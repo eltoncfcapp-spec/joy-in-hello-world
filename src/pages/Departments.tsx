@@ -94,12 +94,21 @@ const Departments = () => {
                 </select>
               </div>
             </div>
-            <button
-              type="submit"
-              className="bg-primary text-primary-foreground px-6 py-2 rounded-lg hover:opacity-90 transition-opacity"
-            >
-              Create Department
-            </button>
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="px-6 py-2 rounded-lg border border-border hover:bg-accent transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="bg-primary text-primary-foreground px-6 py-2 rounded-lg hover:opacity-90 transition-opacity font-medium"
+              >
+                Save Department
+              </button>
+            </div>
           </form>
         </div>
       )}
