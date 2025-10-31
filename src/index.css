@@ -3,26 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --primary: 270 60% 60%;
+  --primary: 215 25% 27%;
   --primary-foreground: 0 0% 100%;
-  --background: 240 20% 10%;
-  --foreground: 0 0% 100%;
+  --secondary: 210 20% 95%;
+  --secondary-foreground: 215 25% 27%;
+  --background: 0 0% 98%;
+  --foreground: 215 25% 15%;
+  --muted: 210 20% 95%;
+  --muted-foreground: 215 15% 45%;
+  --accent: 215 25% 27%;
+  --accent-foreground: 0 0% 100%;
+  --border: 220 15% 88%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 25% 15%;
 }
 
 @layer utilities {
-  .gradient-text {
-    @apply bg-gradient-to-r from-purple-400 to-blue-500 bg-clip-text text-transparent;
-  }
-  
-  .gradient-bg {
-    @apply bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900;
-  }
-  
-  .animate-float {
-    animation: float 3s ease-in-out infinite;
-  }
-  
   .animate-fadeIn {
-    animation: fadeIn 1s ease-out;
+    animation: fadeIn 0.5s ease-out;
   }
 }
