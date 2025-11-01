@@ -11,51 +11,28 @@ interface AuthContextType {
   user: User | null;
   login: (email: string, password: string, rememberMe?: boolean) => boolean;
   logout: () => void;
-  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     // Check for stored authentication on app start
-    const checkStoredAuth = () => {
-      try {
-        const storedUser = localStorage.getItem('church_user');
-        const rememberMe = localStorage.getItem('church_remember_me') === 'true';
-        
-        if (storedUser && rememberMe) {
-          setUser(JSON.parse(storedUser));
-        } else {
-          // Also check sessionStorage for temporary login
-          const sessionUser = sessionStorage.getItem('church_user');
-          if (sessionUser) {
-            setUser(JSON.parse(sessionUser));
-          }
-        }
-      } catch (error) {
-        console.error('Error checking stored auth:', error);
-        // Clear invalid stored data
-        localStorage.removeItem('church_user');
-        localStorage.removeItem('church_remember_me');
-        sessionStorage.removeItem('church_user');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkStoredAuth();
+    const storedUser = localStorage.getItem('church_user');
+    const rememberMe = localStorage.getItem('church_remember_me') === 'true';
+    
+    if (storedUser && rememberMe) {
+      setUser(JSON.parse(storedUser));
+    }
   }, []);
 
   const login = (email: string, password: string, rememberMe: boolean = false): boolean => {
-    // Mock authentication
+    // Mock authentication - same as your working version
     const mockUsers = [
       { email: 'admin@church.com', password: 'admin123', role: 'admin', name: 'Administrator' },
       { email: 'pastor@church.com', password: 'pastor123', role: 'pastor', name: 'Pastor John' },
-      { email: 'leader@church.com', password: 'leader123', role: 'leader', name: 'Group Leader' },
     ];
 
     const foundUser = mockUsers.find(u => u.email === email && u.password === password);
@@ -65,11 +42,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(userData);
       
       if (rememberMe) {
+        // Store in localStorage for persistence across browser sessions
         localStorage.setItem('church_user', JSON.stringify(userData));
         localStorage.setItem('church_remember_me', 'true');
-        sessionStorage.removeItem('church_user');
       } else {
-        // Only store in sessionStorage for session-only persistence
+        // Only store in sessionStorage for current session only
         sessionStorage.setItem('church_user', JSON.stringify(userData));
         localStorage.removeItem('church_user');
         localStorage.removeItem('church_remember_me');
@@ -89,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
