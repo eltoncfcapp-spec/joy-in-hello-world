@@ -1,83 +1,90 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+// contexts/AuthContext.tsx
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const { login } = useAuth();
-  const navigate = useNavigate();
+interface AuthContextType {
+  user: any;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
+  logout: () => void;
+  isLoading: boolean;
+}
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-    const success = login(email, password);
-    if (success) {
-      navigate('/');
-    } else {
-      setError('Invalid email or password');
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Check for stored authentication on app start
+    const checkStoredAuth = async () => {
+      try {
+        const storedUser = localStorage.getItem('church_user');
+        const rememberMe = localStorage.getItem('church_remember_me') === 'true';
+        
+        if (storedUser && rememberMe) {
+          setUser(JSON.parse(storedUser));
+        }
+      } catch (error) {
+        console.error('Error checking stored auth:', error);
+        // Clear invalid stored data
+        localStorage.removeItem('church_user');
+        localStorage.removeItem('church_remember_me');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkStoredAuth();
+  }, []);
+
+  const login = async (email: string, password: string, rememberMe: boolean = false): Promise<boolean> => {
+    // Mock authentication - replace with your actual authentication logic
+    const mockUsers = [
+      { email: 'admin@church.com', password: 'admin123', role: 'admin', name: 'Administrator' },
+      { email: 'pastor@church.com', password: 'pastor123', role: 'pastor', name: 'Pastor John' },
+      { email: 'leader@church.com', password: 'leader123', role: 'leader', name: 'Group Leader' },
+    ];
+
+    const user = mockUsers.find(u => u.email === email && u.password === password);
+    
+    if (user) {
+      const userData = { ...user, password: undefined }; // Remove password from stored data
+      setUser(userData);
+      
+      if (rememberMe) {
+        localStorage.setItem('church_user', JSON.stringify(userData));
+        localStorage.setItem('church_remember_me', 'true');
+      } else {
+        // Only store in sessionStorage for session-only persistence
+        sessionStorage.setItem('church_user', JSON.stringify(userData));
+        localStorage.removeItem('church_user');
+        localStorage.removeItem('church_remember_me');
+      }
+      
+      return true;
     }
+    
+    return false;
+  };
+
+  const logout = () => {
+    setUser(null);
+    localStorage.removeItem('church_user');
+    localStorage.removeItem('church_remember_me');
+    sessionStorage.removeItem('church_user');
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="max-w-md w-full space-y-8 p-8 bg-card rounded-lg shadow-lg">
-        <div>
-          <h2 className="text-3xl font-bold text-center text-foreground">Church Management</h2>
-          <p className="mt-2 text-center text-muted-foreground">Sign in to your account</p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-foreground">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                placeholder="admin@church.com"
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-foreground">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                placeholder="••••••••"
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="text-destructive text-sm text-center">{error}</div>
-          )}
-
-          <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground">
-            <p className="font-medium mb-2">Mock Login Credentials:</p>
-            <p>• admin@church.com / admin123</p>
-            <p>• pastor@church.com / pastor123</p>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-          >
-            Sign in
-          </button>
-        </form>
-      </div>
-    </div>
+    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+      {children}
+    </AuthContext.Provider>
   );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }
