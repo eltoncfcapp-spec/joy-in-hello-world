@@ -1,9 +1,17 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, DollarSign, UsersRound, Shield, Menu, X } from 'lucide-react';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Users, Calendar, DollarSign, UsersRound, Shield, Menu, X, LogOut } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 const Layout = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { logout, user } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -54,6 +62,20 @@ const Layout = () => {
               </NavLink>
             ))}
           </nav>
+
+          <div className="absolute bottom-6 left-6 right-6 space-y-3">
+            <div className="px-4 py-3 bg-primary/10 rounded-lg border border-primary/20">
+              <p className="text-sm text-muted-foreground">Logged in as</p>
+              <p className="text-sm font-medium text-foreground truncate">{user?.name}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-foreground/70 hover:bg-destructive/10 hover:text-destructive transition-all duration-200"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Logout</span>
+            </button>
+          </div>
         </div>
       </aside>
 
