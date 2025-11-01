@@ -1,25 +1,81 @@
 import { Plus, Users, MapPin } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+
+interface CellGroup {
+  id: string;
+  name: string;
+  location: string | null;
+  meeting_day: string | null;
+  leader: { name: string; surname: string } | null;
+}
 
 const CellGroups = () => {
   const [showForm, setShowForm] = useState(false);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [members, setMembers] = useState<{ id: string; name: string; surname: string }[]>([]);
   const [formData, setFormData] = useState({
     groupName: '',
-    leader: '',
+    leaderId: '',
     location: '',
     meetingDay: '',
   });
 
-  const cellGroups = [
-    { id: 1, name: 'North Side Cell', leader: 'John Doe', location: 'Community Center', members: 12, meetingDay: 'Wednesday' },
-    { id: 2, name: 'Youth Cell', leader: 'Jane Smith', location: 'Church Hall', members: 18, meetingDay: 'Friday' },
-  ];
+  useEffect(() => {
+    fetchCellGroups();
+    fetchMembers();
+  }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const fetchCellGroups = async () => {
+    const { data, error } = await supabase
+      .from('cell_groups')
+      .select(`
+        id,
+        name,
+        location,
+        meeting_day,
+        leader:members!leader_id(name, surname)
+      `)
+      .order('name');
+
+    if (error) {
+      console.error('Error fetching cell groups:', error);
+    } else {
+      setCellGroups(data || []);
+    }
+  };
+
+  const fetchMembers = async () => {
+    const { data, error } = await supabase
+      .from('members')
+      .select('id, name, surname')
+      .order('name');
+
+    if (error) {
+      console.error('Error fetching members:', error);
+    } else {
+      setMembers(data || []);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('New cell group:', formData);
-    setShowForm(false);
-    setFormData({ groupName: '', leader: '', location: '', meetingDay: '' });
+    
+    const { error } = await supabase.from('cell_groups').insert({
+      name: formData.groupName,
+      leader_id: formData.leaderId || null,
+      location: formData.location || null,
+      meeting_day: formData.meetingDay || null,
+    });
+
+    if (error) {
+      console.error('Error creating cell group:', error);
+      alert('Error creating cell group');
+    } else {
+      setShowForm(false);
+      setFormData({ groupName: '', leaderId: '', location: '', meetingDay: '' });
+      fetchCellGroups();
+    }
   };
 
   return (
@@ -52,13 +108,19 @@ const CellGroups = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">Leader</label>
-                <input
-                  type="text"
-                  value={formData.leader}
-                  onChange={(e) => setFormData({ ...formData, leader: e.target.value })}
+                <select
+                  value={formData.leaderId}
+                  onChange={(e) => setFormData({ ...formData, leaderId: e.target.value })}
                   className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   required
-                />
+                >
+                  <option value="">Select leader</option>
+                  {members.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name} {member.surname}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">Location</label>
@@ -117,18 +179,22 @@ const CellGroups = () => {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Users className="h-4 w-4" />
-                    <span>Leader: {group.leader}</span>
+                    <span>
+                      Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'No leader assigned'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <MapPin className="h-4 w-4" />
-                    <span>{group.location}</span>
-                  </div>
+                  {group.location && (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <MapPin className="h-4 w-4" />
+                      <span>{group.location}</span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-2xl font-bold text-primary mb-1">{group.members}</div>
-                <div className="text-sm text-muted-foreground">Members</div>
-                <div className="text-sm text-muted-foreground mt-2">{group.meetingDay}</div>
+                <div className="text-sm text-muted-foreground mt-2">
+                  {group.meeting_day || 'No meeting day set'}
+                </div>
               </div>
             </div>
           </div>
