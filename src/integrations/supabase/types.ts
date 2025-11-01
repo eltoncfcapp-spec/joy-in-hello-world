@@ -14,7 +14,181 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      cell_groups: {
+        Row: {
+          created_at: string | null
+          id: string
+          leader_id: string | null
+          location: string | null
+          meeting_day: string | null
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          leader_id?: string | null
+          location?: string | null
+          meeting_day?: string | null
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          leader_id?: string | null
+          location?: string | null
+          meeting_day?: string | null
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cell_groups_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_attendees: {
+        Row: {
+          attended_at: string | null
+          cell_group_id: string | null
+          event_id: string
+          first_time: boolean | null
+          id: string
+          invited_by: string | null
+          name: string
+          phone: string | null
+          surname: string
+        }
+        Insert: {
+          attended_at?: string | null
+          cell_group_id?: string | null
+          event_id: string
+          first_time?: boolean | null
+          id?: string
+          invited_by?: string | null
+          name: string
+          phone?: string | null
+          surname: string
+        }
+        Update: {
+          attended_at?: string | null
+          cell_group_id?: string | null
+          event_id?: string
+          first_time?: boolean | null
+          id?: string
+          invited_by?: string | null
+          name?: string
+          phone?: string | null
+          surname?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_attendees_cell_group_id_fkey"
+            columns: ["cell_group_id"]
+            isOneToOne: false
+            referencedRelation: "cell_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_attendees_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      events: {
+        Row: {
+          created_at: string | null
+          event_date: string
+          event_time: string
+          id: string
+          location: string | null
+          name: string
+          topic: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          event_date: string
+          event_time: string
+          id?: string
+          location?: string | null
+          name: string
+          topic?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          event_date?: string
+          event_time?: string
+          id?: string
+          location?: string | null
+          name?: string
+          topic?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      members: {
+        Row: {
+          cell_group_id: string | null
+          created_at: string | null
+          email: string | null
+          first_time_visit_date: string | null
+          id: string
+          invited_by: string | null
+          is_permanent_member: boolean | null
+          name: string
+          permanent_member_date: string | null
+          phone: string | null
+          surname: string
+          updated_at: string | null
+        }
+        Insert: {
+          cell_group_id?: string | null
+          created_at?: string | null
+          email?: string | null
+          first_time_visit_date?: string | null
+          id?: string
+          invited_by?: string | null
+          is_permanent_member?: boolean | null
+          name: string
+          permanent_member_date?: string | null
+          phone?: string | null
+          surname: string
+          updated_at?: string | null
+        }
+        Update: {
+          cell_group_id?: string | null
+          created_at?: string | null
+          email?: string | null
+          first_time_visit_date?: string | null
+          id?: string
+          invited_by?: string | null
+          is_permanent_member?: boolean | null
+          name?: string
+          permanent_member_date?: string | null
+          phone?: string | null
+          surname?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_cell_group"
+            columns: ["cell_group_id"]
+            isOneToOne: false
+            referencedRelation: "cell_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
