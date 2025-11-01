@@ -939,12 +939,551 @@ const Admin = () => {
           </Modal>
         )}
 
-        {/* Other modals (Users, Security, Notifications, Communication, General) remain the same */}
-        {/* ... (other modal implementations remain unchanged) ... */}
-        
+              {/* User Management Modal */}
+        {activeModal === 'users' && (
+          <Modal title="User Management">
+            <div className="space-y-6">
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search users by name, email, or role..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Users List */}
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {filteredMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                        {member.name.charAt(0)}{member.surname.charAt(0)}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900 dark:text-white">
+                          {member.name} {member.surname}
+                        </h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {member.email} • {member.role}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => openModal('userDetails', member)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                    >
+                      Manage
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {activeModal === 'userDetails' && selectedUser && (
+          <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
+            <div className="space-y-6">
+              {/* User Info */}
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                    {selectedUser.name.charAt(0)}{selectedUser.surname.charAt(0)}
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-bold text-gray-900 dark:text-white">
+                      {selectedUser.name} {selectedUser.surname}
+                    </h4>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedUser.email}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{selectedUser.phone}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Role Selection */}
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  User Role
+                </label>
+                <select
+                  value={userFormData.role}
+                  onChange={(e) => {
+                    const newRole = e.target.value;
+                    setUserFormData({
+                      ...userFormData,
+                      role: newRole,
+                      permissions: getRolePermissions(newRole)
+                    });
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {roles.map(role => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {roles.find(r => r.value === userFormData.role)?.description}
+                </p>
+              </div>
+
+              {/* Page Access for Pastors */}
+              {userFormData.role === 'pastor' && (
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Page Access Control
+                  </label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {pageAccess.map(page => (
+                      <div key={page.value} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg">
+                        <input
+                          type="checkbox"
+                          checked={userFormData.permissions.includes(`view_${page.value}`)}
+                          onChange={() => handlePermissionToggle(`view_${page.value}`)}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white text-sm">
+                            {page.label}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {page.description}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Group Management for Leaders */}
+              {userFormData.role === 'leader' && (
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Assigned Groups
+                  </label>
+                  <div className="space-y-3">
+                    {groups.map(group => (
+                      <div key={group.id} className="flex items-center justify-between p-3 border border-gray-300 dark:border-gray-600 rounded-lg">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {group.name}
+                          </div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            {group.description}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors">
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors">
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors">
+                            <UserPlus className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Permissions */}
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Permissions
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {permissions.map(permission => (
+                    <div key={permission.value} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg">
+                      <input
+                        type="checkbox"
+                        checked={userFormData.permissions.includes(permission.value)}
+                        onChange={() => handlePermissionToggle(permission.value)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white text-sm">
+                          {permission.label}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {permission.description}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleUserUpdate}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+                >
+                  {loading ? 'Updating...' : 'Update User'}
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Security Modal */}
+        {activeModal === 'security' && (
+          <Modal title="Security Settings">
+            <div className="space-y-6">
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <Shield className="h-5 w-5 text-red-600" />
+                  <div>
+                    <h4 className="font-semibold text-red-900 dark:text-red-100">Security & Access Control</h4>
+                    <p className="text-red-700 dark:text-red-300 text-sm">Configure system security settings</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Authentication</h3>
+                {Object.entries(securitySettings).map(([key, value]) => (
+                  <div key={key} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-white capitalize">
+                        {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {key === 'twoFactorAuth' ? 'Require 2FA for all users' :
+                         key === 'sessionTimeout' ? `Session timeout: ${value} minutes` :
+                         key === 'passwordMinLength' ? `Minimum password length: ${value} characters` :
+                         key === 'requireStrongPassword' ? 'Require strong passwords' :
+                         key === 'failedLoginLockout' ? `Account lockout after ${value} failed attempts` :
+                         `Keep audit logs for ${value} days`}
+                      </div>
+                    </div>
+                    {typeof value === 'boolean' ? (
+                      <button
+                        onClick={() => handleSecuritySettingChange(key, !value)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          value ? 'bg-green-600' : 'bg-gray-200 dark:bg-gray-700'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            value ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    ) : (
+                      <input
+                        type="number"
+                        value={value as number}
+                        onChange={(e) => handleSecuritySettingChange(key, parseInt(e.target.value))}
+                        className="w-20 px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="h-5 w-5 text-yellow-600" />
+                  <div>
+                    <h4 className="font-semibold text-yellow-900 dark:text-yellow-100">Security Audit Log</h4>
+                    <p className="text-yellow-700 dark:text-yellow-300 text-sm">Recent security events and access logs</p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Last password change</span>
+                    <span className="text-gray-900 dark:text-white">2 days ago</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Failed login attempts</span>
+                    <span className="text-gray-900 dark:text-white">3 this week</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Last security scan</span>
+                    <span className="text-gray-900 dark:text-white">1 hour ago</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                  <Lock className="h-4 w-4" />
+                  Save Security Settings
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Notifications Modal */}
+        {activeModal === 'notifications' && (
+          <Modal title="Notification Settings">
+            <div className="space-y-6">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <Bell className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <h4 className="font-semibold text-blue-900 dark:text-blue-100">Notification Preferences</h4>
+                    <p className="text-blue-700 dark:text-blue-300 text-sm">Configure how and when you receive notifications</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Email Notifications</h3>
+                {Object.entries(notificationSettings).map(([key, value]) => (
+                  <div key={key} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-white capitalize">
+                        {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {key.includes('email') ? 'Send via email' : key.includes('push') ? 'Send push notification' : 'System notification'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleNotificationToggle(key)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        value ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          value ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                  <Save className="h-4 w-4" />
+                  Save Settings
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Communication Modal */}
+        {activeModal === 'communication' && (
+          <Modal title="Communication Settings">
+            <div className="space-y-6">
+              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <Mail className="h-5 w-5 text-purple-600" />
+                  <div>
+                    <h4 className="font-semibold text-purple-900 dark:text-purple-100">Communication Channels</h4>
+                    <p className="text-purple-700 dark:text-purple-300 text-sm">Manage email and SMS settings</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Channel Settings</h3>
+                  {Object.entries(communicationSettings).map(([key, value]) => (
+                    <div key={key} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white text-sm capitalize">
+                          {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                        </div>
+                      </div>
+                      {typeof value === 'boolean' ? (
+                        <button
+                          onClick={() => handleCommunicationSettingChange(key, !value)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            value ? 'bg-green-600' : 'bg-gray-200 dark:bg-gray-700'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              value ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      ) : (
+                        <input
+                          type="text"
+                          value={value as string}
+                          onChange={(e) => handleCommunicationSettingChange(key, e.target.value)}
+                          className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Email Templates</h3>
+                  <div className="space-y-3">
+                    {emailTemplates.map(template => (
+                      <div key={template.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                        <div className="font-medium text-gray-900 dark:text-white">{template.name}</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">{template.subject}</div>
+                        <button className="mt-2 text-blue-600 hover:text-blue-700 text-sm font-medium">
+                          Edit Template
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                  <Send className="h-4 w-4" />
+                  Save & Test
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* General Settings Modal */}
+        {activeModal === 'general' && (
+          <Modal title="General Settings">
+            <div className="space-y-6">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <Settings className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <h4 className="font-semibold text-blue-900 dark:text-blue-100">Church Information</h4>
+                    <p className="text-blue-700 dark:text-blue-300 text-sm">Configure basic church details and preferences</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Church Details</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Church Name
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      placeholder="Enter church name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Address
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      placeholder="Enter church address"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      placeholder="Enter phone number"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">System Preferences</h3>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Time Zone
+                    </label>
+                    <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                      <option>UTC-5 (Eastern Time)</option>
+                      <option>UTC-6 (Central Time)</option>
+                      <option>UTC-7 (Mountain Time)</option>
+                      <option>UTC-8 (Pacific Time)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Date Format
+                    </label>
+                    <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                      <option>MM/DD/YYYY</option>
+                      <option>DD/MM/YYYY</option>
+                      <option>YYYY-MM-DD</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Language
+                    </label>
+                    <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                      <option>English</option>
+                      <option>Spanish</option>
+                      <option>French</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                  <Save className="h-4 w-4" />
+                  Save Settings
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
       </div>
     </div>
   );
 };
 
 export default Admin;
+        
+  
