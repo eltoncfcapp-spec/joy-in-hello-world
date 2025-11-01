@@ -938,8 +938,7 @@ const Admin = () => {
             </div>
           </Modal>
         )}
-
-              {/* User Management Modal */}
+                {/* User Management Modal */}
         {activeModal === 'users' && (
           <Modal title="User Management">
             <div className="space-y-6">
@@ -1485,5 +1484,3 @@ const Admin = () => {
 };
 
 export default Admin;
-        
-  
