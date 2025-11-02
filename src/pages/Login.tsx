@@ -16,7 +16,7 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    const success = login(email, password, rememberMe);
+    const success = login(email, password);
     if (success) {
       navigate('/');
     } else {

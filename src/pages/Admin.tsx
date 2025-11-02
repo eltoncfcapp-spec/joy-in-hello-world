@@ -1,5 +1,5 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Trash2, Eye, EyeOff, UserPlus, ChevronDown, Download, Upload, Key, Lock, AlertTriangle, MessageSquare, Send, Save, FileText, Columns, Grid } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye, UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText, Columns } from 'lucide-react';
+import { useState } from 'react';
 
 interface Member {
   id: string;
@@ -24,8 +24,8 @@ interface ImportColumnMapping {
 }
 
 const Admin = () => {
-  const [activeModal, setActiveModal] = useState(null);
-  const [members, setMembers] = useState([
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [members, setMembers] = useState<Member[]>([
     {
       id: '1',
       name: 'John',
@@ -61,26 +61,30 @@ const Admin = () => {
     }
   ]);
   
-  const [groups, setGroups] = useState([
+  const groups: Group[] = [
     { id: '1', name: 'Youth Ministry', description: 'Young adults and teenagers' },
     { id: '2', name: 'Women\'s Fellowship', description: 'Women\'s support group' },
     { id: '3', name: 'Men\'s Group', description: 'Men\'s Bible study' }
-  ]);
+  ];
   
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUser, setSelectedUser] = useState<Member | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const [excelData, setExcelData] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [columnMapping, setColumnMapping] = useState({});
-  const [availableColumns, setAvailableColumns] = useState([]);
+  const [excelData, setExcelData] = useState<any[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [columnMapping, setColumnMapping] = useState<ImportColumnMapping>({});
+  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [importProgress, setImportProgress] = useState(0);
-  const [importResult, setImportResult] = useState(null);
-  const [previewData, setPreviewData] = useState([]);
-  const [importMode, setImportMode] = useState('bulk');
+  const [importResult, setImportResult] = useState<{success: boolean; imported: number; updated: number; errors: number; message: string} | null>(null);
+  const [previewData, setPreviewData] = useState<any[]>([]);
+  const [importMode, setImportMode] = useState<'bulk' | 'manual'>('bulk');
 
-  const [userFormData, setUserFormData] = useState({
+  const [userFormData, setUserFormData] = useState<{
+    role: string;
+    permissions: string[];
+    assignedGroups: string[];
+  }>({
     role: 'member',
     permissions: [],
     assignedGroups: [],
@@ -221,7 +225,7 @@ const Admin = () => {
     { value: 'admin', label: 'Admin', description: 'Administration panel' },
   ];
 
-  const handleFileUpload = (event) => {
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -240,8 +244,8 @@ const Admin = () => {
     const columns = Object.keys(sampleData[0]);
     setAvailableColumns(columns);
     
-    const autoMapping = {};
-    columns.forEach(col => {
+    const autoMapping: ImportColumnMapping = {};
+    columns.forEach((col: string) => {
       const lowerCol = col.toLowerCase();
       if (lowerCol.includes('first') || (lowerCol.includes('name') && !lowerCol.includes('surname'))) {
         autoMapping[col] = 'name';
@@ -260,7 +264,7 @@ const Admin = () => {
     setColumnMapping(autoMapping);
   };
 
-  const handleColumnMappingChange = (excelColumn, databaseField) => {
+  const handleColumnMappingChange = (excelColumn: string, databaseField: string) => {
     setColumnMapping(prev => ({
       ...prev,
       [excelColumn]: databaseField
@@ -284,11 +288,16 @@ const Admin = () => {
       await new Promise(resolve => setTimeout(resolve, 300));
 
       try {
-        const memberData = {
+        const memberData: any = {
           id: Math.random().toString(36).substr(2, 9),
-          role: 'member',
-          permissions: [],
-          is_active: true
+          role: 'member' as const,
+          permissions: [] as string[],
+          is_active: true,
+          name: '',
+          surname: '',
+          email: '',
+          phone: '',
+          cell_group: null
         };
 
         Object.entries(columnMapping).forEach(([excelCol, dbField]) => {
@@ -309,10 +318,10 @@ const Admin = () => {
         const existingMember = members.find(m => m.email === memberData.email);
 
         if (existingMember) {
-          setMembers(prev => prev.map(m => m.id === existingMember.id ? { ...m, ...memberData, id: m.id } : m));
+          setMembers(prev => prev.map(m => m.id === existingMember.id ? { ...m, ...memberData as Member, id: m.id } : m));
           updated++;
         } else {
-          setMembers(prev => [...prev, memberData]);
+          setMembers(prev => [...prev, memberData as Member]);
           imported++;
         }
       } catch (error) {
@@ -332,12 +341,17 @@ const Admin = () => {
     setImportProgress(100);
   };
 
-  const handleManualRowImport = async (row, index) => {
-    const memberData = {
+  const handleManualRowImport = async (row: any, index: number) => {
+    const memberData: any = {
       id: Math.random().toString(36).substr(2, 9),
-      role: 'member',
-      permissions: [],
-      is_active: true
+      role: 'member' as const,
+      permissions: [] as string[],
+      is_active: true,
+      name: '',
+      surname: '',
+      email: '',
+      phone: '',
+      cell_group: null
     };
 
     Object.entries(columnMapping).forEach(([excelCol, dbField]) => {
@@ -355,7 +369,7 @@ const Admin = () => {
       memberData.email = `${memberData.name.toLowerCase()}.${memberData.surname.toLowerCase()}@church.com`;
     }
 
-    setMembers(prev => [...prev, memberData]);
+    setMembers(prev => [...prev, memberData as Member]);
     alert(`Successfully imported ${memberData.name} ${memberData.surname}`);
   };
 
@@ -403,7 +417,7 @@ const Admin = () => {
     a.click();
   };
 
-  const openModal = (modalType, user) => {
+  const openModal = (modalType: string, user?: Member) => {
     setActiveModal(modalType);
     if (user) {
       setSelectedUser(user);
@@ -450,7 +464,7 @@ const Admin = () => {
     alert('User updated successfully!');
   };
 
-  const handlePermissionToggle = (permission) => {
+  const handlePermissionToggle = (permission: string) => {
     setUserFormData(prev => ({
       ...prev,
       permissions: prev.permissions.includes(permission)
@@ -459,29 +473,29 @@ const Admin = () => {
     }));
   };
 
-  const handleNotificationToggle = (setting) => {
+  const handleNotificationToggle = (setting: keyof typeof notificationSettings) => {
     setNotificationSettings(prev => ({
       ...prev,
       [setting]: !prev[setting]
     }));
   };
 
-  const handleSecuritySettingChange = (setting, value) => {
+  const handleSecuritySettingChange = (setting: keyof typeof securitySettings, value: any) => {
     setSecuritySettings(prev => ({
       ...prev,
       [setting]: value
     }));
   };
 
-  const handleCommunicationSettingChange = (setting, value) => {
+  const handleCommunicationSettingChange = (setting: keyof typeof communicationSettings, value: any) => {
     setCommunicationSettings(prev => ({
       ...prev,
       [setting]: value
     }));
   };
 
-  const getRolePermissions = (role) => {
-    const rolePermissions = {
+  const getRolePermissions = (role: string): string[] => {
+    const rolePermissions: Record<string, string[]> = {
       member: ['view_members', 'view_events', 'view_groups'],
       leader: ['view_members', 'view_events', 'view_groups', 'manage_groups'],
       deacon: ['view_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups', 'view_donations'],
@@ -497,7 +511,7 @@ const Admin = () => {
     member.role.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const Modal = ({ children, title }) => (
+  const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="flex justify-between items-center p-6 border-b border-gray-200">
@@ -1066,7 +1080,7 @@ const Admin = () => {
                     </div>
                     {typeof value === 'boolean' ? (
                       <button
-                        onClick={() => handleSecuritySettingChange(key, !value)}
+                        onClick={() => handleSecuritySettingChange(key as keyof typeof securitySettings, !value)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           value ? 'bg-green-600' : 'bg-gray-200'
                         }`}
@@ -1081,7 +1095,7 @@ const Admin = () => {
                       <input
                         type="number"
                         value={value}
-                        onChange={(e) => handleSecuritySettingChange(key, parseInt(e.target.value))}
+                        onChange={(e) => handleSecuritySettingChange(key as keyof typeof securitySettings, parseInt(e.target.value))}
                         className="w-20 px-3 py-1 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
                       />
                     )}
@@ -1155,7 +1169,7 @@ const Admin = () => {
                       </div>
                     </div>
                     <button
-                      onClick={() => handleNotificationToggle(key)}
+                      onClick={() => handleNotificationToggle(key as keyof typeof notificationSettings)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                         value ? 'bg-blue-600' : 'bg-gray-200'
                       }`}
@@ -1211,7 +1225,7 @@ const Admin = () => {
                       </div>
                       {typeof value === 'boolean' ? (
                         <button
-                          onClick={() => handleCommunicationSettingChange(key, !value)}
+                          onClick={() => handleCommunicationSettingChange(key as keyof typeof communicationSettings, !value)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                             value ? 'bg-green-600' : 'bg-gray-200'
                           }`}
@@ -1226,7 +1240,7 @@ const Admin = () => {
                         <input
                           type="text"
                           value={value}
-                          onChange={(e) => handleCommunicationSettingChange(key, e.target.value)}
+                          onChange={(e) => handleCommunicationSettingChange(key as keyof typeof communicationSettings, e.target.value)}
                           className="px-3 py-1 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
                         />
                       )}

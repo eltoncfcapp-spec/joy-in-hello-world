@@ -141,10 +141,11 @@ const Dashboard = () => {
     },
   ];
 
-  const upcomingEvents = [
+  const upcomingEvents: Event[] = [
     { 
-      id: 1,
-      title: 'Sunday Service', 
+      id: '1',
+      title: 'Sunday Service',
+      date: 'Tomorrow',
       time: 'Tomorrow, 10:00 AM', 
       location: 'Main Sanctuary',
       description: 'Weekly Sunday service with communion. All are welcome to join us for worship and fellowship.',
@@ -154,8 +155,9 @@ const Dashboard = () => {
       type: 'Worship'
     },
     { 
-      id: 2,
-      title: 'Prayer Meeting', 
+      id: '2',
+      title: 'Prayer Meeting',
+      date: 'Wednesday',
       time: 'Wednesday, 7:00 PM', 
       location: 'Prayer Room',
       description: 'Evening prayer meeting for community needs and church missions.',
@@ -165,8 +167,9 @@ const Dashboard = () => {
       type: 'Prayer'
     },
     { 
-      id: 3,
-      title: 'Bible Study', 
+      id: '3',
+      title: 'Bible Study',
+      date: 'Friday',
       time: 'Friday, 6:30 PM', 
       location: 'Fellowship Hall',
       description: 'Study of the Book of Romans. Bring your Bible and notebook.',
@@ -176,8 +179,9 @@ const Dashboard = () => {
       type: 'Study'
     },
     { 
-      id: 4,
-      title: 'Youth Group', 
+      id: '4',
+      title: 'Youth Group',
+      date: 'Saturday',
       time: 'Saturday, 4:00 PM', 
       location: 'Youth Center',
       description: 'Youth group activities and Bible study for ages 13-18.',

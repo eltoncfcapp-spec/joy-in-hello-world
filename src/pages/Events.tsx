@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, ChevronDown, User } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -32,7 +32,6 @@ const Events = () => {
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
-  const [cellGroups, setCellGroups] = useState<{ id: string; name: string }[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);

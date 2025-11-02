@@ -1,4 +1,4 @@
-import { Users, Plus, Calendar, User, Search, X, MapPin, Clock, Mail, Phone, ChevronDown } from 'lucide-react';
+import { Users, Plus, Calendar, User, Search, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
