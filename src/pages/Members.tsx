@@ -1,4 +1,4 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -19,14 +19,20 @@ interface Member {
   invited_by: string | null;
 }
 
+interface CellGroup {
+  id: string;
+  name: string;
+}
+
 const Members = () => {
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
-  const [cellGroups, setCellGroups] = useState<{ id: string; name: string }[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingStatus, setEditingStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [statusFormData, setStatusFormData] = useState({
     status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
     status_date: '',
@@ -37,8 +43,8 @@ const Members = () => {
     surname: '',
     email: '',
     phone: '',
-    invitedBy: '',
-    cellGroup: '',
+    invited_by: '',
+    cell_group_id: '',
   });
 
   useEffect(() => {
@@ -64,9 +70,9 @@ const Members = () => {
       }
 
       setMembers(data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching members:', error);
-      setError('Failed to load members. Please check your connection.');
+      setError(error.message || 'Failed to load members. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -84,9 +90,9 @@ const Members = () => {
       }
 
       setCellGroups(data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching cell groups:', error);
-      setError('Failed to load cell groups.');
+      setError(error.message || 'Failed to load cell groups.');
     }
   };
 
@@ -94,27 +100,44 @@ const Members = () => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccess(null);
     
     try {
-      const { error } = await supabase.from('members').insert({
-        name: formData.name,
-        surname: formData.surname,
-        email: formData.email || null,
-        phone: formData.phone || null,
-        cell_group_id: formData.cellGroup || null,
-        invited_by: formData.invitedBy || null,
-      });
+      const { data, error } = await supabase
+        .from('members')
+        .insert([{
+          name: formData.name.trim(),
+          surname: formData.surname.trim(),
+          email: formData.email.trim() || null,
+          phone: formData.phone.trim() || null,
+          cell_group_id: formData.cell_group_id || null,
+          invited_by: formData.invited_by.trim() || null,
+          status: 'newcomer',
+          status_date: new Date().toISOString(),
+        }])
+        .select();
 
       if (error) {
         throw error;
       }
 
       setShowForm(false);
-      setFormData({ name: '', surname: '', email: '', phone: '', invitedBy: '', cellGroup: '' });
+      setFormData({ 
+        name: '', 
+        surname: '', 
+        email: '', 
+        phone: '', 
+        invited_by: '', 
+        cell_group_id: '' 
+      });
+      setSuccess('Member added successfully!');
       fetchMembers();
-    } catch (error) {
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
       console.error('Error adding member:', error);
-      setError('Failed to add member. Please try again.');
+      setError(error.message || 'Failed to add member. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -123,6 +146,8 @@ const Members = () => {
   const handleMarkAsPermanent = async (memberId: string) => {
     try {
       setError(null);
+      setSuccess(null);
+      
       const { error } = await supabase
         .from('members')
         .update({
@@ -135,10 +160,13 @@ const Members = () => {
         throw error;
       }
 
+      setSuccess('Member marked as permanent!');
       fetchMembers();
-    } catch (error) {
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
       console.error('Error marking as permanent:', error);
-      setError('Failed to update member status.');
+      setError(error.message || 'Failed to update member status.');
     }
   };
 
@@ -146,7 +174,7 @@ const Members = () => {
     setEditingStatus(member.id);
     setStatusFormData({
       status: member.status || 'newcomer',
-      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
+      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       not_attending_reason: member.not_attending_reason || '',
     });
   };
@@ -154,15 +182,16 @@ const Members = () => {
   const handleSaveStatus = async (memberId: string) => {
     setLoading(true);
     setError(null);
+    setSuccess(null);
     
     try {
       const updateData: any = {
         status: statusFormData.status,
-        status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : null,
+        status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : new Date().toISOString(),
       };
 
       if (statusFormData.status === 'not_attending') {
-        updateData.not_attending_reason = statusFormData.not_attending_reason;
+        updateData.not_attending_reason = statusFormData.not_attending_reason.trim();
       } else {
         updateData.not_attending_reason = null;
       }
@@ -177,12 +206,43 @@ const Members = () => {
       }
 
       setEditingStatus(null);
+      setSuccess('Member status updated successfully!');
       fetchMembers();
-    } catch (error) {
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
       console.error('Error updating status:', error);
-      setError('Failed to update member status.');
+      setError(error.message || 'Failed to update member status.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteMember = async (memberId: string) => {
+    if (!confirm('Are you sure you want to delete this member? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setError(null);
+      setSuccess(null);
+      
+      const { error } = await supabase
+        .from('members')
+        .delete()
+        .eq('id', memberId);
+
+      if (error) {
+        throw error;
+      }
+
+      setSuccess('Member deleted successfully!');
+      fetchMembers();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting member:', error);
+      setError(error.message || 'Failed to delete member.');
     }
   };
 
@@ -191,7 +251,8 @@ const Members = () => {
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.phone?.toLowerCase().includes(searchQuery.toLowerCase())
+      member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string, surname: string) => {
@@ -199,23 +260,51 @@ const Members = () => {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', surname: '', email: '', phone: '', invitedBy: '', cellGroup: '' });
+    setFormData({ 
+      name: '', 
+      surname: '', 
+      email: '', 
+      phone: '', 
+      invited_by: '', 
+      cell_group_id: '' 
+    });
     setShowForm(false);
     setError(null);
   };
 
   const getStatusBadge = (status: string | null) => {
     const badges = {
-      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
-      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
-      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
+      newcomer: { 
+        color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', 
+        text: 'Newcomer' 
+      },
+      signed_member: { 
+        color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', 
+        text: 'Signed Member' 
+      },
+      not_attending: { 
+        color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', 
+        text: 'Not Attending' 
+      },
     };
     return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
   };
 
+  const getStatusCounts = () => {
+    return {
+      total: members.length,
+      permanent: members.filter(m => m.is_permanent_member).length,
+      newcomer: members.filter(m => m.status === 'newcomer').length,
+      signed_member: members.filter(m => m.status === 'signed_member').length,
+      not_attending: members.filter(m => m.status === 'not_attending').length,
+    };
+  };
+
+  const statusCounts = getStatusCounts();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -233,6 +322,13 @@ const Members = () => {
           </button>
         </div>
 
+        {/* Success Message */}
+        {success && (
+          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
+            {success}
+          </div>
+        )}
+
         {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
@@ -247,7 +343,9 @@ const Members = () => {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">First Name *</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    First Name *
+                  </label>
                   <input
                     type="text"
                     value={formData.name}
@@ -258,7 +356,9 @@ const Members = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Last Name *</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Last Name *
+                  </label>
                   <input
                     type="text"
                     value={formData.surname}
@@ -269,7 +369,9 @@ const Members = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Email
+                  </label>
                   <input
                     type="email"
                     value={formData.email}
@@ -279,7 +381,9 @@ const Members = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Phone</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Phone
+                  </label>
                   <input
                     type="tel"
                     value={formData.phone}
@@ -289,25 +393,31 @@ const Members = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Invited By</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Invited By
+                  </label>
                   <input
                     type="text"
-                    value={formData.invitedBy}
-                    onChange={(e) => setFormData({ ...formData, invitedBy: e.target.value })}
+                    value={formData.invited_by}
+                    onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Who invited this member?"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Cell Group</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Cell Group
+                  </label>
                   <select
-                    value={formData.cellGroup}
-                    onChange={(e) => setFormData({ ...formData, cellGroup: e.target.value })}
+                    value={formData.cell_group_id}
+                    onChange={(e) => setFormData({ ...formData, cell_group_id: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   >
                     <option value="">Select cell group</option>
                     {cellGroups.map((group) => (
-                      <option key={group.id} value={group.id}>{group.name}</option>
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -339,7 +449,7 @@ const Members = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search members by name, email, or phone..."
+              placeholder="Search members by name, email, phone, or cell group..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -420,8 +530,14 @@ const Members = () => {
                             <MapPin className="h-4 w-4" />
                             <span className="font-medium">{member.cell_groups?.name || 'No Cell Group Assigned'}</span>
                           </div>
+                          {member.invited_by && (
+                            <div className="flex items-center gap-3 text-sm">
+                              <User className="h-4 w-4" />
+                              <span>Invited by: {member.invited_by}</span>
+                            </div>
+                          )}
                           {member.permanent_member_date && (
-                            <div className="text-sm text-green-600 dark:text-green-400 mt-2">
+                            <div className="text-sm text-green-600 dark:text-green-400">
                               Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
                                 year: 'numeric',
                                 month: 'long',
@@ -490,7 +606,7 @@ const Members = () => {
                         </div>
                       </div>
                     ) : (
-                      <>
+                      <div className="flex flex-col gap-3">
                         <button
                           onClick={() => handleEditStatus(member)}
                           className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -507,7 +623,14 @@ const Members = () => {
                             Mark as Permanent
                           </button>
                         )}
-                      </>
+                        <button
+                          onClick={() => handleDeleteMember(member.id)}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                        >
+                          <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                          Delete
+                        </button>
+                      </div>
                     )}
                     {member.status_date && member.status === 'signed_member' && (
                       <div className="text-sm text-gray-600 dark:text-gray-400">
@@ -534,21 +657,25 @@ const Members = () => {
         </div>
 
         {/* Stats Summary */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{members.length}</div>
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Total Members</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-              {members.filter(m => m.is_permanent_member).length}
-            </div>
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.permanent}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Permanent Members</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-              {cellGroups.length}
-            </div>
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.newcomer}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
           </div>
         </div>
