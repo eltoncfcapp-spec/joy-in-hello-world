@@ -32,6 +32,22 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
+  invited_by: string | null;
+}
+
+interface NewMemberForm {
+  name: string;
+  surname: string;
+  phone: string;
+  invitedBy: string;
+}
+
+interface SimilarMember {
+  id: string;
+  name: string;
+  surname: string;
+  phone: string | null;
+  email: string | null;
 }
 
 const Groups = () => {
@@ -42,6 +58,15 @@ const Groups = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showNewMemberForm, setShowNewMemberForm] = useState(false);
+  const [showSimilarMembersModal, setShowSimilarMembersModal] = useState(false);
+  const [similarMembers, setSimilarMembers] = useState<SimilarMember[]>([]);
+  const [newMemberData, setNewMemberData] = useState<NewMemberForm>({
+    name: '',
+    surname: '',
+    phone: '',
+    invitedBy: '',
+  });
   
   const [formData, setFormData] = useState({
     name: '',
@@ -119,6 +144,72 @@ const Groups = () => {
     } else {
       setMembers(data || []);
     }
+  };
+
+  const checkForSimilarMembers = (name: string, surname: string, phone: string) => {
+    const similar = members.filter(member => {
+      const nameSimilar = member.name.toLowerCase() === name.toLowerCase();
+      const surnameSimilar = member.surname.toLowerCase() === surname.toLowerCase();
+      const phoneSimilar = member.phone === phone;
+      return nameSimilar || surnameSimilar || phoneSimilar;
+    });
+    return similar;
+  };
+
+  const handleCreateNewMember = async () => {
+    const similar = checkForSimilarMembers(
+      newMemberData.name,
+      newMemberData.surname,
+      newMemberData.phone
+    );
+
+    if (similar.length > 0) {
+      setSimilarMembers(similar);
+      setShowSimilarMembersModal(true);
+      return;
+    }
+
+    await createMember();
+  };
+
+  const createMember = async () => {
+    try {
+      const { data: newMember, error } = await supabase
+        .from('members')
+        .insert({
+          name: newMemberData.name,
+          surname: newMemberData.surname,
+          phone: newMemberData.phone,
+          invited_by: newMemberData.invitedBy || null,
+          is_permanent_member: false,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add to members list and select
+      await fetchMembers();
+      setSelectedMembers([...selectedMembers, newMember.id]);
+      
+      // Reset form
+      setNewMemberData({ name: '', surname: '', phone: '', invitedBy: '' });
+      setShowNewMemberForm(false);
+      setShowSimilarMembersModal(false);
+      alert('Member created successfully!');
+    } catch (error) {
+      console.error('Error creating member:', error);
+      alert('Error creating member');
+    }
+  };
+
+  const handleUseExistingMember = (memberId: string) => {
+    if (!selectedMembers.includes(memberId)) {
+      setSelectedMembers([...selectedMembers, memberId]);
+    }
+    setShowSimilarMembersModal(false);
+    setNewMemberData({ name: '', surname: '', phone: '', invitedBy: '' });
+    setShowNewMemberForm(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -378,9 +469,66 @@ const Groups = () => {
 
               {/* Member Selection */}
               <div className="space-y-4">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Add Members ({selectedMembers.length} selected)
-                </label>
+                <div className="flex justify-between items-center">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Add Members ({selectedMembers.length} selected)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewMemberForm(!showNewMemberForm)}
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                  >
+                    {showNewMemberForm ? 'Cancel' : '+ Create New Member'}
+                  </button>
+                </div>
+
+                {/* New Member Form */}
+                {showNewMemberForm && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 space-y-3">
+                    <h4 className="font-semibold text-gray-900 dark:text-white">Create New Member</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        placeholder="First Name *"
+                        value={newMemberData.name}
+                        onChange={(e) => setNewMemberData({ ...newMemberData, name: e.target.value })}
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="text"
+                        placeholder="Surname *"
+                        value={newMemberData.surname}
+                        onChange={(e) => setNewMemberData({ ...newMemberData, surname: e.target.value })}
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Phone Number *"
+                        value={newMemberData.phone}
+                        onChange={(e) => setNewMemberData({ ...newMemberData, phone: e.target.value })}
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="text"
+                        placeholder="Invited By"
+                        value={newMemberData.invitedBy}
+                        onChange={(e) => setNewMemberData({ ...newMemberData, invitedBy: e.target.value })}
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCreateNewMember}
+                      disabled={!newMemberData.name || !newMemberData.surname || !newMemberData.phone}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                    >
+                      Add Member
+                    </button>
+                  </div>
+                )}
                 
                 {/* Selected Members Display */}
                 {getSelectedMemberDetails().length > 0 && (
@@ -511,6 +659,65 @@ const Groups = () => {
             ))
           )}
         </div>
+
+        {/* Similar Members Modal */}
+        {showSimilarMembersModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Similar Members Found</h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">
+                We found similar members in the database. Would you like to use an existing member or create a new one?
+              </p>
+              
+              <div className="space-y-3 mb-6">
+                {similarMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                        {getInitials(member.name, member.surname)}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-gray-900 dark:text-white">
+                          {member.name} {member.surname}
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {member.phone} {member.email ? `• ${member.email}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleUseExistingMember(member.id)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                    >
+                      Use This Member
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={createMember}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+                >
+                  Create New Member Anyway
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSimilarMembersModal(false);
+                    setNewMemberData({ name: '', surname: '', phone: '', invitedBy: '' });
+                  }}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
