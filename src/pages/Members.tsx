@@ -1,6 +1,6 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '../integrations/supabase/client';
 
 interface Member {
   id: string;
@@ -9,9 +9,12 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  is_permanent_member: boolean;
+  is_permanent_member: boolean | null;
   permanent_member_date: string | null;
   cell_groups: { name: string } | null;
+  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  status_date: string | null;
+  not_attending_reason: string | null;
 }
 
 const Members = () => {
@@ -20,6 +23,12 @@ const Members = () => {
   const [cellGroups, setCellGroups] = useState<{ id: string; name: string }[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [editingStatus, setEditingStatus] = useState<string | null>(null);
+  const [statusFormData, setStatusFormData] = useState({
+    status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
+    status_date: '',
+    not_attending_reason: '',
+  });
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
@@ -119,6 +128,52 @@ const Members = () => {
   const resetForm = () => {
     setFormData({ name: '', surname: '', email: '', phone: '', invitedBy: '', cellGroup: '' });
     setShowForm(false);
+  };
+
+  const handleEditStatus = (member: Member) => {
+    setEditingStatus(member.id);
+    setStatusFormData({
+      status: member.status || 'newcomer',
+      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
+      not_attending_reason: member.not_attending_reason || '',
+    });
+  };
+
+  const handleSaveStatus = async (memberId: string) => {
+    setLoading(true);
+    const updateData: any = {
+      status: statusFormData.status,
+      status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : null,
+    };
+
+    if (statusFormData.status === 'not_attending') {
+      updateData.not_attending_reason = statusFormData.not_attending_reason;
+    } else {
+      updateData.not_attending_reason = null;
+    }
+
+    const { error } = await supabase
+      .from('members')
+      .update(updateData)
+      .eq('id', memberId);
+
+    if (error) {
+      console.error('Error updating status:', error);
+      alert('Error updating member status');
+    } else {
+      setEditingStatus(null);
+      fetchMembers();
+    }
+    setLoading(false);
+  };
+
+  const getStatusBadge = (status: string | null) => {
+    const badges = {
+      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
+      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
+      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
+    };
+    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
   };
 
   return (
@@ -281,7 +336,7 @@ const Members = () => {
                         {getInitials(member.name, member.surname)}
                       </div>
                       <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
+                        <div className="flex items-center gap-3 mb-2 flex-wrap">
                           <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
                             {member.name} {member.surname}
                           </h3>
@@ -291,6 +346,9 @@ const Members = () => {
                               Permanent Member
                             </span>
                           )}
+                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
+                            {getStatusBadge(member.status).text}
+                          </span>
                         </div>
                         
                         <div className="space-y-3 text-gray-600 dark:text-gray-400">
@@ -325,14 +383,93 @@ const Members = () => {
                   </div>
                   
                   <div className="flex flex-col justify-between items-end gap-4">
-                    {!member.is_permanent_member && (
-                      <button
-                        onClick={() => handleMarkAsPermanent(member.id)}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                      >
-                        <Check className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                        Mark as Permanent
-                      </button>
+                    {editingStatus === member.id ? (
+                      <div className="space-y-4 w-full max-w-xs">
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+                          <select
+                            value={statusFormData.status}
+                            onChange={(e) => setStatusFormData({ ...statusFormData, status: e.target.value as any })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                          >
+                            <option value="newcomer">Newcomer</option>
+                            <option value="signed_member">Signed Member</option>
+                            <option value="not_attending">Not Attending</option>
+                          </select>
+                        </div>
+                        {statusFormData.status === 'signed_member' && (
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date Became Member</label>
+                            <input
+                              type="date"
+                              value={statusFormData.status_date}
+                              onChange={(e) => setStatusFormData({ ...statusFormData, status_date: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                            />
+                          </div>
+                        )}
+                        {statusFormData.status === 'not_attending' && (
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reason</label>
+                            <textarea
+                              value={statusFormData.not_attending_reason}
+                              onChange={(e) => setStatusFormData({ ...statusFormData, not_attending_reason: e.target.value })}
+                              placeholder="Reason for not attending..."
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                              rows={3}
+                            />
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleSaveStatus(member.id)}
+                            disabled={loading}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                          >
+                            <Save className="h-4 w-4" />
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingStatus(null)}
+                            className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => handleEditStatus(member)}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                        >
+                          <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                          Edit Status
+                        </button>
+                        {!member.is_permanent_member && (
+                          <button
+                            onClick={() => handleMarkAsPermanent(member.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <Check className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                            Mark as Permanent
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {member.status_date && member.status === 'signed_member' && (
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })}
+                      </div>
+                    )}
+                    {member.not_attending_reason && member.status === 'not_attending' && (
+                      <div className="text-sm text-red-600 dark:text-red-400 max-w-xs">
+                        Reason: {member.not_attending_reason}
+                      </div>
                     )}
                     <div className="text-xs text-gray-500 dark:text-gray-400">
                       Member ID: {member.id.slice(0, 8)}...

@@ -1,6 +1,6 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '../integrations/supabase/client';
 
 interface Event {
   id: string;
@@ -126,9 +126,20 @@ const Events = () => {
 
     setLoading(true);
 
+    // Find the selected member's details
+    const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
+    if (!selectedMember) {
+      alert('Member not found');
+      setLoading(false);
+      return;
+    }
+
     const { error } = await supabase.from('event_attendees').insert({
       event_id: eventId,
-      member_id: attendeeFormData.memberId,
+      name: selectedMember.name,
+      surname: selectedMember.surname,
+      phone: selectedMember.phone,
+      cell_group_id: selectedMember.cell_group_id,
       first_time: attendeeFormData.firstTime,
       invited_by: attendeeFormData.invitedBy || null,
     });

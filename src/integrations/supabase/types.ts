@@ -146,8 +146,11 @@ export type Database = {
           invited_by: string | null
           is_permanent_member: boolean | null
           name: string
+          not_attending_reason: string | null
           permanent_member_date: string | null
           phone: string | null
+          status: Database["public"]["Enums"]["member_status"] | null
+          status_date: string | null
           surname: string
           updated_at: string | null
         }
@@ -160,8 +163,11 @@ export type Database = {
           invited_by?: string | null
           is_permanent_member?: boolean | null
           name: string
+          not_attending_reason?: string | null
           permanent_member_date?: string | null
           phone?: string | null
+          status?: Database["public"]["Enums"]["member_status"] | null
+          status_date?: string | null
           surname: string
           updated_at?: string | null
         }
@@ -174,8 +180,11 @@ export type Database = {
           invited_by?: string | null
           is_permanent_member?: boolean | null
           name?: string
+          not_attending_reason?: string | null
           permanent_member_date?: string | null
           phone?: string | null
+          status?: Database["public"]["Enums"]["member_status"] | null
+          status_date?: string | null
           surname?: string
           updated_at?: string | null
         }
@@ -197,7 +206,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      member_status: "newcomer" | "signed_member" | "not_attending"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -324,6 +333,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      member_status: ["newcomer", "signed_member", "not_attending"],
+    },
   },
 } as const

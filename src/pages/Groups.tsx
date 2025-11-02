@@ -1,28 +1,20 @@
 import { Users, Plus, Calendar, User, Search, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '../integrations/supabase/client';
 
 interface Group {
   id: string;
   name: string;
-  description: string | null;
-  meeting_day: string;
-  meeting_time: string;
-  category: string;
+  description?: string | null;
+  meeting_day: string | null;
+  meeting_time?: string;
+  category?: string;
+  location: string | null;
   leader_id: string | null;
   leader?: {
     name: string;
     surname: string;
-  };
-  group_members?: {
-    member: {
-      id: string;
-      name: string;
-      surname: string;
-      email: string | null;
-      phone: string | null;
-    };
-  }[];
+  } | null;
 }
 
 interface Member {
@@ -70,23 +62,10 @@ const Groups = () => {
   
   const [formData, setFormData] = useState({
     name: '',
-    description: '',
     meetingDay: '',
-    meetingTime: '',
-    category: '',
+    location: '',
     leaderId: '',
   });
-
-  const categories = [
-    'Youth',
-    'Fellowship',
-    'Prayer',
-    'Worship',
-    'Study',
-    'Outreach',
-    'Service',
-    'Support'
-  ];
 
   const daysOfWeek = [
     'Monday',
@@ -98,17 +77,6 @@ const Groups = () => {
     'Sunday'
   ];
 
-  const categoryColors: Record<string, string> = {
-    Youth: 'from-blue-500 to-blue-600',
-    Fellowship: 'from-purple-500 to-purple-600',
-    Prayer: 'from-green-500 to-green-600',
-    Worship: 'from-orange-500 to-orange-600',
-    Study: 'from-pink-500 to-pink-600',
-    Outreach: 'from-red-500 to-red-600',
-    Service: 'from-teal-500 to-teal-600',
-    Support: 'from-indigo-500 to-indigo-600',
-  };
-
   useEffect(() => {
     fetchGroups();
     fetchMembers();
@@ -119,17 +87,14 @@ const Groups = () => {
       .from('cell_groups')
       .select(`
         *,
-        leader:members(name, surname),
-        group_members(
-          member:members(id, name, surname, email, phone)
-        )
+        leader:members(name, surname)
       `)
       .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Error fetching groups:', error);
     } else {
-      setGroups(data || []);
+      setGroups(data as Group[] || []);
     }
   };
 
@@ -217,35 +182,20 @@ const Groups = () => {
     setLoading(true);
 
     try {
-      // First, create the group
-      const { data: group, error: groupError } = await supabase
+      // Create the cell group
+      const { error: groupError } = await supabase
         .from('cell_groups')
         .insert({
           name: formData.name,
-          description: formData.description || null,
           meeting_day: formData.meetingDay,
-          meeting_time: formData.meetingTime,
-          category: formData.category,
+          location: formData.location || null,
           leader_id: formData.leaderId || null,
-        })
-        .select()
-        .single();
+        });
 
       if (groupError) throw groupError;
 
-      // Then, add selected members to the group
-      if (selectedMembers.length > 0) {
-        const groupMembers = selectedMembers.map(memberId => ({
-          group_id: group.id,
-          member_id: memberId,
-        }));
-
-        const { error: membersError } = await supabase
-          .from('group_members')
-          .insert(groupMembers);
-
-        if (membersError) throw membersError;
-      }
+      // Note: group_members table doesn't exist yet in the database
+      // If you need to assign members to groups, you should use the members table's cell_group_id field
 
       // Reset form and refresh data
       resetForm();
@@ -262,10 +212,8 @@ const Groups = () => {
     setShowForm(false);
     setFormData({
       name: '',
-      description: '',
       meetingDay: '',
-      meetingTime: '',
-      category: '',
+      location: '',
       leaderId: '',
     });
     setSelectedMembers([]);
@@ -298,10 +246,6 @@ const Groups = () => {
 
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
-  };
-
-  const getMemberCount = (group: Group) => {
-    return group.group_members?.length || 0;
   };
 
   return (
@@ -342,18 +286,14 @@ const Groups = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Category *</label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  >
-                    <option value="">Select category</option>
-                    {categories.map(category => (
-                      <option key={category} value={category}>{category}</option>
-                    ))}
-                  </select>
+                    placeholder="Enter meeting location"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Day *</label>
@@ -368,26 +308,6 @@ const Groups = () => {
                       <option key={day} value={day}>{day}</option>
                     ))}
                   </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Time *</label>
-                  <input
-                    type="time"
-                    value={formData.meetingTime}
-                    onChange={(e) => setFormData({ ...formData, meetingTime: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    rows={3}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Describe the group's purpose and activities..."
-                  />
                 </div>
               </div>
 
@@ -620,20 +540,18 @@ const Groups = () => {
                 className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02] group"
               >
                 <div className="flex items-start gap-4 mb-4">
-                  <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${categoryColors[group.category] || 'from-gray-500 to-gray-600'} flex items-center justify-center shadow-lg`}>
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
                     <Users className="h-7 w-7 text-white" />
                   </div>
                   <div className="flex-1">
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
-                    <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium">
-                      {group.category}
-                    </span>
+                    {group.location && (
+                      <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium">
+                        {group.location}
+                      </span>
+                    )}
                   </div>
                 </div>
-
-                <p className="text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">
-                  {group.description || 'No description available'}
-                </p>
 
                 <div className="space-y-3 mb-4">
                   <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
@@ -642,14 +560,12 @@ const Groups = () => {
                       Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'Not assigned'}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                    <Users className="h-4 w-4" />
-                    <span className="font-medium">{getMemberCount(group)} Members</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                    <Calendar className="h-4 w-4" />
-                    <span className="font-medium">{group.meeting_day}s at {group.meeting_time}</span>
-                  </div>
+                  {group.meeting_day && (
+                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                      <Calendar className="h-4 w-4" />
+                      <span className="font-medium">Meets on {group.meeting_day}s</span>
+                    </div>
+                  )}
                 </div>
 
                 <button className="w-full px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group">
