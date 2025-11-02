@@ -15,6 +15,8 @@ interface Member {
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   status_date: string | null;
   not_attending_reason: string | null;
+  created_at: string;
+  invited_by: string | null;
 }
 
 const Members = () => {
@@ -24,6 +26,7 @@ const Members = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingStatus, setEditingStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [statusFormData, setStatusFormData] = useState({
     status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
     status_date: '',
@@ -44,72 +47,142 @@ const Members = () => {
   }, []);
 
   const fetchMembers = async () => {
-    const { data, error } = await supabase
-      .from('members')
-      .select(`
-        *,
-        cell_groups(name)
-      `)
-      .order('created_at', { ascending: false });
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const { data, error } = await supabase
+        .from('members')
+        .select(`
+          *,
+          cell_groups(name)
+        `)
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching members:', error);
-    } else {
+      if (error) {
+        throw error;
+      }
+
       setMembers(data || []);
+    } catch (error) {
+      console.error('Error fetching members:', error);
+      setError('Failed to load members. Please check your connection.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchCellGroups = async () => {
-    const { data, error } = await supabase
-      .from('cell_groups')
-      .select('id, name')
-      .order('name');
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
 
-    if (error) {
-      console.error('Error fetching cell groups:', error);
-    } else {
+      if (error) {
+        throw error;
+      }
+
       setCellGroups(data || []);
+    } catch (error) {
+      console.error('Error fetching cell groups:', error);
+      setError('Failed to load cell groups.');
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     
-    const { error } = await supabase.from('members').insert({
-      name: formData.name,
-      surname: formData.surname,
-      email: formData.email || null,
-      phone: formData.phone || null,
-      cell_group_id: formData.cellGroup || null,
-      invited_by: formData.invitedBy || null,
-    });
+    try {
+      const { error } = await supabase.from('members').insert({
+        name: formData.name,
+        surname: formData.surname,
+        email: formData.email || null,
+        phone: formData.phone || null,
+        cell_group_id: formData.cellGroup || null,
+        invited_by: formData.invitedBy || null,
+      });
 
-    if (error) {
-      console.error('Error adding member:', error);
-      alert('Error adding member');
-    } else {
+      if (error) {
+        throw error;
+      }
+
       setShowForm(false);
       setFormData({ name: '', surname: '', email: '', phone: '', invitedBy: '', cellGroup: '' });
       fetchMembers();
+    } catch (error) {
+      console.error('Error adding member:', error);
+      setError('Failed to add member. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleMarkAsPermanent = async (memberId: string) => {
-    const { error } = await supabase
-      .from('members')
-      .update({
-        is_permanent_member: true,
-        permanent_member_date: new Date().toISOString(),
-      })
-      .eq('id', memberId);
+    try {
+      setError(null);
+      const { error } = await supabase
+        .from('members')
+        .update({
+          is_permanent_member: true,
+          permanent_member_date: new Date().toISOString(),
+        })
+        .eq('id', memberId);
 
-    if (error) {
-      console.error('Error marking as permanent:', error);
-      alert('Error updating member');
-    } else {
+      if (error) {
+        throw error;
+      }
+
       fetchMembers();
+    } catch (error) {
+      console.error('Error marking as permanent:', error);
+      setError('Failed to update member status.');
+    }
+  };
+
+  const handleEditStatus = (member: Member) => {
+    setEditingStatus(member.id);
+    setStatusFormData({
+      status: member.status || 'newcomer',
+      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
+      not_attending_reason: member.not_attending_reason || '',
+    });
+  };
+
+  const handleSaveStatus = async (memberId: string) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const updateData: any = {
+        status: statusFormData.status,
+        status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : null,
+      };
+
+      if (statusFormData.status === 'not_attending') {
+        updateData.not_attending_reason = statusFormData.not_attending_reason;
+      } else {
+        updateData.not_attending_reason = null;
+      }
+
+      const { error } = await supabase
+        .from('members')
+        .update(updateData)
+        .eq('id', memberId);
+
+      if (error) {
+        throw error;
+      }
+
+      setEditingStatus(null);
+      fetchMembers();
+    } catch (error) {
+      console.error('Error updating status:', error);
+      setError('Failed to update member status.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -128,43 +201,7 @@ const Members = () => {
   const resetForm = () => {
     setFormData({ name: '', surname: '', email: '', phone: '', invitedBy: '', cellGroup: '' });
     setShowForm(false);
-  };
-
-  const handleEditStatus = (member: Member) => {
-    setEditingStatus(member.id);
-    setStatusFormData({
-      status: member.status || 'newcomer',
-      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
-      not_attending_reason: member.not_attending_reason || '',
-    });
-  };
-
-  const handleSaveStatus = async (memberId: string) => {
-    setLoading(true);
-    const updateData: any = {
-      status: statusFormData.status,
-      status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : null,
-    };
-
-    if (statusFormData.status === 'not_attending') {
-      updateData.not_attending_reason = statusFormData.not_attending_reason;
-    } else {
-      updateData.not_attending_reason = null;
-    }
-
-    const { error } = await supabase
-      .from('members')
-      .update(updateData)
-      .eq('id', memberId);
-
-    if (error) {
-      console.error('Error updating status:', error);
-      alert('Error updating member status');
-    } else {
-      setEditingStatus(null);
-      fetchMembers();
-    }
-    setLoading(false);
+    setError(null);
   };
 
   const getStatusBadge = (status: string | null) => {
@@ -195,6 +232,13 @@ const Members = () => {
             {showForm ? 'Cancel' : 'Add Member'}
           </button>
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
+            {error}
+          </div>
+        )}
 
         {/* Add Member Form */}
         {showForm && (
@@ -311,9 +355,17 @@ const Members = () => {
           </div>
         </div>
 
+        {/* Loading State */}
+        {loading && members.length === 0 && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading members...</p>
+          </div>
+        )}
+
         {/* Members Grid */}
         <div className="grid gap-6">
-          {filteredMembers.length === 0 ? (
+          {!loading && filteredMembers.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
