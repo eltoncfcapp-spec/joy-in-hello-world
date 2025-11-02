@@ -1,6 +1,6 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '../../integrations/supabase/client';
 
 interface Event {
   id: string;
@@ -55,7 +55,6 @@ const Events = () => {
 
   useEffect(() => {
     fetchEvents();
-    fetchCellGroups();
     fetchMembers();
   }, []);
 
@@ -69,19 +68,6 @@ const Events = () => {
       console.error('Error fetching events:', error);
     } else {
       setEvents(data || []);
-    }
-  };
-
-  const fetchCellGroups = async () => {
-    const { data, error } = await supabase
-      .from('cell_groups')
-      .select('id, name')
-      .order('name');
-
-    if (error) {
-      console.error('Error fetching cell groups:', error);
-    } else {
-      setCellGroups(data || []);
     }
   };
 

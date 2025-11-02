@@ -38,6 +38,7 @@ interface Event {
   attendees: number;
   maxAttendees: number;
   type: string;
+  priority: string;
 }
 
 interface Donation {
@@ -53,7 +54,6 @@ const Dashboard = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [selectedDonation, setSelectedDonation] = useState<Donation | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
     activity: true
@@ -240,7 +240,6 @@ const Dashboard = () => {
     setActiveModal(null);
     setSelectedMember(null);
     setSelectedEvent(null);
-    setSelectedDonation(null);
   };
 
   const openMemberDetail = (member: Member) => {
@@ -253,8 +252,7 @@ const Dashboard = () => {
     setActiveModal('eventDetail');
   };
 
-  const openDonationDetail = (donation: Donation) => {
-    setSelectedDonation(donation);
+  const openDonationDetail = (_donation: Donation) => {
     setActiveModal('donationDetail');
   };
 
