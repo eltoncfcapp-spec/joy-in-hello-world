@@ -1,6 +1,6 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '../../integrations/supabase/client';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Event {
   id: string;
