@@ -1,814 +1,1027 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User, ChevronDown, Phone, Mail } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { supabase } from '../integrations/supabase/client';
-
-interface Event {
-  id: string;
-  name: string;
-  topic: string | null;
-  event_date: string;
-  event_time: string;
-  location: string | null;
-  created_at: string;
-}
-
-interface Member {
-  id: string;
-  name: string;
-  surname: string;
-  email: string | null;
-  phone: string | null;
-  cell_group_id: string | null;
-  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  cell_groups?: {
-    name: string;
-  };
-  ministry_groups?: {
-    name: string;
-  };
-}
-
-interface EventAttendee {
-  id: string;
-  event_id: string;
-  member_id: string;
-  first_time: boolean;
-  invited_by: string | null;
-  created_at: string;
-  members: {
-    id: string;
-    name: string;
-    surname: string;
-    email: string | null;
-    phone: string | null;
-    status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-    cell_groups?: {
-      name: string;
-    };
-    ministry_groups?: {
-      name: string;
-    };
-  };
-}
-
-interface AttendeeFormData {
-  memberId: string;
-  firstTime: boolean;
-  invitedBy: string;
-}
-
-const Events = () => {
-  const [showEventForm, setShowEventForm] = useState(false);
-  const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
-  const [events, setEvents] = useState<Event[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [attendees, setAttendees] = useState<EventAttendee[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [expandedEvents, setExpandedEvents] = useState<{[key: string]: boolean}>({});
-  
-  const [eventFormData, setEventFormData] = useState({
-    name: '',
-    topic: '',
-    eventDate: '',
-    eventTime: '',
-    location: '',
-  });
-
-  const [attendeeFormData, setAttendeeFormData] = useState<AttendeeFormData>({
-    memberId: '',
-    firstTime: false,
-    invitedBy: '',
-  });
-
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-
-  useEffect(() => {
-    fetchEvents();
-    fetchMembers();
-  }, []);
-
-  const fetchEvents = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('events')
-        .select('*')
-        .order('event_date', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching events:', error);
-        alert('Error loading events');
-      } else {
-        setEvents(data || []);
-        // Fetch attendees for each event
-        if (data && data.length > 0) {
-          await Promise.all(data.map(event => fetchEventAttendees(event.id)));
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Events Calendar - Add Event Attendee</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
         }
-      }
-    } catch (error) {
-      console.error('Error in fetchEvents:', error);
-      alert('Error loading events');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const fetchMembers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select(`
-          id,
-          name,
-          surname,
-          email,
-          phone,
-          cell_group_id,
-          status,
-          cell_groups (
-            name
-          ),
-          ministry_groups (
-            name
-          )
-        `)
-        .order('name')
-        .order('surname');
+        body {
+            background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+            min-height: 100vh;
+            color: #1f2937;
+            padding: 24px;
+        }
 
-      if (error) {
-        console.error('Error fetching members:', error);
-        alert('Error loading members');
-      } else {
-        console.log('Fetched members:', data?.length);
-        setMembers(data || []);
-      }
-    } catch (error) {
-      console.error('Error in fetchMembers:', error);
-      alert('Error loading members');
-    }
-  };
+        .dark body {
+            background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+            color: #f9fafb;
+        }
 
-  const fetchEventAttendees = async (eventId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .select(`
-          *,
-          members (
-            id,
-            name,
-            surname,
-            email,
-            phone,
-            status,
-            cell_groups (
-              name
-            ),
-            ministry_groups (
-              name
-            )
-          )
-        `)
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: false });
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
 
-      if (error) {
-        console.error('Error fetching attendees:', error);
-      } else {
-        setAttendees(prev => {
-          const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-          return [...filtered, ...(data || [])];
-        });
-      }
-    } catch (error) {
-      console.error('Error in fetchEventAttendees:', error);
-    }
-  };
+        /* Header Styles */
+        .header {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 32px;
+        }
 
-  const handleEventSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    
-    try {
-      const { error } = await supabase.from('events').insert({
-        name: eventFormData.name,
-        topic: eventFormData.topic || null,
-        event_date: eventFormData.eventDate,
-        event_time: eventFormData.eventTime,
-        location: eventFormData.location || null,
-      });
+        @media (min-width: 640px) {
+            .header {
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+            }
+        }
 
-      if (error) {
-        console.error('Error creating event:', error);
-        alert('Error creating event');
-      } else {
-        setShowEventForm(false);
-        setEventFormData({ name: '', topic: '', eventDate: '', eventTime: '', location: '' });
-        fetchEvents();
-        alert('Event created successfully!');
-      }
-    } catch (error) {
-      console.error('Error in handleEventSubmit:', error);
-      alert('Error creating event');
-    } finally {
-      setLoading(false);
-    }
-  };
+        .title {
+            font-size: 36px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
 
-  const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
-    e.preventDefault();
-    
-    if (!attendeeFormData.memberId) {
-      alert('Please select a member');
-      return;
-    }
+        .subtitle {
+            color: #6b7280;
+            font-size: 16px;
+        }
 
-    setLoading(true);
+        .dark .subtitle {
+            color: #9ca3af;
+        }
 
-    try {
-      const { error } = await supabase.from('event_attendees').insert({
-        event_id: eventId,
-        member_id: attendeeFormData.memberId,
-        first_time: attendeeFormData.firstTime,
-        invited_by: attendeeFormData.invitedBy || null,
-      });
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            text-decoration: none;
+        }
 
-      if (error) {
-        console.error('Error adding attendee:', error);
-        alert('Error adding attendee');
-      } else {
-        resetAttendeeForm();
-        fetchEventAttendees(eventId);
-        alert('Attendee added successfully!');
-      }
-    } catch (error) {
-      console.error('Error in handleAttendeeSubmit:', error);
-      alert('Error adding attendee');
-    } finally {
-      setLoading(false);
-    }
-  };
+        .btn-primary {
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
 
-  const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
-    if (!confirm('Are you sure you want to remove this attendee?')) {
-      return;
-    }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
 
-    try {
-      const { error } = await supabase
-        .from('event_attendees')
-        .delete()
-        .eq('id', attendeeId);
+        .btn-secondary {
+            background-color: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
 
-      if (error) {
-        console.error('Error removing attendee:', error);
-        alert('Error removing attendee');
-      } else {
-        fetchEventAttendees(eventId);
-        alert('Attendee removed successfully!');
-      }
-    } catch (error) {
-      console.error('Error in handleRemoveAttendee:', error);
-      alert('Error removing attendee');
-    }
-  };
+        .dark .btn-secondary {
+            background-color: #374151;
+            color: #f3f4f6;
+            border-color: #4b5563;
+        }
 
-  const resetAttendeeForm = () => {
-    setShowAttendeeForm(null);
-    setAttendeeFormData({
-      memberId: '',
-      firstTime: false,
-      invitedBy: '',
-    });
-    setSelectedMember(null);
-    setSearchTerm('');
-    setIsMemberDropdownOpen(false);
-  };
+        /* Card Styles */
+        .card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(209, 213, 219, 0.5);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+        }
 
-  const handleMemberSelect = (member: Member) => {
-    setAttendeeFormData({
-      ...attendeeFormData,
-      memberId: member.id,
-    });
-    setSelectedMember(member);
-    setSearchTerm(`${member.name} ${member.surname}`);
-    setIsMemberDropdownOpen(false);
-  };
+        .dark .card {
+            background: rgba(31, 41, 55, 0.7);
+            border-color: rgba(75, 85, 99, 0.5);
+        }
 
-  const toggleEventExpansion = (eventId: string) => {
-    setExpandedEvents(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-  };
+        .card:hover {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            border-color: rgba(156, 163, 175, 0.5);
+        }
 
-  const filteredMembers = members.filter(member => {
-    if (!searchTerm.trim()) return false;
-    
-    const searchLower = searchTerm.toLowerCase().trim();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
-    );
-  });
+        .dark .card:hover {
+            border-color: rgba(107, 114, 128, 0.5);
+        }
 
-  const getEventAttendees = (eventId: string) => {
-    return attendees.filter(attendee => attendee.event_id === eventId);
-  };
+        /* Form Styles */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 24px;
+        }
 
-  const getUniqueAttendees = (eventId: string) => {
-    const eventAttendees = getEventAttendees(eventId);
-    const uniqueAttendees = eventAttendees.filter((attendee, index, self) =>
-      index === self.findIndex(a => a.member_id === attendee.member_id)
-    );
-    return uniqueAttendees;
-  };
+        @media (min-width: 768px) {
+            .form-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
 
-  const formatTime = (timeString: string) => {
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const formattedHour = hour % 12 || 12;
-    return `${formattedHour}:${minutes} ${ampm}`;
-  };
+        .form-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+        }
 
-  const getInitials = (name: string, surname: string) => {
-    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
-  };
+        .dark .form-label {
+            color: #d1d5db;
+        }
 
-  const getStatusBadge = (status: string | null) => {
-    const badges = {
-      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
-      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
-      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
-    };
-    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
-  };
+        .form-input {
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            background-color: white;
+            font-size: 16px;
+            transition: all 0.2s ease;
+        }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Events Calendar
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">Manage church events and track attendance</p>
-          </div>
-          <button 
-            onClick={() => setShowEventForm(!showEventForm)}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-          >
-            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-            {showEventForm ? 'Cancel' : 'Create Event'}
-          </button>
+        .dark .form-input {
+            background-color: #374151;
+            border-color: #4b5563;
+            color: #f9fafb;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        /* Search and Select Styles */
+        .search-container {
+            position: relative;
+            margin-bottom: 16px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 16px 12px 40px;
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .dark .search-input {
+            background-color: #374151;
+            border-color: #4b5563;
+            color: #f9fafb;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9ca3af;
+        }
+
+        .search-hint {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 16px;
+        }
+
+        .dark .search-hint {
+            color: #9ca3af;
+        }
+
+        .results-container {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            max-height: 240px;
+            overflow-y: auto;
+            background: white;
+        }
+
+        .dark .results-container {
+            border-color: #4b5563;
+            background: #374151;
+        }
+
+        .result-item {
+            padding: 16px;
+            border-bottom: 1px solid #f3f4f6;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .dark .result-item {
+            border-bottom-color: #4b5563;
+        }
+
+        .result-item:hover {
+            background-color: #f9fafb;
+        }
+
+        .dark .result-item:hover {
+            background-color: #4b5563;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-name {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .result-details {
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .dark .result-details {
+            color: #9ca3af;
+        }
+
+        .no-results {
+            padding: 32px 16px;
+            text-align: center;
+            color: #6b7280;
+        }
+
+        .dark .no-results {
+            color: #9ca3af;
+        }
+
+        .selected-member {
+            background-color: #eff6ff;
+            border: 1px solid #dbeafe;
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 16px;
+            display: none;
+        }
+
+        .dark .selected-member {
+            background-color: #1e3a8a;
+            border-color: #3b82f6;
+        }
+
+        .selected-member.active {
+            display: block;
+        }
+
+        .selected-member-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .remove-selection {
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .member-info {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .member-details {
+            flex: 1;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-newcomer {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        .dark .status-newcomer {
+            background-color: #1e3a8a;
+            color: #93c5fd;
+        }
+
+        .status-signed_member {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .dark .status-signed_member {
+            background-color: #14532d;
+            color: #86efac;
+        }
+
+        .status-not_attending {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .dark .status-not_attending {
+            background-color: #7f1d1d;
+            color: #fca5a5;
+        }
+
+        .first-time-badge {
+            background-color: #dcfce7;
+            color: #166534;
+            padding: 4px 8px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .dark .first-time-badge {
+            background-color: #14532d;
+            color: #86efac;
+        }
+
+        /* Actions */
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            justify-content: flex-end;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 2px solid #d1d5db;
+            background: white;
+            cursor: pointer;
+        }
+
+        .dark .checkbox {
+            background: #374151;
+            border-color: #6b7280;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background-color: #fef2f2;
+            color: #dc2626;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 1px solid #fecaca;
+            display: none;
+        }
+
+        .dark .error-message {
+            background-color: #7f1d1d;
+            color: #fca5a5;
+            border-color: #991b1b;
+        }
+
+        .error-message.active {
+            display: block;
+        }
+
+        .success-message {
+            background-color: #f0fdf4;
+            color: #16a34a;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 1px solid #bbf7d0;
+            display: none;
+        }
+
+        .dark .success-message {
+            background-color: #14532d;
+            color: #4ade80;
+            border-color: #16a34a;
+        }
+
+        .success-message.active {
+            display: block;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1 class="title">Events Calendar</h1>
+                <p class="subtitle">Manage church events and track attendance</p>
+            </div>
+            <button class="btn btn-primary" id="showEventFormBtn">
+                <i data-lucide="plus"></i>
+                <span>Create Event</span>
+            </button>
         </div>
 
-        {/* Event Creation Form */}
-        {showEventForm && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
-            <form onSubmit={handleEventSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
-                  <input
-                    type="text"
-                    value={eventFormData.name}
-                    onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter event name"
-                    required
-                  />
+        <!-- Messages -->
+        <div class="error-message" id="errorMessage"></div>
+        <div class="success-message" id="successMessage"></div>
+
+        <!-- Event Creation Form -->
+        <div class="card hidden" id="eventFormCard">
+            <h2 style="font-size: 24px; font-weight: 700; margin-bottom: 24px; color: #111827;">Create New Event</h2>
+            <form id="eventForm">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Event Name *</label>
+                        <input type="text" class="form-input" id="eventName" placeholder="Enter event name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Topic</label>
+                        <input type="text" class="form-input" id="eventTopic" placeholder="Event topic or theme">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Date *</label>
+                        <input type="date" class="form-input" id="eventDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Time *</label>
+                        <input type="time" class="form-input" id="eventTime" required>
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label class="form-label">Location</label>
+                        <input type="text" class="form-input" id="eventLocation" placeholder="Event location">
+                    </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
-                  <input
-                    type="text"
-                    value={eventFormData.topic}
-                    onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event topic or theme"
-                  />
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary" id="createEventBtn">
+                        Create Event
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="cancelEventBtn">
+                        Cancel
+                    </button>
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
-                  <input
-                    type="date"
-                    value={eventFormData.eventDate}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
-                  <input
-                    type="time"
-                    value={eventFormData.eventTime}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                  <input
-                    type="text"
-                    value={eventFormData.location}
-                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event location"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Creating...' : 'Create Event'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowEventForm(false)}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
             </form>
-          </div>
-        )}
-
-        {/* Events List */}
-        <div className="space-y-6">
-          {loading && events.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading events...</p>
-            </div>
-          ) : events.length === 0 ? (
-            <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
-              <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
-              <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
-            </div>
-          ) : (
-            events.map((event) => {
-              const eventAttendees = getUniqueAttendees(event.id);
-              const isExpanded = expandedEvents[event.id];
-              
-              return (
-                <div key={event.id} className="group">
-                  {/* Event Card */}
-                  <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
-                    <div className="flex flex-col lg:flex-row justify-between gap-6">
-                      <div className="flex-1">
-                        <div className="flex items-start gap-4 mb-4">
-                          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-lg">
-                            <CalendarIcon className="h-7 w-7 text-white" />
-                          </div>
-                          <div className="flex-1">
-                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{event.name}</h3>
-                            {event.topic && (
-                              <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
-                          <div className="flex items-center gap-3">
-                            <CalendarIcon className="h-4 w-4" />
-                            <span className="font-medium">{formatDate(event.event_date)}</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <Clock className="h-4 w-4" />
-                            <span className="font-medium">{formatTime(event.event_time)}</span>
-                          </div>
-                          {event.location && (
-                            <div className="flex items-center gap-3">
-                              <MapPin className="h-4 w-4" />
-                              <span className="font-medium">{event.location}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Attendees Count */}
-                        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                          <Users className="h-4 w-4" />
-                          <span>{eventAttendees.length} attendees</span>
-                          {eventAttendees.filter(a => a.first_time).length > 0 && (
-                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
-                              {eventAttendees.filter(a => a.first_time).length} first-time
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex flex-col justify-between items-end gap-4">
-                        <div className="flex gap-3">
-                          <button 
-                            onClick={() => toggleEventExpansion(event.id)}
-                            className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                          >
-                            <Users className="h-4 w-4" />
-                            {isExpanded ? 'Hide' : 'View'} Attendees
-                            <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-                          </button>
-                          <button 
-                            onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
-                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                          >
-                            <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-200" />
-                            {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Expanded Attendees List */}
-                    {isExpanded && (
-                      <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Event Attendees ({eventAttendees.length})</h4>
-                        {eventAttendees.length === 0 ? (
-                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                            <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                            <p>No attendees yet</p>
-                            <p className="text-sm">Add attendees using the "Add Attendee" button</p>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                            {eventAttendees.map((attendee) => (
-                              <div key={attendee.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 hover:shadow-md transition-all duration-200">
-                                <div className="flex items-start gap-3">
-                                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
-                                    {getInitials(attendee.members.name, attendee.members.surname)}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-start justify-between mb-2">
-                                      <div>
-                                        <h5 className="font-semibold text-gray-900 dark:text-white truncate">
-                                          {attendee.members.name} {attendee.members.surname}
-                                        </h5>
-                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(attendee.members.status).color}`}>
-                                            {getStatusBadge(attendee.members.status).text}
-                                          </span>
-                                          {attendee.first_time && (
-                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
-                                              First Time
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <button
-                                        onClick={() => handleRemoveAttendee(attendee.id, event.id)}
-                                        className="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0"
-                                        title="Remove attendee"
-                                      >
-                                        <X className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                    
-                                    <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                                      {attendee.members.phone && (
-                                        <div className="flex items-center gap-2">
-                                          <Phone className="h-3 w-3" />
-                                          <span>{attendee.members.phone}</span>
-                                        </div>
-                                      )}
-                                      {attendee.members.email && (
-                                        <div className="flex items-center gap-2">
-                                          <Mail className="h-3 w-3" />
-                                          <span className="truncate">{attendee.members.email}</span>
-                                        </div>
-                                      )}
-                                      {attendee.members.cell_groups?.name && (
-                                        <div className="text-xs">
-                                          Cell Group: {attendee.members.cell_groups.name}
-                                        </div>
-                                      )}
-                                      {attendee.invited_by && (
-                                        <div className="text-xs text-blue-600 dark:text-blue-400">
-                                          Invited by: {attendee.invited_by}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Attendee Form */}
-                  {showAttendeeForm === event.id && (
-                    <div className="mt-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300">
-                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Add Event Attendee</h3>
-                      
-                      <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-6">
-                        {/* Member Search and Selection */}
-                        <div className="space-y-4">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Search and Select Member *
-                          </label>
-                          
-                          <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                            Type to search {members.length} members by name, surname, email, or phone number
-                          </div>
-                          
-                          {/* Search Input */}
-                          <div className="relative">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input
-                              type="text"
-                              value={searchTerm}
-                              onChange={(e) => {
-                                setSearchTerm(e.target.value);
-                                setIsMemberDropdownOpen(true);
-                              }}
-                              onFocus={() => setIsMemberDropdownOpen(true)}
-                              placeholder={`Search ${members.length} members by name, surname, email, or phone...`}
-                              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                            />
-                            {searchTerm && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSearchTerm('');
-                                  setSelectedMember(null);
-                                  setAttendeeFormData({ ...attendeeFormData, memberId: '' });
-                                  setIsMemberDropdownOpen(false);
-                                }}
-                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Selected Member Display */}
-                          {selectedMember && (
-                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                                  {getInitials(selectedMember.name, selectedMember.surname)}
-                                </div>
-                                <div className="flex-1">
-                                  <h4 className="font-semibold text-gray-900 dark:text-white">
-                                    {selectedMember.name} {selectedMember.surname}
-                                  </h4>
-                                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                                    {selectedMember.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {selectedMember.phone}</div>}
-                                    {selectedMember.email && <div className="flex items-center gap-2"><Mail className="h-3 w-3" /> {selectedMember.email}</div>}
-                                    {selectedMember.cell_groups?.name && <div>Cell Group: {selectedMember.cell_groups.name}</div>}
-                                    <div className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(selectedMember.status).color}`}>
-                                      {getStatusBadge(selectedMember.status).text}
-                                    </div>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedMember(null);
-                                    setAttendeeFormData({ ...attendeeFormData, memberId: '' });
-                                    setSearchTerm('');
-                                  }}
-                                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                                >
-                                  <X className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Member Dropdown */}
-                          {isMemberDropdownOpen && searchTerm && (
-                            <div className="border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 shadow-lg max-h-60 overflow-y-auto">
-                              {filteredMembers.length > 0 ? (
-                                filteredMembers.map((member) => (
-                                  <button
-                                    key={member.id}
-                                    type="button"
-                                    onClick={() => handleMemberSelect(member)}
-                                    className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
-                                  >
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                                        {getInitials(member.name, member.surname)}
-                                      </div>
-                                      <div className="flex-1">
-                                        <div className="font-medium text-gray-900 dark:text-white">
-                                          {member.name} {member.surname}
-                                        </div>
-                                        <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
-                                          {member.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {member.phone}</div>}
-                                          {member.email && <div className="flex items-center gap-2"><Mail className="h-3 w-3" /> {member.email}</div>}
-                                          {member.cell_groups?.name && <div>Cell Group: {member.cell_groups.name}</div>}
-                                          <div className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(member.status).color}`}>
-                                            {getStatusBadge(member.status).text}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </button>
-                                ))
-                              ) : (
-                                <div className="text-center py-6 text-gray-500 dark:text-gray-400">
-                                  <User className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                  <p>No members found matching "{searchTerm}"</p>
-                                  <p className="text-sm mt-1">Try a different search term</p>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {!searchTerm && isMemberDropdownOpen && (
-                            <div className="text-center py-6 text-gray-500 dark:text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
-                              <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                              <p>Start typing to search {members.length} members</p>
-                              <p className="text-sm mt-1">Search by name, surname, email, or phone number</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Additional Fields */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                              Invited By
-                            </label>
-                            <input
-                              type="text"
-                              value={attendeeFormData.invitedBy}
-                              onChange={(e) => setAttendeeFormData({ ...attendeeFormData, invitedBy: e.target.value })}
-                              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                              placeholder="Who invited this member?"
-                            />
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              id="firstTime"
-                              checked={attendeeFormData.firstTime}
-                              onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
-                              className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <label htmlFor="firstTime" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                              First Time Attending this Event
-                            </label>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3 pt-4">
-                          <button
-                            type="submit"
-                            disabled={loading || !attendeeFormData.memberId}
-                            className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Users className="h-4 w-4" />
-                            {loading ? 'Adding...' : 'Add Attendee'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={resetAttendeeForm}
-                            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
         </div>
-      </div>
-    </div>
-  );
-};
 
-export default Events;
+        <!-- Add Event Attendee Form -->
+        <div class="card" id="attendeeFormCard">
+            <h2 style="font-size: 24px; font-weight: 700; margin-bottom: 24px; color: #111827;">Add Event Attendee</h2>
+            
+            <form id="attendeeForm">
+                <!-- Event Selection -->
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label class="form-label">Select Event *</label>
+                    <select class="form-input" id="eventSelect" required>
+                        <option value="">Choose an event...</option>
+                    </select>
+                </div>
+
+                <!-- Member Search and Selection -->
+                <div class="form-group">
+                    <label class="form-label">Search and Select Member *</label>
+                    <div class="search-hint">Type to search members by name, surname, email, or phone number</div>
+                    
+                    <div class="search-container">
+                        <i data-lucide="search" class="search-icon"></i>
+                        <input type="text" class="search-input" id="searchInput" placeholder="Type to search members...">
+                    </div>
+                    
+                    <div class="results-container" id="resultsContainer">
+                        <div class="no-results">Start typing to search for members</div>
+                    </div>
+                    
+                    <div class="selected-member" id="selectedMember">
+                        <div class="selected-member-header">
+                            <div class="result-name">Selected Member</div>
+                            <div class="remove-selection" id="removeSelection">Remove</div>
+                        </div>
+                        <div class="member-info">
+                            <div class="avatar" id="memberAvatar"></div>
+                            <div class="member-details">
+                                <div id="selectedMemberName" style="font-weight: 600; margin-bottom: 4px;"></div>
+                                <div id="selectedMemberContact" style="font-size: 14px; color: #6b7280; margin-bottom: 8px;"></div>
+                                <div id="selectedMemberStatus" class="status-badge"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Additional Fields -->
+                <div class="form-grid" style="margin-top: 24px;">
+                    <div class="form-group">
+                        <label class="form-label">Invited By</label>
+                        <input type="text" class="form-input" id="invitedBy" placeholder="Who invited this member?">
+                    </div>
+                    <div class="checkbox-container">
+                        <input type="checkbox" id="firstTime" class="checkbox">
+                        <label for="firstTime" class="form-label">First Time Attending this Event</label>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary" id="addAttendeeBtn" disabled>
+                        <i data-lucide="users"></i>
+                        <span>Add Attendee</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="cancelAttendeeBtn">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Supabase configuration
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // Replace with your Supabase URL
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your Supabase anon key
+        
+        // Initialize Supabase client
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        // DOM elements
+        const eventFormCard = document.getElementById('eventFormCard');
+        const attendeeFormCard = document.getElementById('attendeeFormCard');
+        const showEventFormBtn = document.getElementById('showEventFormBtn');
+        const eventForm = document.getElementById('eventForm');
+        const attendeeForm = document.getElementById('attendeeForm');
+        const eventSelect = document.getElementById('eventSelect');
+        const searchInput = document.getElementById('searchInput');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const selectedMember = document.getElementById('selectedMember');
+        const selectedMemberName = document.getElementById('selectedMemberName');
+        const selectedMemberContact = document.getElementById('selectedMemberContact');
+        const selectedMemberStatus = document.getElementById('selectedMemberStatus');
+        const memberAvatar = document.getElementById('memberAvatar');
+        const removeSelection = document.getElementById('removeSelection');
+        const addAttendeeBtn = document.getElementById('addAttendeeBtn');
+        const cancelEventBtn = document.getElementById('cancelEventBtn');
+        const cancelAttendeeBtn = document.getElementById('cancelAttendeeBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+
+        // State
+        let events = [];
+        let members = [];
+        let selectedMemberData = null;
+        let searchTimeout = null;
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchEvents();
+            fetchMembers();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            // Event form toggle
+            showEventFormBtn.addEventListener('click', function() {
+                eventFormCard.classList.toggle('hidden');
+                attendeeFormCard.classList.toggle('hidden');
+                this.querySelector('span').textContent = 
+                    eventFormCard.classList.contains('hidden') ? 'Create Event' : 'Cancel';
+            });
+
+            // Cancel event form
+            cancelEventBtn.addEventListener('click', function() {
+                eventFormCard.classList.add('hidden');
+                attendeeFormCard.classList.remove('hidden');
+                showEventFormBtn.querySelector('span').textContent = 'Create Event';
+                eventForm.reset();
+            });
+
+            // Cancel attendee form
+            cancelAttendeeBtn.addEventListener('click', function() {
+                resetAttendeeForm();
+            });
+
+            // Event form submission
+            eventForm.addEventListener('submit', handleEventSubmit);
+
+            // Attendee form submission
+            attendeeForm.addEventListener('submit', handleAttendeeSubmit);
+
+            // Member search
+            searchInput.addEventListener('input', handleMemberSearch);
+
+            // Remove member selection
+            removeSelection.addEventListener('click', function() {
+                selectedMemberData = null;
+                selectedMember.classList.remove('active');
+                addAttendeeBtn.disabled = true;
+                searchInput.value = '';
+            });
+        }
+
+        // Fetch events from Supabase
+        async function fetchEvents() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('events')
+                    .select('*')
+                    .order('event_date', { ascending: true });
+
+                if (error) {
+                    throw error;
+                }
+
+                events = data || [];
+                populateEventSelect();
+            } catch (error) {
+                console.error('Error fetching events:', error);
+                showError('Failed to load events. Please check your connection.');
+            }
+        }
+
+        // Fetch members from Supabase
+        async function fetchMembers() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('members')
+                    .select(`
+                        id,
+                        name,
+                        surname,
+                        email,
+                        phone,
+                        cell_group_id,
+                        status,
+                        cell_groups (
+                            name
+                        ),
+                        ministry_groups (
+                            name
+                        )
+                    `)
+                    .order('name')
+                    .order('surname');
+
+                if (error) {
+                    throw error;
+                }
+
+                members = data || [];
+                console.log('Fetched members:', members.length);
+            } catch (error) {
+                console.error('Error fetching members:', error);
+                showError('Failed to load members. Please check your connection.');
+            }
+        }
+
+        // Populate event dropdown
+        function populateEventSelect() {
+            eventSelect.innerHTML = '<option value="">Choose an event...</option>';
+            
+            events.forEach(event => {
+                const option = document.createElement('option');
+                option.value = event.id;
+                option.textContent = `${event.name} - ${formatDate(event.event_date)}`;
+                eventSelect.appendChild(option);
+            });
+        }
+
+        // Handle event form submission
+        async function handleEventSubmit(e) {
+            e.preventDefault();
+            
+            const eventName = document.getElementById('eventName').value;
+            const eventTopic = document.getElementById('eventTopic').value;
+            const eventDate = document.getElementById('eventDate').value;
+            const eventTime = document.getElementById('eventTime').value;
+            const eventLocation = document.getElementById('eventLocation').value;
+
+            if (!eventName || !eventDate || !eventTime) {
+                showError('Please fill in all required fields');
+                return;
+            }
+
+            const createEventBtn = document.getElementById('createEventBtn');
+            createEventBtn.innerHTML = '<span class="loading"></span> Creating...';
+            createEventBtn.disabled = true;
+
+            try {
+                const { error } = await supabaseClient
+                    .from('events')
+                    .insert({
+                        name: eventName,
+                        topic: eventTopic || null,
+                        event_date: eventDate,
+                        event_time: eventTime,
+                        location: eventLocation || null,
+                    });
+
+                if (error) {
+                    throw error;
+                }
+
+                showSuccess('Event created successfully!');
+                eventForm.reset();
+                eventFormCard.classList.add('hidden');
+                attendeeFormCard.classList.remove('hidden');
+                showEventFormBtn.querySelector('span').textContent = 'Create Event';
+                
+                // Refresh events list
+                await fetchEvents();
+            } catch (error) {
+                console.error('Error creating event:', error);
+                showError('Failed to create event. Please try again.');
+            } finally {
+                createEventBtn.innerHTML = 'Create Event';
+                createEventBtn.disabled = false;
+            }
+        }
+
+        // Handle member search
+        function handleMemberSearch() {
+            const searchTerm = this.value.trim();
+            
+            // Clear previous timeout
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
+            }
+            
+            // Set a new timeout to debounce the search
+            searchTimeout = setTimeout(() => {
+                if (searchTerm.length === 0) {
+                    resultsContainer.innerHTML = '<div class="no-results">Start typing to search for members</div>';
+                    return;
+                }
+                
+                searchMembers(searchTerm);
+            }, 300);
+        }
+
+        // Search members in Supabase
+        function searchMembers(searchTerm) {
+            const searchLower = searchTerm.toLowerCase().trim();
+            
+            const filteredMembers = members.filter(member => {
+                return (
+                    member.name.toLowerCase().includes(searchLower) ||
+                    member.surname.toLowerCase().includes(searchLower) ||
+                    `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+                    member.phone?.toLowerCase().includes(searchLower) ||
+                    member.email?.toLowerCase().includes(searchLower)
+                );
+            });
+
+            // Display results
+            if (filteredMembers.length > 0) {
+                resultsContainer.innerHTML = '';
+                filteredMembers.forEach(member => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'result-item';
+                    resultItem.innerHTML = `
+                        <div class="result-name">${member.name} ${member.surname}</div>
+                        <div class="result-details">
+                            ${member.email || 'No email'} • ${member.phone || 'No phone'}
+                            ${member.cell_groups?.name ? ` • ${member.cell_groups.name}` : ''}
+                        </div>
+                    `;
+                    resultItem.addEventListener('click', () => selectMember(member));
+                    resultsContainer.appendChild(resultItem);
+                });
+            } else {
+                resultsContainer.innerHTML = `
+                    <div class="no-results">
+                        No members found matching "${searchTerm}"<br>
+                        Try a different search term
+                    </div>
+                `;
+            }
+        }
+
+        // Select a member
+        function selectMember(member) {
+            selectedMemberData = member;
+            
+            // Update selected member display
+            selectedMemberName.textContent = `${member.name} ${member.surname}`;
+            
+            let contactInfo = [];
+            if (member.email) contactInfo.push(member.email);
+            if (member.phone) contactInfo.push(member.phone);
+            selectedMemberContact.textContent = contactInfo.join(' • ') || 'No contact information';
+            
+            // Set status badge
+            selectedMemberStatus.textContent = getStatusText(member.status);
+            selectedMemberStatus.className = `status-badge status-${member.status || 'newcomer'}`;
+            
+            // Set avatar
+            memberAvatar.textContent = getInitials(member.name, member.surname);
+            
+            // Show selected member section
+            selectedMember.classList.add('active');
+            
+            // Clear search and results
+            searchInput.value = '';
+            resultsContainer.innerHTML = '<div class="no-results">Start typing to search for members</div>';
+            
+            // Enable add attendee button
+            addAttendeeBtn.disabled = false;
+        }
+
+        // Handle attendee form submission
+        async function handleAttendeeSubmit(e) {
+            e.preventDefault();
+            
+            const eventId = eventSelect.value;
+            
+            if (!eventId) {
+                showError('Please select an event');
+                return;
+            }
+            
+            if (!selectedMemberData) {
+                showError('Please select a member');
+                return;
+            }
+
+            const invitedBy = document.getElementById('invitedBy').value;
+            const firstTime = document.getElementById('firstTime').checked;
+
+            // Show loading state
+            addAttendeeBtn.innerHTML = '<span class="loading"></span> Adding...';
+            addAttendeeBtn.disabled = true;
+
+            try {
+                const { error } = await supabaseClient
+                    .from('event_attendees')
+                    .insert({
+                        event_id: eventId,
+                        member_id: selectedMemberData.id,
+                        first_time: firstTime,
+                        invited_by: invitedBy || null,
+                    });
+
+                if (error) {
+                    throw error;
+                }
+
+                showSuccess('Attendee added successfully!');
+                resetAttendeeForm();
+            } catch (error) {
+                console.error('Error adding attendee:', error);
+                showError('Failed to add attendee. Please try again.');
+                addAttendeeBtn.innerHTML = '<i data-lucide="users"></i><span>Add Attendee</span>';
+                addAttendeeBtn.disabled = false;
+                lucide.createIcons();
+            }
+        }
+
+        // Reset attendee form
+        function resetAttendeeForm() {
+            selectedMemberData = null;
+            selectedMember.classList.remove('active');
+            searchInput.value = '';
+            resultsContainer.innerHTML = '<div class="no-results">Start typing to search for members</div>';
+            document.getElementById('invitedBy').value = '';
+            document.getElementById('firstTime').checked = false;
+            eventSelect.value = '';
+            addAttendeeBtn.disabled = true;
+            addAttendeeBtn.innerHTML = '<i data-lucide="users"></i><span>Add Attendee</span>';
+            lucide.createIcons();
+        }
+
+        // Utility functions
+        function getInitials(name, surname) {
+            return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
+        }
+
+        function getStatusText(status) {
+            const statusMap = {
+                newcomer: 'Newcomer',
+                signed_member: 'Signed Member',
+                not_attending: 'Not Attending'
+            };
+            return statusMap[status] || 'Newcomer';
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('active');
+            
+            // Hide error after 5 seconds
+            setTimeout(() => {
+                errorMessage.classList.remove('active');
+            }, 5000);
+        }
+
+        function showSuccess(message) {
+            successMessage.textContent = message;
+            successMessage.classList.add('active');
+            
+            // Hide success after 3 seconds
+            setTimeout(() => {
+                successMessage.classList.remove('active');
+            }, 3000);
+        }
+
+        // Test connection on load
+        async function testConnection() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('members')
+                    .select('count')
+                    .limit(1);
+
+                if (error) {
+                    throw error;
+                }
+                
+                console.log('Supabase connection successful');
+            } catch (error) {
+                console.error('Supabase connection failed:', error);
+                showError('Connection to database failed. Please check your configuration.');
+            }
+        }
+
+        // Initialize the app
+        testConnection();
+    </script>
+</body>
+</html>
