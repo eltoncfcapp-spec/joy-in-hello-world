@@ -213,6 +213,7 @@ const Dashboard = () => {
     const newcomers = members.filter(m => m.status === 'newcomer').length;
     const signedMembers = members.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
+    const leadersCount = members.filter(m => m.is_leader).length;
     
     const monthlyDonations = donations
       .filter(d => {
@@ -236,7 +237,8 @@ const Dashboard = () => {
       ? ((monthlyDonations - lastMonthDonations) / lastMonthDonations * 100).toFixed(1)
       : '0';
 
-    const uniqueGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
+    const uniqueCellGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
+    const uniqueMinistryGroups = ministryGroups.length;
 
     const statsData: StatCard[] = [
       { 
@@ -271,13 +273,33 @@ const Dashboard = () => {
       },
       { 
         icon: TrendingUp, 
-        label: 'Active Groups', 
-        value: uniqueGroups.toString(), 
-        change: `${uniqueGroups} cell groups`, 
+        label: 'Cell Groups', 
+        value: uniqueCellGroups.toString(), 
+        change: `${uniqueCellGroups} active groups`, 
         changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
         action: 'viewGroups'
+      },
+      { 
+        icon: Crown, 
+        label: 'Ministry Groups', 
+        value: uniqueMinistryGroups.toString(), 
+        change: `${leadersCount} leaders`, 
+        changeType: 'positive',
+        color: 'from-red-500 to-red-600',
+        bgColor: 'bg-red-50 dark:bg-red-950/20',
+        action: 'viewMinistryGroups'
+      },
+      { 
+        icon: DollarSign, 
+        label: 'Monthly Donations', 
+        value: `$${monthlyDonations.toLocaleString()}`, 
+        change: `${donationChange}% from last month`, 
+        changeType: Number(donationChange) >= 0 ? 'positive' : 'negative',
+        color: 'from-emerald-500 to-emerald-600',
+        bgColor: 'bg-emerald-50 dark:bg-emerald-950/20',
+        action: 'viewDonations'
       },
     ];
 
@@ -641,8 +663,8 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* Stats Grid - Now with 6 cards including Ministry Groups */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
           {stats.map((stat) => (
             <button
               key={stat.label}
@@ -823,7 +845,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Modals - Same as before */}
+        {/* Modals */}
         {activeModal === 'viewMembers' && (
           <Modal title="All Members">
             <div className="space-y-4">
@@ -858,7 +880,34 @@ const Dashboard = () => {
           </Modal>
         )}
 
-        {/* ... All other modals remain the same as in the previous code ... */}
+        {activeModal === 'viewMinistryGroups' && (
+          <Modal title="Ministry Groups">
+            <div className="space-y-4">
+              <p className="text-gray-600 dark:text-gray-400">View all ministry groups.</p>
+              <div className="space-y-3">
+                {ministryGroups.map(group => (
+                  <div key={group.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <p className="font-medium text-gray-900 dark:text-white">{group.name}</p>
+                    {group.description && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{group.description}</p>
+                    )}
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                      Members: {members.filter(m => m.ministry_group_id === group.id).length}
+                      {members.filter(m => m.ministry_group_id === group.id && m.is_leader).length > 0 && 
+                        ` • ${members.filter(m => m.ministry_group_id === group.id && m.is_leader).length} leaders`
+                      }
+                    </p>
+                  </div>
+                ))}
+                {ministryGroups.length === 0 && (
+                  <p className="text-gray-500 dark:text-gray-400 text-center py-4">No ministry groups found</p>
+                )}
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* ... Other modals remain the same ... */}
         
       </div>
     </div>
