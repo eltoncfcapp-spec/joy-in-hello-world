@@ -146,7 +146,7 @@ const Events = () => {
             status,
             cell_groups!fk_cell_group(name)
           ),
-          invited_by:members!event_attendees_invited_by_id_fkey (
+          members!event_attendees_invited_by_id_fkey (
             id,
             name,
             surname
@@ -159,12 +159,81 @@ const Events = () => {
         throw error;
       }
 
+      // Transform the data to match our interface
+      const transformedData = data?.map(attendee => ({
+        ...attendee,
+        invited_by_member: attendee.members?.[1] || null, // Second members object is the inviter
+        members: attendee.members?.[0] || attendee.members // First members object is the attendee
+      })) || [];
+
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...(data || [])];
+        return [...filtered, ...transformedData];
       });
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
+      // If the complex query fails, try a simpler approach
+      await fetchEventAttendeesFallback(eventId);
+    }
+  };
+
+  // Fallback method if the main query fails
+  const fetchEventAttendeesFallback = async (eventId: string) => {
+    try {
+      // First get the basic attendee data
+      const { data: attendeesData, error: attendeesError } = await supabase
+        .from('event_attendees')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+
+      if (attendeesError) throw attendeesError;
+
+      // Then fetch member details for each attendee
+      const attendeesWithDetails = await Promise.all(
+        (attendeesData || []).map(async (attendee) => {
+          // Fetch attendee member details
+          const { data: memberData, error: memberError } = await supabase
+            .from('members')
+            .select(`
+              id,
+              name,
+              surname,
+              email,
+              phone,
+              status,
+              cell_group_id,
+              cell_groups!fk_cell_group(name)
+            `)
+            .eq('id', attendee.members_id)
+            .single();
+
+          // Fetch inviter details if exists
+          let invitedByMember = null;
+          if (attendee.invited_by_id) {
+            const { data: inviterData } = await supabase
+              .from('members')
+              .select('id, name, surname')
+              .eq('id', attendee.invited_by_id)
+              .single();
+            invitedByMember = inviterData;
+          }
+
+          return {
+            ...attendee,
+            members: memberData,
+            invited_by_member: invitedByMember
+          };
+        })
+      );
+
+      setAttendees(prev => {
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...attendeesWithDetails];
+      });
+    } catch (error: any) {
+      console.error('Error in fallback attendees fetch:', error);
+      setError('Failed to load attendees details.');
     }
   };
 
