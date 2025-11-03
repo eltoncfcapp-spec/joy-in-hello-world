@@ -28,7 +28,7 @@ interface EventAttendee {
   event_id: string;
   members_id: string;
   first_time: boolean;
-  invited_by_id: string | null;
+  invited_by_id?: string | null;
   created_at: string;
   members: Member;
   invited_by_member?: Member | null;
@@ -133,61 +133,16 @@ const Events = () => {
 
   const fetchEventAttendees = async (eventId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey (
-            id,
-            name,
-            surname,
-            email,
-            phone,
-            status,
-            cell_groups!fk_cell_group(name)
-          ),
-          members!event_attendees_invited_by_id_fkey (
-            id,
-            name,
-            surname
-          )
-        `)
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw error;
-      }
-
-      // Transform the data to match our interface
-      const transformedData = data?.map(attendee => ({
-        ...attendee,
-        invited_by_member: attendee.members?.[1] || null, // Second members object is the inviter
-        members: attendee.members?.[0] || attendee.members // First members object is the attendee
-      })) || [];
-
-      setAttendees(prev => {
-        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...transformedData];
-      });
-    } catch (error: any) {
-      console.error('Error fetching attendees:', error);
-      // If the complex query fails, try a simpler approach
-      await fetchEventAttendeesFallback(eventId);
-    }
-  };
-
-  // Fallback method if the main query fails
-  const fetchEventAttendeesFallback = async (eventId: string) => {
-    try {
-      // First get the basic attendee data
+      // Use a simple query first to avoid schema cache issues
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select('*')
         .eq('event_id', eventId)
         .order('created_at', { ascending: false });
 
-      if (attendeesError) throw attendeesError;
+      if (attendeesError) {
+        throw attendeesError;
+      }
 
       // Then fetch member details for each attendee
       const attendeesWithDetails = await Promise.all(
@@ -208,20 +163,27 @@ const Events = () => {
             .eq('id', attendee.members_id)
             .single();
 
+          if (memberError) {
+            console.error('Error fetching member:', memberError);
+          }
+
           // Fetch inviter details if exists
           let invitedByMember = null;
           if (attendee.invited_by_id) {
-            const { data: inviterData } = await supabase
+            const { data: inviterData, error: inviterError } = await supabase
               .from('members')
               .select('id, name, surname')
               .eq('id', attendee.invited_by_id)
               .single();
-            invitedByMember = inviterData;
+
+            if (!inviterError) {
+              invitedByMember = inviterData;
+            }
           }
 
           return {
             ...attendee,
-            members: memberData,
+            members: memberData || { id: '', name: 'Unknown', surname: 'Member', email: null, phone: null, cell_group_id: null, cell_groups: null, status: null },
             invited_by_member: invitedByMember
           };
         })
@@ -232,8 +194,8 @@ const Events = () => {
         return [...filtered, ...attendeesWithDetails];
       });
     } catch (error: any) {
-      console.error('Error in fallback attendees fetch:', error);
-      setError('Failed to load attendees details.');
+      console.error('Error fetching attendees:', error);
+      setError('Failed to load attendees. Please refresh the page.');
     }
   };
 
@@ -295,12 +257,18 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      const { error } = await supabase.from('event_attendees').insert([{
+      const attendeeData: any = {
         event_id: eventId,
         members_id: attendeeFormData.memberId,
         first_time: attendeeFormData.firstTime,
-        invited_by_id: attendeeFormData.invitedById || null,
-      }]);
+      };
+
+      // Only include invited_by_id if it's provided
+      if (attendeeFormData.invitedById) {
+        attendeeData.invited_by_id = attendeeFormData.invitedById;
+      }
+
+      const { error } = await supabase.from('event_attendees').insert([attendeeData]);
 
       if (error) {
         throw error;
