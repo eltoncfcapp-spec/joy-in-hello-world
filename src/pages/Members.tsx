@@ -103,7 +103,7 @@ const Members = () => {
     setSuccess(null);
     
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('members')
         .insert([{
           name: formData.name.trim(),

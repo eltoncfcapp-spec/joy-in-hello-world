@@ -2,14 +2,12 @@ import { useState, useEffect } from 'react';
 import { 
   Users, 
   Calendar, 
-  DollarSign, 
   TrendingUp, 
   MoreVertical, 
   ArrowUp, 
   ArrowDown, 
   X,
   Plus,
-  Mail,
   UserPlus,
   MapPin,
   Clock,
@@ -44,15 +42,6 @@ interface Event {
   location: string | null;
   topic: string | null;
   created_at: string | null;
-}
-
-interface Donation {
-  id: string;
-  donor: string;
-  amount: number;
-  date: string;
-  type: string;
-  message: string;
 }
 
 interface StatCard {
@@ -108,12 +97,6 @@ const Dashboard = () => {
     event_date: '',
     event_time: '',
     topic: ''
-  });
-  const [newDonation] = useState({
-    donor: '',
-    amount: 0,
-    type: '',
-    message: ''
   });
 
   // Load dashboard data from Supabase
@@ -301,15 +284,6 @@ const Dashboard = () => {
     return null;
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'border-red-400';
-      case 'medium': return 'border-yellow-400';
-      case 'low': return 'border-green-400';
-      default: return 'border-gray-400';
-    }
-  };
-
   // Add new member handler
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -323,19 +297,17 @@ const Dashboard = () => {
           phone: newMember.phone || null,
           invited_by: newMember.invited_by || null,
           cell_group_id: newMember.cell_group_id || null,
-          status: newMember.status,
-          join_date: new Date().toISOString().split('T')[0]
-        }])
-        .select();
+          status: 'newcomer'
+        }]);
 
       if (error) throw error;
       
-      if (data) {
-        await loadDashboardData(); // Refresh data
-        closeModal();
-      }
+      alert('Member added successfully!');
+      await loadDashboardData();
+      closeModal();
     } catch (error) {
       console.error('Error adding member:', error);
+      alert('Failed to add member');
     }
   };
 
@@ -343,55 +315,24 @@ const Dashboard = () => {
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('events')
         .insert([{
-          title: newEvent.title,
-          location: newEvent.location,
-          date: newEvent.date,
-          time: newEvent.time,
-          description: newEvent.description,
-          type: newEvent.type,
-          max_attendees: newEvent.maxAttendees,
-          priority: newEvent.priority,
-          attendees: 0
-        }])
-        .select();
+          name: newEvent.name,
+          event_date: newEvent.event_date,
+          event_time: newEvent.event_time,
+          location: newEvent.location || null,
+          topic: newEvent.topic || null
+        }]);
 
       if (error) throw error;
       
-      if (data) {
-        await loadDashboardData(); // Refresh data
-        closeModal();
-      }
+      alert('Event created successfully!');
+      await loadDashboardData();
+      closeModal();
     } catch (error) {
       console.error('Error creating event:', error);
-    }
-  };
-
-  // Record donation handler
-  const handleRecordDonation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const { data, error } = await supabase
-        .from('donations')
-        .insert([{
-          donor: newDonation.donor,
-          amount: newDonation.amount,
-          type: newDonation.type,
-          message: newDonation.message,
-          date: new Date().toISOString().split('T')[0]
-        }])
-        .select();
-
-      if (error) throw error;
-      
-      if (data) {
-        await loadDashboardData(); // Refresh data
-        closeModal();
-      }
-    } catch (error) {
-      console.error('Error recording donation:', error);
+      alert('Failed to create event');
     }
   };
 
@@ -548,22 +489,22 @@ const Dashboard = () => {
                   <button
                     key={event.id}
                     onClick={() => openEventDetail(event)}
-                    className={`w-full border-l-4 ${getPriorityColor(event.priority)} pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
+                    className="w-full border-l-4 border-blue-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
                   >
                     <div className="flex justify-between items-start mb-1">
                       <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        {event.title}
+                        {event.name}
                       </h3>
                       <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
-                        {event.attendees} attending
+                        {event.event_date}
                       </span>
                     </div>
                     <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">
-                      {event.time}
+                      {event.event_time}
                     </p>
                     <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1">
                       <MapPin className="h-3 w-3" />
-                      {event.location}
+                      {event.location || 'No location'}
                     </p>
                   </button>
                 ))}
@@ -600,20 +541,6 @@ const Dashboard = () => {
             <Plus className="h-4 w-4" />
             Create Event
           </button>
-          <button 
-            onClick={() => openModal('recordDonation')}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-          >
-            <DollarSign className="h-4 w-4" />
-            Record Donation
-          </button>
-          <button 
-            onClick={() => openModal('sendAnnouncement')}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-          >
-            <Mail className="h-4 w-4" />
-            Send Announcement
-          </button>
         </div>
       </div>
 
@@ -623,11 +550,11 @@ const Dashboard = () => {
           <div className="space-y-4">
             <p className="text-gray-600 dark:text-gray-400">View and manage all church members.</p>
             <div className="space-y-3">
-              {members.map(member => (
+              {members.slice(0, 5).map(member => (
                 <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{member.name}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{member.group}</p>
+                    <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{member.email || member.phone || 'No contact'}</p>
                   </div>
                   <button 
                     onClick={() => openMemberDetail(member)}
@@ -650,33 +577,35 @@ const Dashboard = () => {
           <div className="space-y-4">
             <div className="text-center">
               <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xl mx-auto mb-3">
-                {selectedMember.name.split(' ').map(n => n[0]).join('')}
+                {selectedMember.name.charAt(0)}{selectedMember.surname.charAt(0)}
               </div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.name}</h3>
-              <p className="text-gray-500 dark:text-gray-400">{selectedMember.group}</p>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.name} {selectedMember.surname}</h3>
+              <p className="text-gray-500 dark:text-gray-400">{selectedMember.cell_group_id ? 'Member of cell group' : 'No cell group'}</p>
             </div>
             
             <div className="space-y-3">
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Email:</span>
-                <span className="text-gray-900 dark:text-white">{selectedMember.email}</span>
+                <span className="text-gray-900 dark:text-white">{selectedMember.email || 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Phone:</span>
-                <span className="text-gray-900 dark:text-white">{selectedMember.phone}</span>
+                <span className="text-gray-900 dark:text-white">{selectedMember.phone || 'N/A'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Join Date:</span>
-                <span className="text-gray-900 dark:text-white">{selectedMember.joinDate}</span>
+                <span className="text-gray-600 dark:text-gray-400">Invited By:</span>
+                <span className="text-gray-900 dark:text-white">{selectedMember.invited_by || 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Status:</span>
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  selectedMember.status === 'active' 
+                  selectedMember.status === 'signed_member' 
                     ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                    : selectedMember.status === 'not_attending'
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                 }`}>
-                  {selectedMember.status}
+                  {selectedMember.status || 'newcomer'}
                 </span>
               </div>
             </div>
@@ -687,41 +616,28 @@ const Dashboard = () => {
       {activeModal === 'eventDetail' && selectedEvent && (
         <Modal title="Event Details">
           <div className="space-y-4">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedEvent.title}</h3>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedEvent.name}</h3>
             
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-gray-500" />
-                <span className="text-gray-900 dark:text-white">{selectedEvent.time}</span>
+                <span className="text-gray-900 dark:text-white">{selectedEvent.event_time}</span>
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-gray-500" />
-                <span className="text-gray-900 dark:text-white">{selectedEvent.location}</span>
+                <span className="text-gray-900 dark:text-white">{selectedEvent.location || 'No location'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="text-gray-900 dark:text-white">{selectedEvent.type}</span>
+                <span className="text-gray-900 dark:text-white">{selectedEvent.event_date}</span>
               </div>
             </div>
 
-            <div>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">{selectedEvent.description}</p>
-            </div>
-
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Attendance</span>
-                <span className="text-sm font-medium text-gray-900 dark:text-white">
-                  {selectedEvent.attendees} / {selectedEvent.maxAttendees}
-                </span>
+            {selectedEvent.topic && (
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-gray-600 dark:text-gray-400 text-sm">{selectedEvent.topic}</p>
               </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-                <div 
-                  className="bg-green-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(selectedEvent.attendees / selectedEvent.maxAttendees) * 100}%` }}
-                />
-              </div>
-            </div>
+            )}
           </div>
         </Modal>
       )}
@@ -832,97 +748,84 @@ const Dashboard = () => {
       {activeModal === 'createEvent' && (
         <Modal title="Create New Event">
           <form onSubmit={handleCreateEvent} className="space-y-4">
-            <p className="text-gray-600 dark:text-gray-400">Create a new church event.</p>
             <div className="space-y-3">
-              <input 
-                type="text" 
-                placeholder="Event Title"
-                value={newEvent.title}
-                onChange={(e) => setNewEvent({...newEvent, title: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <input 
-                type="text" 
-                placeholder="Location"
-                value={newEvent.location}
-                onChange={(e) => setNewEvent({...newEvent, location: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <input 
-                type="date"
-                value={newEvent.date}
-                onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <input 
-                type="time"
-                value={newEvent.time}
-                onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <textarea 
-                placeholder="Event Description"
-                rows={3}
-                value={newEvent.description}
-                onChange={(e) => setNewEvent({...newEvent, description: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              />
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Event Name *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Enter event name"
+                  value={newEvent.name}
+                  onChange={(e) => setNewEvent({...newEvent, name: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Location
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Event location"
+                  value={newEvent.location}
+                  onChange={(e) => setNewEvent({...newEvent, location: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Date *
+                </label>
+                <input 
+                  type="date"
+                  value={newEvent.event_date}
+                  onChange={(e) => setNewEvent({...newEvent, event_date: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Time *
+                </label>
+                <input 
+                  type="time"
+                  value={newEvent.event_time}
+                  onChange={(e) => setNewEvent({...newEvent, event_time: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Topic
+                </label>
+                <textarea 
+                  placeholder="Event topic or description"
+                  rows={3}
+                  value={newEvent.topic}
+                  onChange={(e) => setNewEvent({...newEvent, topic: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
             </div>
-            <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-medium transition-colors">
-              Create Event
-            </button>
-          </form>
-        </Modal>
-      )}
-
-      {activeModal === 'recordDonation' && (
-        <Modal title="Record Donation">
-          <form onSubmit={handleRecordDonation} className="space-y-4">
-            <p className="text-gray-600 dark:text-gray-400">Record a new donation.</p>
-            <div className="space-y-3">
-              <input 
-                type="text" 
-                placeholder="Donor Name"
-                value={newDonation.donor}
-                onChange={(e) => setNewDonation({...newDonation, donor: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <input 
-                type="number" 
-                placeholder="Amount"
-                value={newDonation.amount || ''}
-                onChange={(e) => setNewDonation({...newDonation, amount: parseFloat(e.target.value)})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <select 
-                value={newDonation.type}
-                onChange={(e) => setNewDonation({...newDonation, type: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
+            <div className="flex gap-3">
+              <button 
+                type="submit" 
+                className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
               >
-                <option value="">Select Type</option>
-                <option value="Tithes">Tithes</option>
-                <option value="Offering">Offering</option>
-                <option value="Building Fund">Building Fund</option>
-                <option value="Missions">Missions</option>
-              </select>
-              <textarea 
-                placeholder="Message (Optional)"
-                rows={2}
-                value={newDonation.message}
-                onChange={(e) => setNewDonation({...newDonation, message: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              />
+                Create Event
+              </button>
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
             </div>
-            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-medium transition-colors">
-              Record Donation
-            </button>
           </form>
         </Modal>
       )}
