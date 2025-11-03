@@ -243,68 +243,38 @@ const Events = () => {
     }
   };
 
- const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
-  e.preventDefault();
-  
-  if (!attendeeFormData.memberId) {
-    setError('Please select a member');
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
-
-  // Check if member is already attending this event
-  const alreadyAttending = attendees.some(
-    a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
-  );
-
-  if (alreadyAttending) {
-    setError('This member is already registered for this event');
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
-
-  setLoading(true);
-  setError(null);
-  setSuccess(null);
-
-  try {
-    const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
+  const handleEventSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
     
-    if (!selectedMember) {
-      throw new Error('Selected member not found');
+    try {
+      const { error } = await supabase.from('events').insert([{
+        name: eventFormData.name.trim(),
+        topic: eventFormData.topic.trim() || null,
+        event_date: eventFormData.eventDate,
+        event_time: eventFormData.eventTime,
+        location: eventFormData.location.trim() || null,
+      }]);
+
+      if (error) {
+        throw error;
+      }
+
+      setShowEventForm(false);
+      setEventFormData({ name: '', topic: '', eventDate: '', eventTime: '', location: '' });
+      setSuccess('Event created successfully!');
+      await fetchEvents();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error creating event:', error);
+      setError(error.message || 'Failed to create event. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    const attendeeData: any = {
-      event_id: eventId,
-      members_id: attendeeFormData.memberId,
-      name: selectedMember.name, // Include name for current schema
-      surname: selectedMember.surname, // Include surname for current schema
-      first_time: attendeeFormData.firstTime,
-    };
-
-    // Only include invited_by_id if it's provided
-    if (attendeeFormData.invitedById) {
-      attendeeData.invited_by_id = attendeeFormData.invitedById;
-    }
-
-    const { error } = await supabase.from('event_attendees').insert([attendeeData]);
-
-    if (error) {
-      throw error;
-    }
-
-    resetAttendeeForm();
-    await fetchEventAttendees(eventId);
-    setSuccess('Attendee added successfully!');
-    
-    setTimeout(() => setSuccess(null), 3000);
-  } catch (error: any) {
-    console.error('Error adding attendee:', error);
-    setError(error.message || 'Failed to add attendee. Please try again.');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
