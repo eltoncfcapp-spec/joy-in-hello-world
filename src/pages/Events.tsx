@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -81,6 +81,8 @@ const Events = () => {
       console.error('Error fetching cell groups:', error);
     }
   };
+
+  const fetchEvents = async () => {
     try {
       setLoading(true);
       setError(null);
@@ -102,49 +104,6 @@ const Events = () => {
       setError(error.message || 'Failed to load events. Please check your connection.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchMembers = async () => {
-    try {
-      setError(null);
-      
-      const { data, error } = await supabase
-        .from('members')
-        .select(`
-          id,
-          name,
-          surname,
-          email,
-          phone,
-          cell_group_id,
-          status,
-          cell_groups!fk_cell_group(name)
-        `)
-        .order('name');
-
-      if (error) {
-        throw error;
-      }
-
-      setMembers(data || []);
-    } catch (error: any) {
-      console.error('Error fetching members:', error);
-      setError(error.message || 'Failed to load members.');
-    }
-  };
-
-  const fetchCellGroups = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .select('id, name')
-        .order('name');
-
-      if (error) throw error;
-      setCellGroups(data || []);
-    } catch (error: any) {
-      console.error('Error fetching cell groups:', error);
     }
   };
 
