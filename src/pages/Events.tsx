@@ -54,6 +54,7 @@ const Events = () => {
   const [expandedEvents, setExpandedEvents] = useState<{[key: string]: boolean}>({});
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [hasInvitedById, setHasInvitedById] = useState<boolean>(true);
   
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -73,9 +74,31 @@ const Events = () => {
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
 
   useEffect(() => {
+    checkSchema();
     fetchEvents();
     fetchMembers();
   }, []);
+
+  // Check if invited_by_id column exists
+  const checkSchema = async () => {
+    try {
+      // Try to select from the column to see if it exists
+      const { error } = await supabase
+        .from('event_attendees')
+        .select('invited_by_id')
+        .limit(1);
+
+      if (error) {
+        console.log('invited_by_id column not found, disabling inviter feature');
+        setHasInvitedById(false);
+      } else {
+        setHasInvitedById(true);
+      }
+    } catch (error) {
+      console.log('Error checking schema, disabling inviter feature:', error);
+      setHasInvitedById(false);
+    }
+  };
 
   const fetchEvents = async () => {
     try {
@@ -133,7 +156,7 @@ const Events = () => {
 
   const fetchEventAttendees = async (eventId: string) => {
     try {
-      // Use a simple query first to avoid schema cache issues
+      // First, get basic attendee data
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select('*')
@@ -148,7 +171,7 @@ const Events = () => {
       const attendeesWithDetails = await Promise.all(
         (attendeesData || []).map(async (attendee) => {
           // Fetch attendee member details
-          const { data: memberData, error: memberError } = await supabase
+          const { data: memberData } = await supabase
             .from('members')
             .select(`
               id,
@@ -163,27 +186,29 @@ const Events = () => {
             .eq('id', attendee.members_id)
             .single();
 
-          if (memberError) {
-            console.error('Error fetching member:', memberError);
-          }
-
-          // Fetch inviter details if exists
+          // Fetch inviter details only if the column exists and has a value
           let invitedByMember = null;
-          if (attendee.invited_by_id) {
-            const { data: inviterData, error: inviterError } = await supabase
+          if (hasInvitedById && attendee.invited_by_id) {
+            const { data: inviterData } = await supabase
               .from('members')
               .select('id, name, surname')
               .eq('id', attendee.invited_by_id)
               .single();
-
-            if (!inviterError) {
-              invitedByMember = inviterData;
-            }
+            invitedByMember = inviterData;
           }
 
           return {
             ...attendee,
-            members: memberData || { id: '', name: 'Unknown', surname: 'Member', email: null, phone: null, cell_group_id: null, cell_groups: null, status: null },
+            members: memberData || {
+              id: attendee.members_id,
+              name: 'Unknown',
+              surname: 'Member',
+              email: null,
+              phone: null,
+              cell_group_id: null,
+              cell_groups: null,
+              status: null
+            },
             invited_by_member: invitedByMember
           };
         })
@@ -257,14 +282,15 @@ const Events = () => {
     setSuccess(null);
 
     try {
+      // Build the data object conditionally based on schema availability
       const attendeeData: any = {
         event_id: eventId,
         members_id: attendeeFormData.memberId,
         first_time: attendeeFormData.firstTime,
       };
 
-      // Only include invited_by_id if it's provided
-      if (attendeeFormData.invitedById) {
+      // Only include invited_by_id if the column exists and a value is provided
+      if (hasInvitedById && attendeeFormData.invitedById) {
         attendeeData.invited_by_id = attendeeFormData.invitedById;
       }
 
@@ -432,6 +458,11 @@ const Events = () => {
               Events Calendar
             </h1>
             <p className="text-gray-600 dark:text-gray-400">Manage church events and track attendance</p>
+            {!hasInvitedById && (
+              <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg text-yellow-700 dark:text-yellow-300 text-sm">
+                Inviter feature is disabled. The 'invited_by_id' column is missing from the database.
+              </div>
+            )}
           </div>
           <button 
             onClick={() => setShowEventForm(!showEventForm)}
@@ -814,100 +845,102 @@ const Events = () => {
                           )}
                         </div>
 
-                        {/* Inviter Search and Selection */}
-                        <div className="space-y-4">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Invited By (Optional)
-                          </label>
-                          
-                          {/* Inviter Search Input */}
-                          <div className="relative">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input
-                              type="text"
-                              value={inviterSearchTerm}
-                              onChange={(e) => {
-                                setInviterSearchTerm(e.target.value);
-                                setIsInviterDropdownOpen(true);
-                              }}
-                              onFocus={() => setIsInviterDropdownOpen(true)}
-                              placeholder="Search who invited this member..."
-                              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                            />
-                            {inviterSearchTerm && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setInviterSearchTerm('');
-                                  setSelectedInviter(null);
-                                  setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
-                                  setIsInviterDropdownOpen(false);
+                        {/* Inviter Search and Selection - Only show if column exists */}
+                        {hasInvitedById && (
+                          <div className="space-y-4">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Invited By (Optional)
+                            </label>
+                            
+                            {/* Inviter Search Input */}
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                              <input
+                                type="text"
+                                value={inviterSearchTerm}
+                                onChange={(e) => {
+                                  setInviterSearchTerm(e.target.value);
+                                  setIsInviterDropdownOpen(true);
                                 }}
-                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Selected Inviter Display */}
-                          {selectedInviter && (
-                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold">
-                                  {getInitials(selectedInviter.name, selectedInviter.surname)}
-                                </div>
-                                <div className="flex-1">
-                                  <h4 className="font-semibold text-gray-900 dark:text-white">
-                                    {selectedInviter.name} {selectedInviter.surname}
-                                  </h4>
-                                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    {selectedInviter.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {selectedInviter.phone}</div>}
-                                  </div>
-                                </div>
+                                onFocus={() => setIsInviterDropdownOpen(true)}
+                                placeholder="Search who invited this member..."
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                              />
+                              {inviterSearchTerm && (
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    setInviterSearchTerm('');
                                     setSelectedInviter(null);
                                     setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
-                                    setInviterSearchTerm('');
+                                    setIsInviterDropdownOpen(false);
                                   }}
-                                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                                 >
                                   <X className="h-4 w-4" />
                                 </button>
-                              </div>
+                              )}
                             </div>
-                          )}
 
-                          {/* Inviter Dropdown */}
-                          {isInviterDropdownOpen && filteredInviters.length > 0 && !selectedInviter && (
-                            <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                              {filteredInviters.map((member) => (
-                                <button
-                                  key={member.id}
-                                  type="button"
-                                  onClick={() => handleInviterSelect(member)}
-                                  className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-teal-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                                      {getInitials(member.name, member.surname)}
-                                    </div>
-                                    <div className="flex-1">
-                                      <div className="font-medium text-gray-900 dark:text-white">
-                                        {member.name} {member.surname}
-                                      </div>
-                                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                                        {member.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {member.phone}</div>}
-                                      </div>
+                            {/* Selected Inviter Display */}
+                            {selectedInviter && (
+                              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                    {getInitials(selectedInviter.name, selectedInviter.surname)}
+                                  </div>
+                                  <div className="flex-1">
+                                    <h4 className="font-semibold text-gray-900 dark:text-white">
+                                      {selectedInviter.name} {selectedInviter.surname}
+                                    </h4>
+                                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                                      {selectedInviter.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {selectedInviter.phone}</div>}
                                     </div>
                                   </div>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedInviter(null);
+                                      setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
+                                      setInviterSearchTerm('');
+                                    }}
+                                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Inviter Dropdown */}
+                            {isInviterDropdownOpen && filteredInviters.length > 0 && !selectedInviter && (
+                              <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                {filteredInviters.map((member) => (
+                                  <button
+                                    key={member.id}
+                                    type="button"
+                                    onClick={() => handleInviterSelect(member)}
+                                    className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-teal-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                        {getInitials(member.name, member.surname)}
+                                      </div>
+                                      <div className="flex-1">
+                                        <div className="font-medium text-gray-900 dark:text-white">
+                                          {member.name} {member.surname}
+                                        </div>
+                                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                                          {member.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {member.phone}</div>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* First Time Checkbox */}
                         <div className="flex items-center gap-3">
