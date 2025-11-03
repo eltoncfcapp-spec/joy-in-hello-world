@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { 
   Users, 
   Calendar, 
+  DollarSign,
   TrendingUp, 
   MoreVertical, 
   ArrowUp, 
   ArrowDown, 
   X,
   Plus,
+  Mail,
   UserPlus,
   MapPin,
   Clock,
@@ -30,6 +32,8 @@ interface Member {
   created_at: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   is_leader: boolean | null;
+  cell_groups: { name: string } | null;
+  ministry_groups: { name: string } | null;
 }
 
 interface CellGroup {
@@ -52,6 +56,15 @@ interface Event {
   location: string | null;
   topic: string | null;
   created_at: string | null;
+}
+
+interface Donation {
+  id: string;
+  donor: string;
+  amount: number;
+  date: string;
+  type: string;
+  message: string;
 }
 
 interface StatCard {
@@ -92,6 +105,7 @@ const Dashboard = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
+  const [donations, setDonations] = useState<Donation[]>([]);
 
   // Form states
   const [newMember, setNewMember] = useState({
@@ -114,6 +128,12 @@ const Dashboard = () => {
   const [newMinistryGroup, setNewMinistryGroup] = useState({
     name: '',
     description: ''
+  });
+  const [newDonation, setNewDonation] = useState({
+    donor: '',
+    amount: 0,
+    type: '',
+    message: ''
   });
 
   // Load dashboard data from Supabase
@@ -162,11 +182,21 @@ const Dashboard = () => {
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
 
+      // Load donations
+      const { data: donationsData, error: donationsError } = await supabase
+        .from('donations')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (donationsError) throw donationsError;
+      setDonations(donationsData || []);
+
       // Calculate stats
-      calculateStats(membersData || [], eventsData || [], ministryGroupsData || []);
+      calculateStats(membersData || [], eventsData || [], ministryGroupsData || [], donationsData || []);
 
       // Generate recent activities
-      generateRecentActivities(membersData || [], eventsData || []);
+      generateRecentActivities(membersData || [], eventsData || [], donationsData || []);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -175,14 +205,36 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (members: Member[], events: Event[], ministryGroups: MinistryGroup[]) => {
+  const calculateStats = (members: Member[], events: Event[], ministryGroups: MinistryGroup[], donations: Donation[]) => {
     const totalMembers = members.length;
     const newcomers = members.filter(m => m.status === 'newcomer').length;
     const signedMembers = members.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     const leadersCount = members.filter(m => m.is_leader).length;
     
-    const uniqueCellGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
+    const monthlyDonations = donations
+      .filter(d => {
+        const donationDate = new Date(d.date);
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        return donationDate.getMonth() === currentMonth && donationDate.getFullYear() === currentYear;
+      })
+      .reduce((sum, donation) => sum + donation.amount, 0);
+
+    const lastMonthDonations = donations
+      .filter(d => {
+        const donationDate = new Date(d.date);
+        const lastMonth = new Date().getMonth() - 1;
+        const currentYear = new Date().getFullYear();
+        return donationDate.getMonth() === lastMonth && donationDate.getFullYear() === currentYear;
+      })
+      .reduce((sum, donation) => sum + donation.amount, 0);
+
+    const donationChange = lastMonthDonations > 0 
+      ? ((monthlyDonations - lastMonthDonations) / lastMonthDonations * 100).toFixed(1)
+      : '0';
+
+    const uniqueGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
     const uniqueMinistryGroups = ministryGroups.length;
 
     const statsData: StatCard[] = [
@@ -207,14 +259,14 @@ const Dashboard = () => {
         action: 'viewEvents'
       },
       { 
-        icon: UserPlus, 
-        label: 'Newcomers', 
-        value: newcomers.toString(), 
-        change: `${newcomers} new visitors`, 
-        changeType: 'positive',
+        icon: DollarSign, 
+        label: 'Monthly Donations', 
+        value: `$${monthlyDonations.toLocaleString()}`, 
+        change: `${donationChange}% from last month`, 
+        changeType: Number(donationChange) >= 0 ? 'positive' : 'negative',
         color: 'from-green-500 to-green-600',
         bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: 'viewMembers'
+        action: 'viewDonations'
       },
       { 
         icon: Crown, 
@@ -231,11 +283,11 @@ const Dashboard = () => {
     setStats(statsData);
   };
 
-  const generateRecentActivities = (members: Member[], events: Event[]) => {
+  const generateRecentActivities = (members: Member[], events: Event[], donations: Donation[]) => {
     const activities: Activity[] = [];
 
     // Add recent member joins
-    const recentMembers = members.slice(0, 3);
+    const recentMembers = members.slice(0, 2);
     recentMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
@@ -249,12 +301,12 @@ const Dashboard = () => {
     });
 
     // Add recent events
-    const recentEvents = events.slice(0, 3);
+    const recentEvents = events.slice(0, 2);
     recentEvents.forEach(event => {
       activities.push({
         id: activities.length + 1,
         type: 'event',
-        message: `Upcoming event: ${event.name}`,
+        message: `New event: ${event.name}`,
         time: formatTimeAgo(new Date(event.event_date)),
         color: 'bg-blue-500',
         icon: Calendar,
@@ -262,7 +314,21 @@ const Dashboard = () => {
       });
     });
 
-    setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 6));
+    // Add recent donations
+    const recentDonations = donations.slice(0, 2);
+    recentDonations.forEach(donation => {
+      activities.push({
+        id: activities.length + 1,
+        type: 'donation',
+        message: `Donation received: $${donation.amount}`,
+        time: formatTimeAgo(new Date(donation.date)),
+        color: 'bg-purple-500',
+        icon: DollarSign,
+        action: () => openDonationDetail(donation)
+      });
+    });
+
+    setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 4));
   };
 
   const formatTimeAgo = (date: Date): string => {
@@ -291,6 +357,7 @@ const Dashboard = () => {
     setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '', ministry_group_id: '', is_leader: false });
     setNewEvent({ name: '', location: '', event_date: '', event_time: '', topic: '' });
     setNewMinistryGroup({ name: '', description: '' });
+    setNewDonation({ donor: '', amount: 0, type: '', message: '' });
   };
 
   const openMemberDetail = (member: Member) => {
@@ -301,6 +368,10 @@ const Dashboard = () => {
   const openEventDetail = (event: Event) => {
     setSelectedEvent(event);
     setActiveModal('eventDetail');
+  };
+
+  const openDonationDetail = (donation: Donation) => {
+    setActiveModal('donationDetail');
   };
 
   const toggleSection = (section: string) => {
@@ -314,6 +385,15 @@ const Dashboard = () => {
     if (type === 'positive') return <ArrowUp className="h-3 w-3" />;
     if (type === 'negative') return <ArrowDown className="h-3 w-3" />;
     return null;
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'border-red-400';
+      case 'medium': return 'border-yellow-400';
+      case 'low': return 'border-green-400';
+      default: return 'border-gray-400';
+    }
   };
 
   // Add new member handler
@@ -389,6 +469,31 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error creating ministry group:', error);
       alert('Failed to create ministry group');
+    }
+  };
+
+  // Record donation handler
+  const handleRecordDonation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { error } = await supabase
+        .from('donations')
+        .insert([{
+          donor: newDonation.donor,
+          amount: newDonation.amount,
+          type: newDonation.type,
+          message: newDonation.message,
+          date: new Date().toISOString().split('T')[0]
+        }]);
+
+      if (error) throw error;
+      
+      alert('Donation recorded successfully!');
+      await loadDashboardData();
+      closeModal();
+    } catch (error) {
+      console.error('Error recording donation:', error);
+      alert('Failed to record donation');
     }
   };
 
@@ -598,11 +703,25 @@ const Dashboard = () => {
             Create Event
           </button>
           <button 
+            onClick={() => openModal('recordDonation')}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+          >
+            <DollarSign className="h-4 w-4" />
+            Record Donation
+          </button>
+          <button 
             onClick={() => openModal('createMinistryGroup')}
             className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
           >
             <Crown className="h-4 w-4" />
             Create Ministry Group
+          </button>
+          <button 
+            onClick={() => openModal('sendAnnouncement')}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+          >
+            <Mail className="h-4 w-4" />
+            Send Announcement
           </button>
         </div>
       </div>
@@ -655,6 +774,9 @@ const Dashboard = () => {
                   )}
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                     Members: {members.filter(m => m.ministry_group_id === group.id).length}
+                    {members.filter(m => m.ministry_group_id === group.id && m.is_leader).length > 0 && 
+                      ` • ${members.filter(m => m.ministry_group_id === group.id && m.is_leader).length} leaders`
+                    }
                   </p>
                 </div>
               ))}
@@ -681,7 +803,7 @@ const Dashboard = () => {
                   </span>
                 )}
                 <span className="text-gray-500 dark:text-gray-400 text-sm">
-                  {selectedMember.cell_group_id ? 'Cell Group Member' : 'No cell group'}
+                  {selectedMember.cell_groups?.name ? `Cell Group: ${selectedMember.cell_groups.name}` : 'No cell group'}
                 </span>
               </div>
             </div>
@@ -699,11 +821,11 @@ const Dashboard = () => {
                 <span className="text-gray-600 dark:text-gray-400">Invited By:</span>
                 <span className="text-gray-900 dark:text-white">{selectedMember.invited_by || 'N/A'}</span>
               </div>
-              {selectedMember.ministry_group_id && (
+              {selectedMember.ministry_groups && (
                 <div className="flex justify-between">
                   <span className="text-gray-600 dark:text-gray-400">Ministry Group:</span>
                   <span className="text-gray-900 dark:text-white">
-                    {ministryGroups.find(g => g.id === selectedMember.ministry_group_id)?.name || 'N/A'}
+                    {selectedMember.ministry_groups.name}
                   </span>
                 </div>
               )}
@@ -749,6 +871,28 @@ const Dashboard = () => {
                 <p className="text-gray-600 dark:text-gray-400 text-sm">{selectedEvent.topic}</p>
               </div>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {activeModal === 'donationDetail' && (
+        <Modal title="Recent Donations">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">Recent donation activities.</p>
+            <div className="space-y-3">
+              {donations.slice(0, 5).map(donation => (
+                <div key={donation.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <p className="font-medium text-gray-900 dark:text-white">${donation.amount} from {donation.donor}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{donation.type} • {donation.date}</p>
+                  {donation.message && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">"{donation.message}"</p>
+                  )}
+                </div>
+              ))}
+              {donations.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">No donations found</p>
+              )}
+            </div>
           </div>
         </Modal>
       )}
@@ -1006,6 +1150,86 @@ const Dashboard = () => {
                 className="flex-1 bg-gradient-to-r from-orange-600 to-amber-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
               >
                 Create Ministry Group
+              </button>
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {activeModal === 'recordDonation' && (
+        <Modal title="Record Donation">
+          <form onSubmit={handleRecordDonation} className="space-y-4">
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Donor Name *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Enter donor name"
+                  value={newDonation.donor}
+                  onChange={(e) => setNewDonation({...newDonation, donor: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Amount *
+                </label>
+                <input 
+                  type="number" 
+                  placeholder="Enter amount"
+                  value={newDonation.amount || ''}
+                  onChange={(e) => setNewDonation({...newDonation, amount: parseFloat(e.target.value)})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Type *
+                </label>
+                <select 
+                  value={newDonation.type}
+                  onChange={(e) => setNewDonation({...newDonation, type: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                >
+                  <option value="">Select type</option>
+                  <option value="Tithes">Tithes</option>
+                  <option value="Offering">Offering</option>
+                  <option value="Building Fund">Building Fund</option>
+                  <option value="Missions">Missions</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Message (Optional)
+                </label>
+                <textarea 
+                  placeholder="Enter donation message"
+                  rows={3}
+                  value={newDonation.message}
+                  onChange={(e) => setNewDonation({...newDonation, message: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                type="submit" 
+                className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
+              >
+                Record Donation
               </button>
               <button 
                 type="button" 
