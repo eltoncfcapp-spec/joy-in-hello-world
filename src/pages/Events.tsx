@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User, ChevronDown } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User, ChevronDown, Phone, Mail } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -9,17 +9,23 @@ interface Event {
   event_date: string;
   event_time: string;
   location: string | null;
+  created_at: string;
 }
 
 interface Member {
   id: string;
   name: string;
   surname: string;
+  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  cell_group?: {
+  cell_groups?: {
     name: string;
   };
+  ministry_groups?: {
+    name: string;
+  };
+  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
 }
 
 interface EventAttendee {
@@ -29,13 +35,19 @@ interface EventAttendee {
   first_time: boolean;
   invited_by: string | null;
   created_at: string;
-  members?: {
+  members: {
+    id: string;
     name: string;
     surname: string;
+    email: string | null;
     phone: string | null;
     cell_groups?: {
       name: string;
     };
+    ministry_groups?: {
+      name: string;
+    };
+    status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   };
 }
 
@@ -99,9 +111,14 @@ const Events = () => {
         id,
         name,
         surname,
+        email,
         phone,
         cell_group_id,
+        status,
         cell_groups (
+          name
+        ),
+        ministry_groups (
           name
         )
       `)
@@ -120,10 +137,16 @@ const Events = () => {
       .select(`
         *,
         members (
+          id,
           name,
           surname,
+          email,
           phone,
+          status,
           cell_groups (
+            name
+          ),
+          ministry_groups (
             name
           )
         )
@@ -192,6 +215,25 @@ const Events = () => {
     setLoading(false);
   };
 
+  const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
+    if (!confirm('Are you sure you want to remove this attendee?')) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from('event_attendees')
+      .delete()
+      .eq('id', attendeeId);
+
+    if (error) {
+      console.error('Error removing attendee:', error);
+      alert('Error removing attendee');
+    } else {
+      fetchEventAttendees(eventId);
+      alert('Attendee removed successfully!');
+    }
+  };
+
   const resetAttendeeForm = () => {
     setShowAttendeeForm(null);
     setAttendeeFormData({
@@ -221,15 +263,27 @@ const Events = () => {
     }));
   };
 
-  const filteredMembers = members.filter(member => 
-    `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    member.phone?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredMembers = members.filter(member => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      member.name.toLowerCase().includes(searchLower) ||
+      member.surname.toLowerCase().includes(searchLower) ||
+      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+      member.phone?.toLowerCase().includes(searchLower) ||
+      member.email?.toLowerCase().includes(searchLower)
+    );
+  });
 
   const getEventAttendees = (eventId: string) => {
     return attendees.filter(attendee => attendee.event_id === eventId);
+  };
+
+  const getUniqueAttendees = (eventId: string) => {
+    const eventAttendees = getEventAttendees(eventId);
+    const uniqueAttendees = eventAttendees.filter((attendee, index, self) =>
+      index === self.findIndex(a => a.member_id === attendee.member_id)
+    );
+    return uniqueAttendees;
   };
 
   const formatDate = (dateString: string) => {
@@ -254,9 +308,18 @@ const Events = () => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
+  const getStatusBadge = (status: string | null) => {
+    const badges = {
+      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
+      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
+      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
+    };
+    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -362,7 +425,7 @@ const Events = () => {
             </div>
           ) : (
             events.map((event) => {
-              const eventAttendees = getEventAttendees(event.id);
+              const eventAttendees = getUniqueAttendees(event.id);
               const isExpanded = expandedEvents[event.id];
               
               return (
@@ -404,6 +467,11 @@ const Events = () => {
                         <div className="mt-4 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                           <Users className="h-4 w-4" />
                           <span>{eventAttendees.length} attendees</span>
+                          {eventAttendees.filter(a => a.first_time).length > 0 && (
+                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                              {eventAttendees.filter(a => a.first_time).length} first-time
+                            </span>
+                          )}
                         </div>
                       </div>
                       
@@ -431,7 +499,7 @@ const Events = () => {
                     {/* Expanded Attendees List */}
                     {isExpanded && (
                       <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Event Attendees</h4>
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Event Attendees ({eventAttendees.length})</h4>
                         {eventAttendees.length === 0 ? (
                           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                             <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
@@ -439,30 +507,63 @@ const Events = () => {
                             <p className="text-sm">Add attendees using the "Add Attendee" button</p>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             {eventAttendees.map((attendee) => (
-                              <div key={attendee.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                                    {getInitials(attendee.members?.name || '', attendee.members?.surname || '')}
+                              <div key={attendee.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 hover:shadow-md transition-all duration-200">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                                    {getInitials(attendee.members.name, attendee.members.surname)}
                                   </div>
-                                  <div className="flex-1">
-                                    <h5 className="font-medium text-gray-900 dark:text-white">
-                                      {attendee.members?.name} {attendee.members?.surname}
-                                    </h5>
-                                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                                      {attendee.members?.phone && <span>{attendee.members.phone}</span>}
-                                      {attendee.first_time && (
-                                        <span className="ml-2 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
-                                          First Time
-                                        </span>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between mb-2">
+                                      <div>
+                                        <h5 className="font-semibold text-gray-900 dark:text-white truncate">
+                                          {attendee.members.name} {attendee.members.surname}
+                                        </h5>
+                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(attendee.members.status).color}`}>
+                                            {getStatusBadge(attendee.members.status).text}
+                                          </span>
+                                          {attendee.first_time && (
+                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                                              First Time
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <button
+                                        onClick={() => handleRemoveAttendee(attendee.id, event.id)}
+                                        className="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0"
+                                        title="Remove attendee"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                    
+                                    <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                      {attendee.members.phone && (
+                                        <div className="flex items-center gap-2">
+                                          <Phone className="h-3 w-3" />
+                                          <span>{attendee.members.phone}</span>
+                                        </div>
+                                      )}
+                                      {attendee.members.email && (
+                                        <div className="flex items-center gap-2">
+                                          <Mail className="h-3 w-3" />
+                                          <span className="truncate">{attendee.members.email}</span>
+                                        </div>
+                                      )}
+                                      {attendee.members.cell_groups?.name && (
+                                        <div className="text-xs">
+                                          Cell Group: {attendee.members.cell_groups.name}
+                                        </div>
+                                      )}
+                                      {attendee.invited_by && (
+                                        <div className="text-xs text-blue-600 dark:text-blue-400">
+                                          Invited by: {attendee.invited_by}
+                                        </div>
                                       )}
                                     </div>
-                                    {attendee.invited_by && (
-                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                        Invited by: {attendee.invited_by}
-                                      </p>
-                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -482,7 +583,7 @@ const Events = () => {
                         {/* Member Search and Selection */}
                         <div className="space-y-4">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Select Member *
+                            Search and Select Member *
                           </label>
                           
                           {/* Search Input */}
@@ -496,7 +597,7 @@ const Events = () => {
                                 setIsMemberDropdownOpen(true);
                               }}
                               onFocus={() => setIsMemberDropdownOpen(true)}
-                              placeholder="Search members by name, surname, or phone number..."
+                              placeholder="Search members by name, surname, email, or phone number..."
                               className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                             />
                             {searchTerm && (
@@ -519,16 +620,17 @@ const Events = () => {
                           {selectedMember && (
                             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
                                   {getInitials(selectedMember.name, selectedMember.surname)}
                                 </div>
                                 <div className="flex-1">
                                   <h4 className="font-semibold text-gray-900 dark:text-white">
                                     {selectedMember.name} {selectedMember.surname}
                                   </h4>
-                                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    {selectedMember.phone && <span>{selectedMember.phone} • </span>}
-                                    {selectedMember.cell_group?.name || 'No cell group'}
+                                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                                    {selectedMember.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {selectedMember.phone}</div>}
+                                    {selectedMember.email && <div className="flex items-center gap-2"><Mail className="h-3 w-3" /> {selectedMember.email}</div>}
+                                    {selectedMember.cell_groups?.name && <div>Cell Group: {selectedMember.cell_groups.name}</div>}
                                   </div>
                                 </div>
                                 <button
@@ -557,15 +659,17 @@ const Events = () => {
                                   className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
                                 >
                                   <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
                                       {getInitials(member.name, member.surname)}
                                     </div>
                                     <div className="flex-1">
                                       <div className="font-medium text-gray-900 dark:text-white">
                                         {member.name} {member.surname}
                                       </div>
-                                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                                        {member.phone} • {member.cell_group?.name || 'No cell group'}
+                                      <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                                        {member.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {member.phone}</div>}
+                                        {member.email && <div className="flex items-center gap-2"><Mail className="h-3 w-3" /> {member.email}</div>}
+                                        {member.cell_groups?.name && <div>Cell Group: {member.cell_groups.name}</div>}
                                       </div>
                                     </div>
                                   </div>
