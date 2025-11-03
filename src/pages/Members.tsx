@@ -61,7 +61,7 @@ const Members = () => {
         .from('members')
         .select(`
           *,
-          cell_groups(name)
+          cell_groups!fk_cell_group(name)
         `)
         .order('created_at', { ascending: false });
 
