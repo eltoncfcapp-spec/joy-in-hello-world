@@ -12,7 +12,8 @@ import {
   MapPin,
   Clock,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Crown
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -24,14 +25,23 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
+  ministry_group_id: string | null;
   invited_by: string | null;
   created_at: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  is_leader: boolean | null;
 }
 
 interface CellGroup {
   id: string;
   name: string;
+}
+
+interface MinistryGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
 }
 
 interface Event {
@@ -81,6 +91,7 @@ const Dashboard = () => {
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
 
   // Form states
   const [newMember, setNewMember] = useState({
@@ -89,7 +100,9 @@ const Dashboard = () => {
     email: '',
     phone: '',
     invited_by: '',
-    cell_group_id: ''
+    cell_group_id: '',
+    ministry_group_id: '',
+    is_leader: false
   });
   const [newEvent, setNewEvent] = useState({
     name: '',
@@ -98,16 +111,24 @@ const Dashboard = () => {
     event_time: '',
     topic: ''
   });
+  const [newMinistryGroup, setNewMinistryGroup] = useState({
+    name: '',
+    description: ''
+  });
 
   // Load dashboard data from Supabase
   const loadDashboardData = async () => {
     try {
       setLoading(true);
       
-      // Load members
+      // Load members with related data
       const { data: membersData, error: membersError } = await supabase
         .from('members')
-        .select('*')
+        .select(`
+          *,
+          cell_groups(name),
+          ministry_groups(name)
+        `)
         .order('created_at', { ascending: false });
 
       if (membersError) throw membersError;
@@ -122,6 +143,15 @@ const Dashboard = () => {
       if (cellGroupsError) throw cellGroupsError;
       setCellGroups(cellGroupsData || []);
 
+      // Load ministry groups
+      const { data: ministryGroupsData, error: ministryGroupsError } = await supabase
+        .from('ministry_groups')
+        .select('*')
+        .order('name');
+
+      if (ministryGroupsError) throw ministryGroupsError;
+      setMinistryGroups(ministryGroupsData || []);
+
       // Load events
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
@@ -133,7 +163,7 @@ const Dashboard = () => {
       setUpcomingEvents(eventsData || []);
 
       // Calculate stats
-      calculateStats(membersData || [], eventsData || []);
+      calculateStats(membersData || [], eventsData || [], ministryGroupsData || []);
 
       // Generate recent activities
       generateRecentActivities(membersData || [], eventsData || []);
@@ -145,13 +175,15 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (members: Member[], events: Event[]) => {
+  const calculateStats = (members: Member[], events: Event[], ministryGroups: MinistryGroup[]) => {
     const totalMembers = members.length;
     const newcomers = members.filter(m => m.status === 'newcomer').length;
     const signedMembers = members.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
+    const leadersCount = members.filter(m => m.is_leader).length;
     
-    const uniqueGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
+    const uniqueCellGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
+    const uniqueMinistryGroups = ministryGroups.length;
 
     const statsData: StatCard[] = [
       { 
@@ -185,14 +217,14 @@ const Dashboard = () => {
         action: 'viewMembers'
       },
       { 
-        icon: TrendingUp, 
-        label: 'Active Groups', 
-        value: uniqueGroups.toString(), 
-        change: `${uniqueGroups} cell groups`, 
+        icon: Crown, 
+        label: 'Ministry Groups', 
+        value: uniqueMinistryGroups.toString(), 
+        change: `${leadersCount} leaders`, 
         changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
-        action: 'viewGroups'
+        action: 'viewMinistryGroups'
       },
     ];
 
@@ -256,8 +288,9 @@ const Dashboard = () => {
     setSelectedMember(null);
     setSelectedEvent(null);
     // Reset form states
-    setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '' });
+    setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '', ministry_group_id: '', is_leader: false });
     setNewEvent({ name: '', location: '', event_date: '', event_time: '', topic: '' });
+    setNewMinistryGroup({ name: '', description: '' });
   };
 
   const openMemberDetail = (member: Member) => {
@@ -269,7 +302,6 @@ const Dashboard = () => {
     setSelectedEvent(event);
     setActiveModal('eventDetail');
   };
-
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
@@ -297,6 +329,8 @@ const Dashboard = () => {
           phone: newMember.phone || null,
           invited_by: newMember.invited_by || null,
           cell_group_id: newMember.cell_group_id || null,
+          ministry_group_id: newMember.ministry_group_id || null,
+          is_leader: newMember.is_leader,
           status: 'newcomer'
         }]);
 
@@ -333,6 +367,28 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error creating event:', error);
       alert('Failed to create event');
+    }
+  };
+
+  // Create ministry group handler
+  const handleCreateMinistryGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { error } = await supabase
+        .from('ministry_groups')
+        .insert([{
+          name: newMinistryGroup.name,
+          description: newMinistryGroup.description || null
+        }]);
+
+      if (error) throw error;
+      
+      alert('Ministry Group created successfully!');
+      await loadDashboardData();
+      closeModal();
+    } catch (error) {
+      console.error('Error creating ministry group:', error);
+      alert('Failed to create ministry group');
     }
   };
 
@@ -541,6 +597,13 @@ const Dashboard = () => {
             <Plus className="h-4 w-4" />
             Create Event
           </button>
+          <button 
+            onClick={() => openModal('createMinistryGroup')}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+          >
+            <Crown className="h-4 w-4" />
+            Create Ministry Group
+          </button>
         </div>
       </div>
 
@@ -554,7 +617,14 @@ const Dashboard = () => {
                 <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
                   <div>
                     <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{member.email || member.phone || 'No contact'}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {member.email || member.phone || 'No contact'}
+                      {member.is_leader && (
+                        <span className="ml-2 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full text-xs">
+                          Leader
+                        </span>
+                      )}
+                    </p>
                   </div>
                   <button 
                     onClick={() => openMemberDetail(member)}
@@ -572,6 +642,30 @@ const Dashboard = () => {
         </Modal>
       )}
 
+      {activeModal === 'viewMinistryGroups' && (
+        <Modal title="Ministry Groups">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">View all ministry groups.</p>
+            <div className="space-y-3">
+              {ministryGroups.map(group => (
+                <div key={group.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <p className="font-medium text-gray-900 dark:text-white">{group.name}</p>
+                  {group.description && (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{group.description}</p>
+                  )}
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                    Members: {members.filter(m => m.ministry_group_id === group.id).length}
+                  </p>
+                </div>
+              ))}
+              {ministryGroups.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">No ministry groups found</p>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {activeModal === 'memberDetail' && selectedMember && (
         <Modal title="Member Details">
           <div className="space-y-4">
@@ -580,7 +674,16 @@ const Dashboard = () => {
                 {selectedMember.name.charAt(0)}{selectedMember.surname.charAt(0)}
               </div>
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.name} {selectedMember.surname}</h3>
-              <p className="text-gray-500 dark:text-gray-400">{selectedMember.cell_group_id ? 'Member of cell group' : 'No cell group'}</p>
+              <div className="flex items-center justify-center gap-2 mt-2">
+                {selectedMember.is_leader && (
+                  <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full text-xs font-medium">
+                    Leader
+                  </span>
+                )}
+                <span className="text-gray-500 dark:text-gray-400 text-sm">
+                  {selectedMember.cell_group_id ? 'Cell Group Member' : 'No cell group'}
+                </span>
+              </div>
             </div>
             
             <div className="space-y-3">
@@ -596,6 +699,14 @@ const Dashboard = () => {
                 <span className="text-gray-600 dark:text-gray-400">Invited By:</span>
                 <span className="text-gray-900 dark:text-white">{selectedMember.invited_by || 'N/A'}</span>
               </div>
+              {selectedMember.ministry_group_id && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Ministry Group:</span>
+                  <span className="text-gray-900 dark:text-white">
+                    {ministryGroups.find(g => g.id === selectedMember.ministry_group_id)?.name || 'N/A'}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Status:</span>
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -725,6 +836,35 @@ const Dashboard = () => {
                   ))}
                 </select>
               </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Ministry Group
+                </label>
+                <select 
+                  value={newMember.ministry_group_id}
+                  onChange={(e) => setNewMember({...newMember, ministry_group_id: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                >
+                  <option value="">Select ministry group</option>
+                  {ministryGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="checkbox" 
+                  id="is_leader"
+                  checked={newMember.is_leader}
+                  onChange={(e) => setNewMember({...newMember, is_leader: e.target.checked})}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                />
+                <label htmlFor="is_leader" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  This member is a leader
+                </label>
+              </div>
             </div>
             <div className="flex gap-3">
               <button 
@@ -817,6 +957,55 @@ const Dashboard = () => {
                 className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
               >
                 Create Event
+              </button>
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {activeModal === 'createMinistryGroup' && (
+        <Modal title="Create Ministry Group">
+          <form onSubmit={handleCreateMinistryGroup} className="space-y-4">
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Ministry Group Name *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Enter ministry group name"
+                  value={newMinistryGroup.name}
+                  onChange={(e) => setNewMinistryGroup({...newMinistryGroup, name: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Description
+                </label>
+                <textarea 
+                  placeholder="Enter ministry group description"
+                  rows={3}
+                  value={newMinistryGroup.description}
+                  onChange={(e) => setNewMinistryGroup({...newMinistryGroup, description: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                type="submit" 
+                className="flex-1 bg-gradient-to-r from-orange-600 to-amber-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
+              >
+                Create Ministry Group
               </button>
               <button 
                 type="button" 
