@@ -16,30 +16,34 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '../integrations/supabase/client';
 
 // Types
 interface Member {
   id: string;
   name: string;
-  joinDate: string;
-  email: string;
-  phone: string;
-  group: string;
-  status: 'active' | 'inactive';
+  surname: string;
+  email: string | null;
+  phone: string | null;
+  cell_group_id: string | null;
+  invited_by: string | null;
+  created_at: string | null;
+  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+}
+
+interface CellGroup {
+  id: string;
+  name: string;
 }
 
 interface Event {
   id: string;
-  title: string;
-  date: string;
-  time: string;
-  location: string;
-  description: string;
-  attendees: number;
-  maxAttendees: number;
-  type: string;
-  priority: string;
+  name: string;
+  event_date: string;
+  event_time: string;
+  location: string | null;
+  topic: string | null;
+  created_at: string | null;
 }
 
 interface Donation {
@@ -87,27 +91,25 @@ const Dashboard = () => {
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [donations, setDonations] = useState<Donation[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
 
   // Form states
   const [newMember, setNewMember] = useState({
     name: '',
+    surname: '',
     email: '',
     phone: '',
-    group: '',
-    status: 'active' as 'active' | 'inactive'
+    invited_by: '',
+    cell_group_id: ''
   });
   const [newEvent, setNewEvent] = useState({
-    title: '',
+    name: '',
     location: '',
-    date: '',
-    time: '',
-    description: '',
-    type: '',
-    maxAttendees: 50,
-    priority: 'medium'
+    event_date: '',
+    event_time: '',
+    topic: ''
   });
-  const [newDonation, setNewDonation] = useState({
+  const [newDonation] = useState({
     donor: '',
     amount: 0,
     type: '',
@@ -128,31 +130,30 @@ const Dashboard = () => {
       if (membersError) throw membersError;
       setMembers(membersData || []);
 
+      // Load cell groups
+      const { data: cellGroupsData, error: cellGroupsError } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
+
+      if (cellGroupsError) throw cellGroupsError;
+      setCellGroups(cellGroupsData || []);
+
       // Load events
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('*')
-        .gte('date', new Date().toISOString().split('T')[0])
-        .order('date', { ascending: true });
+        .gte('event_date', new Date().toISOString().split('T')[0])
+        .order('event_date', { ascending: true });
 
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
 
-      // Load donations
-      const { data: donationsData, error: donationsError } = await supabase
-        .from('donations')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (donationsError) throw donationsError;
-      setDonations(donationsData || []);
-
       // Calculate stats
-      calculateStats(membersData || [], eventsData || [], donationsData || []);
+      calculateStats(membersData || [], eventsData || []);
 
       // Generate recent activities
-      generateRecentActivities(membersData || [], eventsData || [], donationsData || []);
+      generateRecentActivities(membersData || [], eventsData || []);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -161,41 +162,20 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (members: Member[], events: Event[], donations: Donation[]) => {
+  const calculateStats = (members: Member[], events: Event[]) => {
     const totalMembers = members.length;
-    const activeMembers = members.filter(m => m.status === 'active').length;
+    const newcomers = members.filter(m => m.status === 'newcomer').length;
+    const signedMembers = members.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     
-    const monthlyDonations = donations
-      .filter(d => {
-        const donationDate = new Date(d.date);
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        return donationDate.getMonth() === currentMonth && donationDate.getFullYear() === currentYear;
-      })
-      .reduce((sum, donation) => sum + donation.amount, 0);
-
-    const lastMonthDonations = donations
-      .filter(d => {
-        const donationDate = new Date(d.date);
-        const lastMonth = new Date().getMonth() - 1;
-        const currentYear = new Date().getFullYear();
-        return donationDate.getMonth() === lastMonth && donationDate.getFullYear() === currentYear;
-      })
-      .reduce((sum, donation) => sum + donation.amount, 0);
-
-    const donationChange = lastMonthDonations > 0 
-      ? ((monthlyDonations - lastMonthDonations) / lastMonthDonations * 100).toFixed(1)
-      : '0';
-
-    const uniqueGroups = [...new Set(members.map(m => m.group))].length;
+    const uniqueGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
 
     const statsData: StatCard[] = [
       { 
         icon: Users, 
         label: 'Total Members', 
         value: totalMembers.toString(), 
-        change: `${activeMembers} active`, 
+        change: `${signedMembers} signed members`, 
         changeType: 'positive',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
@@ -205,27 +185,27 @@ const Dashboard = () => {
         icon: Calendar, 
         label: 'Upcoming Events', 
         value: upcomingEventsCount.toString(), 
-        change: events[0] ? `Next: ${events[0].title}` : 'No upcoming events',
+        change: events[0] ? `Next: ${events[0].name}` : 'No upcoming events',
         changeType: 'info',
         color: 'from-purple-500 to-purple-600',
         bgColor: 'bg-purple-50 dark:bg-purple-950/20',
         action: 'viewEvents'
       },
       { 
-        icon: DollarSign, 
-        label: 'Monthly Donations', 
-        value: `$${monthlyDonations.toLocaleString()}`, 
-        change: `${donationChange}% from last month`, 
-        changeType: Number(donationChange) >= 0 ? 'positive' : 'negative',
+        icon: UserPlus, 
+        label: 'Newcomers', 
+        value: newcomers.toString(), 
+        change: `${newcomers} new visitors`, 
+        changeType: 'positive',
         color: 'from-green-500 to-green-600',
         bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: 'viewDonations'
+        action: 'viewMembers'
       },
       { 
         icon: TrendingUp, 
         label: 'Active Groups', 
         value: uniqueGroups.toString(), 
-        change: `${uniqueGroups} groups active`, 
+        change: `${uniqueGroups} cell groups`, 
         changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
@@ -236,17 +216,17 @@ const Dashboard = () => {
     setStats(statsData);
   };
 
-  const generateRecentActivities = (members: Member[], events: Event[], donations: Donation[]) => {
+  const generateRecentActivities = (members: Member[], events: Event[]) => {
     const activities: Activity[] = [];
 
     // Add recent member joins
-    const recentMembers = members.slice(0, 2);
+    const recentMembers = members.slice(0, 3);
     recentMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
         type: 'member',
-        message: `${member.name} joined the church`,
-        time: formatTimeAgo(new Date(member.joinDate)),
+        message: `${member.name} ${member.surname} joined the church`,
+        time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
         color: 'bg-green-500',
         icon: Users,
         action: () => openMemberDetail(member)
@@ -254,34 +234,20 @@ const Dashboard = () => {
     });
 
     // Add recent events
-    const recentEvents = events.slice(0, 2);
+    const recentEvents = events.slice(0, 3);
     recentEvents.forEach(event => {
       activities.push({
         id: activities.length + 1,
         type: 'event',
-        message: `New event: ${event.title}`,
-        time: formatTimeAgo(new Date(event.date)),
+        message: `Upcoming event: ${event.name}`,
+        time: formatTimeAgo(new Date(event.event_date)),
         color: 'bg-blue-500',
         icon: Calendar,
         action: () => openEventDetail(event)
       });
     });
 
-    // Add recent donations
-    const recentDonations = donations.slice(0, 2);
-    recentDonations.forEach(donation => {
-      activities.push({
-        id: activities.length + 1,
-        type: 'donation',
-        message: `Donation received: $${donation.amount}`,
-        time: formatTimeAgo(new Date(donation.date)),
-        color: 'bg-purple-500',
-        icon: DollarSign,
-        action: () => openDonationDetail(donation)
-      });
-    });
-
-    setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 4));
+    setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 6));
   };
 
   const formatTimeAgo = (date: Date): string => {
@@ -307,9 +273,8 @@ const Dashboard = () => {
     setSelectedMember(null);
     setSelectedEvent(null);
     // Reset form states
-    setNewMember({ name: '', email: '', phone: '', group: '', status: 'active' });
-    setNewEvent({ title: '', location: '', date: '', time: '', description: '', type: '', maxAttendees: 50, priority: 'medium' });
-    setNewDonation({ donor: '', amount: 0, type: '', message: '' });
+    setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '' });
+    setNewEvent({ name: '', location: '', event_date: '', event_time: '', topic: '' });
   };
 
   const openMemberDetail = (member: Member) => {
@@ -322,9 +287,6 @@ const Dashboard = () => {
     setActiveModal('eventDetail');
   };
 
-  const openDonationDetail = (donation: Donation) => {
-    setActiveModal('donationDetail');
-  };
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
@@ -352,13 +314,15 @@ const Dashboard = () => {
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('members')
         .insert([{
           name: newMember.name,
-          email: newMember.email,
-          phone: newMember.phone,
-          group: newMember.group,
+          surname: newMember.surname,
+          email: newMember.email || null,
+          phone: newMember.phone || null,
+          invited_by: newMember.invited_by || null,
+          cell_group_id: newMember.cell_group_id || null,
           status: newMember.status,
           join_date: new Date().toISOString().split('T')[0]
         }])
@@ -765,47 +729,102 @@ const Dashboard = () => {
       {activeModal === 'addMember' && (
         <Modal title="Add New Member">
           <form onSubmit={handleAddMember} className="space-y-4">
-            <p className="text-gray-600 dark:text-gray-400">Add a new member to the church database.</p>
             <div className="space-y-3">
-              <input 
-                type="text" 
-                placeholder="Full Name"
-                value={newMember.name}
-                onChange={(e) => setNewMember({...newMember, name: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <input 
-                type="email" 
-                placeholder="Email Address"
-                value={newMember.email}
-                onChange={(e) => setNewMember({...newMember, email: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <input 
-                type="tel" 
-                placeholder="Phone Number"
-                value={newMember.phone}
-                onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              />
-              <select 
-                value={newMember.group}
-                onChange={(e) => setNewMember({...newMember, group: e.target.value})}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              >
-                <option value="">Select Group</option>
-                <option value="Young Adults">Young Adults</option>
-                <option value="Women's Ministry">Women's Ministry</option>
-                <option value="Men's Fellowship">Men's Fellowship</option>
-                <option value="Youth Group">Youth Group</option>
-              </select>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  First Name *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Enter first name"
+                  value={newMember.name}
+                  onChange={(e) => setNewMember({...newMember, name: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Last Name *
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Enter last name"
+                  value={newMember.surname}
+                  onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Email
+                </label>
+                <input 
+                  type="email" 
+                  placeholder="Enter email address"
+                  value={newMember.email}
+                  onChange={(e) => setNewMember({...newMember, email: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Phone
+                </label>
+                <input 
+                  type="tel" 
+                  placeholder="Enter phone number"
+                  value={newMember.phone}
+                  onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Invited By
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Who invited this member?"
+                  value={newMember.invited_by}
+                  onChange={(e) => setNewMember({...newMember, invited_by: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Cell Group
+                </label>
+                <select 
+                  value={newMember.cell_group_id}
+                  onChange={(e) => setNewMember({...newMember, cell_group_id: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                >
+                  <option value="">Select cell group</option>
+                  {cellGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors">
-              Add Member
-            </button>
+            <div className="flex gap-3">
+              <button 
+                type="submit" 
+                className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
+              >
+                Add Member
+              </button>
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
           </form>
         </Modal>
       )}

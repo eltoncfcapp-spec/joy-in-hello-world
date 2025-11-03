@@ -15,7 +15,7 @@ interface Member {
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   status_date: string | null;
   not_attending_reason: string | null;
-  created_at: string;
+  created_at: string | null;
   invited_by: string | null;
 }
 
