@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { 
   Users, 
   Calendar, 
-  DollarSign,
   TrendingUp, 
   MoreVertical, 
   ArrowUp, 
@@ -61,15 +60,6 @@ interface Event {
   created_at: string | null;
 }
 
-interface Donation {
-  id: string;
-  donor: string;
-  amount: number;
-  date: string;
-  type: string;
-  message: string;
-}
-
 interface StatCard {
   icon: any;
   label: string;
@@ -108,7 +98,6 @@ const Dashboard = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
-  const [donations, setDonations] = useState<Donation[]>([]);
 
   // Form states
   const [newMember, setNewMember] = useState({
@@ -131,12 +120,6 @@ const Dashboard = () => {
   const [newMinistryGroup, setNewMinistryGroup] = useState({
     name: '',
     description: ''
-  });
-  const [newDonation, setNewDonation] = useState({
-    donor: '',
-    amount: 0,
-    type: '',
-    message: ''
   });
 
   // Load dashboard data from Supabase
@@ -185,21 +168,11 @@ const Dashboard = () => {
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
 
-      // Load donations
-      const { data: donationsData, error: donationsError } = await supabase
-        .from('donations')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (donationsError) throw donationsError;
-      setDonations(donationsData || []);
-
       // Calculate stats
-      calculateStats(membersData || [], eventsData || [], ministryGroupsData || [], donationsData || []);
+      calculateStats(membersData || [], eventsData || [], ministryGroupsData || []);
 
       // Generate recent activities
-      generateRecentActivities(membersData || [], eventsData || [], donationsData || []);
+      generateRecentActivities(membersData || [], eventsData || []);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -208,35 +181,13 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (members: Member[], events: Event[], ministryGroups: MinistryGroup[], donations: Donation[]) => {
+  const calculateStats = (members: Member[], events: Event[], ministryGroups: MinistryGroup[]) => {
     const totalMembers = members.length;
     const newcomers = members.filter(m => m.status === 'newcomer').length;
     const signedMembers = members.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     const leadersCount = members.filter(m => m.is_leader).length;
     
-    const monthlyDonations = donations
-      .filter(d => {
-        const donationDate = new Date(d.date);
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        return donationDate.getMonth() === currentMonth && donationDate.getFullYear() === currentYear;
-      })
-      .reduce((sum, donation) => sum + donation.amount, 0);
-
-    const lastMonthDonations = donations
-      .filter(d => {
-        const donationDate = new Date(d.date);
-        const lastMonth = new Date().getMonth() - 1;
-        const currentYear = new Date().getFullYear();
-        return donationDate.getMonth() === lastMonth && donationDate.getFullYear() === currentYear;
-      })
-      .reduce((sum, donation) => sum + donation.amount, 0);
-
-    const donationChange = lastMonthDonations > 0 
-      ? ((monthlyDonations - lastMonthDonations) / lastMonthDonations * 100).toFixed(1)
-      : '0';
-
     const uniqueCellGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
     const uniqueMinistryGroups = ministryGroups.length;
 
@@ -291,26 +242,16 @@ const Dashboard = () => {
         bgColor: 'bg-red-50 dark:bg-red-950/20',
         action: 'viewMinistryGroups'
       },
-      { 
-        icon: DollarSign, 
-        label: 'Monthly Donations', 
-        value: `$${monthlyDonations.toLocaleString()}`, 
-        change: `${donationChange}% from last month`, 
-        changeType: Number(donationChange) >= 0 ? 'positive' : 'negative',
-        color: 'from-emerald-500 to-emerald-600',
-        bgColor: 'bg-emerald-50 dark:bg-emerald-950/20',
-        action: 'viewDonations'
-      },
     ];
 
     setStats(statsData);
   };
 
-  const generateRecentActivities = (members: Member[], events: Event[], donations: Donation[]) => {
+  const generateRecentActivities = (members: Member[], events: Event[]) => {
     const activities: Activity[] = [];
 
     // Add recent member joins
-    const recentMembers = members.slice(0, 2);
+    const recentMembers = members.slice(0, 3);
     recentMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
@@ -324,7 +265,7 @@ const Dashboard = () => {
     });
 
     // Add recent events
-    const recentEvents = events.slice(0, 2);
+    const recentEvents = events.slice(0, 3);
     recentEvents.forEach(event => {
       activities.push({
         id: activities.length + 1,
@@ -334,20 +275,6 @@ const Dashboard = () => {
         color: 'bg-blue-500',
         icon: Calendar,
         action: () => openEventDetail(event)
-      });
-    });
-
-    // Add recent donations
-    const recentDonations = donations.slice(0, 2);
-    recentDonations.forEach(donation => {
-      activities.push({
-        id: activities.length + 1,
-        type: 'donation',
-        message: `Donation received: $${donation.amount}`,
-        time: formatTimeAgo(new Date(donation.date)),
-        color: 'bg-purple-500',
-        icon: DollarSign,
-        action: () => openDonationDetail(donation)
       });
     });
 
@@ -380,7 +307,6 @@ const Dashboard = () => {
     setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '', ministry_group_id: '', is_leader: false });
     setNewEvent({ name: '', location: '', event_date: '', event_time: '', topic: '' });
     setNewMinistryGroup({ name: '', description: '' });
-    setNewDonation({ donor: '', amount: 0, type: '', message: '' });
   };
 
   const openMemberDetail = (member: Member) => {
@@ -391,10 +317,6 @@ const Dashboard = () => {
   const openEventDetail = (event: Event) => {
     setSelectedEvent(event);
     setActiveModal('eventDetail');
-  };
-
-  const openDonationDetail = (donation: Donation) => {
-    setActiveModal('donationDetail');
   };
 
   const toggleSection = (section: string) => {
@@ -486,31 +408,6 @@ const Dashboard = () => {
     }
   };
 
-  // Record donation handler
-  const handleRecordDonation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const { error } = await supabase
-        .from('donations')
-        .insert([{
-          donor: newDonation.donor,
-          amount: newDonation.amount,
-          type: newDonation.type,
-          message: newDonation.message,
-          date: new Date().toISOString().split('T')[0]
-        }]);
-
-      if (error) throw error;
-      
-      alert('Donation recorded successfully!');
-      await loadDashboardData();
-      closeModal();
-    } catch (error) {
-      console.error('Error recording donation:', error);
-      alert('Failed to record donation');
-    }
-  };
-
   const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto animate-scaleIn">
@@ -551,10 +448,6 @@ const Dashboard = () => {
             <button className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
               <Calendar className="h-5 w-5" />
               Events
-            </button>
-            <button className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
-              <DollarSign className="h-5 w-5" />
-              Donations
             </button>
             <button className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
               <TrendingUp className="h-5 w-5" />
@@ -616,10 +509,6 @@ const Dashboard = () => {
             Events
           </button>
           <button className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
-            <DollarSign className="h-5 w-5" />
-            Donations
-          </button>
-          <button className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
             <TrendingUp className="h-5 w-5" />
             Groups
           </button>
@@ -663,8 +552,8 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Stats Grid - Now with 6 cards including Ministry Groups */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+        {/* Stats Grid - 5 cards without donations */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-8">
           {stats.map((stat) => (
             <button
               key={stat.label}
@@ -822,13 +711,6 @@ const Dashboard = () => {
               Create Event
             </button>
             <button 
-              onClick={() => openModal('recordDonation')}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <DollarSign className="h-4 w-4" />
-              Record Donation
-            </button>
-            <button 
               onClick={() => openModal('createMinistryGroup')}
               className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
             >
@@ -907,8 +789,358 @@ const Dashboard = () => {
           </Modal>
         )}
 
-        {/* ... Other modals remain the same ... */}
-        
+        {activeModal === 'memberDetail' && selectedMember && (
+          <Modal title="Member Details">
+            <div className="space-y-4">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xl mx-auto mb-3">
+                  {selectedMember.name.charAt(0)}{selectedMember.surname.charAt(0)}
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.name} {selectedMember.surname}</h3>
+                <div className="flex items-center justify-center gap-2 mt-2">
+                  {selectedMember.is_leader && (
+                    <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full text-xs font-medium">
+                      Leader
+                    </span>
+                  )}
+                  <span className="text-gray-500 dark:text-gray-400 text-sm">
+                    {selectedMember.cell_groups?.name ? `Cell Group: ${selectedMember.cell_groups.name}` : 'No cell group'}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Email:</span>
+                  <span className="text-gray-900 dark:text-white">{selectedMember.email || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Phone:</span>
+                  <span className="text-gray-900 dark:text-white">{selectedMember.phone || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Invited By:</span>
+                  <span className="text-gray-900 dark:text-white">{selectedMember.invited_by || 'N/A'}</span>
+                </div>
+                {selectedMember.ministry_groups && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Ministry Group:</span>
+                    <span className="text-gray-900 dark:text-white">
+                      {selectedMember.ministry_groups.name}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-gray-400">Status:</span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    selectedMember.status === 'signed_member' 
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                      : selectedMember.status === 'not_attending'
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                      : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                  }`}>
+                    {selectedMember.status || 'newcomer'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {activeModal === 'eventDetail' && selectedEvent && (
+          <Modal title="Event Details">
+            <div className="space-y-4">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedEvent.name}</h3>
+              
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-gray-500" />
+                  <span className="text-gray-900 dark:text-white">{selectedEvent.event_time}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-gray-500" />
+                  <span className="text-gray-900 dark:text-white">{selectedEvent.location || 'No location'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-gray-500" />
+                  <span className="text-gray-900 dark:text-white">{selectedEvent.event_date}</span>
+                </div>
+              </div>
+
+              {selectedEvent.topic && (
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">{selectedEvent.topic}</p>
+                </div>
+              )}
+            </div>
+          </Modal>
+        )}
+
+        {activeModal === 'addMember' && (
+          <Modal title="Add New Member">
+            <form onSubmit={handleAddMember} className="space-y-4">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    First Name *
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Enter first name"
+                    value={newMember.name}
+                    onChange={(e) => setNewMember({...newMember, name: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Last Name *
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Enter last name"
+                    value={newMember.surname}
+                    onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Email
+                  </label>
+                  <input 
+                    type="email" 
+                    placeholder="Enter email address"
+                    value={newMember.email}
+                    onChange={(e) => setNewMember({...newMember, email: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Phone
+                  </label>
+                  <input 
+                    type="tel" 
+                    placeholder="Enter phone number"
+                    value={newMember.phone}
+                    onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Invited By
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Who invited this member?"
+                    value={newMember.invited_by}
+                    onChange={(e) => setNewMember({...newMember, invited_by: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Cell Group
+                  </label>
+                  <select 
+                    value={newMember.cell_group_id}
+                    onChange={(e) => setNewMember({...newMember, cell_group_id: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">Select cell group</option>
+                    {cellGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Ministry Group
+                  </label>
+                  <select 
+                    value={newMember.ministry_group_id}
+                    onChange={(e) => setNewMember({...newMember, ministry_group_id: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">Select ministry group</option>
+                    {ministryGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="is_leader"
+                    checked={newMember.is_leader}
+                    onChange={(e) => setNewMember({...newMember, is_leader: e.target.checked})}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <label htmlFor="is_leader" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    This member is a leader
+                  </label>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  type="submit" 
+                  className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
+                >
+                  Add Member
+                </button>
+                <button 
+                  type="button" 
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+        {activeModal === 'createEvent' && (
+          <Modal title="Create New Event">
+            <form onSubmit={handleCreateEvent} className="space-y-4">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Event Name *
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Enter event name"
+                    value={newEvent.name}
+                    onChange={(e) => setNewEvent({...newEvent, name: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Location
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Event location"
+                    value={newEvent.location}
+                    onChange={(e) => setNewEvent({...newEvent, location: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Date *
+                  </label>
+                  <input 
+                    type="date"
+                    value={newEvent.event_date}
+                    onChange={(e) => setNewEvent({...newEvent, event_date: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Time *
+                  </label>
+                  <input 
+                    type="time"
+                    value={newEvent.event_time}
+                    onChange={(e) => setNewEvent({...newEvent, event_time: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Topic
+                  </label>
+                  <textarea 
+                    placeholder="Event topic or description"
+                    rows={3}
+                    value={newEvent.topic}
+                    onChange={(e) => setNewEvent({...newEvent, topic: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  type="submit" 
+                  className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
+                >
+                  Create Event
+                </button>
+                <button 
+                  type="button" 
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+        {activeModal === 'createMinistryGroup' && (
+          <Modal title="Create Ministry Group">
+            <form onSubmit={handleCreateMinistryGroup} className="space-y-4">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Ministry Group Name *
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="Enter ministry group name"
+                    value={newMinistryGroup.name}
+                    onChange={(e) => setNewMinistryGroup({...newMinistryGroup, name: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Description
+                  </label>
+                  <textarea 
+                    placeholder="Enter ministry group description"
+                    rows={3}
+                    value={newMinistryGroup.description}
+                    onChange={(e) => setNewMinistryGroup({...newMinistryGroup, description: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  type="submit" 
+                  className="flex-1 bg-gradient-to-r from-orange-600 to-amber-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
+                >
+                  Create Ministry Group
+                </button>
+                <button 
+                  type="button" 
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
       </div>
     </div>
   );
