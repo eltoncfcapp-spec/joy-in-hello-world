@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, Search, X, User, ChevronDown } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -22,6 +22,23 @@ interface Member {
   };
 }
 
+interface EventAttendee {
+  id: string;
+  event_id: string;
+  member_id: string;
+  first_time: boolean;
+  invited_by: string | null;
+  created_at: string;
+  members?: {
+    name: string;
+    surname: string;
+    phone: string | null;
+    cell_groups?: {
+      name: string;
+    };
+  };
+}
+
 interface AttendeeFormData {
   memberId: string;
   firstTime: boolean;
@@ -33,9 +50,11 @@ const Events = () => {
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [attendees, setAttendees] = useState<EventAttendee[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [expandedEvents, setExpandedEvents] = useState<{[key: string]: boolean}>({});
   
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -68,6 +87,8 @@ const Events = () => {
       console.error('Error fetching events:', error);
     } else {
       setEvents(data || []);
+      // Fetch attendees for each event
+      data?.forEach(event => fetchEventAttendees(event.id));
     }
   };
 
@@ -90,6 +111,33 @@ const Events = () => {
       console.error('Error fetching members:', error);
     } else {
       setMembers(data || []);
+    }
+  };
+
+  const fetchEventAttendees = async (eventId: string) => {
+    const { data, error } = await supabase
+      .from('event_attendees')
+      .select(`
+        *,
+        members (
+          name,
+          surname,
+          phone,
+          cell_groups (
+            name
+          )
+        )
+      `)
+      .eq('event_id', eventId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching attendees:', error);
+    } else {
+      setAttendees(prev => {
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...(data || [])];
+      });
     }
   };
 
@@ -126,20 +174,9 @@ const Events = () => {
 
     setLoading(true);
 
-    // Find the selected member's details
-    const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
-    if (!selectedMember) {
-      alert('Member not found');
-      setLoading(false);
-      return;
-    }
-
     const { error } = await supabase.from('event_attendees').insert({
       event_id: eventId,
-      name: selectedMember.name,
-      surname: selectedMember.surname,
-      phone: selectedMember.phone,
-      cell_group_id: selectedMember.cell_group_id,
+      member_id: attendeeFormData.memberId,
       first_time: attendeeFormData.firstTime,
       invited_by: attendeeFormData.invitedBy || null,
     });
@@ -149,6 +186,7 @@ const Events = () => {
       alert('Error adding attendee');
     } else {
       resetAttendeeForm();
+      fetchEventAttendees(eventId);
       alert('Attendee added successfully!');
     }
     setLoading(false);
@@ -176,10 +214,23 @@ const Events = () => {
     setIsMemberDropdownOpen(false);
   };
 
+  const toggleEventExpansion = (eventId: string) => {
+    setExpandedEvents(prev => ({
+      ...prev,
+      [eventId]: !prev[eventId]
+    }));
+  };
+
   const filteredMembers = members.filter(member => 
     `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
     member.phone?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const getEventAttendees = (eventId: string) => {
+    return attendees.filter(attendee => attendee.event_id === eventId);
+  };
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -197,6 +248,10 @@ const Events = () => {
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const formattedHour = hour % 12 || 12;
     return `${formattedHour}:${minutes} ${ampm}`;
+  };
+
+  const getInitials = (name: string, surname: string) => {
+    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
   return (
@@ -306,214 +361,279 @@ const Events = () => {
               <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
             </div>
           ) : (
-            events.map((event) => (
-              <div key={event.id} className="group">
-                {/* Event Card */}
-                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
-                  <div className="flex flex-col lg:flex-row justify-between gap-6">
-                    <div className="flex-1">
-                      <div className="flex items-start gap-4 mb-4">
-                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-lg">
-                          <CalendarIcon className="h-7 w-7 text-white" />
+            events.map((event) => {
+              const eventAttendees = getEventAttendees(event.id);
+              const isExpanded = expandedEvents[event.id];
+              
+              return (
+                <div key={event.id} className="group">
+                  {/* Event Card */}
+                  <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
+                    <div className="flex flex-col lg:flex-row justify-between gap-6">
+                      <div className="flex-1">
+                        <div className="flex items-start gap-4 mb-4">
+                          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-lg">
+                            <CalendarIcon className="h-7 w-7 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{event.name}</h3>
+                            {event.topic && (
+                              <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{event.name}</h3>
-                          {event.topic && (
-                            <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
+                        
+                        <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
+                          <div className="flex items-center gap-3">
+                            <CalendarIcon className="h-4 w-4" />
+                            <span className="font-medium">{formatDate(event.event_date)}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Clock className="h-4 w-4" />
+                            <span className="font-medium">{formatTime(event.event_time)}</span>
+                          </div>
+                          {event.location && (
+                            <div className="flex items-center gap-3">
+                              <MapPin className="h-4 w-4" />
+                              <span className="font-medium">{event.location}</span>
+                            </div>
                           )}
+                        </div>
+
+                        {/* Attendees Count */}
+                        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                          <Users className="h-4 w-4" />
+                          <span>{eventAttendees.length} attendees</span>
                         </div>
                       </div>
                       
-                      <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
-                        <div className="flex items-center gap-3">
-                          <CalendarIcon className="h-4 w-4" />
-                          <span className="font-medium">{formatDate(event.event_date)}</span>
+                      <div className="flex flex-col justify-between items-end gap-4">
+                        <div className="flex gap-3">
+                          <button 
+                            onClick={() => toggleEventExpansion(event.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <Users className="h-4 w-4" />
+                            {isExpanded ? 'Hide' : 'View'} Attendees
+                            <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                          </button>
+                          <button 
+                            onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
+                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-200" />
+                            {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
+                          </button>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <Clock className="h-4 w-4" />
-                          <span className="font-medium">{formatTime(event.event_time)}</span>
-                        </div>
-                        {event.location && (
-                          <div className="flex items-center gap-3">
-                            <MapPin className="h-4 w-4" />
-                            <span className="font-medium">{event.location}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
-                    
-                    <div className="flex flex-col justify-between items-end gap-4">
-                      <button 
-                        onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                      >
-                        <Users className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                        {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
 
-                {/* Attendee Form */}
-                {showAttendeeForm === event.id && (
-                  <div className="mt-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Add Event Attendee</h3>
-                    
-                    <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-6">
-                      {/* Member Search and Selection */}
-                      <div className="space-y-4">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                          Select Member *
-                        </label>
-                        
-                        {/* Search Input */}
-                        <div className="relative">
-                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                          <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => {
-                              setSearchTerm(e.target.value);
-                              setIsMemberDropdownOpen(true);
-                            }}
-                            onFocus={() => setIsMemberDropdownOpen(true)}
-                            placeholder="Search members by name or phone..."
-                            className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                          />
-                          {searchTerm && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSearchTerm('');
-                                setSelectedMember(null);
-                                setAttendeeFormData({ ...attendeeFormData, memberId: '' });
-                                setIsMemberDropdownOpen(false);
-                              }}
-                              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Selected Member Display */}
-                        {selectedMember && (
-                          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                                {selectedMember.name.charAt(0)}{selectedMember.surname.charAt(0)}
-                              </div>
-                              <div className="flex-1">
-                                <h4 className="font-semibold text-gray-900 dark:text-white">
-                                  {selectedMember.name} {selectedMember.surname}
-                                </h4>
-                                <div className="text-sm text-gray-600 dark:text-gray-400">
-                                  {selectedMember.phone && <span>{selectedMember.phone} • </span>}
-                                  {selectedMember.cell_group?.name || 'No cell group'}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedMember(null);
-                                  setAttendeeFormData({ ...attendeeFormData, memberId: '' });
-                                  setSearchTerm('');
-                                }}
-                                className="text-gray-400 hover:text-gray-600 transition-colors"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
+                    {/* Expanded Attendees List */}
+                    {isExpanded && (
+                      <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Event Attendees</h4>
+                        {eventAttendees.length === 0 ? (
+                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                            <p>No attendees yet</p>
+                            <p className="text-sm">Add attendees using the "Add Attendee" button</p>
                           </div>
-                        )}
-
-                        {/* Member Dropdown */}
-                        {isMemberDropdownOpen && filteredMembers.length > 0 && (
-                          <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                            {filteredMembers.map((member) => (
-                              <button
-                                key={member.id}
-                                type="button"
-                                onClick={() => handleMemberSelect(member)}
-                                className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
-                              >
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {eventAttendees.map((attendee) => (
+                              <div key={attendee.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                                    {member.name.charAt(0)}{member.surname.charAt(0)}
+                                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                    {getInitials(attendee.members?.name || '', attendee.members?.surname || '')}
                                   </div>
                                   <div className="flex-1">
-                                    <div className="font-medium text-gray-900 dark:text-white">
-                                      {member.name} {member.surname}
+                                    <h5 className="font-medium text-gray-900 dark:text-white">
+                                      {attendee.members?.name} {attendee.members?.surname}
+                                    </h5>
+                                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                                      {attendee.members?.phone && <span>{attendee.members.phone}</span>}
+                                      {attendee.first_time && (
+                                        <span className="ml-2 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                                          First Time
+                                        </span>
+                                      )}
                                     </div>
-                                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                                      {member.phone} • {member.cell_group?.name || 'No cell group'}
-                                    </div>
+                                    {attendee.invited_by && (
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Invited by: {attendee.invited_by}
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
-                              </button>
+                              </div>
                             ))}
                           </div>
                         )}
-
-                        {searchTerm && filteredMembers.length === 0 && (
-                          <div className="text-center py-6 text-gray-500 dark:text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
-                            <User className="h-8 w-8 mx-auto mb-2" />
-                            <p>No members found matching "{searchTerm}"</p>
-                            <p className="text-sm mt-1">Try a different search term</p>
-                          </div>
-                        )}
                       </div>
-
-                      {/* Additional Fields */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Invited By
-                          </label>
-                          <input
-                            type="text"
-                            value={attendeeFormData.invitedBy}
-                            onChange={(e) => setAttendeeFormData({ ...attendeeFormData, invitedBy: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                            placeholder="Who invited this member?"
-                          />
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            id="firstTime"
-                            checked={attendeeFormData.firstTime}
-                            onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
-                            className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                          />
-                          <label htmlFor="firstTime" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            First Time Attending this Event
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-3 pt-4">
-                        <button
-                          type="submit"
-                          disabled={loading || !attendeeFormData.memberId}
-                          className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Users className="h-4 w-4" />
-                          {loading ? 'Adding...' : 'Add Attendee'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={resetAttendeeForm}
-                          className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
+                    )}
                   </div>
-                )}
-              </div>
-            ))
+
+                  {/* Attendee Form */}
+                  {showAttendeeForm === event.id && (
+                    <div className="mt-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300">
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Add Event Attendee</h3>
+                      
+                      <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-6">
+                        {/* Member Search and Selection */}
+                        <div className="space-y-4">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Select Member *
+                          </label>
+                          
+                          {/* Search Input */}
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                              type="text"
+                              value={searchTerm}
+                              onChange={(e) => {
+                                setSearchTerm(e.target.value);
+                                setIsMemberDropdownOpen(true);
+                              }}
+                              onFocus={() => setIsMemberDropdownOpen(true)}
+                              placeholder="Search members by name, surname, or phone number..."
+                              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                            />
+                            {searchTerm && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSearchTerm('');
+                                  setSelectedMember(null);
+                                  setAttendeeFormData({ ...attendeeFormData, memberId: '' });
+                                  setIsMemberDropdownOpen(false);
+                                }}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Selected Member Display */}
+                          {selectedMember && (
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                  {getInitials(selectedMember.name, selectedMember.surname)}
+                                </div>
+                                <div className="flex-1">
+                                  <h4 className="font-semibold text-gray-900 dark:text-white">
+                                    {selectedMember.name} {selectedMember.surname}
+                                  </h4>
+                                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                                    {selectedMember.phone && <span>{selectedMember.phone} • </span>}
+                                    {selectedMember.cell_group?.name || 'No cell group'}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedMember(null);
+                                    setAttendeeFormData({ ...attendeeFormData, memberId: '' });
+                                    setSearchTerm('');
+                                  }}
+                                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Member Dropdown */}
+                          {isMemberDropdownOpen && filteredMembers.length > 0 && (
+                            <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                              {filteredMembers.map((member) => (
+                                <button
+                                  key={member.id}
+                                  type="button"
+                                  onClick={() => handleMemberSelect(member)}
+                                  className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                      {getInitials(member.name, member.surname)}
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="font-medium text-gray-900 dark:text-white">
+                                        {member.name} {member.surname}
+                                      </div>
+                                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                                        {member.phone} • {member.cell_group?.name || 'No cell group'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {searchTerm && filteredMembers.length === 0 && (
+                            <div className="text-center py-6 text-gray-500 dark:text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
+                              <User className="h-8 w-8 mx-auto mb-2" />
+                              <p>No members found matching "{searchTerm}"</p>
+                              <p className="text-sm mt-1">Try a different search term</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Additional Fields */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Invited By
+                            </label>
+                            <input
+                              type="text"
+                              value={attendeeFormData.invitedBy}
+                              onChange={(e) => setAttendeeFormData({ ...attendeeFormData, invitedBy: e.target.value })}
+                              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                              placeholder="Who invited this member?"
+                            />
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              id="firstTime"
+                              checked={attendeeFormData.firstTime}
+                              onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
+                              className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <label htmlFor="firstTime" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                              First Time Attending this Event
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3 pt-4">
+                          <button
+                            type="submit"
+                            disabled={loading || !attendeeFormData.memberId}
+                            className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Users className="h-4 w-4" />
+                            {loading ? 'Adding...' : 'Add Attendee'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={resetAttendeeForm}
+                            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       </div>
