@@ -19,12 +19,7 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  cell_groups?: {
-    name: string;
-  };
-  ministry_groups?: {
-    name: string;
-  };
+  cell_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
 }
 
@@ -35,20 +30,7 @@ interface EventAttendee {
   first_time: boolean;
   invited_by: string | null;
   created_at: string;
-  members: {
-    id: string;
-    name: string;
-    surname: string;
-    email: string | null;
-    phone: string | null;
-    cell_groups?: {
-      name: string;
-    };
-    ministry_groups?: {
-      name: string;
-    };
-    status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  };
+  members: Member;
 }
 
 interface AttendeeFormData {
@@ -67,6 +49,8 @@ const Events = () => {
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedEvents, setExpandedEvents] = useState<{[key: string]: boolean}>({});
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -90,129 +74,171 @@ const Events = () => {
   }, []);
 
   const fetchEvents = async () => {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .order('event_date', { ascending: true });
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('event_date', { ascending: true });
 
-    if (error) {
-      console.error('Error fetching events:', error);
-    } else {
+      if (error) {
+        throw error;
+      }
+
       setEvents(data || []);
       // Fetch attendees for each event
       data?.forEach(event => fetchEventAttendees(event.id));
+    } catch (error: any) {
+      console.error('Error fetching events:', error);
+      setError(error.message || 'Failed to load events. Please check your connection.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchMembers = async () => {
-    const { data, error } = await supabase
-      .from('members')
-      .select(`
-        id,
-        name,
-        surname,
-        email,
-        phone,
-        cell_group_id,
-        status,
-        cell_groups (
-          name
-        ),
-        ministry_groups (
-          name
-        )
-      `)
-      .order('name');
-
-    if (error) {
-      console.error('Error fetching members:', error);
-    } else {
-      setMembers(data || []);
-    }
-  };
-
-  const fetchEventAttendees = async (eventId: string) => {
-    const { data, error } = await supabase
-      .from('event_attendees')
-      .select(`
-        *,
-        members (
+    try {
+      setError(null);
+      
+      const { data, error } = await supabase
+        .from('members')
+        .select(`
           id,
           name,
           surname,
           email,
           phone,
+          cell_group_id,
           status,
-          cell_groups (
-            name
-          ),
-          ministry_groups (
-            name
-          )
-        )
-      `)
-      .eq('event_id', eventId)
-      .order('created_at', { ascending: false });
+          cell_groups!fk_cell_group(name)
+        `)
+        .order('name');
 
-    if (error) {
-      console.error('Error fetching attendees:', error);
-    } else {
+      if (error) {
+        throw error;
+      }
+
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Error fetching members:', error);
+      setError(error.message || 'Failed to load members.');
+    }
+  };
+
+  const fetchEventAttendees = async (eventId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_groups!fk_cell_group(name)
+          )
+        `)
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
         return [...filtered, ...(data || [])];
       });
+    } catch (error: any) {
+      console.error('Error fetching attendees:', error);
     }
   };
 
   const handleEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
+    setSuccess(null);
     
-    const { error } = await supabase.from('events').insert({
-      name: eventFormData.name,
-      topic: eventFormData.topic || null,
-      event_date: eventFormData.eventDate,
-      event_time: eventFormData.eventTime,
-      location: eventFormData.location || null,
-    });
+    try {
+      const { error } = await supabase.from('events').insert([{
+        name: eventFormData.name.trim(),
+        topic: eventFormData.topic.trim() || null,
+        event_date: eventFormData.eventDate,
+        event_time: eventFormData.eventTime,
+        location: eventFormData.location.trim() || null,
+      }]);
 
-    if (error) {
-      console.error('Error creating event:', error);
-      alert('Error creating event');
-    } else {
+      if (error) {
+        throw error;
+      }
+
       setShowEventForm(false);
       setEventFormData({ name: '', topic: '', eventDate: '', eventTime: '', location: '' });
-      fetchEvents();
+      setSuccess('Event created successfully!');
+      await fetchEvents();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error creating event:', error);
+      setError(error.message || 'Failed to create event. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
     if (!attendeeFormData.memberId) {
-      alert('Please select a member');
+      setError('Please select a member');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    // Check if member is already attending this event
+    const alreadyAttending = attendees.some(
+      a => a.event_id === eventId && a.member_id === attendeeFormData.memberId
+    );
+
+    if (alreadyAttending) {
+      setError('This member is already registered for this event');
+      setTimeout(() => setError(null), 3000);
       return;
     }
 
     setLoading(true);
+    setError(null);
+    setSuccess(null);
 
-    const { error } = await supabase.from('event_attendees').insert({
-      event_id: eventId,
-      member_id: attendeeFormData.memberId,
-      first_time: attendeeFormData.firstTime,
-      invited_by: attendeeFormData.invitedBy || null,
-    });
+    try {
+      const { error } = await supabase.from('event_attendees').insert([{
+        event_id: eventId,
+        member_id: attendeeFormData.memberId,
+        first_time: attendeeFormData.firstTime,
+        invited_by: attendeeFormData.invitedBy.trim() || null,
+      }]);
 
-    if (error) {
-      console.error('Error adding attendee:', error);
-      alert('Error adding attendee');
-    } else {
+      if (error) {
+        throw error;
+      }
+
       resetAttendeeForm();
-      fetchEventAttendees(eventId);
-      alert('Attendee added successfully!');
+      await fetchEventAttendees(eventId);
+      setSuccess('Attendee added successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error adding attendee:', error);
+      setError(error.message || 'Failed to add attendee. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
@@ -220,17 +246,26 @@ const Events = () => {
       return;
     }
 
-    const { error } = await supabase
-      .from('event_attendees')
-      .delete()
-      .eq('id', attendeeId);
+    try {
+      setError(null);
+      setSuccess(null);
+      
+      const { error } = await supabase
+        .from('event_attendees')
+        .delete()
+        .eq('id', attendeeId);
 
-    if (error) {
+      if (error) {
+        throw error;
+      }
+
+      await fetchEventAttendees(eventId);
+      setSuccess('Attendee removed successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
       console.error('Error removing attendee:', error);
-      alert('Error removing attendee');
-    } else {
-      fetchEventAttendees(eventId);
-      alert('Attendee removed successfully!');
+      setError(error.message || 'Failed to remove attendee.');
     }
   };
 
@@ -337,6 +372,20 @@ const Events = () => {
           </button>
         </div>
 
+        {/* Success Message */}
+        {success && (
+          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
+            {success}
+          </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
+            {error}
+          </div>
+        )}
+
         {/* Event Creation Form */}
         {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
@@ -415,9 +464,17 @@ const Events = () => {
           </div>
         )}
 
+        {/* Loading State */}
+        {loading && events.length === 0 && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading events...</p>
+          </div>
+        )}
+
         {/* Events List */}
         <div className="space-y-6">
-          {events.length === 0 ? (
+          {!loading && events.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
@@ -597,7 +654,7 @@ const Events = () => {
                                 setIsMemberDropdownOpen(true);
                               }}
                               onFocus={() => setIsMemberDropdownOpen(true)}
-                              placeholder="Search members by name, surname, email, or phone number..."
+                              placeholder="Search by name, surname, email, or phone..."
                               className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                             />
                             {searchTerm && (
@@ -649,7 +706,7 @@ const Events = () => {
                           )}
 
                           {/* Member Dropdown */}
-                          {isMemberDropdownOpen && filteredMembers.length > 0 && (
+                          {isMemberDropdownOpen && filteredMembers.length > 0 && !selectedMember && (
                             <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
                               {filteredMembers.map((member) => (
                                 <button
@@ -704,12 +761,12 @@ const Events = () => {
                           <div className="flex items-center gap-3">
                             <input
                               type="checkbox"
-                              id="firstTime"
+                              id={`firstTime-${event.id}`}
                               checked={attendeeFormData.firstTime}
                               onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
                               className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                             />
-                            <label htmlFor="firstTime" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <label htmlFor={`firstTime-${event.id}`} className="text-sm font-medium text-gray-700 dark:text-gray-300">
                               First Time Attending this Event
                             </label>
                           </div>
