@@ -40,7 +40,6 @@ const Trends = () => {
     try {
       setLoading(true);
       
-      // Fetch members data
       const { data: members, error: membersError } = await supabase
         .from('members')
         .select('*')
@@ -48,14 +47,12 @@ const Trends = () => {
 
       if (membersError) throw membersError;
 
-      // Fetch groups data
       const { data: groups, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*');
 
       if (groupsError) throw groupsError;
 
-      // Fetch meetings and attendance data
       const { data: meetings, error: meetingsError } = await supabase
         .from('meetings')
         .select('*, attendance(*)')
@@ -63,7 +60,6 @@ const Trends = () => {
 
       if (meetingsError) throw meetingsError;
 
-      // Calculate member statistics
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
       
@@ -82,7 +78,6 @@ const Trends = () => {
         newcomers
       });
 
-      // Calculate trends
       const calculatedTrends: TrendData[] = [
         {
           label: 'Total Members',
@@ -116,7 +111,6 @@ const Trends = () => {
 
       setTrends(calculatedTrends);
 
-      // Calculate growth percentages
       const totalMeetings = meetings?.length || 1;
       const totalAttendance = meetings?.reduce((acc, meeting) => 
         acc + (meeting.attendance?.filter((a: any) => a.status === 'present').length || 0), 0) || 0;
