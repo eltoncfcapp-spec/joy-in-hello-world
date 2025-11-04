@@ -1,1100 +1,1481 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, FileText, Download, Filter, Target, Star, TrendingDown, X } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
-interface StatCard {
-  icon: any;
-  label: string;
-  value: string;
-  color: string;
-  description?: string;
+interface Event {
+  id: string;
+  name: string;
+  topic: string | null;
+  event_date: string;
+  event_time: string;
+  location: string | null;
+  created_at: string | null;
+  is_whole_church: boolean;
+  target_groups: string[] | null;
+  target_departments: string[] | null;
+  is_completed: boolean;
+  completed_at: string | null;
 }
 
-interface AbsentMember {
+interface Member {
   id: string;
   name: string;
   surname: string;
   email: string | null;
   phone: string | null;
-  last_attendance_date: string | null;
-  consecutive_absences: number;
-  cell_group_name: string | null;
+  cell_group_id: string | null;
+  cell_groups: { name: string } | null;
+  ministry_group_id: string | null;
+  ministry_groups: { name: string } | null;
+  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+}
+
+interface CellGroup {
+  id: string;
+  name: string;
+}
+
+interface MinistryGroup {
+  id: string;
+  name: string;
+}
+
+interface EventAttendee {
+  id: string;
+  event_id: string;
+  members_id: string;
+  first_time: boolean | null;
+  invited_by_id: string | null;
+  attended_at: string | null;
+  members: Member;
+  invited_by_member?: {
+    id: string;
+    name: string;
+    surname: string;
+  } | null;
+}
+
+interface AbsentMember extends Member {
   absence_reason?: string;
-  member_since: string;
-  gender: string;
+  marked_absent: boolean;
 }
 
-interface AttendanceReport {
-  meeting_date: string;
-  meeting_type: string;
-  total_members: number;
-  present_count: number;
-  absent_count: number;
-  late_count: number;
-  attendance_rate: number;
-  male_present: number;
-  female_present: number;
+interface AttendeeFormData {
+  memberId: string;
+  firstTime: boolean;
+  invitedById: string;
 }
 
-interface GrowthMetrics {
-  new_members_this_month: number;
-  new_members_last_month: number;
-  growth_rate: number;
-  permanent_members: number;
-  newcomers: number;
-  total_members: number;
-  became_members_this_month: number;
-  became_members_last_month: number;
-}
-
-interface CellGroupStats {
-  group_name: string;
-  total_members: number;
-  avg_attendance: number;
-  meetings_this_month: number;
-  leader_name: string;
-  trend: 'increasing' | 'decreasing' | 'steady';
-  previous_month_attendance: number;
-}
-
-interface InviterStats {
-  invited_by: string;
-  invite_count: number;
-  new_members_count: number;
-}
-
-interface GenderStats {
-  male: number;
-  female: number;
-  male_present: number;
-  female_present: number;
-}
-
-interface FilterState {
-  gender: 'all' | 'male' | 'female';
-  cell_group: string;
-  attendance_status: 'all' | 'present' | 'absent';
-  meeting_type: 'all' | 'sunday' | 'cell' | 'other';
-  date_from: string;
-  date_to: string;
-}
-
-const Analytics = () => {
-  const [stats, setStats] = useState<StatCard[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
-  const [sundayAbsentees, setSundayAbsentees] = useState<AbsentMember[]>([]);
-  const [threeTimeAbsentees, setThreeTimeAbsentees] = useState<AbsentMember[]>([]);
-  const [attendanceReports, setAttendanceReports] = useState<AttendanceReport[]>([]);
-  const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics>({
-    new_members_this_month: 0,
-    new_members_last_month: 0,
-    growth_rate: 0,
-    permanent_members: 0,
-    newcomers: 0,
-    total_members: 0,
-    became_members_this_month: 0,
-    became_members_last_month: 0
+const Events = () => {
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
+  const [showAbsentList, setShowAbsentList] = useState<string | null>(null);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
+  const [attendees, setAttendees] = useState<EventAttendee[]>([]);
+  const [absentMembers, setAbsentMembers] = useState<{[key: string]: AbsentMember[]}>({});
+  const [loading, setLoading] = useState(false);
+  const [expandedEvents, setExpandedEvents] = useState<{[key: string]: boolean}>({});
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [inviterSearchTerm, setInviterSearchTerm] = useState('');
+  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
+  const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
+  
+  const [eventFormData, setEventFormData] = useState({
+    name: '',
+    topic: '',
+    eventDate: '',
+    eventTime: '',
+    location: '',
+    isWholeChurch: true,
+    targetCellGroups: [] as string[],
+    targetMinistryGroups: [] as string[],
   });
-  const [cellGroupStats, setCellGroupStats] = useState<CellGroupStats[]>([]);
-  const [inviterStats, setInviterStats] = useState<InviterStats[]>([]);
-  const [genderStats, setGenderStats] = useState<GenderStats>({
-    male: 0,
-    female: 0,
-    male_present: 0,
-    female_present: 0
-  });
-  const [cellGroups, setCellGroups] = useState<any[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
 
-  // Default date range: last 30 days
-  const defaultDateFrom = new Date();
-  defaultDateFrom.setDate(defaultDateFrom.getDate() - 30);
-
-  const [filters, setFilters] = useState<FilterState>({
-    gender: 'all',
-    cell_group: 'all',
-    attendance_status: 'all',
-    meeting_type: 'all',
-    date_from: defaultDateFrom.toISOString().split('T')[0],
-    date_to: new Date().toISOString().split('T')[0]
+  const [attendeeFormData, setAttendeeFormData] = useState<AttendeeFormData>({
+    memberId: '',
+    firstTime: false,
+    invitedById: '',
   });
+
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
 
   useEffect(() => {
-    fetchAnalyticsData();
-  }, [filters]);
+    fetchEvents();
+    fetchMembers();
+    fetchCellGroups();
+    fetchMinistryGroups();
+  }, []);
 
-  const fetchAnalyticsData = async () => {
+  const fetchEvents = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('event_date', { ascending: true });
 
-      // Fetch all data with real Supabase queries
-      const [membersData, groupsData, meetingsData, attendanceData, cellGroupsData] = await Promise.all([
-        // Members query with filters
-        buildMembersQuery(),
-        // Cell groups query
-        supabase.from('cell_groups').select('*'),
-        // Meetings query with filters
-        buildMeetingsQuery(),
-        // Attendance query with filters
-        buildAttendanceQuery(),
-        // Cell groups with leader info
-        supabase.from('cell_groups').select('*, members!cell_groups_leader_id_fkey(name, surname)')
-      ]);
+      if (error) {
+        throw error;
+      }
 
-      if (membersData.error) throw membersData.error;
-      if (groupsData.error) throw groupsData.error;
-      if (meetingsData.error) throw meetingsData.error;
-      if (attendanceData.error) throw attendanceData.error;
-      if (cellGroupsData.error) throw cellGroupsData.error;
-
-      const members = membersData.data || [];
-      const groups = groupsData.data || [];
-      const meetings = meetingsData.data || [];
-      const allAttendance = attendanceData.data || [];
-      const allCellGroups = cellGroupsData.data || [];
-
-      setCellGroups(allCellGroups);
-
-      // Calculate all metrics with real data
-      await calculateAllMetrics(members, groups, meetings, allAttendance, allCellGroups);
-
-    } catch (error) {
-      console.error('Error fetching analytics data:', error);
+      setEvents(data || []);
+      // Fetch attendees for each event
+      data?.forEach(event => {
+        fetchEventAttendees(event.id);
+        if (event.is_completed) {
+          calculateAbsentMembers(event);
+        }
+      });
+    } catch (error: any) {
+      console.error('Error fetching events:', error);
+      setError(error.message || 'Failed to load events. Please check your connection.');
     } finally {
       setLoading(false);
     }
   };
 
-  const buildMembersQuery = () => {
-    let query = supabase.from('members').select('*');
-
-    // Apply gender filter
-    if (filters.gender !== 'all') {
-      query = query.eq('gender', filters.gender);
-    }
-
-    // Apply cell group filter
-    if (filters.cell_group !== 'all') {
-      query = query.eq('cell_group_id', filters.cell_group);
-    }
-
-    return query;
-  };
-
-  const buildMeetingsQuery = () => {
-    let query = supabase
-      .from('meetings')
-      .select('*, attendance(status, member_id, notes)');
-
-    // Apply date filter
-    if (filters.date_from) {
-      query = query.gte('meeting_date', filters.date_from);
-    }
-    if (filters.date_to) {
-      query = query.lte('meeting_date', filters.date_to);
-    }
-
-    // Apply meeting type filter
-    if (filters.meeting_type === 'sunday') {
-      query = query.or('topic.ilike.%sunday%,topic.ilike.%service%');
-    } else if (filters.meeting_type === 'cell') {
-      query = query.or('topic.ilike.%cell%,topic.ilike.%group%');
-    }
-
-    return query;
-  };
-
-  const buildAttendanceQuery = () => {
-    let query = supabase.from('attendance').select('*');
-
-    // Apply attendance status filter
-    if (filters.attendance_status !== 'all') {
-      query = query.eq('status', filters.attendance_status);
-    }
-
-    return query;
-  };
-
-  const calculateAllMetrics = async (members: any[], groups: any[], meetings: any[], attendance: any[], cellGroups: any[]) => {
-    // Calculate basic statistics with real data
-    const totalMembers = members.length;
-    const totalGroups = groups.length;
-    
-    // Events in date range
-    const eventsInRange = meetings.length;
-
-    // Calculate real attendance data
-    const totalPresent = meetings.reduce((acc, meeting) => {
-      const presentCount = meeting.attendance?.filter((a: any) => a.status === 'present').length || 0;
-      return acc + presentCount;
-    }, 0);
-    
-    const totalPossibleAttendance = meetings.length * totalMembers;
-    const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
-
-    // Update main stats with real data
-    setStats([
-      { 
-        icon: Users, 
-        label: 'Total Members', 
-        value: totalMembers.toString(), 
-        color: 'bg-blue-50 dark:bg-blue-900/20',
-        description: `${members.filter(m => m.is_permanent_member).length} permanent`
-      },
-      { 
-        icon: Users, 
-        label: 'Active Groups', 
-        value: totalGroups.toString(), 
-        color: 'bg-green-50 dark:bg-green-900/20',
-        description: `${groups.filter(g => g.members && g.members.length > 0).length} with members`
-      },
-      { 
-        icon: Calendar, 
-        label: 'Meetings', 
-        value: eventsInRange.toString(), 
-        color: 'bg-purple-50 dark:bg-purple-900/20',
-        description: `in selected period`
-      },
-      { 
-        icon: BarChart3, 
-        label: 'Avg Attendance', 
-        value: `${avgAttendance}%`, 
-        color: 'bg-orange-50 dark:bg-orange-900/20',
-        description: 'Across filtered meetings'
-      },
-    ]);
-
-    // Calculate all detailed metrics with real data
-    await calculateGrowthMetrics(members);
-    await calculateGenderStats(members, meetings);
-    await calculateInviterStats(members);
-    await generateAttendanceReports(meetings, members);
-    await calculateCellGroupStats(cellGroups, meetings, members);
-    await findConsecutiveAbsences(members, meetings);
-    await findSundayServiceAbsentees(members, meetings);
-    await findThreeTimeAbsentees(members, meetings);
-  };
-
-  const calculateGrowthMetrics = async (members: any[]) => {
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth();
-    const currentYear = currentDate.getFullYear();
-    
-    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-
-    // Real query for new members in date range
-    const newMembersInRange = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return memberDate >= fromDate && memberDate <= toDate;
-    }).length;
-
-    // Real data for growth rate calculation
-    const newMembersThisMonth = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
-    }).length;
-
-    const newMembersLastMonth = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
-    }).length;
-
-    // Real query for members who became permanent in date range
-    const becameMembersInRange = members.filter(member => {
-      if (!member.permanent_member_date) return false;
-      const permanentDate = new Date(member.permanent_member_date);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return permanentDate >= fromDate && permanentDate <= toDate;
-    }).length;
-
-    const growthRate = newMembersLastMonth > 0 
-      ? Math.round(((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100)
-      : newMembersThisMonth > 0 ? 100 : 0;
-
-    setGrowthMetrics({
-      new_members_this_month: newMembersInRange,
-      new_members_last_month: newMembersLastMonth,
-      growth_rate: growthRate,
-      permanent_members: members.filter(m => m.is_permanent_member).length,
-      newcomers: members.filter(m => m.status === 'newcomer').length,
-      total_members: members.length,
-      became_members_this_month: becameMembersInRange,
-      became_members_last_month: 0
-    });
-  };
-
-  const calculateGenderStats = async (members: any[], meetings: any[]) => {
-    // Real gender data from members
-    const maleMembers = members.filter(m => m.gender === 'male');
-    const femaleMembers = members.filter(m => m.gender === 'female');
-    
-    // Calculate real attendance by gender
-    let malePresent = 0;
-    let femalePresent = 0;
-
-    meetings.forEach(meeting => {
-      meeting.attendance?.forEach((a: any) => {
-        if (a.status === 'present') {
-          const member = members.find(m => m.id === a.member_id);
-          if (member?.gender === 'male') malePresent++;
-          if (member?.gender === 'female') femalePresent++;
-        }
-      });
-    });
-
-    setGenderStats({
-      male: maleMembers.length,
-      female: femaleMembers.length,
-      male_present: malePresent,
-      female_present: femalePresent
-    });
-  };
-
-  const calculateInviterStats = async (members: any[]) => {
-    // Real inviter data from members table
-    const inviterMap = new Map();
-    
-    members.forEach(member => {
-      if (member.invited_by && member.invited_by.trim() !== '') {
-        const currentCount = inviterMap.get(member.invited_by) || 0;
-        inviterMap.set(member.invited_by, currentCount + 1);
-      }
-    });
-
-    const inviterStatsArray: InviterStats[] = Array.from(inviterMap.entries())
-      .map(([invited_by, invite_count]) => ({
-        invited_by,
-        invite_count,
-        new_members_count: members.filter(m => m.invited_by === invited_by && m.status === 'newcomer').length
-      }))
-      .sort((a, b) => b.invite_count - a.invite_count)
-      .slice(0, 10);
-
-    setInviterStats(inviterStatsArray);
-  };
-
-  const generateAttendanceReports = (meetings: any[], members: any[]) => {
-    // Real attendance data for each meeting
-    const reports: AttendanceReport[] = meetings.map(meeting => {
-      const presentAttendees = meeting.attendance?.filter((a: any) => a.status === 'present') || [];
-      const absentAttendees = meeting.attendance?.filter((a: any) => a.status === 'absent') || [];
-      const lateAttendees = meeting.attendance?.filter((a: any) => a.status === 'late') || [];
+  const fetchMembers = async () => {
+    try {
+      setError(null);
       
-      const present = presentAttendees.length;
-      const absent = absentAttendees.length;
-      const late = lateAttendees.length;
-      const total = members.length;
-      
-      // Calculate real gender attendance
-      let malePresent = 0;
-      let femalePresent = 0;
-      
-      presentAttendees.forEach((a: any) => {
-        const member = members.find(m => m.id === a.member_id);
-        if (member) {
-          if (member.gender === 'male') malePresent++;
-          if (member.gender === 'female') femalePresent++;
-        }
-      });
-
-      return {
-        meeting_date: meeting.meeting_date,
-        meeting_type: meeting.topic || 'General Meeting',
-        total_members: total,
-        present_count: present,
-        absent_count: absent,
-        late_count: late,
-        attendance_rate: total > 0 ? Math.round((present / total) * 100) : 0,
-        male_present: malePresent,
-        female_present: femalePresent
-      };
-    });
-
-    setAttendanceReports(reports.slice(0, 10));
-  };
-
-  const calculateCellGroupStats = async (cellGroups: any[], meetings: any[], members: any[]) => {
-    const stats: CellGroupStats[] = [];
-
-    for (const group of cellGroups) {
-      // Real query for group members
-      const { data: groupMembers } = await supabase
+      const { data, error } = await supabase
         .from('members')
+        .select(`
+          id,
+          name,
+          surname,
+          email,
+          phone,
+          cell_group_id,
+          ministry_group_id,
+          status,
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name)
+        `)
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Error fetching members:', error);
+      setError(error.message || 'Failed to load members.');
+    }
+  };
+
+  const fetchCellGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setCellGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching cell groups:', error);
+      setError(error.message || 'Failed to load cell groups.');
+    }
+  };
+
+  const fetchMinistryGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setMinistryGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching ministry groups:', error);
+      setError(error.message || 'Failed to load ministry groups.');
+    }
+  };
+
+  const fetchEventAttendees = async (eventId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name)
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
+        .eq('event_id', eventId)
+        .order('attended_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      setAttendees(prev => {
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...(data || []) as EventAttendee[]];
+      });
+    } catch (error: any) {
+      console.error('Error fetching attendees:', error);
+      await fetchEventAttendeesFallback(eventId);
+    }
+  };
+
+  const fetchEventAttendeesFallback = async (eventId: string) => {
+    try {
+      const { data: attendeesData, error: attendeesError } = await supabase
+        .from('event_attendees')
         .select('*')
-        .eq('cell_group_id', group.id);
+        .eq('event_id', eventId)
+        .order('attended_at', { ascending: false });
 
-      if (!groupMembers) continue;
+      if (attendeesError) throw attendeesError;
 
-      const groupMemberIds = groupMembers.map(m => m.id);
-      
-      // Calculate real attendance for this group
-      let presentCount = 0;
-      let totalPossible = 0;
-      
-      meetings.forEach(meeting => {
-        meeting.attendance?.forEach((a: any) => {
-          if (groupMemberIds.includes(a.member_id)) {
-            totalPossible++;
-            if (a.status === 'present') presentCount++;
+      const attendeesWithDetails = await Promise.all(
+        (attendeesData || []).map(async (attendee) => {
+          // Fetch attendee member details
+          const { data: memberData } = await supabase
+            .from('members')
+            .select(`
+              id,
+              name,
+              surname,
+              email,
+              phone,
+              status,
+              cell_group_id,
+              ministry_group_id,
+              cell_groups!fk_cell_group(name),
+              ministry_groups(name)
+            `)
+            .eq('id', attendee.members_id)
+            .single();
+
+          // Fetch inviter details if exists
+          let invitedByMember = null;
+          if (attendee.invited_by_id) {
+            const { data: inviterData } = await supabase
+              .from('members')
+              .select('id, name, surname')
+              .eq('id', attendee.invited_by_id)
+              .single();
+            invitedByMember = inviterData;
           }
-        });
+
+          return {
+            ...attendee,
+            members: memberData || {
+              id: attendee.members_id,
+              name: 'Unknown',
+              surname: 'Member',
+              email: null,
+              phone: null,
+              cell_group_id: null,
+              ministry_group_id: null,
+              cell_groups: null,
+              ministry_groups: null,
+              status: null
+            },
+            invited_by_member: invitedByMember
+          };
+        })
+      );
+
+      setAttendees(prev => {
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...attendeesWithDetails];
       });
-      
-      const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
-      
-      // Get real leader info
-      const leaderName = group.leader ? 
-        `${group.leader.name} ${group.leader.surname}` : 'Not assigned';
+    } catch (error: any) {
+      console.error('Error in fallback attendees fetch:', error);
+      setError('Failed to load attendees details.');
+    }
+  };
 
-      // Simple trend calculation based on recent performance
-      const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
+  const calculateAbsentMembers = (event: Event) => {
+    const eventAttendees = getEventAttendees(event.id);
+    const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
-      stats.push({
-        group_name: group.name,
-        total_members: groupMembers.length,
-        avg_attendance: avgAttendance,
-        meetings_this_month: meetings.length,
-        leader_name: leaderName,
-        trend: trend,
-        previous_month_attendance: Math.max(0, avgAttendance - 10) // Simplified for demo
+    let expectedMembers: Member[] = [];
+
+    if (event.is_whole_church) {
+      // For whole church events, all active members are expected
+      expectedMembers = members.filter(member => 
+        member.status !== 'not_attending'
+      );
+    } else {
+      // For targeted events, only members from selected groups/departments
+      expectedMembers = members.filter(member => {
+        // Check cell groups
+        const inTargetCellGroup = event.target_groups?.some(groupId => 
+          member.cell_group_id === groupId
+        );
+        
+        // Check ministry groups
+        const inTargetMinistryGroup = event.target_departments?.some(deptId => 
+          member.ministry_group_id === deptId
+        );
+
+        return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
       });
     }
 
-    setCellGroupStats(stats.filter(group => group.total_members > 0));
+    // Find absent members (expected but not attending)
+    const absent = expectedMembers
+      .filter(member => !attendeeIds.has(member.id))
+      .map(member => ({
+        ...member,
+        marked_absent: true,
+        absence_reason: 'Not registered'
+      }));
+
+    setAbsentMembers(prev => ({
+      ...prev,
+      [event.id]: absent
+    }));
   };
 
-  const findConsecutiveAbsences = async (members: any[], meetings: any[]) => {
+  const handleCompleteEvent = async (eventId: string) => {
+    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
     try {
-      const absentMembersList: AbsentMember[] = [];
+      // First, calculate absent members for this event
+      const event = events.find(e => e.id === eventId);
+      if (!event) {
+        throw new Error('Event not found');
+      }
+
+      calculateAbsentMembers(event);
+
+      // Mark event as completed in the database
+      const { error } = await supabase
+        .from('events')
+        .update({
+          is_completed: true,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', eventId);
+
+      if (error) {
+        throw error;
+      }
+
+      setSuccess('Event marked as completed! Absent members have been calculated.');
+      await fetchEvents();
       
-      // Get recent meetings sorted by date
-      const recentMeetings = meetings
-        .sort((a, b) => new Date(a.meeting_date).getTime() - new Date(b.meeting_date).getTime())
-        .slice(-5); // Last 5 meetings
-
-      for (const member of members) {
-        let consecutiveAbsences = 0;
-        let lastAttendanceDate: string | null = null;
-
-        // Check last 3 meetings for this member
-        for (const meeting of recentMeetings.slice(-3)) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
-            consecutiveAbsences++;
-          } else {
-            consecutiveAbsences = 0;
-            lastAttendanceDate = meeting.meeting_date;
-          }
-        }
-
-        if (consecutiveAbsences >= 2) {
-          // Get real cell group name
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
-
-          absentMembersList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            email: member.email,
-            phone: member.phone,
-            last_attendance_date: lastAttendanceDate,
-            consecutive_absences: consecutiveAbsences,
-            cell_group_name: cellGroup?.name || null,
-            member_since: member.created_at,
-            gender: member.gender || 'unknown'
-          });
-        }
-      }
-
-      setAbsentMembers(absentMembersList);
-    } catch (error) {
-      console.error('Error finding consecutive absences:', error);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error completing event:', error);
+      setError(error.message || 'Failed to complete event. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const findSundayServiceAbsentees = async (members: any[], meetings: any[]) => {
+  const handleEventSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    
     try {
-      const sundayAbsenteesList: AbsentMember[] = [];
+      const eventData: any = {
+        name: eventFormData.name.trim(),
+        topic: eventFormData.topic.trim() || null,
+        event_date: eventFormData.eventDate,
+        event_time: eventFormData.eventTime,
+        location: eventFormData.location.trim() || null,
+        is_whole_church: eventFormData.isWholeChurch,
+        is_completed: false,
+        completed_at: null,
+      };
+
+      // Only include target groups if not a whole church event
+      if (!eventFormData.isWholeChurch) {
+        eventData.target_groups = eventFormData.targetCellGroups.length > 0 ? eventFormData.targetCellGroups : null;
+        eventData.target_departments = eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null;
+      }
+
+      const { error } = await supabase.from('events').insert([eventData]);
+
+      if (error) {
+        throw error;
+      }
+
+      setShowEventForm(false);
+      setEventFormData({ 
+        name: '', 
+        topic: '', 
+        eventDate: '', 
+        eventTime: '', 
+        location: '',
+        isWholeChurch: true,
+        targetCellGroups: [],
+        targetMinistryGroups: [],
+      });
+      setSuccess('Event created successfully!');
+      await fetchEvents();
       
-      // Find real Sunday meetings
-      const sundayMeetings = meetings.filter(meeting => {
-        const meetingDate = new Date(meeting.meeting_date);
-        return meetingDate.getDay() === 0; // Sunday
-      }).slice(-2); // Last 2 Sundays
-
-      for (const member of members) {
-        let sundayAbsences = 0;
-
-        for (const meeting of sundayMeetings) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
-            sundayAbsences++;
-          }
-        }
-
-        if (sundayAbsences >= 2) {
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
-
-          sundayAbsenteesList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            email: member.email,
-            phone: member.phone,
-            last_attendance_date: null,
-            consecutive_absences: sundayAbsences,
-            cell_group_name: cellGroup?.name || null,
-            member_since: member.created_at,
-            gender: member.gender || 'unknown'
-          });
-        }
-      }
-
-      setSundayAbsentees(sundayAbsenteesList);
-    } catch (error) {
-      console.error('Error finding Sunday absentees:', error);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error creating event:', error);
+      setError(error.message || 'Failed to create event. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], meetings: any[]) => {
+  const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
+    e.preventDefault();
+    
+    if (!attendeeFormData.memberId) {
+      setError('Please select a member');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    // Check if member is already attending this event
+    const alreadyAttending = attendees.some(
+      a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
+    );
+
+    if (alreadyAttending) {
+      setError('This member is already registered for this event');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
     try {
-      const threeTimeAbsenteesList: AbsentMember[] = [];
-
-      for (const member of members) {
-        let totalAbsences = 0;
-
-        for (const meeting of meetings) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
-            totalAbsences++;
-          }
-        }
-
-        if (totalAbsences >= 3) {
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
-
-          threeTimeAbsenteesList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            email: member.email,
-            phone: member.phone,
-            last_attendance_date: null,
-            consecutive_absences: totalAbsences,
-            cell_group_name: cellGroup?.name || null,
-            member_since: member.created_at,
-            gender: member.gender || 'unknown'
-          });
-        }
+      const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
+      
+      if (!selectedMember) {
+        throw new Error('Selected member not found');
       }
 
-      setThreeTimeAbsentees(threeTimeAbsenteesList);
-    } catch (error) {
-      console.error('Error finding three-time absentees:', error);
+      const attendeeData: any = {
+        event_id: eventId,
+        members_id: attendeeFormData.memberId,
+        name: selectedMember.name,
+        surname: selectedMember.surname,
+        first_time: attendeeFormData.firstTime,
+      };
+
+      // Only include invited_by_id if it's provided
+      if (attendeeFormData.invitedById) {
+        attendeeData.invited_by_id = attendeeFormData.invitedById;
+      }
+
+      const { error } = await supabase.from('event_attendees').insert([attendeeData]);
+
+      if (error) {
+        throw error;
+      }
+
+      resetAttendeeForm();
+      await fetchEventAttendees(eventId);
+      
+      // Recalculate absent members if event is completed
+      const event = events.find(e => e.id === eventId);
+      if (event?.is_completed) {
+        calculateAbsentMembers(event);
+      }
+      
+      setSuccess('Attendee added successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error adding attendee:', error);
+      setError(error.message || 'Failed to add attendee. Please try again.');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
+    if (!confirm('Are you sure you want to remove this attendee?')) {
+      return;
+    }
+
+    try {
+      setError(null);
+      setSuccess(null);
+      
+      const { error } = await supabase
+        .from('event_attendees')
+        .delete()
+        .eq('id', attendeeId);
+
+      if (error) {
+        throw error;
+      }
+
+      await fetchEventAttendees(eventId);
+      
+      // Recalculate absent members if event is completed
+      const event = events.find(e => e.id === eventId);
+      if (event?.is_completed) {
+        calculateAbsentMembers(event);
+      }
+      
+      setSuccess('Attendee removed successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error removing attendee:', error);
+      setError(error.message || 'Failed to remove attendee.');
+    }
+  };
+
+  const resetAttendeeForm = () => {
+    setShowAttendeeForm(null);
+    setAttendeeFormData({
+      memberId: '',
+      firstTime: false,
+      invitedById: '',
+    });
+    setSelectedMember(null);
+    setSelectedInviter(null);
+    setSearchTerm('');
+    setInviterSearchTerm('');
+    setIsMemberDropdownOpen(false);
+    setIsInviterDropdownOpen(false);
+  };
+
+  const handleMemberSelect = (member: Member) => {
+    setAttendeeFormData({
+      ...attendeeFormData,
+      memberId: member.id,
+    });
+    setSelectedMember(member);
+    setSearchTerm(`${member.name} ${member.surname}`);
+    setIsMemberDropdownOpen(false);
+  };
+
+  const handleInviterSelect = (member: Member) => {
+    setAttendeeFormData({
+      ...attendeeFormData,
+      invitedById: member.id,
+    });
+    setSelectedInviter(member);
+    setInviterSearchTerm(`${member.name} ${member.surname}`);
+    setIsInviterDropdownOpen(false);
+  };
+
+  const toggleEventExpansion = (eventId: string) => {
+    setExpandedEvents(prev => ({
+      ...prev,
+      [eventId]: !prev[eventId]
+    }));
+  };
+
+  const toggleAbsentList = (eventId: string) => {
+    setShowAbsentList(prev => prev === eventId ? null : eventId);
+  };
+
+  const filteredMembers = members.filter(member => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      member.name.toLowerCase().includes(searchLower) ||
+      member.surname.toLowerCase().includes(searchLower) ||
+      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+      member.phone?.toLowerCase().includes(searchLower) ||
+      member.email?.toLowerCase().includes(searchLower)
+    );
+  });
+
+  const filteredInviters = members.filter(member => {
+    const searchLower = inviterSearchTerm.toLowerCase();
+    return (
+      member.name.toLowerCase().includes(searchLower) ||
+      member.surname.toLowerCase().includes(searchLower) ||
+      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+      member.phone?.toLowerCase().includes(searchLower) ||
+      member.email?.toLowerCase().includes(searchLower)
+    );
+  });
+
+  const getEventAttendees = (eventId: string) => {
+    return attendees.filter(attendee => attendee.event_id === eventId);
+  };
+
+  const getUniqueAttendees = (eventId: string) => {
+    const eventAttendees = getEventAttendees(eventId);
+    const uniqueAttendees = eventAttendees.filter((attendee, index, self) =>
+      index === self.findIndex(a => a.members_id === attendee.members_id)
+    );
+    return uniqueAttendees;
+  };
+
+  const getEventAbsentMembers = (eventId: string) => {
+    return absentMembers[eventId] || [];
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const formatTime = (timeString: string) => {
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const formattedHour = hour % 12 || 12;
+    return `${formattedHour}:${minutes} ${ampm}`;
   };
 
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
-  const getTrendIcon = (trend: 'increasing' | 'decreasing' | 'steady') => {
-    switch (trend) {
-      case 'increasing':
-        return <TrendingUp className="h-4 w-4 text-green-500" />;
-      case 'decreasing':
-        return <TrendingDown className="h-4 w-4 text-red-500" />;
-      default:
-        return <Target className="h-4 w-4 text-gray-500" />;
+  const getStatusBadge = (status: string | null) => {
+    const badges = {
+      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
+      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
+      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
+    };
+    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
+  };
+
+  const getEventScopeBadge = (event: Event) => {
+    if (event.is_whole_church) {
+      return {
+        color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+        text: 'Whole Church',
+        icon: Building
+      };
+    } else {
+      return {
+        color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
+        text: 'Target Groups',
+        icon: GroupsIcon
+      };
     }
   };
 
-  const clearFilters = () => {
-    setFilters({
-      gender: 'all',
-      cell_group: 'all',
-      attendance_status: 'all',
-      meeting_type: 'all',
-      date_from: defaultDateFrom.toISOString().split('T')[0],
-      date_to: new Date().toISOString().split('T')[0]
-    });
+  const getEventStatusBadge = (event: Event) => {
+    if (event.is_completed) {
+      return {
+        color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
+        text: 'Completed',
+        icon: CheckCircle
+      };
+    } else {
+      return {
+        color: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
+        text: 'Active',
+        icon: AlertCircle
+      };
+    }
   };
-
-  const hasActiveFilters = () => {
-    return filters.gender !== 'all' || 
-           filters.cell_group !== 'all' || 
-           filters.attendance_status !== 'all' || 
-           filters.meeting_type !== 'all';
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading real analytics data from database...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Real-Time Analytics
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              Events Calendar
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Live data from your church database</p>
+            <p className="text-gray-600 dark:text-gray-400">Manage church events and track attendance</p>
           </div>
-          
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Filter className="h-4 w-4" />
-              Filters
-              {hasActiveFilters() && (
-                <span className="bg-red-500 text-white px-2 py-1 rounded-full text-xs">
-                  Active
-                </span>
-              )}
-            </button>
-          </div>
+          <button 
+            onClick={() => setShowEventForm(!showEventForm)}
+            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+          >
+            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+            {showEventForm ? 'Cancel' : 'Create Event'}
+          </button>
         </div>
 
-        {/* Filters Panel */}
-        {showFilters && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Filter Analytics</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={clearFilters}
-                  className="flex items-center gap-2 px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                >
-                  <X className="h-4 w-4" />
-                  Clear All
-                </button>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Gender Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Gender
-                </label>
-                <select
-                  value={filters.gender}
-                  onChange={(e) => setFilters({...filters, gender: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Genders</option>
-                  <option value="male">Male Only</option>
-                  <option value="female">Female Only</option>
-                </select>
-              </div>
-
-              {/* Cell Group Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Cell Group
-                </label>
-                <select
-                  value={filters.cell_group}
-                  onChange={(e) => setFilters({...filters, cell_group: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Groups</option>
-                  {cellGroups.map(group => (
-                    <option key={group.id} value={group.id}>{group.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Attendance Status Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Attendance Status
-                </label>
-                <select
-                  value={filters.attendance_status}
-                  onChange={(e) => setFilters({...filters, attendance_status: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Status</option>
-                  <option value="present">Present Only</option>
-                  <option value="absent">Absent Only</option>
-                </select>
-              </div>
-
-              {/* Meeting Type Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Meeting Type
-                </label>
-                <select
-                  value={filters.meeting_type}
-                  onChange={(e) => setFilters({...filters, meeting_type: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Meetings</option>
-                  <option value="sunday">Sunday Services</option>
-                  <option value="cell">Cell Groups</option>
-                  <option value="other">Other Meetings</option>
-                </select>
-              </div>
-
-              {/* Date From */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Date From
-                </label>
-                <input
-                  type="date"
-                  value={filters.date_from}
-                  onChange={(e) => setFilters({...filters, date_from: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-              </div>
-
-              {/* Date To */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Date To
-                </label>
-                <input
-                  type="date"
-                  value={filters.date_to}
-                  onChange={(e) => setFilters({...filters, date_to: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-              </div>
-            </div>
-
-            {/* Active Filters Display */}
-            {hasActiveFilters() && (
-              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <div className="text-sm text-blue-700 dark:text-blue-300">
-                  Active Filters: 
-                  {filters.gender !== 'all' && ` ${filters.gender}`}
-                  {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
-                  {filters.attendance_status !== 'all' && `, ${filters.attendance_status}`}
-                  {filters.meeting_type !== 'all' && `, ${filters.meeting_type} meetings`}
-                </div>
-              </div>
-            )}
+        {/* Success Message */}
+        {success && (
+          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
+            {success}
           </div>
         )}
 
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{genderStats.male}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Male Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">
-              {genderStats.male_present} present
-            </div>
+        {/* Error Message */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
+            {error}
           </div>
-          <div className="bg-pink-50 dark:bg-pink-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-pink-600 dark:text-pink-400">{genderStats.female}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Female Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">
-              {genderStats.female_present} present
-            </div>
-          </div>
-          <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">{growthMetrics.new_members_this_month}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">New Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
-          </div>
-          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{growthMetrics.became_members_this_month}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Became Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
-          </div>
-        </div>
+        )}
 
-        {/* Main Analytics Grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-          {/* Top Inviters */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-              <Star className="h-5 w-5 text-yellow-500" />
-              Top Inviters
-            </h2>
-            <div className="space-y-3">
-              {inviterStats.length > 0 ? inviterStats.map((inviter, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <div className="font-semibold text-gray-900 dark:text-white">{inviter.invited_by}</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                        {inviter.new_members_count} new members
+        {/* Event Creation Form */}
+        {showEventForm && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
+            <form onSubmit={handleEventSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                  <input
+                    type="text"
+                    value={eventFormData.name}
+                    onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter event name"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
+                  <input
+                    type="text"
+                    value={eventFormData.topic}
+                    onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Event topic or theme"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
+                  <input
+                    type="date"
+                    value={eventFormData.eventDate}
+                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
+                  <input
+                    type="time"
+                    value={eventFormData.eventTime}
+                    onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="md:col-span-2 space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                  <input
+                    type="text"
+                    value={eventFormData.location}
+                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Event location"
+                  />
+                </div>
+
+                {/* Event Scope */}
+                <div className="md:col-span-2 space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                      <input
+                        type="radio"
+                        name="eventScope"
+                        checked={eventFormData.isWholeChurch}
+                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [] })}
+                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <Building className="h-5 w-5 text-purple-600" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                      <input
+                        type="radio"
+                        name="eventScope"
+                        checked={!eventFormData.isWholeChurch}
+                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
+                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <GroupsIcon className="h-5 w-5 text-orange-600" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups or ministry departments</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Target Groups Selection (only show if not whole church) */}
+                {!eventFormData.isWholeChurch && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {cellGroups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetCellGroups.includes(group.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                          </label>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                      {inviter.invite_count}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {ministryGroups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-500">invited</div>
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                  No inviter data available
-                </div>
-              )}
-            </div>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Creating...' : 'Create Event'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEventForm(false)}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
+        )}
 
-          {/* Gender Attendance */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Gender Attendance
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-700 dark:text-gray-300">Male Attendance</span>
-                  <span className="font-bold text-blue-600 dark:text-blue-400">
-                    {genderStats.male > 0 ? Math.round((genderStats.male_present / genderStats.male) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-blue-500 h-2 rounded-full" 
-                    style={{ width: `${genderStats.male > 0 ? Math.round((genderStats.male_present / genderStats.male) * 100) : 0}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.male_present} of {genderStats.male} members
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-700 dark:text-gray-300">Female Attendance</span>
-                  <span className="font-bold text-pink-600 dark:text-pink-400">
-                    {genderStats.female > 0 ? Math.round((genderStats.female_present / genderStats.female) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-pink-500 h-2 rounded-full" 
-                    style={{ width: `${genderStats.female > 0 ? Math.round((genderStats.female_present / genderStats.female) * 100) : 0}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.female_present} of {genderStats.female} members
-                </div>
-              </div>
-            </div>
+        {/* Loading State */}
+        {loading && events.length === 0 && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading events...</p>
           </div>
-        </div>
+        )}
 
-        {/* Cell Group Performance */}
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Cell Group Performance
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {cellGroupStats.length > 0 ? cellGroupStats.map((group, index) => (
-              <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-semibold text-gray-900 dark:text-white">{group.group_name}</div>
-                  {getTrendIcon(group.trend)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                  {group.total_members} members • {group.meetings_this_month} meetings
-                </div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
-                  <span className={`text-sm font-bold ${
-                    group.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
-                    group.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
-                    'text-red-600 dark:text-red-400'
-                  }`}>
-                    {group.avg_attendance}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mb-1">
-                  <div 
-                    className={`h-2 rounded-full ${
-                      group.avg_attendance >= 80 ? 'bg-green-500' :
-                      group.avg_attendance >= 60 ? 'bg-yellow-500' :
-                      'bg-red-500'
-                    }`}
-                    style={{ width: `${group.avg_attendance}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500">
-                  Leader: {group.leader_name}
-                </div>
-              </div>
-            )) : (
-              <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
-                No cell group data available
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Events List */}
+        <div className="space-y-6">
+          {!loading && events.length === 0 ? (
+            <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+              <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
+              <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
+            </div>
+          ) : (
+            events.map((event) => {
+              const eventAttendees = getUniqueAttendees(event.id);
+              const eventAbsentMembers = getEventAbsentMembers(event.id);
+              const isExpanded = expandedEvents[event.id];
+              const scopeBadge = getEventScopeBadge(event);
+              const statusBadge = getEventStatusBadge(event);
+              const ScopeIcon = scopeBadge.icon;
+              const StatusIcon = statusBadge.icon;
+              
+              return (
+                <div key={event.id} className="group">
+                  {/* Event Card */}
+                  <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
+                    <div className="flex flex-col lg:flex-row justify-between gap-6">
+                      <div className="flex-1">
+                        <div className="flex items-start gap-4 mb-4">
+                          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-lg">
+                            <CalendarIcon className="h-7 w-7 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${statusBadge.color}`}>
+                                <StatusIcon className="h-3 w-3" />
+                                {statusBadge.text}
+                              </span>
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${scopeBadge.color}`}>
+                                <ScopeIcon className="h-3 w-3" />
+                                {scopeBadge.text}
+                              </span>
+                            </div>
+                            {event.topic && (
+                              <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
+                          <div className="flex items-center gap-3">
+                            <CalendarIcon className="h-4 w-4" />
+                            <span className="font-medium">{formatDate(event.event_date)}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Clock className="h-4 w-4" />
+                            <span className="font-medium">{formatTime(event.event_time)}</span>
+                          </div>
+                          {event.location && (
+                            <div className="flex items-center gap-3">
+                              <MapPin className="h-4 w-4" />
+                              <span className="font-medium">{event.location}</span>
+                            </div>
+                          )}
+                          {event.is_completed && event.completed_at && (
+                            <div className="flex items-center gap-3 text-green-600 dark:text-green-400">
+                              <CheckCircle className="h-4 w-4" />
+                              <span className="font-medium">Completed on {formatDate(event.completed_at)}</span>
+                            </div>
+                          )}
+                        </div>
 
-        {/* Absence Alerts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* 2+ Consecutive Absences */}
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
-              <h3 className="font-bold text-red-900 dark:text-red-300">2+ Meeting Absences</h3>
-              <span className="bg-red-600 text-white px-2 py-1 rounded-full text-sm">
-                {absentMembers.length}
-              </span>
-            </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {absentMembers.length > 0 ? absentMembers.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-red-200 dark:border-red-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
-                    {member.name} {member.surname}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.consecutive_absences} absences
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-                  No consecutive absences
-                </div>
-              )}
-            </div>
-          </div>
+                        {/* Attendance Summary */}
+                        <div className="mt-4 flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-green-600" />
+                            <span>{eventAttendees.length} attended</span>
+                          </div>
+                          {event.is_completed && (
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-red-600" />
+                              <span>{eventAbsentMembers.length} absent</span>
+                            </div>
+                          )}
+                          {eventAttendees.filter(a => a.first_time).length > 0 && (
+                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                              {eventAttendees.filter(a => a.first_time).length} first-time
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col justify-between items-end gap-4">
+                        <div className="flex gap-3">
+                          {!event.is_completed && (
+                            <>
+                              <button 
+                                onClick={() => toggleEventExpansion(event.id)}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <Users className="h-4 w-4" />
+                                {isExpanded ? 'Hide' : 'View'} Attendees
+                                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+                              <button 
+                                onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
+                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-200" />
+                                {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
+                              </button>
+                              <button 
+                                onClick={() => handleCompleteEvent(event.id)}
+                                className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <CheckCircle className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                                Complete Event
+                              </button>
+                            </>
+                          )}
+                          {event.is_completed && (
+                            <>
+                              <button 
+                                onClick={() => toggleEventExpansion(event.id)}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <Users className="h-4 w-4" />
+                                {isExpanded ? 'Hide' : 'View'} Attendees
+                                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+                              <button 
+                                onClick={() => toggleAbsentList(event.id)}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <User className="h-4 w-4" />
+                                {showAbsentList === event.id ? 'Hide' : 'View'} Absent
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
-          {/* 2+ Sunday Absences */}
-          <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-              <h3 className="font-bold text-orange-900 dark:text-orange-300">2+ Sunday Absences</h3>
-              <span className="bg-orange-600 text-white px-2 py-1 rounded-full text-sm">
-                {sundayAbsentees.length}
-              </span>
-            </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {sundayAbsentees.length > 0 ? sundayAbsentees.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-orange-200 dark:border-orange-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
-                    {member.name} {member.surname}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.gender}
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-                  No Sunday absences
-                </div>
-              )}
-            </div>
-          </div>
+                    {/* Expanded Attendees List */}
+                    {isExpanded && (
+                      <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                          Event Attendees ({eventAttendees.length})
+                          {event.is_completed && (
+                            <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+                              • Event completed
+                            </span>
+                          )}
+                        </h4>
+                        {eventAttendees.length === 0 ? (
+                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                            <p>No attendees yet</p>
+                            <p className="text-sm">
+                              {event.is_completed ? 
+                                'No one attended this event' : 
+                                'Add attendees using the "Add Attendee" button'
+                              }
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {eventAttendees.map((attendee) => (
+                              <div key={attendee.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 hover:shadow-md transition-all duration-200">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                                    {getInitials(attendee.members.name, attendee.members.surname)}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between mb-2">
+                                      <div>
+                                        <h5 className="font-semibold text-gray-900 dark:text-white truncate">
+                                          {attendee.members.name} {attendee.members.surname}
+                                        </h5>
+                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(attendee.members.status).color}`}>
+                                            {getStatusBadge(attendee.members.status).text}
+                                          </span>
+                                          {attendee.first_time && (
+                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                                              First Time
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {!event.is_completed && (
+                                        <button
+                                          onClick={() => handleRemoveAttendee(attendee.id, event.id)}
+                                          className="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0"
+                                          title="Remove attendee"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </button>
+                                      )}
+                                    </div>
+                                    
+                                    <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                      {attendee.members.phone && (
+                                        <div className="flex items-center gap-2">
+                                          <Phone className="h-3 w-3" />
+                                          <span>{attendee.members.phone}</span>
+                                        </div>
+                                      )}
+                                      {attendee.members.email && (
+                                        <div className="flex items-center gap-2">
+                                          <Mail className="h-3 w-3" />
+                                          <span className="truncate">{attendee.members.email}</span>
+                                        </div>
+                                      )}
+                                      {attendee.members.cell_groups?.name && (
+                                        <div className="text-xs">
+                                          Cell Group: {attendee.members.cell_groups.name}
+                                        </div>
+                                      )}
+                                      {attendee.invited_by_member && (
+                                        <div className="text-xs text-blue-600 dark:text-blue-400">
+                                          Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-          {/* 3+ Total Absences */}
-          <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-              <h3 className="font-bold text-purple-900 dark:text-purple-300">3+ Total Absences</h3>
-              <span className="bg-purple-600 text-white px-2 py-1 rounded-full text-sm">
-                {threeTimeAbsentees.length}
-              </span>
-            </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {threeTimeAbsentees.length > 0 ? threeTimeAbsentees.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
-                    {member.name} {member.surname}
+                    {/* Absent Members List */}
+                    {showAbsentList === event.id && event.is_completed && (
+                      <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                          Absent Members ({eventAbsentMembers.length})
+                          <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+                            {event.is_whole_church ? 
+                              'All church members not registered' : 
+                              'Target group members not registered'
+                            }
+                          </span>
+                        </h4>
+                        {eventAbsentMembers.length === 0 ? (
+                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                            <p>No absent members</p>
+                            <p className="text-sm">All expected members are registered</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {eventAbsentMembers.map((member) => (
+                              <div key={member.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                                    {getInitials(member.name, member.surname)}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h5 className="font-semibold text-gray-900 dark:text-white truncate">
+                                      {member.name} {member.surname}
+                                    </h5>
+                                    <div className="flex items-center gap-2 mt-1 mb-2">
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(member.status).color}`}>
+                                        {getStatusBadge(member.status).text}
+                                      </span>
+                                      <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full text-xs">
+                                        Absent
+                                      </span>
+                                    </div>
+                                    
+                                    <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                      {member.phone && (
+                                        <div className="flex items-center gap-2">
+                                          <Phone className="h-3 w-3" />
+                                          <span>{member.phone}</span>
+                                        </div>
+                                      )}
+                                      {member.cell_groups?.name && (
+                                        <div className="text-xs">
+                                          Cell Group: {member.cell_groups.name}
+                                        </div>
+                                      )}
+                                      {member.ministry_groups?.name && (
+                                        <div className="text-xs">
+                                          Ministry: {member.ministry_groups.name}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.consecutive_absences} absences
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-                  No multiple absences
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
 
-        {/* Growth Metrics */}
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Growth & Membership Metrics
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-                {growthMetrics.new_members_this_month}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">New Members</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">This period</div>
-            </div>
-            <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-1">
-                {growthMetrics.became_members_this_month}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Became Members</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">This period</div>
-            </div>
-            <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-              <div className={`text-2xl font-bold ${
-                growthMetrics.growth_rate >= 0 ? 'text-purple-600 dark:text-purple-400' : 'text-red-600 dark:text-red-400'
-              } mb-1`}>
-                {growthMetrics.growth_rate}%
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Growth Rate</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">vs last month</div>
-            </div>
-            <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-              <div className="text-2xl font-bold text-orange-600 dark:text-orange-400 mb-1">
-                {growthMetrics.permanent_members}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Permanent</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">Members</div>
-            </div>
-          </div>
+                  {/* Attendee Form */}
+                  {showAttendeeForm === event.id && !event.is_completed && (
+                    <div className="mt-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300">
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Add Event Attendee</h3>
+                      
+                      <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-6">
+                        {/* Member Search and Selection */}
+                        <div className="space-y-4">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Search and Select Member *
+                          </label>
+                          
+                          {/* Search Input */}
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                              type="text"
+                              value={searchTerm}
+                              onChange={(e) => {
+                                setSearchTerm(e.target.value);
+                                setIsMemberDropdownOpen(true);
+                              }}
+                              onFocus={() => setIsMemberDropdownOpen(true)}
+                              placeholder="Search by name, surname, email, or phone..."
+                              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                            />
+                            {searchTerm && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSearchTerm('');
+                                  setSelectedMember(null);
+                                  setAttendeeFormData({ ...attendeeFormData, memberId: '' });
+                                  setIsMemberDropdownOpen(false);
+                                }}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Selected Member Display */}
+                          {selectedMember && (
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                  {getInitials(selectedMember.name, selectedMember.surname)}
+                                </div>
+                                <div className="flex-1">
+                                  <h4 className="font-semibold text-gray-900 dark:text-white">
+                                    {selectedMember.name} {selectedMember.surname}
+                                  </h4>
+                                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                                    {selectedMember.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {selectedMember.phone}</div>}
+                                    {selectedMember.email && <div className="flex items-center gap-2"><Mail className="h-3 w-3" /> {selectedMember.email}</div>}
+                                    {selectedMember.cell_groups?.name && <div>Cell Group: {selectedMember.cell_groups.name}</div>}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedMember(null);
+                                    setAttendeeFormData({ ...attendeeFormData, memberId: '' });
+                                    setSearchTerm('');
+                                  }}
+                                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Member Dropdown */}
+                          {isMemberDropdownOpen && filteredMembers.length > 0 && !selectedMember && (
+                            <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                              {filteredMembers.map((member) => (
+                                <button
+                                  key={member.id}
+                                  type="button"
+                                  onClick={() => handleMemberSelect(member)}
+                                  className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                      {getInitials(member.name, member.surname)}
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="font-medium text-gray-900 dark:text-white">
+                                        {member.name} {member.surname}
+                                      </div>
+                                      <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                                        {member.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {member.phone}</div>}
+                                        {member.email && <div className="flex items-center gap-2"><Mail className="h-3 w-3" /> {member.email}</div>}
+                                        {member.cell_groups?.name && <div>Cell Group: {member.cell_groups.name}</div>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {searchTerm && filteredMembers.length === 0 && (
+                            <div className="text-center py-6 text-gray-500 dark:text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
+                              <User className="h-8 w-8 mx-auto mb-2" />
+                              <p>No members found matching "{searchTerm}"</p>
+                              <p className="text-sm mt-1">Try a different search term</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Inviter Search and Selection */}
+                        <div className="space-y-4">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Invited By (Optional)
+                          </label>
+                          
+                          {/* Inviter Search Input */}
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                              type="text"
+                              value={inviterSearchTerm}
+                              onChange={(e) => {
+                                setInviterSearchTerm(e.target.value);
+                                setIsInviterDropdownOpen(true);
+                              }}
+                              onFocus={() => setIsInviterDropdownOpen(true)}
+                              placeholder="Search who invited this member..."
+                              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                            />
+                            {inviterSearchTerm && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInviterSearchTerm('');
+                                  setSelectedInviter(null);
+                                  setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
+                                  setIsInviterDropdownOpen(false);
+                                }}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Selected Inviter Display */}
+                          {selectedInviter && (
+                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                  {getInitials(selectedInviter.name, selectedInviter.surname)}
+                                </div>
+                                <div className="flex-1">
+                                  <h4 className="font-semibold text-gray-900 dark:text-white">
+                                    {selectedInviter.name} {selectedInviter.surname}
+                                  </h4>
+                                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                                    {selectedInviter.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {selectedInviter.phone}</div>}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedInviter(null);
+                                    setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
+                                    setInviterSearchTerm('');
+                                  }}
+                                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Inviter Dropdown */}
+                          {isInviterDropdownOpen && filteredInviters.length > 0 && !selectedInviter && (
+                            <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                              {filteredInviters.map((member) => (
+                                <button
+                                  key={member.id}
+                                  type="button"
+                                  onClick={() => handleInviterSelect(member)}
+                                  className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-teal-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                      {getInitials(member.name, member.surname)}
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="font-medium text-gray-900 dark:text-white">
+                                        {member.name} {member.surname}
+                                      </div>
+                                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                                        {member.phone && <div className="flex items-center gap-2"><Phone className="h-3 w-3" /> {member.phone}</div>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* First Time Checkbox */}
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            id={`firstTime-${event.id}`}
+                            checked={attendeeFormData.firstTime}
+                            onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
+                            className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                          />
+                          <label htmlFor={`firstTime-${event.id}`} className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            First Time Attending this Event
+                          </label>
+                        </div>
+
+                        <div className="flex gap-3 pt-4">
+                          <button
+                            type="submit"
+                            disabled={loading || !attendeeFormData.memberId}
+                            className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Users className="h-4 w-4" />
+                            {loading ? 'Adding...' : 'Add Attendee'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={resetAttendeeForm}
+                            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-export default Analytics;
+export default Events;
