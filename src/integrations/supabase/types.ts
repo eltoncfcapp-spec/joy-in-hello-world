@@ -60,9 +60,11 @@ export type Database = {
           first_time: boolean | null
           id: string
           invited_by: string | null
-          name: string
+          invited_by_id: string | null
+          members_id: string
+          name: string | null
           phone: string | null
-          surname: string
+          surname: string | null
         }
         Insert: {
           attended_at?: string | null
@@ -71,9 +73,11 @@ export type Database = {
           first_time?: boolean | null
           id?: string
           invited_by?: string | null
-          name: string
+          invited_by_id?: string | null
+          members_id: string
+          name?: string | null
           phone?: string | null
-          surname: string
+          surname?: string | null
         }
         Update: {
           attended_at?: string | null
@@ -82,9 +86,11 @@ export type Database = {
           first_time?: boolean | null
           id?: string
           invited_by?: string | null
-          name?: string
+          invited_by_id?: string | null
+          members_id?: string
+          name?: string | null
           phone?: string | null
-          surname?: string
+          surname?: string | null
         }
         Relationships: [
           {
@@ -99,6 +105,20 @@ export type Database = {
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_attendees_invited_by_id_fkey"
+            columns: ["invited_by_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_attendees_members_id_fkey"
+            columns: ["members_id"]
+            isOneToOne: false
+            referencedRelation: "members"
             referencedColumns: ["id"]
           },
         ]
@@ -142,9 +162,12 @@ export type Database = {
           created_at: string | null
           email: string | null
           first_time_visit_date: string | null
+          gender: Database["public"]["Enums"]["gender_type"] | null
           id: string
           invited_by: string | null
+          is_leader: boolean | null
           is_permanent_member: boolean | null
+          ministry_group_id: string | null
           name: string
           not_attending_reason: string | null
           permanent_member_date: string | null
@@ -159,9 +182,12 @@ export type Database = {
           created_at?: string | null
           email?: string | null
           first_time_visit_date?: string | null
+          gender?: Database["public"]["Enums"]["gender_type"] | null
           id?: string
           invited_by?: string | null
+          is_leader?: boolean | null
           is_permanent_member?: boolean | null
+          ministry_group_id?: string | null
           name: string
           not_attending_reason?: string | null
           permanent_member_date?: string | null
@@ -176,9 +202,12 @@ export type Database = {
           created_at?: string | null
           email?: string | null
           first_time_visit_date?: string | null
+          gender?: Database["public"]["Enums"]["gender_type"] | null
           id?: string
           invited_by?: string | null
+          is_leader?: boolean | null
           is_permanent_member?: boolean | null
+          ministry_group_id?: string | null
           name?: string
           not_attending_reason?: string | null
           permanent_member_date?: string | null
@@ -196,7 +225,35 @@ export type Database = {
             referencedRelation: "cell_groups"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "members_ministry_group_id_fkey"
+            columns: ["ministry_group_id"]
+            isOneToOne: false
+            referencedRelation: "ministry_groups"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      ministry_groups: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
       }
     }
     Views: {
@@ -206,6 +263,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      gender_type: "male" | "female"
       member_status: "newcomer" | "signed_member" | "not_attending"
     }
     CompositeTypes: {
@@ -334,6 +392,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      gender_type: ["male", "female"],
       member_status: ["newcomer", "signed_member", "not_attending"],
     },
   },
