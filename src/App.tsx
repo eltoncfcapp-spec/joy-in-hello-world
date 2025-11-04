@@ -5,7 +5,7 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Events from './pages/Events';
-import CellGroups from './pages/CellGroups';
+import Groups from './pages/Groups'; // Changed from CellGroups to Groups
 import Departments from './pages/Departments';
 import Trends from './pages/Trends';
 import Analytics from './pages/Analytics';
@@ -22,7 +22,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="members" element={<Members />} />
             <Route path="events" element={<Events />} />
-            <Route path="cell-groups" element={<CellGroups />} />
+            <Route path="groups" element={<Groups />} /> {/* Changed from cell-groups to groups */}
             <Route path="departments" element={<Departments />} />
             <Route path="trends" element={<Trends />} />
             <Route path="analytics" element={<Analytics />} />
