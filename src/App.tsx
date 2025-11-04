@@ -5,7 +5,6 @@ import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Events from './pages/Events';
 import Groups from './pages/Groups';
-import Departments from './pages/Departments';
 import Trends from './pages/Trends';
 import Analytics from './pages/Analytics';
 import Admin from './pages/Admin';
@@ -17,7 +16,6 @@ import {
   BarChart3, 
   TrendingUp, 
   Settings,
-  Building,
   LogOut
 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
@@ -32,7 +30,6 @@ const Layout = () => {
     { path: '/members', icon: Users, label: 'Members' },
     { path: '/groups', icon: Users, label: 'Groups' },
     { path: '/events', icon: Calendar, label: 'Events' },
-    { path: '/departments', icon: Building, label: 'Departments' },
     { path: '/trends', icon: TrendingUp, label: 'Trends' },
     { path: '/analytics', icon: BarChart3, label: 'Analytics' },
     { path: '/admin', icon: Settings, label: 'Admin' },
@@ -98,7 +95,6 @@ function App() {
             <Route path="members" element={<Members />} />
             <Route path="events" element={<Events />} />
             <Route path="groups" element={<Groups />} />
-            <Route path="departments" element={<Departments />} />
             <Route path="trends" element={<Trends />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="admin" element={<Admin />} />
