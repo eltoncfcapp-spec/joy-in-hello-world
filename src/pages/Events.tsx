@@ -1,6 +1,10 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
+// Add these state variables at the top with your other states
+const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
+const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
+
 
 interface Event {
   id: string;
@@ -544,18 +548,242 @@ const Events = () => {
     setInviterSearchTerm(`${member.name} ${member.surname}`);
     setIsInviterDropdownOpen(false);
   };
+// Replace the toggle functions with these:
+const togglePresentList = (eventId: string) => {
+  setShowPresentList(prev => ({
+    ...prev,
+    [eventId]: !prev[eventId]
+  }));
+  // Hide absent list when showing present list
+  setShowAbsentList(prev => ({
+    ...prev,
+    [eventId]: false
+  }));
+};
 
-  const toggleEventExpansion = (eventId: string) => {
-    setExpandedEvents(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-  };
+const toggleAbsentList = (eventId: string) => {
+  setShowAbsentList(prev => ({
+    ...prev,
+    [eventId]: !prev[eventId]
+  }));
+  // Hide present list when showing absent list
+  setShowPresentList(prev => ({
+    ...prev,
+    [eventId]: false
+  }));
+};
 
-  const toggleAbsentList = (eventId: string) => {
-    setShowAbsentList(prev => prev === eventId ? null : eventId);
-  };
+// In the events.map section, replace the buttons and lists with this:
 
+{/* Buttons Section - Updated */}
+<div className="flex gap-3">
+  {!event.is_completed && (
+    <>
+      <button 
+        onClick={() => togglePresentList(event.id)}
+        className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+      >
+        <Users className="h-4 w-4" />
+        {showPresentList[event.id] ? 'Hide' : 'View'} Attendees
+        <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showPresentList[event.id] ? 'rotate-180' : ''}`} />
+      </button>
+      <button 
+        onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
+        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+      >
+        <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-200" />
+        {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
+      </button>
+      <button 
+        onClick={() => handleCompleteEvent(event.id)}
+        className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+      >
+        <CheckCircle className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+        Complete Event
+      </button>
+    </>
+  )}
+  {event.is_completed && (
+    <>
+      <button 
+        onClick={() => togglePresentList(event.id)}
+        className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+      >
+        <Users className="h-4 w-4" />
+        {showPresentList[event.id] ? 'Hide' : 'View'} Present
+        <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showPresentList[event.id] ? 'rotate-180' : ''}`} />
+      </button>
+      <button 
+        onClick={() => toggleAbsentList(event.id)}
+        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+      >
+        <User className="h-4 w-4" />
+        {showAbsentList[event.id] ? 'Hide' : 'View'} Absent
+        <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showAbsentList[event.id] ? 'rotate-180' : ''}`} />
+      </button>
+    </>
+  )}
+</div>
+
+{/* Present Attendees List - Updated */}
+{showPresentList[event.id] && (
+  <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      {event.is_completed ? 'Present Attendees' : 'Event Attendees'} ({presentAttendees.length})
+      {event.is_completed && (
+        <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+          • Event completed
+        </span>
+      )}
+    </h4>
+    {presentAttendees.length === 0 ? (
+      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+        <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
+        <p>No {event.is_completed ? 'present' : ''} attendees yet</p>
+        <p className="text-sm">
+          {event.is_completed ? 
+            'No one attended this event' : 
+            'Add attendees using the "Add Attendee" button'
+          }
+        </p>
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {presentAttendees.map((attendee) => (
+          <div key={attendee.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 hover:shadow-md transition-all duration-200">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                {getInitials(attendee.members.name, attendee.members.surname)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h5 className="font-semibold text-gray-900 dark:text-white truncate">
+                      {attendee.members.name} {attendee.members.surname}
+                    </h5>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(attendee.members.status).color}`}>
+                        {getStatusBadge(attendee.members.status).text}
+                      </span>
+                      {attendee.first_time && (
+                        <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                          First Time
+                        </span>
+                      )}
+                      <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
+                        Present
+                      </span>
+                    </div>
+                  </div>
+                  {!event.is_completed && (
+                    <button
+                      onClick={() => handleRemoveAttendee(attendee.id, event.id)}
+                      className="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0"
+                      title="Remove attendee"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                
+                <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                  {attendee.members.phone && (
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-3 w-3" />
+                      <span>{attendee.members.phone}</span>
+                    </div>
+                  )}
+                  {attendee.members.email && (
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-3 w-3" />
+                      <span className="truncate">{attendee.members.email}</span>
+                    </div>
+                  )}
+                  {attendee.members.cell_groups?.name && (
+                    <div className="text-xs">
+                      Cell Group: {attendee.members.cell_groups.name}
+                    </div>
+                  )}
+                  {attendee.invited_by_member && (
+                    <div className="text-xs text-blue-600 dark:text-blue-400">
+                      Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+
+{/* Absent Members List - Updated */}
+{showAbsentList[event.id] && event.is_completed && (
+  <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      Absent Members ({absentAttendees.length})
+      <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+        {event.is_whole_church ? 
+          'All church members not present' : 
+          'Target group members not present'
+        }
+      </span>
+    </h4>
+    {absentAttendees.length === 0 ? (
+      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+        <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
+        <p>No absent members</p>
+        <p className="text-sm">All expected members are present</p>
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {absentAttendees.map((attendee) => (
+          <div key={attendee.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                {getInitials(attendee.members.name, attendee.members.surname)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h5 className="font-semibold text-gray-900 dark:text-white truncate">
+                  {attendee.members.name} {attendee.members.surname}
+                </h5>
+                <div className="flex items-center gap-2 mt-1 mb-2">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(attendee.members.status).color}`}>
+                    {getStatusBadge(attendee.members.status).text}
+                  </span>
+                  <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full text-xs">
+                    Absent
+                  </span>
+                </div>
+                
+                <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                  {attendee.members.phone && (
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-3 w-3" />
+                      <span>{attendee.members.phone}</span>
+                    </div>
+                  )}
+                  {attendee.members.cell_groups?.name && (
+                    <div className="text-xs">
+                      Cell Group: {attendee.members.cell_groups.name}
+                    </div>
+                  )}
+                  {attendee.members.ministry_groups?.name && (
+                    <div className="text-xs">
+                      Ministry: {attendee.members.ministry_groups.name}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
   const filteredMembers = members.filter(member => {
     const searchLower = searchTerm.toLowerCase();
     return (
