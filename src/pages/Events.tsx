@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -13,6 +13,8 @@ interface Event {
   is_whole_church: boolean;
   target_groups: string[] | null;
   target_departments: string[] | null;
+  is_completed: boolean;
+  completed_at: string | null;
 }
 
 interface Member {
@@ -53,15 +55,15 @@ interface EventAttendee {
   } | null;
 }
 
+interface AbsentMember extends Member {
+  absence_reason?: string;
+  marked_absent: boolean;
+}
+
 interface AttendeeFormData {
   memberId: string;
   firstTime: boolean;
   invitedById: string;
-}
-
-interface AbsentMember extends Member {
-  absence_reason?: string;
-  marked_absent: boolean;
 }
 
 const Events = () => {
@@ -128,7 +130,9 @@ const Events = () => {
       // Fetch attendees for each event
       data?.forEach(event => {
         fetchEventAttendees(event.id);
-        calculateAbsentMembers(event);
+        if (event.is_completed) {
+          calculateAbsentMembers(event);
+        }
       });
     } catch (error: any) {
       console.error('Error fetching events:', error);
@@ -359,6 +363,49 @@ const Events = () => {
     }));
   };
 
+  const handleCompleteEvent = async (eventId: string) => {
+    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // First, calculate absent members for this event
+      const event = events.find(e => e.id === eventId);
+      if (!event) {
+        throw new Error('Event not found');
+      }
+
+      calculateAbsentMembers(event);
+
+      // Mark event as completed in the database
+      const { error } = await supabase
+        .from('events')
+        .update({
+          is_completed: true,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', eventId);
+
+      if (error) {
+        throw error;
+      }
+
+      setSuccess('Event marked as completed! Absent members have been calculated.');
+      await fetchEvents();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error completing event:', error);
+      setError(error.message || 'Failed to complete event. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -373,6 +420,8 @@ const Events = () => {
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
         is_whole_church: eventFormData.isWholeChurch,
+        is_completed: false,
+        completed_at: null,
       };
 
       // Only include target groups if not a whole church event
@@ -463,9 +512,9 @@ const Events = () => {
       resetAttendeeForm();
       await fetchEventAttendees(eventId);
       
-      // Recalculate absent members
+      // Recalculate absent members if event is completed
       const event = events.find(e => e.id === eventId);
-      if (event) {
+      if (event?.is_completed) {
         calculateAbsentMembers(event);
       }
       
@@ -500,9 +549,9 @@ const Events = () => {
 
       await fetchEventAttendees(eventId);
       
-      // Recalculate absent members
+      // Recalculate absent members if event is completed
       const event = events.find(e => e.id === eventId);
-      if (event) {
+      if (event?.is_completed) {
         calculateAbsentMembers(event);
       }
       
@@ -642,6 +691,22 @@ const Events = () => {
         color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
         text: 'Target Groups',
         icon: GroupsIcon
+      };
+    }
+  };
+
+  const getEventStatusBadge = (event: Event) => {
+    if (event.is_completed) {
+      return {
+        color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
+        text: 'Completed',
+        icon: CheckCircle
+      };
+    } else {
+      return {
+        color: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
+        text: 'Active',
+        icon: AlertCircle
       };
     }
   };
@@ -877,7 +942,9 @@ const Events = () => {
               const eventAbsentMembers = getEventAbsentMembers(event.id);
               const isExpanded = expandedEvents[event.id];
               const scopeBadge = getEventScopeBadge(event);
+              const statusBadge = getEventStatusBadge(event);
               const ScopeIcon = scopeBadge.icon;
+              const StatusIcon = statusBadge.icon;
               
               return (
                 <div key={event.id} className="group">
@@ -892,6 +959,10 @@ const Events = () => {
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${statusBadge.color}`}>
+                                <StatusIcon className="h-3 w-3" />
+                                {statusBadge.text}
+                              </span>
                               <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${scopeBadge.color}`}>
                                 <ScopeIcon className="h-3 w-3" />
                                 {scopeBadge.text}
@@ -918,6 +989,12 @@ const Events = () => {
                               <span className="font-medium">{event.location}</span>
                             </div>
                           )}
+                          {event.is_completed && event.completed_at && (
+                            <div className="flex items-center gap-3 text-green-600 dark:text-green-400">
+                              <CheckCircle className="h-4 w-4" />
+                              <span className="font-medium">Completed on {formatDate(event.completed_at)}</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Attendance Summary */}
@@ -926,10 +1003,12 @@ const Events = () => {
                             <Users className="h-4 w-4 text-green-600" />
                             <span>{eventAttendees.length} attended</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-red-600" />
-                            <span>{eventAbsentMembers.length} absent</span>
-                          </div>
+                          {event.is_completed && (
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-red-600" />
+                              <span>{eventAbsentMembers.length} absent</span>
+                            </div>
+                          )}
                           {eventAttendees.filter(a => a.first_time).length > 0 && (
                             <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
                               {eventAttendees.filter(a => a.first_time).length} first-time
@@ -940,28 +1019,51 @@ const Events = () => {
                       
                       <div className="flex flex-col justify-between items-end gap-4">
                         <div className="flex gap-3">
-                          <button 
-                            onClick={() => toggleEventExpansion(event.id)}
-                            className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                          >
-                            <Users className="h-4 w-4" />
-                            {isExpanded ? 'Hide' : 'View'} Attendees
-                            <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-                          </button>
-                          <button 
-                            onClick={() => toggleAbsentList(event.id)}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                          >
-                            <User className="h-4 w-4" />
-                            View Absent
-                          </button>
-                          <button 
-                            onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
-                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                          >
-                            <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-200" />
-                            {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
-                          </button>
+                          {!event.is_completed && (
+                            <>
+                              <button 
+                                onClick={() => toggleEventExpansion(event.id)}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <Users className="h-4 w-4" />
+                                {isExpanded ? 'Hide' : 'View'} Attendees
+                                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+                              <button 
+                                onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
+                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <Plus className="h-4 w-4 group-hover:rotate-90 transition-transform duration-200" />
+                                {showAttendeeForm === event.id ? 'Cancel' : 'Add Attendee'}
+                              </button>
+                              <button 
+                                onClick={() => handleCompleteEvent(event.id)}
+                                className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <CheckCircle className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                                Complete Event
+                              </button>
+                            </>
+                          )}
+                          {event.is_completed && (
+                            <>
+                              <button 
+                                onClick={() => toggleEventExpansion(event.id)}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <Users className="h-4 w-4" />
+                                {isExpanded ? 'Hide' : 'View'} Attendees
+                                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+                              <button 
+                                onClick={() => toggleAbsentList(event.id)}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                              >
+                                <User className="h-4 w-4" />
+                                {showAbsentList === event.id ? 'Hide' : 'View'} Absent
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -969,12 +1071,24 @@ const Events = () => {
                     {/* Expanded Attendees List */}
                     {isExpanded && (
                       <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Event Attendees ({eventAttendees.length})</h4>
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                          Event Attendees ({eventAttendees.length})
+                          {event.is_completed && (
+                            <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+                              • Event completed
+                            </span>
+                          )}
+                        </h4>
                         {eventAttendees.length === 0 ? (
                           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                             <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
                             <p>No attendees yet</p>
-                            <p className="text-sm">Add attendees using the "Add Attendee" button</p>
+                            <p className="text-sm">
+                              {event.is_completed ? 
+                                'No one attended this event' : 
+                                'Add attendees using the "Add Attendee" button'
+                              }
+                            </p>
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -1001,13 +1115,15 @@ const Events = () => {
                                           )}
                                         </div>
                                       </div>
-                                      <button
-                                        onClick={() => handleRemoveAttendee(attendee.id, event.id)}
-                                        className="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0"
-                                        title="Remove attendee"
-                                      >
-                                        <X className="h-4 w-4" />
-                                      </button>
+                                      {!event.is_completed && (
+                                        <button
+                                          onClick={() => handleRemoveAttendee(attendee.id, event.id)}
+                                          className="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0"
+                                          title="Remove attendee"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </button>
+                                      )}
                                     </div>
                                     
                                     <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
@@ -1044,7 +1160,7 @@ const Events = () => {
                     )}
 
                     {/* Absent Members List */}
-                    {showAbsentList === event.id && (
+                    {showAbsentList === event.id && event.is_completed && (
                       <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                         <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                           Absent Members ({eventAbsentMembers.length})
@@ -1111,7 +1227,7 @@ const Events = () => {
                   </div>
 
                   {/* Attendee Form */}
-                  {showAttendeeForm === event.id && (
+                  {showAttendeeForm === event.id && !event.is_completed && (
                     <div className="mt-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300">
                       <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Add Event Attendee</h3>
                       
