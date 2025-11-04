@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -10,6 +10,9 @@ interface Event {
   event_time: string;
   location: string | null;
   created_at: string | null;
+  is_whole_church: boolean;
+  target_groups: string[] | null;
+  target_departments: string[] | null;
 }
 
 interface Member {
@@ -20,7 +23,19 @@ interface Member {
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
+  ministry_group_id: string | null;
+  ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+}
+
+interface CellGroup {
+  id: string;
+  name: string;
+}
+
+interface MinistryGroup {
+  id: string;
+  name: string;
 }
 
 interface EventAttendee {
@@ -44,12 +59,21 @@ interface AttendeeFormData {
   invitedById: string;
 }
 
+interface AbsentMember extends Member {
+  absence_reason?: string;
+  marked_absent: boolean;
+}
+
 const Events = () => {
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
+  const [showAbsentList, setShowAbsentList] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [attendees, setAttendees] = useState<EventAttendee[]>([]);
+  const [absentMembers, setAbsentMembers] = useState<{[key: string]: AbsentMember[]}>({});
   const [loading, setLoading] = useState(false);
   const [expandedEvents, setExpandedEvents] = useState<{[key: string]: boolean}>({});
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +89,9 @@ const Events = () => {
     eventDate: '',
     eventTime: '',
     location: '',
+    isWholeChurch: true,
+    targetCellGroups: [] as string[],
+    targetMinistryGroups: [] as string[],
   });
 
   const [attendeeFormData, setAttendeeFormData] = useState<AttendeeFormData>({
@@ -79,6 +106,8 @@ const Events = () => {
   useEffect(() => {
     fetchEvents();
     fetchMembers();
+    fetchCellGroups();
+    fetchMinistryGroups();
   }, []);
 
   const fetchEvents = async () => {
@@ -97,7 +126,10 @@ const Events = () => {
 
       setEvents(data || []);
       // Fetch attendees for each event
-      data?.forEach(event => fetchEventAttendees(event.id));
+      data?.forEach(event => {
+        fetchEventAttendees(event.id);
+        calculateAbsentMembers(event);
+      });
     } catch (error: any) {
       console.error('Error fetching events:', error);
       setError(error.message || 'Failed to load events. Please check your connection.');
@@ -119,8 +151,10 @@ const Events = () => {
           email,
           phone,
           cell_group_id,
+          ministry_group_id,
           status,
-          cell_groups!fk_cell_group(name)
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name)
         `)
         .order('name');
 
@@ -132,6 +166,42 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
+    }
+  };
+
+  const fetchCellGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setCellGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching cell groups:', error);
+      setError(error.message || 'Failed to load cell groups.');
+    }
+  };
+
+  const fetchMinistryGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setMinistryGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching ministry groups:', error);
+      setError(error.message || 'Failed to load ministry groups.');
     }
   };
 
@@ -149,7 +219,9 @@ const Events = () => {
             phone,
             status,
             cell_group_id,
-            cell_groups!fk_cell_group(name)
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -170,7 +242,6 @@ const Events = () => {
       });
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
-      // Fallback if the complex query fails
       await fetchEventAttendeesFallback(eventId);
     }
   };
@@ -198,7 +269,9 @@ const Events = () => {
               phone,
               status,
               cell_group_id,
-              cell_groups!fk_cell_group(name)
+              ministry_group_id,
+              cell_groups!fk_cell_group(name),
+              ministry_groups(name)
             `)
             .eq('id', attendee.members_id)
             .single();
@@ -223,7 +296,9 @@ const Events = () => {
               email: null,
               phone: null,
               cell_group_id: null,
+              ministry_group_id: null,
               cell_groups: null,
+              ministry_groups: null,
               status: null
             },
             invited_by_member: invitedByMember
@@ -241,6 +316,49 @@ const Events = () => {
     }
   };
 
+  const calculateAbsentMembers = (event: Event) => {
+    const eventAttendees = getEventAttendees(event.id);
+    const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
+
+    let expectedMembers: Member[] = [];
+
+    if (event.is_whole_church) {
+      // For whole church events, all active members are expected
+      expectedMembers = members.filter(member => 
+        member.status !== 'not_attending'
+      );
+    } else {
+      // For targeted events, only members from selected groups/departments
+      expectedMembers = members.filter(member => {
+        // Check cell groups
+        const inTargetCellGroup = event.target_groups?.some(groupId => 
+          member.cell_group_id === groupId
+        );
+        
+        // Check ministry groups
+        const inTargetMinistryGroup = event.target_departments?.some(deptId => 
+          member.ministry_group_id === deptId
+        );
+
+        return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
+      });
+    }
+
+    // Find absent members (expected but not attending)
+    const absent = expectedMembers
+      .filter(member => !attendeeIds.has(member.id))
+      .map(member => ({
+        ...member,
+        marked_absent: true,
+        absence_reason: 'Not registered'
+      }));
+
+    setAbsentMembers(prev => ({
+      ...prev,
+      [event.id]: absent
+    }));
+  };
+
   const handleEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -248,20 +366,38 @@ const Events = () => {
     setSuccess(null);
     
     try {
-      const { error } = await supabase.from('events').insert([{
+      const eventData: any = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
         event_date: eventFormData.eventDate,
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
-      }]);
+        is_whole_church: eventFormData.isWholeChurch,
+      };
+
+      // Only include target groups if not a whole church event
+      if (!eventFormData.isWholeChurch) {
+        eventData.target_groups = eventFormData.targetCellGroups.length > 0 ? eventFormData.targetCellGroups : null;
+        eventData.target_departments = eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null;
+      }
+
+      const { error } = await supabase.from('events').insert([eventData]);
 
       if (error) {
         throw error;
       }
 
       setShowEventForm(false);
-      setEventFormData({ name: '', topic: '', eventDate: '', eventTime: '', location: '' });
+      setEventFormData({ 
+        name: '', 
+        topic: '', 
+        eventDate: '', 
+        eventTime: '', 
+        location: '',
+        isWholeChurch: true,
+        targetCellGroups: [],
+        targetMinistryGroups: [],
+      });
       setSuccess('Event created successfully!');
       await fetchEvents();
       
@@ -274,68 +410,75 @@ const Events = () => {
     }
   };
 
- const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
-  e.preventDefault();
-  
-  if (!attendeeFormData.memberId) {
-    setError('Please select a member');
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
-
-  // Check if member is already attending this event
-  const alreadyAttending = attendees.some(
-    a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
-  );
-
-  if (alreadyAttending) {
-    setError('This member is already registered for this event');
-    setTimeout(() => setError(null), 3000);
-    return;
-  }
-
-  setLoading(true);
-  setError(null);
-  setSuccess(null);
-
-  try {
-    const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
+  const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
+    e.preventDefault();
     
-    if (!selectedMember) {
-      throw new Error('Selected member not found');
+    if (!attendeeFormData.memberId) {
+      setError('Please select a member');
+      setTimeout(() => setError(null), 3000);
+      return;
     }
 
-    const attendeeData: any = {
-      event_id: eventId,
-      members_id: attendeeFormData.memberId,
-      name: selectedMember.name, // Include name for current schema
-      surname: selectedMember.surname, // Include surname for current schema
-      first_time: attendeeFormData.firstTime,
-    };
+    // Check if member is already attending this event
+    const alreadyAttending = attendees.some(
+      a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
+    );
 
-    // Only include invited_by_id if it's provided
-    if (attendeeFormData.invitedById) {
-      attendeeData.invited_by_id = attendeeFormData.invitedById;
+    if (alreadyAttending) {
+      setError('This member is already registered for this event');
+      setTimeout(() => setError(null), 3000);
+      return;
     }
 
-    const { error } = await supabase.from('event_attendees').insert([attendeeData]);
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
 
-    if (error) {
-      throw error;
+    try {
+      const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
+      
+      if (!selectedMember) {
+        throw new Error('Selected member not found');
+      }
+
+      const attendeeData: any = {
+        event_id: eventId,
+        members_id: attendeeFormData.memberId,
+        name: selectedMember.name,
+        surname: selectedMember.surname,
+        first_time: attendeeFormData.firstTime,
+      };
+
+      // Only include invited_by_id if it's provided
+      if (attendeeFormData.invitedById) {
+        attendeeData.invited_by_id = attendeeFormData.invitedById;
+      }
+
+      const { error } = await supabase.from('event_attendees').insert([attendeeData]);
+
+      if (error) {
+        throw error;
+      }
+
+      resetAttendeeForm();
+      await fetchEventAttendees(eventId);
+      
+      // Recalculate absent members
+      const event = events.find(e => e.id === eventId);
+      if (event) {
+        calculateAbsentMembers(event);
+      }
+      
+      setSuccess('Attendee added successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error adding attendee:', error);
+      setError(error.message || 'Failed to add attendee. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    resetAttendeeForm();
-    await fetchEventAttendees(eventId);
-    setSuccess('Attendee added successfully!');
-    
-    setTimeout(() => setSuccess(null), 3000);
-  } catch (error: any) {
-    console.error('Error adding attendee:', error);
-    setError(error.message || 'Failed to add attendee. Please try again.');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
     if (!confirm('Are you sure you want to remove this attendee?')) {
@@ -356,6 +499,13 @@ const Events = () => {
       }
 
       await fetchEventAttendees(eventId);
+      
+      // Recalculate absent members
+      const event = events.find(e => e.id === eventId);
+      if (event) {
+        calculateAbsentMembers(event);
+      }
+      
       setSuccess('Attendee removed successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
@@ -407,6 +557,10 @@ const Events = () => {
     }));
   };
 
+  const toggleAbsentList = (eventId: string) => {
+    setShowAbsentList(prev => prev === eventId ? null : eventId);
+  };
+
   const filteredMembers = members.filter(member => {
     const searchLower = searchTerm.toLowerCase();
     return (
@@ -441,6 +595,10 @@ const Events = () => {
     return uniqueAttendees;
   };
 
+  const getEventAbsentMembers = (eventId: string) => {
+    return absentMembers[eventId] || [];
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -470,6 +628,22 @@ const Events = () => {
       not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
     };
     return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
+  };
+
+  const getEventScopeBadge = (event: Event) => {
+    if (event.is_whole_church) {
+      return {
+        color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+        text: 'Whole Church',
+        icon: Building
+      };
+    } else {
+      return {
+        color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
+        text: 'Target Groups',
+        icon: GroupsIcon
+      };
+    }
   };
 
   return (
@@ -563,6 +737,103 @@ const Events = () => {
                     placeholder="Event location"
                   />
                 </div>
+
+                {/* Event Scope */}
+                <div className="md:col-span-2 space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                      <input
+                        type="radio"
+                        name="eventScope"
+                        checked={eventFormData.isWholeChurch}
+                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [] })}
+                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <Building className="h-5 w-5 text-purple-600" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                      <input
+                        type="radio"
+                        name="eventScope"
+                        checked={!eventFormData.isWholeChurch}
+                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
+                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <GroupsIcon className="h-5 w-5 text-orange-600" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups or ministry departments</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Target Groups Selection (only show if not whole church) */}
+                {!eventFormData.isWholeChurch && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {cellGroups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetCellGroups.includes(group.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {ministryGroups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="flex gap-3">
                 <button
@@ -603,7 +874,10 @@ const Events = () => {
           ) : (
             events.map((event) => {
               const eventAttendees = getUniqueAttendees(event.id);
+              const eventAbsentMembers = getEventAbsentMembers(event.id);
               const isExpanded = expandedEvents[event.id];
+              const scopeBadge = getEventScopeBadge(event);
+              const ScopeIcon = scopeBadge.icon;
               
               return (
                 <div key={event.id} className="group">
@@ -616,7 +890,13 @@ const Events = () => {
                             <CalendarIcon className="h-7 w-7 text-white" />
                           </div>
                           <div className="flex-1">
-                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{event.name}</h3>
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${scopeBadge.color}`}>
+                                <ScopeIcon className="h-3 w-3" />
+                                {scopeBadge.text}
+                              </span>
+                            </div>
                             {event.topic && (
                               <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
                             )}
@@ -640,10 +920,16 @@ const Events = () => {
                           )}
                         </div>
 
-                        {/* Attendees Count */}
-                        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                          <Users className="h-4 w-4" />
-                          <span>{eventAttendees.length} attendees</span>
+                        {/* Attendance Summary */}
+                        <div className="mt-4 flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-green-600" />
+                            <span>{eventAttendees.length} attended</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-red-600" />
+                            <span>{eventAbsentMembers.length} absent</span>
+                          </div>
                           {eventAttendees.filter(a => a.first_time).length > 0 && (
                             <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs">
                               {eventAttendees.filter(a => a.first_time).length} first-time
@@ -661,6 +947,13 @@ const Events = () => {
                             <Users className="h-4 w-4" />
                             {isExpanded ? 'Hide' : 'View'} Attendees
                             <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                          </button>
+                          <button 
+                            onClick={() => toggleAbsentList(event.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <User className="h-4 w-4" />
+                            View Absent
                           </button>
                           <button 
                             onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
@@ -738,6 +1031,72 @@ const Events = () => {
                                       {attendee.invited_by_member && (
                                         <div className="text-xs text-blue-600 dark:text-blue-400">
                                           Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Absent Members List */}
+                    {showAbsentList === event.id && (
+                      <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                          Absent Members ({eventAbsentMembers.length})
+                          <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+                            {event.is_whole_church ? 
+                              'All church members not registered' : 
+                              'Target group members not registered'
+                            }
+                          </span>
+                        </h4>
+                        {eventAbsentMembers.length === 0 ? (
+                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <User className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                            <p>No absent members</p>
+                            <p className="text-sm">All expected members are registered</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {eventAbsentMembers.map((member) => (
+                              <div key={member.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                                    {getInitials(member.name, member.surname)}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <h5 className="font-semibold text-gray-900 dark:text-white truncate">
+                                      {member.name} {member.surname}
+                                    </h5>
+                                    <div className="flex items-center gap-2 mt-1 mb-2">
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(member.status).color}`}>
+                                        {getStatusBadge(member.status).text}
+                                      </span>
+                                      <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full text-xs">
+                                        Absent
+                                      </span>
+                                    </div>
+                                    
+                                    <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                      {member.phone && (
+                                        <div className="flex items-center gap-2">
+                                          <Phone className="h-3 w-3" />
+                                          <span>{member.phone}</span>
+                                        </div>
+                                      )}
+                                      {member.cell_groups?.name && (
+                                        <div className="text-xs">
+                                          Cell Group: {member.cell_groups.name}
+                                        </div>
+                                      )}
+                                      {member.ministry_groups?.name && (
+                                        <div className="text-xs">
+                                          Ministry: {member.ministry_groups.name}
                                         </div>
                                       )}
                                     </div>
