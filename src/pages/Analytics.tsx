@@ -129,35 +129,31 @@ const Analytics = () => {
       setLoading(true);
 
       // Fetch all data with real Supabase queries
-      const [membersData, groupsData, meetingsData, attendanceData, cellGroupsData] = await Promise.all([
+      const [membersData, cellGroupsData, eventsData, eventAttendeesData] = await Promise.all([
         // Members query with filters
         buildMembersQuery(),
         // Cell groups query
         supabase.from('cell_groups').select('*'),
-        // Meetings query with filters
-        buildMeetingsQuery(),
-        // Attendance query with filters
-        buildAttendanceQuery(),
-        // Cell groups with leader info
-        supabase.from('cell_groups').select('*, members!cell_groups_leader_id_fkey(name, surname)')
+        // Events query with filters
+        buildEventsQuery(),
+        // Event attendees query with filters
+        buildEventAttendeesQuery()
       ]);
 
       if (membersData.error) throw membersData.error;
-      if (groupsData.error) throw groupsData.error;
-      if (meetingsData.error) throw meetingsData.error;
-      if (attendanceData.error) throw attendanceData.error;
       if (cellGroupsData.error) throw cellGroupsData.error;
+      if (eventsData.error) throw eventsData.error;
+      if (eventAttendeesData.error) throw eventAttendeesData.error;
 
       const members = membersData.data || [];
-      const groups = groupsData.data || [];
-      const meetings = meetingsData.data || [];
-      const allAttendance = attendanceData.data || [];
       const allCellGroups = cellGroupsData.data || [];
+      const events = eventsData.data || [];
+      const eventAttendees = eventAttendeesData.data || [];
 
       setCellGroups(allCellGroups);
 
       // Calculate all metrics with real data
-      await calculateAllMetrics(members, groups, meetings, allAttendance, allCellGroups);
+      await calculateAllMetrics(members, allCellGroups, events, eventAttendees);
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
@@ -182,55 +178,51 @@ const Analytics = () => {
     return query;
   };
 
-  const buildMeetingsQuery = () => {
+  const buildEventsQuery = () => {
     let query = supabase
-      .from('meetings')
-      .select('*, attendance(status, member_id, notes)');
+      .from('events')
+      .select('*');
 
     // Apply date filter
     if (filters.date_from) {
-      query = query.gte('meeting_date', filters.date_from);
+      query = query.gte('event_date', filters.date_from);
     }
     if (filters.date_to) {
-      query = query.lte('meeting_date', filters.date_to);
+      query = query.lte('event_date', filters.date_to);
     }
 
     // Apply meeting type filter
     if (filters.meeting_type === 'sunday') {
-      query = query.or('topic.ilike.%sunday%,topic.ilike.%service%');
+      query = query.or('name.ilike.%sunday%,name.ilike.%service%');
     } else if (filters.meeting_type === 'cell') {
-      query = query.or('topic.ilike.%cell%,topic.ilike.%group%');
+      query = query.or('name.ilike.%cell%,name.ilike.%group%');
     }
 
     return query;
   };
 
-  const buildAttendanceQuery = () => {
-    let query = supabase.from('attendance').select('*');
+  const buildEventAttendeesQuery = () => {
+    let query = supabase.from('event_attendees').select('*');
 
     // Apply attendance status filter
     if (filters.attendance_status !== 'all') {
-      query = query.eq('status', filters.attendance_status);
+      query = query.eq('attendance_status', filters.attendance_status);
     }
 
     return query;
   };
 
-  const calculateAllMetrics = async (members: any[], groups: any[], meetings: any[], attendance: any[], cellGroups: any[]) => {
+  const calculateAllMetrics = async (members: any[], cellGroups: any[], events: any[], eventAttendees: any[]) => {
     // Calculate basic statistics with real data
     const totalMembers = members.length;
-    const totalGroups = groups.length;
+    const totalGroups = cellGroups.length;
     
     // Events in date range
-    const eventsInRange = meetings.length;
+    const eventsInRange = events.length;
 
     // Calculate real attendance data
-    const totalPresent = meetings.reduce((acc, meeting) => {
-      const presentCount = meeting.attendance?.filter((a: any) => a.status === 'present').length || 0;
-      return acc + presentCount;
-    }, 0);
-    
-    const totalPossibleAttendance = meetings.length * totalMembers;
+    const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
+    const totalPossibleAttendance = events.length * totalMembers;
     const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
 
     // Update main stats with real data
@@ -240,18 +232,18 @@ const Analytics = () => {
         label: 'Total Members', 
         value: totalMembers.toString(), 
         color: 'bg-blue-50 dark:bg-blue-900/20',
-        description: `${members.filter(m => m.is_permanent_member).length} permanent`
+        description: `${members.filter(m => m.status === 'signed_member').length} signed members`
       },
       { 
         icon: Users, 
         label: 'Active Groups', 
         value: totalGroups.toString(), 
         color: 'bg-green-50 dark:bg-green-900/20',
-        description: `${groups.filter(g => g.members && g.members.length > 0).length} with members`
+        description: `${cellGroups.filter(g => g.is_active !== false).length} active`
       },
       { 
         icon: Calendar, 
-        label: 'Meetings', 
+        label: 'Events', 
         value: eventsInRange.toString(), 
         color: 'bg-purple-50 dark:bg-purple-900/20',
         description: `in selected period`
@@ -261,19 +253,19 @@ const Analytics = () => {
         label: 'Avg Attendance', 
         value: `${avgAttendance}%`, 
         color: 'bg-orange-50 dark:bg-orange-900/20',
-        description: 'Across filtered meetings'
+        description: 'Across filtered events'
       },
     ]);
 
     // Calculate all detailed metrics with real data
     await calculateGrowthMetrics(members);
-    await calculateGenderStats(members, meetings);
+    await calculateGenderStats(members, eventAttendees);
     await calculateInviterStats(members);
-    await generateAttendanceReports(meetings, members);
-    await calculateCellGroupStats(cellGroups, meetings, members);
-    await findConsecutiveAbsences(members, meetings);
-    await findSundayServiceAbsentees(members, meetings);
-    await findThreeTimeAbsentees(members, meetings);
+    await generateAttendanceReports(events, members, eventAttendees);
+    await calculateCellGroupStats(cellGroups, events, members, eventAttendees);
+    await findConsecutiveAbsences(members, events, eventAttendees);
+    await findSundayServiceAbsentees(members, events, eventAttendees);
+    await findThreeTimeAbsentees(members, events, eventAttendees);
   };
 
   const calculateGrowthMetrics = async (members: any[]) => {
@@ -303,13 +295,13 @@ const Analytics = () => {
       return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
     }).length;
 
-    // Real query for members who became permanent in date range
+    // Real query for members who became signed members in date range
     const becameMembersInRange = members.filter(member => {
-      if (!member.permanent_member_date) return false;
-      const permanentDate = new Date(member.permanent_member_date);
+      if (!member.created_at) return false;
+      const createdDate = new Date(member.created_at);
       const fromDate = new Date(filters.date_from);
       const toDate = new Date(filters.date_to);
-      return permanentDate >= fromDate && permanentDate <= toDate;
+      return createdDate >= fromDate && createdDate <= toDate && member.status === 'signed_member';
     }).length;
 
     const growthRate = newMembersLastMonth > 0 
@@ -320,7 +312,7 @@ const Analytics = () => {
       new_members_this_month: newMembersInRange,
       new_members_last_month: newMembersLastMonth,
       growth_rate: growthRate,
-      permanent_members: members.filter(m => m.is_permanent_member).length,
+      permanent_members: members.filter(m => m.status === 'signed_member').length,
       newcomers: members.filter(m => m.status === 'newcomer').length,
       total_members: members.length,
       became_members_this_month: becameMembersInRange,
@@ -328,24 +320,21 @@ const Analytics = () => {
     });
   };
 
-  const calculateGenderStats = async (members: any[], meetings: any[]) => {
+  const calculateGenderStats = async (members: any[], eventAttendees: any[]) => {
     // Real gender data from members
     const maleMembers = members.filter(m => m.gender === 'male');
     const femaleMembers = members.filter(m => m.gender === 'female');
     
     // Calculate real attendance by gender
-    let malePresent = 0;
-    let femalePresent = 0;
+    const malePresent = eventAttendees.filter(attendee => {
+      const member = members.find(m => m.id === attendee.members_id);
+      return attendee.attendance_status === 'present' && member?.gender === 'male';
+    }).length;
 
-    meetings.forEach(meeting => {
-      meeting.attendance?.forEach((a: any) => {
-        if (a.status === 'present') {
-          const member = members.find(m => m.id === a.member_id);
-          if (member?.gender === 'male') malePresent++;
-          if (member?.gender === 'female') femalePresent++;
-        }
-      });
-    });
+    const femalePresent = eventAttendees.filter(attendee => {
+      const member = members.find(m => m.id === attendee.members_id);
+      return attendee.attendance_status === 'present' && member?.gender === 'female';
+    }).length;
 
     setGenderStats({
       male: maleMembers.length,
@@ -356,13 +345,16 @@ const Analytics = () => {
   };
 
   const calculateInviterStats = async (members: any[]) => {
-    // Real inviter data from members table
+    // Real inviter data from event_attendees table
     const inviterMap = new Map();
     
-    members.forEach(member => {
-      if (member.invited_by && member.invited_by.trim() !== '') {
-        const currentCount = inviterMap.get(member.invited_by) || 0;
-        inviterMap.set(member.invited_by, currentCount + 1);
+    // Get all unique inviters from event_attendees
+    const allInviters = members.filter(member => member.invited_by).map(member => member.invited_by);
+    
+    allInviters.forEach(inviter => {
+      if (inviter && inviter.trim() !== '') {
+        const currentCount = inviterMap.get(inviter) || 0;
+        inviterMap.set(inviter, currentCount + 1);
       }
     });
 
@@ -378,16 +370,16 @@ const Analytics = () => {
     setInviterStats(inviterStatsArray);
   };
 
-  const generateAttendanceReports = (meetings: any[], members: any[]) => {
-    // Real attendance data for each meeting
-    const reports: AttendanceReport[] = meetings.map(meeting => {
-      const presentAttendees = meeting.attendance?.filter((a: any) => a.status === 'present') || [];
-      const absentAttendees = meeting.attendance?.filter((a: any) => a.status === 'absent') || [];
-      const lateAttendees = meeting.attendance?.filter((a: any) => a.status === 'late') || [];
+  const generateAttendanceReports = (events: any[], members: any[], eventAttendees: any[]) => {
+    // Real attendance data for each event
+    const reports: AttendanceReport[] = events.map(event => {
+      const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+      const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
+      const absentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'absent');
       
       const present = presentAttendees.length;
       const absent = absentAttendees.length;
-      const late = lateAttendees.length;
+      const late = 0; // Not tracked in current schema
       const total = members.length;
       
       // Calculate real gender attendance
@@ -395,7 +387,7 @@ const Analytics = () => {
       let femalePresent = 0;
       
       presentAttendees.forEach((a: any) => {
-        const member = members.find(m => m.id === a.member_id);
+        const member = members.find(m => m.id === a.members_id);
         if (member) {
           if (member.gender === 'male') malePresent++;
           if (member.gender === 'female') femalePresent++;
@@ -403,8 +395,8 @@ const Analytics = () => {
       });
 
       return {
-        meeting_date: meeting.meeting_date,
-        meeting_type: meeting.topic || 'General Meeting',
+        meeting_date: event.event_date,
+        meeting_type: event.name || 'General Event',
         total_members: total,
         present_count: present,
         absent_count: absent,
@@ -418,17 +410,14 @@ const Analytics = () => {
     setAttendanceReports(reports.slice(0, 10));
   };
 
-  const calculateCellGroupStats = async (cellGroups: any[], meetings: any[], members: any[]) => {
+  const calculateCellGroupStats = async (cellGroups: any[], events: any[], members: any[], eventAttendees: any[]) => {
     const stats: CellGroupStats[] = [];
 
     for (const group of cellGroups) {
       // Real query for group members
-      const { data: groupMembers } = await supabase
-        .from('members')
-        .select('*')
-        .eq('cell_group_id', group.id);
+      const groupMembers = members.filter(member => member.cell_group_id === group.id);
 
-      if (!groupMembers) continue;
+      if (!groupMembers || groupMembers.length === 0) continue;
 
       const groupMemberIds = groupMembers.map(m => m.id);
       
@@ -436,20 +425,21 @@ const Analytics = () => {
       let presentCount = 0;
       let totalPossible = 0;
       
-      meetings.forEach(meeting => {
-        meeting.attendance?.forEach((a: any) => {
-          if (groupMemberIds.includes(a.member_id)) {
+      events.forEach(event => {
+        const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+        eventAttendeesList.forEach((attendee: any) => {
+          if (groupMemberIds.includes(attendee.members_id)) {
             totalPossible++;
-            if (a.status === 'present') presentCount++;
+            if (attendee.attendance_status === 'present') presentCount++;
           }
         });
       });
       
       const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
       
-      // Get real leader info
-      const leaderName = group.leader ? 
-        `${group.leader.name} ${group.leader.surname}` : 'Not assigned';
+      // Get real leader info - assuming leader_id exists in cell_groups
+      const leaderName = group.leader_id ? 
+        `Leader ${group.leader_id}` : 'Not assigned';
 
       // Simple trend calculation based on recent performance
       const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
@@ -458,7 +448,7 @@ const Analytics = () => {
         group_name: group.name,
         total_members: groupMembers.length,
         avg_attendance: avgAttendance,
-        meetings_this_month: meetings.length,
+        meetings_this_month: events.length,
         leader_name: leaderName,
         trend: trend,
         previous_month_attendance: Math.max(0, avgAttendance - 10) // Simplified for demo
@@ -468,38 +458,36 @@ const Analytics = () => {
     setCellGroupStats(stats.filter(group => group.total_members > 0));
   };
 
-  const findConsecutiveAbsences = async (members: any[], meetings: any[]) => {
+  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[]) => {
     try {
       const absentMembersList: AbsentMember[] = [];
       
-      // Get recent meetings sorted by date
-      const recentMeetings = meetings
-        .sort((a, b) => new Date(a.meeting_date).getTime() - new Date(b.meeting_date).getTime())
-        .slice(-5); // Last 5 meetings
+      // Get recent events sorted by date
+      const recentEvents = events
+        .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
+        .slice(-5); // Last 5 events
 
       for (const member of members) {
         let consecutiveAbsences = 0;
         let lastAttendanceDate: string | null = null;
 
-        // Check last 3 meetings for this member
-        for (const meeting of recentMeetings.slice(-3)) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
+        // Check last 3 events for this member
+        for (const event of recentEvents.slice(-3)) {
+          const attendanceRecord = eventAttendees.find((a: any) => 
+            a.event_id === event.id && a.members_id === member.id
+          );
           
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
+          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent') {
             consecutiveAbsences++;
           } else {
             consecutiveAbsences = 0;
-            lastAttendanceDate = meeting.meeting_date;
+            lastAttendanceDate = event.event_date;
           }
         }
 
         if (consecutiveAbsences >= 2) {
           // Get real cell group name
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
+          const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
 
           absentMembersList.push({
             id: member.id,
@@ -522,32 +510,30 @@ const Analytics = () => {
     }
   };
 
-  const findSundayServiceAbsentees = async (members: any[], meetings: any[]) => {
+  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[]) => {
     try {
       const sundayAbsenteesList: AbsentMember[] = [];
       
-      // Find real Sunday meetings
-      const sundayMeetings = meetings.filter(meeting => {
-        const meetingDate = new Date(meeting.meeting_date);
-        return meetingDate.getDay() === 0; // Sunday
+      // Find real Sunday events (assuming Sunday events have specific naming)
+      const sundayEvents = events.filter(event => {
+        const eventDate = new Date(event.event_date);
+        return eventDate.getDay() === 0; // Sunday
       }).slice(-2); // Last 2 Sundays
 
       for (const member of members) {
         let sundayAbsences = 0;
 
-        for (const meeting of sundayMeetings) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
+        for (const event of sundayEvents) {
+          const attendanceRecord = eventAttendees.find((a: any) => 
+            a.event_id === event.id && a.members_id === member.id
+          );
+          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent') {
             sundayAbsences++;
           }
         }
 
         if (sundayAbsences >= 2) {
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
+          const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
 
           sundayAbsenteesList.push({
             id: member.id,
@@ -570,26 +556,24 @@ const Analytics = () => {
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], meetings: any[]) => {
+  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[]) => {
     try {
       const threeTimeAbsenteesList: AbsentMember[] = [];
 
       for (const member of members) {
         let totalAbsences = 0;
 
-        for (const meeting of meetings) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
+        for (const event of events) {
+          const attendanceRecord = eventAttendees.find((a: any) => 
+            a.event_id === event.id && a.members_id === member.id
+          );
+          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent') {
             totalAbsences++;
           }
         }
 
         if (totalAbsences >= 3) {
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
+          const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
 
           threeTimeAbsenteesList.push({
             id: member.id,
@@ -755,17 +739,17 @@ const Analytics = () => {
               {/* Meeting Type Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Meeting Type
+                  Event Type
                 </label>
                 <select
                   value={filters.meeting_type}
                   onChange={(e) => setFilters({...filters, meeting_type: e.target.value as any})}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
-                  <option value="all">All Meetings</option>
+                  <option value="all">All Events</option>
                   <option value="sunday">Sunday Services</option>
                   <option value="cell">Cell Groups</option>
-                  <option value="other">Other Meetings</option>
+                  <option value="other">Other Events</option>
                 </select>
               </div>
 
@@ -804,12 +788,38 @@ const Analytics = () => {
                   {filters.gender !== 'all' && ` ${filters.gender}`}
                   {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
                   {filters.attendance_status !== 'all' && `, ${filters.attendance_status}`}
-                  {filters.meeting_type !== 'all' && `, ${filters.meeting_type} meetings`}
+                  {filters.meeting_type !== 'all' && `, ${filters.meeting_type} events`}
                 </div>
               </div>
             )}
           </div>
         )}
+
+        {/* Main Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {stats.map((stat, index) => (
+            <div key={index} className={`${stat.color} rounded-2xl p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm">
+                  <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
+                    {stat.value}
+                  </div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {stat.label}
+                  </div>
+                  {stat.description && (
+                    <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                      {stat.description}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
 
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -1087,8 +1097,8 @@ const Analytics = () => {
               <div className="text-2xl font-bold text-orange-600 dark:text-orange-400 mb-1">
                 {growthMetrics.permanent_members}
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Permanent</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">Members</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">Signed Members</div>
+              <div className="text-xs text-gray-500 dark:text-gray-500">Total</div>
             </div>
           </div>
         </div>
