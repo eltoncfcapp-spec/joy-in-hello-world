@@ -1,4 +1,4 @@
-import { Users, Plus, Calendar, User, Search, X } from 'lucide-react';
+import { Users, Plus, Calendar, User, Search, X, Mail, Phone } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -83,31 +83,43 @@ const Groups = () => {
   }, []);
 
   const fetchGroups = async () => {
-    const { data, error } = await supabase
-      .from('cell_groups')
-      .select(`
-        *,
-        leader:members(name, surname)
-      `)
-      .order('created_at', { ascending: false });
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          *,
+          leader:members!cell_groups_leader_id_fkey(name, surname)
+        `)
+        .order('created_at', { ascending: false });
 
-    if (error) {
+      if (error) {
+        console.error('Error fetching groups:', error);
+      } else {
+        console.log('Fetched groups:', data); // Debug log
+        setGroups(data as Group[] || []);
+      }
+    } catch (error) {
       console.error('Error fetching groups:', error);
-    } else {
-      setGroups(data as Group[] || []);
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchMembers = async () => {
-    const { data, error } = await supabase
-      .from('members')
-      .select('*')
-      .order('name');
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
 
-    if (error) {
+      if (error) {
+        console.error('Error fetching members:', error);
+      } else {
+        setMembers(data || []);
+      }
+    } catch (error) {
       console.error('Error fetching members:', error);
-    } else {
-      setMembers(data || []);
     }
   };
 
@@ -147,6 +159,8 @@ const Groups = () => {
           phone: newMemberData.phone,
           invited_by: newMemberData.invitedBy || null,
           is_permanent_member: false,
+          status: 'newcomer',
+          status_date: new Date().toISOString(),
         })
         .select()
         .single();
@@ -182,30 +196,42 @@ const Groups = () => {
     setLoading(true);
 
     try {
-      // Create the cell group
-      const { error: groupError } = await supabase
+      // First, create the cell group
+      const { data: newGroup, error: groupError } = await supabase
         .from('cell_groups')
         .insert({
           name: formData.name,
           meeting_day: formData.meetingDay,
           location: formData.location || null,
           leader_id: formData.leaderId || null,
-        });
+        })
+        .select()
+        .single();
 
       if (groupError) throw groupError;
 
-      // Note: group_members table doesn't exist yet in the database
-      // If you need to assign members to groups, you should use the members table's cell_group_id field
+      console.log('New group created:', newGroup); // Debug log
+
+      // Then, update the cell_group_id for selected members
+      if (selectedMembers.length > 0) {
+        const { error: updateError } = await supabase
+          .from('members')
+          .update({ cell_group_id: newGroup.id })
+          .in('id', selectedMembers);
+
+        if (updateError) throw updateError;
+      }
 
       // Reset form and refresh data
       resetForm();
-      fetchGroups();
+      await fetchGroups(); // Wait for groups to refresh
       alert('Group created successfully!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating group:', error);
-      alert('Error creating group');
+      alert(`Error creating group: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const resetForm = () => {
@@ -219,6 +245,8 @@ const Groups = () => {
     setSelectedMembers([]);
     setSearchTerm('');
     setIsMemberDropdownOpen(false);
+    setShowNewMemberForm(false);
+    setNewMemberData({ name: '', surname: '', phone: '', invitedBy: '' });
   };
 
   const handleMemberSelect = (memberId: string) => {
@@ -232,6 +260,7 @@ const Groups = () => {
   const handleLeaderSelect = (memberId: string) => {
     setFormData({ ...formData, leaderId: memberId });
     setIsMemberDropdownOpen(false);
+    setSearchTerm(''); // Clear search after selection
   };
 
   const filteredMembers = members.filter(member => 
@@ -247,6 +276,16 @@ const Groups = () => {
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setIsMemberDropdownOpen(false);
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
@@ -327,6 +366,34 @@ const Groups = () => {
                     placeholder="Search for a leader..."
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   />
+                  
+                  {/* Member Dropdown */}
+                  {isMemberDropdownOpen && filteredMembers.length > 0 && (
+                    <div className="absolute z-10 w-full mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                      {filteredMembers.map((member) => (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => handleLeaderSelect(member.id)}
+                          className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                              {getInitials(member.name, member.surname)}
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900 dark:text-white">
+                                {member.name} {member.surname}
+                              </div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">
+                                {member.email} • {member.phone}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Selected Leader Display */}
@@ -355,34 +422,6 @@ const Groups = () => {
                         <X className="h-4 w-4" />
                       </button>
                     </div>
-                  </div>
-                )}
-
-                {/* Member Dropdown */}
-                {isMemberDropdownOpen && filteredMembers.length > 0 && (
-                  <div className="absolute z-10 w-full max-w-2xl mt-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                    {filteredMembers.map((member) => (
-                      <button
-                        key={member.id}
-                        type="button"
-                        onClick={() => handleLeaderSelect(member.id)}
-                        className="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-150 border-b border-gray-100 dark:border-gray-600 last:border-b-0"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                            {getInitials(member.name, member.surname)}
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900 dark:text-white">
-                              {member.name} {member.surname}
-                            </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
-                              {member.email} • {member.phone}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    ))}
                   </div>
                 )}
               </div>
@@ -462,6 +501,9 @@ const Groups = () => {
                           <div className="font-medium text-gray-900 dark:text-white text-sm">
                             {member!.name} {member!.surname}
                           </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {member!.phone}
+                          </div>
                         </div>
                         <button
                           type="button"
@@ -527,7 +569,12 @@ const Groups = () => {
 
         {/* Groups Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {groups.length === 0 ? (
+          {loading && groups.length === 0 ? (
+            <div className="col-span-full text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading groups...</p>
+            </div>
+          ) : groups.length === 0 ? (
             <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Groups Yet</h3>
@@ -568,9 +615,14 @@ const Groups = () => {
                   )}
                 </div>
 
-                <button className="w-full px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group">
-                  View Details
-                </button>
+                <div className="flex gap-2">
+                  <button className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group">
+                    View Details
+                  </button>
+                  <button className="px-4 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all duration-200 font-medium">
+                    Edit
+                  </button>
+                </div>
               </div>
             ))
           )}
