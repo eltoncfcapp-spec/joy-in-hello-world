@@ -1,1095 +1,972 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, FileText, Download, Filter, Target, Star, TrendingDown, X } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
-interface StatCard {
-  icon: any;
-  label: string;
-  value: string;
-  color: string;
-  description?: string;
-}
-
-interface AbsentMember {
+interface Member {
   id: string;
   name: string;
   surname: string;
   email: string | null;
   phone: string | null;
-  last_attendance_date: string | null;
-  consecutive_absences: number;
-  cell_group_name: string | null;
-  absence_reason?: string;
-  member_since: string;
-  gender: string;
+  cell_group_id: string | null;
+  ministry_group_id: string | null;
+  gender: 'male' | 'female' | null;
+  is_permanent_member: boolean | null;
+  permanent_member_date: string | null;
+  cell_groups: { name: string } | null;
+  ministry_groups: { name: string } | null;
+  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  status_date: string | null;
+  not_attending_reason: string | null;
+  created_at: string | null;
+  invited_by: string | null;
 }
 
-interface AttendanceReport {
-  meeting_date: string;
-  meeting_type: string;
-  total_members: number;
-  present_count: number;
-  absent_count: number;
-  late_count: number;
-  attendance_rate: number;
-  male_present: number;
-  female_present: number;
+interface CellGroup {
+  id: string;
+  name: string;
 }
 
-interface GrowthMetrics {
-  new_members_this_month: number;
-  new_members_last_month: number;
-  growth_rate: number;
-  permanent_members: number;
-  newcomers: number;
-  total_members: number;
-  became_members_this_month: number;
-  became_members_last_month: number;
+interface MinistryGroup {
+  id: string;
+  name: string;
 }
 
-interface CellGroupStats {
-  group_name: string;
-  total_members: number;
-  avg_attendance: number;
-  meetings_this_month: number;
-  leader_name: string;
-  trend: 'increasing' | 'decreasing' | 'steady';
-  previous_month_attendance: number;
-}
-
-interface InviterStats {
-  invited_by: string;
-  invite_count: number;
-  new_members_count: number;
-}
-
-interface GenderStats {
-  male: number;
-  female: number;
-  male_present: number;
-  female_present: number;
-}
-
-interface FilterState {
-  gender: 'all' | 'male' | 'female';
-  cell_group: string;
-  attendance_status: 'all' | 'present' | 'absent';
-  meeting_type: 'all' | 'sunday' | 'cell' | 'other';
-  date_from: string;
-  date_to: string;
-}
-
-const Analytics = () => {
-  const [stats, setStats] = useState<StatCard[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
-  const [sundayAbsentees, setSundayAbsentees] = useState<AbsentMember[]>([]);
-  const [threeTimeAbsentees, setThreeTimeAbsentees] = useState<AbsentMember[]>([]);
-  const [attendanceReports, setAttendanceReports] = useState<AttendanceReport[]>([]);
-  const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics>({
-    new_members_this_month: 0,
-    new_members_last_month: 0,
-    growth_rate: 0,
-    permanent_members: 0,
-    newcomers: 0,
-    total_members: 0,
-    became_members_this_month: 0,
-    became_members_last_month: 0
+const Members = () => {
+  const [showForm, setShowForm] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [editingStatus, setEditingStatus] = useState<string | null>(null);
+  const [editingMember, setEditingMember] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [statusFormData, setStatusFormData] = useState({
+    status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
+    status_date: '',
+    not_attending_reason: '',
   });
-  const [cellGroupStats, setCellGroupStats] = useState<CellGroupStats[]>([]);
-  const [inviterStats, setInviterStats] = useState<InviterStats[]>([]);
-  const [genderStats, setGenderStats] = useState<GenderStats>({
-    male: 0,
-    female: 0,
-    male_present: 0,
-    female_present: 0
+  const [formData, setFormData] = useState({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
+    invited_by: '',
+    cell_group_id: '',
+    ministry_group_id: '',
+    gender: '' as 'male' | 'female' | '',
   });
-  const [cellGroups, setCellGroups] = useState<any[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
-
-  // Default date range: last 30 days
-  const defaultDateFrom = new Date();
-  defaultDateFrom.setDate(defaultDateFrom.getDate() - 30);
-
-  const [filters, setFilters] = useState<FilterState>({
-    gender: 'all',
-    cell_group: 'all',
-    attendance_status: 'all',
-    meeting_type: 'all',
-    date_from: defaultDateFrom.toISOString().split('T')[0],
-    date_to: new Date().toISOString().split('T')[0]
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
+    invited_by: '',
+    cell_group_id: '',
+    ministry_group_id: '',
+    gender: '' as 'male' | 'female' | '',
   });
 
   useEffect(() => {
-    fetchAnalyticsData();
-  }, [filters]);
+    fetchMembers();
+    fetchCellGroups();
+    fetchMinistryGroups();
+  }, []);
 
-  const fetchAnalyticsData = async () => {
+  const fetchMembers = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      const { data, error } = await supabase
+        .from('members')
+        .select(`
+          *,
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name)
+        `)
+        .order('created_at', { ascending: false });
 
-      // Fetch all data with real Supabase queries
-      const [membersData, groupsData, meetingsData, attendanceData, cellGroupsData] = await Promise.all([
-        // Members query with filters
-        buildMembersQuery(),
-        // Cell groups query
-        supabase.from('cell_groups').select('*'),
-        // Meetings query with filters
-        buildMeetingsQuery(),
-        // Attendance query with filters
-        buildAttendanceQuery(),
-        // Cell groups with leader info
-        supabase.from('cell_groups').select('*, members!cell_groups_leader_id_fkey(name, surname)')
-      ]);
+      if (error) {
+        throw error;
+      }
 
-      if (membersData.error) throw membersData.error;
-      if (groupsData.error) throw groupsData.error;
-      if (meetingsData.error) throw meetingsData.error;
-      if (attendanceData.error) throw attendanceData.error;
-      if (cellGroupsData.error) throw cellGroupsData.error;
-
-      const members = membersData.data || [];
-      const groups = groupsData.data || [];
-      const meetings = meetingsData.data || [];
-      const allAttendance = attendanceData.data || [];
-      const allCellGroups = cellGroupsData.data || [];
-
-      setCellGroups(allCellGroups);
-
-      // Calculate all metrics with real data
-      await calculateAllMetrics(members, groups, meetings, allAttendance, allCellGroups);
-
-    } catch (error) {
-      console.error('Error fetching analytics data:', error);
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Error fetching members:', error);
+      setError(error.message || 'Failed to load members. Please check your connection.');
     } finally {
       setLoading(false);
     }
   };
 
-  const buildMembersQuery = () => {
-    let query = supabase.from('members').select('*');
+  const fetchCellGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
 
-    // Apply gender filter
-    if (filters.gender !== 'all') {
-      query = query.eq('gender', filters.gender);
-    }
-
-    // Apply cell group filter
-    if (filters.cell_group !== 'all') {
-      query = query.eq('cell_group_id', filters.cell_group);
-    }
-
-    return query;
-  };
-
-  const buildMeetingsQuery = () => {
-    let query = supabase
-      .from('meetings')
-      .select('*, attendance(status, member_id, notes)');
-
-    // Apply date filter
-    if (filters.date_from) {
-      query = query.gte('meeting_date', filters.date_from);
-    }
-    if (filters.date_to) {
-      query = query.lte('meeting_date', filters.date_to);
-    }
-
-    // Apply meeting type filter
-    if (filters.meeting_type === 'sunday') {
-      query = query.or('topic.ilike.%sunday%,topic.ilike.%service%');
-    } else if (filters.meeting_type === 'cell') {
-      query = query.or('topic.ilike.%cell%,topic.ilike.%group%');
-    }
-
-    return query;
-  };
-
-  const buildAttendanceQuery = () => {
-    let query = supabase.from('attendance').select('*');
-
-    // Apply attendance status filter
-    if (filters.attendance_status !== 'all') {
-      query = query.eq('status', filters.attendance_status);
-    }
-
-    return query;
-  };
-
-  const calculateAllMetrics = async (members: any[], groups: any[], meetings: any[], attendance: any[], cellGroups: any[]) => {
-    // Calculate basic statistics with real data
-    const totalMembers = members.length;
-    const totalGroups = groups.length;
-    
-    // Events in date range
-    const eventsInRange = meetings.length;
-
-    // Calculate real attendance data
-    const totalPresent = meetings.reduce((acc, meeting) => {
-      const presentCount = meeting.attendance?.filter((a: any) => a.status === 'present').length || 0;
-      return acc + presentCount;
-    }, 0);
-    
-    const totalPossibleAttendance = meetings.length * totalMembers;
-    const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
-
-    // Update main stats with real data
-    setStats([
-      { 
-        icon: Users, 
-        label: 'Total Members', 
-        value: totalMembers.toString(), 
-        color: 'bg-blue-50 dark:bg-blue-900/20',
-        description: `${members.filter(m => m.is_permanent_member).length} permanent`
-      },
-      { 
-        icon: Users, 
-        label: 'Active Groups', 
-        value: totalGroups.toString(), 
-        color: 'bg-green-50 dark:bg-green-900/20',
-        description: `${groups.filter(g => g.members && g.members.length > 0).length} with members`
-      },
-      { 
-        icon: Calendar, 
-        label: 'Meetings', 
-        value: eventsInRange.toString(), 
-        color: 'bg-purple-50 dark:bg-purple-900/20',
-        description: `in selected period`
-      },
-      { 
-        icon: BarChart3, 
-        label: 'Avg Attendance', 
-        value: `${avgAttendance}%`, 
-        color: 'bg-orange-50 dark:bg-orange-900/20',
-        description: 'Across filtered meetings'
-      },
-    ]);
-
-    // Calculate all detailed metrics with real data
-    await calculateGrowthMetrics(members);
-    await calculateGenderStats(members, meetings);
-    await calculateInviterStats(members);
-    await generateAttendanceReports(meetings, members);
-    await calculateCellGroupStats(cellGroups, meetings, members);
-    await findConsecutiveAbsences(members, meetings);
-    await findSundayServiceAbsentees(members, meetings);
-    await findThreeTimeAbsentees(members, meetings);
-  };
-
-  const calculateGrowthMetrics = async (members: any[]) => {
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth();
-    const currentYear = currentDate.getFullYear();
-    
-    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-
-    // Real query for new members in date range
-    const newMembersInRange = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return memberDate >= fromDate && memberDate <= toDate;
-    }).length;
-
-    // Real data for growth rate calculation
-    const newMembersThisMonth = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
-    }).length;
-
-    const newMembersLastMonth = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
-    }).length;
-
-    // Real query for members who became permanent in date range
-    const becameMembersInRange = members.filter(member => {
-      if (!member.permanent_member_date) return false;
-      const permanentDate = new Date(member.permanent_member_date);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return permanentDate >= fromDate && permanentDate <= toDate;
-    }).length;
-
-    const growthRate = newMembersLastMonth > 0 
-      ? Math.round(((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100)
-      : newMembersThisMonth > 0 ? 100 : 0;
-
-    setGrowthMetrics({
-      new_members_this_month: newMembersInRange,
-      new_members_last_month: newMembersLastMonth,
-      growth_rate: growthRate,
-      permanent_members: members.filter(m => m.is_permanent_member).length,
-      newcomers: members.filter(m => m.status === 'newcomer').length,
-      total_members: members.length,
-      became_members_this_month: becameMembersInRange,
-      became_members_last_month: 0
-    });
-  };
-
-  const calculateGenderStats = async (members: any[], meetings: any[]) => {
-    // Real gender data from members
-    const maleMembers = members.filter(m => m.gender === 'male');
-    const femaleMembers = members.filter(m => m.gender === 'female');
-    
-    // Calculate real attendance by gender
-    let malePresent = 0;
-    let femalePresent = 0;
-
-    meetings.forEach(meeting => {
-      meeting.attendance?.forEach((a: any) => {
-        if (a.status === 'present') {
-          const member = members.find(m => m.id === a.member_id);
-          if (member?.gender === 'male') malePresent++;
-          if (member?.gender === 'female') femalePresent++;
-        }
-      });
-    });
-
-    setGenderStats({
-      male: maleMembers.length,
-      female: femaleMembers.length,
-      male_present: malePresent,
-      female_present: femalePresent
-    });
-  };
-
-  const calculateInviterStats = async (members: any[]) => {
-    // Real inviter data from members table
-    const inviterMap = new Map();
-    
-    members.forEach(member => {
-      if (member.invited_by && member.invited_by.trim() !== '') {
-        const currentCount = inviterMap.get(member.invited_by) || 0;
-        inviterMap.set(member.invited_by, currentCount + 1);
+      if (error) {
+        throw error;
       }
-    });
 
-    const inviterStatsArray: InviterStats[] = Array.from(inviterMap.entries())
-      .map(([invited_by, invite_count]) => ({
-        invited_by,
-        invite_count,
-        new_members_count: members.filter(m => m.invited_by === invited_by && m.status === 'newcomer').length
-      }))
-      .sort((a, b) => b.invite_count - a.invite_count)
-      .slice(0, 10);
-
-    setInviterStats(inviterStatsArray);
+      setCellGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching cell groups:', error);
+      setError(error.message || 'Failed to load cell groups.');
+    }
   };
 
-  const generateAttendanceReports = (meetings: any[], members: any[]) => {
-    // Real attendance data for each meeting
-    const reports: AttendanceReport[] = meetings.map(meeting => {
-      const presentAttendees = meeting.attendance?.filter((a: any) => a.status === 'present') || [];
-      const absentAttendees = meeting.attendance?.filter((a: any) => a.status === 'absent') || [];
-      const lateAttendees = meeting.attendance?.filter((a: any) => a.status === 'late') || [];
-      
-      const present = presentAttendees.length;
-      const absent = absentAttendees.length;
-      const late = lateAttendees.length;
-      const total = members.length;
-      
-      // Calculate real gender attendance
-      let malePresent = 0;
-      let femalePresent = 0;
-      
-      presentAttendees.forEach((a: any) => {
-        const member = members.find(m => m.id === a.member_id);
-        if (member) {
-          if (member.gender === 'male') malePresent++;
-          if (member.gender === 'female') femalePresent++;
-        }
-      });
+  const fetchMinistryGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select('id, name')
+        .order('name');
 
-      return {
-        meeting_date: meeting.meeting_date,
-        meeting_type: meeting.topic || 'General Meeting',
-        total_members: total,
-        present_count: present,
-        absent_count: absent,
-        late_count: late,
-        attendance_rate: total > 0 ? Math.round((present / total) * 100) : 0,
-        male_present: malePresent,
-        female_present: femalePresent
-      };
-    });
+      if (error) {
+        throw error;
+      }
 
-    setAttendanceReports(reports.slice(0, 10));
+      setMinistryGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching ministry groups:', error);
+      setError(error.message || 'Failed to load ministry groups.');
+    }
   };
 
-  const calculateCellGroupStats = async (cellGroups: any[], meetings: any[], members: any[]) => {
-    const stats: CellGroupStats[] = [];
-
-    for (const group of cellGroups) {
-      // Real query for group members
-      const { data: groupMembers } = await supabase
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const { error } = await supabase
         .from('members')
-        .select('*')
-        .eq('cell_group_id', group.id);
+        .insert([{
+          name: formData.name.trim(),
+          surname: formData.surname.trim(),
+          email: formData.email.trim() || null,
+          phone: formData.phone.trim() || null,
+          cell_group_id: formData.cell_group_id || null,
+          ministry_group_id: formData.ministry_group_id || null,
+          gender: formData.gender || null,
+          invited_by: formData.invited_by.trim() || null,
+          status: 'newcomer',
+          status_date: new Date().toISOString(),
+        }])
+        .select();
 
-      if (!groupMembers) continue;
+      if (error) {
+        throw error;
+      }
 
-      const groupMemberIds = groupMembers.map(m => m.id);
-      
-      // Calculate real attendance for this group
-      let presentCount = 0;
-      let totalPossible = 0;
-      
-      meetings.forEach(meeting => {
-        meeting.attendance?.forEach((a: any) => {
-          if (groupMemberIds.includes(a.member_id)) {
-            totalPossible++;
-            if (a.status === 'present') presentCount++;
-          }
-        });
+      setShowForm(false);
+      setFormData({ 
+        name: '', 
+        surname: '', 
+        email: '', 
+        phone: '', 
+        invited_by: '', 
+        cell_group_id: '',
+        ministry_group_id: '',
+        gender: '',
       });
+      setSuccess('Member added successfully!');
+      fetchMembers();
       
-      const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
-      
-      // Get real leader info
-      const leaderName = group.leader ? 
-        `${group.leader.name} ${group.leader.surname}` : 'Not assigned';
-
-      // Simple trend calculation based on recent performance
-      const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
-
-      stats.push({
-        group_name: group.name,
-        total_members: groupMembers.length,
-        avg_attendance: avgAttendance,
-        meetings_this_month: meetings.length,
-        leader_name: leaderName,
-        trend: trend,
-        previous_month_attendance: Math.max(0, avgAttendance - 10) // Simplified for demo
-      });
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error adding member:', error);
+      setError(error.message || 'Failed to add member. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    setCellGroupStats(stats.filter(group => group.total_members > 0));
   };
 
-  const findConsecutiveAbsences = async (members: any[], meetings: any[]) => {
+  const handleEditMember = (member: Member) => {
+    setEditingMember(member.id);
+    setEditFormData({
+      name: member.name,
+      surname: member.surname,
+      email: member.email || '',
+      phone: member.phone || '',
+      invited_by: member.invited_by || '',
+      cell_group_id: member.cell_group_id || '',
+      ministry_group_id: member.ministry_group_id || '',
+      gender: member.gender || '',
+    });
+  };
+
+  const handleSaveMember = async (memberId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    
     try {
-      const absentMembersList: AbsentMember[] = [];
-      
-      // Get recent meetings sorted by date
-      const recentMeetings = meetings
-        .sort((a, b) => new Date(a.meeting_date).getTime() - new Date(b.meeting_date).getTime())
-        .slice(-5); // Last 5 meetings
+      const updateData: any = {
+        name: editFormData.name.trim(),
+        surname: editFormData.surname.trim(),
+        email: editFormData.email.trim() || null,
+        phone: editFormData.phone.trim() || null,
+        cell_group_id: editFormData.cell_group_id || null,
+        ministry_group_id: editFormData.ministry_group_id || null,
+        gender: editFormData.gender || null,
+        invited_by: editFormData.invited_by.trim() || null,
+      };
 
-      for (const member of members) {
-        let consecutiveAbsences = 0;
-        let lastAttendanceDate: string | null = null;
+      const { error } = await supabase
+        .from('members')
+        .update(updateData)
+        .eq('id', memberId);
 
-        // Check last 3 meetings for this member
-        for (const meeting of recentMeetings.slice(-3)) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
-            consecutiveAbsences++;
-          } else {
-            consecutiveAbsences = 0;
-            lastAttendanceDate = meeting.meeting_date;
-          }
-        }
-
-        if (consecutiveAbsences >= 2) {
-          // Get real cell group name
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
-
-          absentMembersList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            email: member.email,
-            phone: member.phone,
-            last_attendance_date: lastAttendanceDate,
-            consecutive_absences: consecutiveAbsences,
-            cell_group_name: cellGroup?.name || null,
-            member_since: member.created_at,
-            gender: member.gender || 'unknown'
-          });
-        }
+      if (error) {
+        throw error;
       }
 
-      setAbsentMembers(absentMembersList);
-    } catch (error) {
-      console.error('Error finding consecutive absences:', error);
-    }
-  };
-
-  const findSundayServiceAbsentees = async (members: any[], meetings: any[]) => {
-    try {
-      const sundayAbsenteesList: AbsentMember[] = [];
+      setEditingMember(null);
+      setSuccess('Member details updated successfully!');
+      fetchMembers();
       
-      // Find real Sunday meetings
-      const sundayMeetings = meetings.filter(meeting => {
-        const meetingDate = new Date(meeting.meeting_date);
-        return meetingDate.getDay() === 0; // Sunday
-      }).slice(-2); // Last 2 Sundays
-
-      for (const member of members) {
-        let sundayAbsences = 0;
-
-        for (const meeting of sundayMeetings) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
-            sundayAbsences++;
-          }
-        }
-
-        if (sundayAbsences >= 2) {
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
-
-          sundayAbsenteesList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            email: member.email,
-            phone: member.phone,
-            last_attendance_date: null,
-            consecutive_absences: sundayAbsences,
-            cell_group_name: cellGroup?.name || null,
-            member_since: member.created_at,
-            gender: member.gender || 'unknown'
-          });
-        }
-      }
-
-      setSundayAbsentees(sundayAbsenteesList);
-    } catch (error) {
-      console.error('Error finding Sunday absentees:', error);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error updating member:', error);
+      setError(error.message || 'Failed to update member details.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], meetings: any[]) => {
+  const handleCancelEdit = () => {
+    setEditingMember(null);
+    setEditFormData({
+      name: '',
+      surname: '',
+      email: '',
+      phone: '',
+      invited_by: '',
+      cell_group_id: '',
+      ministry_group_id: '',
+      gender: '',
+    });
+  };
+
+  const handleMarkAsPermanent = async (memberId: string) => {
     try {
-      const threeTimeAbsenteesList: AbsentMember[] = [];
+      setError(null);
+      setSuccess(null);
+      
+      const { error } = await supabase
+        .from('members')
+        .update({
+          is_permanent_member: true,
+          permanent_member_date: new Date().toISOString(),
+        })
+        .eq('id', memberId);
 
-      for (const member of members) {
-        let totalAbsences = 0;
-
-        for (const meeting of meetings) {
-          const attendanceRecord = meeting.attendance?.find((a: any) => a.member_id === member.id);
-          if (!attendanceRecord || attendanceRecord.status === 'absent') {
-            totalAbsences++;
-          }
-        }
-
-        if (totalAbsences >= 3) {
-          const { data: cellGroup } = await supabase
-            .from('cell_groups')
-            .select('name')
-            .eq('id', member.cell_group_id)
-            .single();
-
-          threeTimeAbsenteesList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            email: member.email,
-            phone: member.phone,
-            last_attendance_date: null,
-            consecutive_absences: totalAbsences,
-            cell_group_name: cellGroup?.name || null,
-            member_since: member.created_at,
-            gender: member.gender || 'unknown'
-          });
-        }
+      if (error) {
+        throw error;
       }
 
-      setThreeTimeAbsentees(threeTimeAbsenteesList);
-    } catch (error) {
-      console.error('Error finding three-time absentees:', error);
+      setSuccess('Member marked as permanent!');
+      fetchMembers();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error marking as permanent:', error);
+      setError(error.message || 'Failed to update member status.');
     }
   };
+
+  const handleEditStatus = (member: Member) => {
+    setEditingStatus(member.id);
+    setStatusFormData({
+      status: member.status || 'newcomer',
+      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      not_attending_reason: member.not_attending_reason || '',
+    });
+  };
+
+  const handleSaveStatus = async (memberId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const updateData: any = {
+        status: statusFormData.status,
+        status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : new Date().toISOString(),
+      };
+
+      if (statusFormData.status === 'not_attending') {
+        updateData.not_attending_reason = statusFormData.not_attending_reason.trim();
+      } else {
+        updateData.not_attending_reason = null;
+      }
+
+      const { error } = await supabase
+        .from('members')
+        .update(updateData)
+        .eq('id', memberId);
+
+      if (error) {
+        throw error;
+      }
+
+      setEditingStatus(null);
+      setSuccess('Member status updated successfully!');
+      fetchMembers();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error updating status:', error);
+      setError(error.message || 'Failed to update member status.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteMember = async (memberId: string) => {
+    if (!confirm('Are you sure you want to delete this member? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setError(null);
+      setSuccess(null);
+      
+      const { error } = await supabase
+        .from('members')
+        .delete()
+        .eq('id', memberId);
+
+      if (error) {
+        throw error;
+      }
+
+      setSuccess('Member deleted successfully!');
+      fetchMembers();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting member:', error);
+      setError(error.message || 'Failed to delete member.');
+    }
+  };
+
+  const filteredMembers = members.filter(
+    (member) =>
+      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
-  const getTrendIcon = (trend: 'increasing' | 'decreasing' | 'steady') => {
-    switch (trend) {
-      case 'increasing':
-        return <TrendingUp className="h-4 w-4 text-green-500" />;
-      case 'decreasing':
-        return <TrendingDown className="h-4 w-4 text-red-500" />;
-      default:
-        return <Target className="h-4 w-4 text-gray-500" />;
-    }
-  };
-
-  const clearFilters = () => {
-    setFilters({
-      gender: 'all',
-      cell_group: 'all',
-      attendance_status: 'all',
-      meeting_type: 'all',
-      date_from: defaultDateFrom.toISOString().split('T')[0],
-      date_to: new Date().toISOString().split('T')[0]
+  const resetForm = () => {
+    setFormData({ 
+      name: '', 
+      surname: '', 
+      email: '', 
+      phone: '', 
+      invited_by: '', 
+      cell_group_id: '',
+      ministry_group_id: '',
+      gender: '',
     });
+    setShowForm(false);
+    setError(null);
   };
 
-  const hasActiveFilters = () => {
-    return filters.gender !== 'all' || 
-           filters.cell_group !== 'all' || 
-           filters.attendance_status !== 'all' || 
-           filters.meeting_type !== 'all';
+  const getStatusBadge = (status: string | null) => {
+    const badges = {
+      newcomer: { 
+        color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', 
+        text: 'Newcomer' 
+      },
+      signed_member: { 
+        color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', 
+        text: 'Signed Member' 
+      },
+      not_attending: { 
+        color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', 
+        text: 'Not Attending' 
+      },
+    };
+    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading real analytics data from database...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const getStatusCounts = () => {
+    return {
+      total: members.length,
+      permanent: members.filter(m => m.is_permanent_member).length,
+      newcomer: members.filter(m => m.status === 'newcomer').length,
+      signed_member: members.filter(m => m.status === 'signed_member').length,
+      not_attending: members.filter(m => m.status === 'not_attending').length,
+    };
+  };
+
+  const statusCounts = getStatusCounts();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Real-Time Analytics
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              Members Directory
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Live data from your church database</p>
+            <p className="text-gray-600 dark:text-gray-400">Manage and view all church members</p>
           </div>
-          
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Filter className="h-4 w-4" />
-              Filters
-              {hasActiveFilters() && (
-                <span className="bg-red-500 text-white px-2 py-1 rounded-full text-xs">
-                  Active
-                </span>
-              )}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+          >
+            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+            {showForm ? 'Cancel' : 'Add Member'}
+          </button>
         </div>
 
-        {/* Filters Panel */}
-        {showFilters && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Filter Analytics</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={clearFilters}
-                  className="flex items-center gap-2 px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                >
-                  <X className="h-4 w-4" />
-                  Clear All
-                </button>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Gender Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Gender
-                </label>
-                <select
-                  value={filters.gender}
-                  onChange={(e) => setFilters({...filters, gender: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Genders</option>
-                  <option value="male">Male Only</option>
-                  <option value="female">Female Only</option>
-                </select>
-              </div>
-
-              {/* Cell Group Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Cell Group
-                </label>
-                <select
-                  value={filters.cell_group}
-                  onChange={(e) => setFilters({...filters, cell_group: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Groups</option>
-                  {cellGroups.map(group => (
-                    <option key={group.id} value={group.id}>{group.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Attendance Status Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Attendance Status
-                </label>
-                <select
-                  value={filters.attendance_status}
-                  onChange={(e) => setFilters({...filters, attendance_status: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Status</option>
-                  <option value="present">Present Only</option>
-                  <option value="absent">Absent Only</option>
-                </select>
-              </div>
-
-              {/* Meeting Type Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Meeting Type
-                </label>
-                <select
-                  value={filters.meeting_type}
-                  onChange={(e) => setFilters({...filters, meeting_type: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Meetings</option>
-                  <option value="sunday">Sunday Services</option>
-                  <option value="cell">Cell Groups</option>
-                  <option value="other">Other Meetings</option>
-                </select>
-              </div>
-
-              {/* Date From */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Date From
-                </label>
-                <input
-                  type="date"
-                  value={filters.date_from}
-                  onChange={(e) => setFilters({...filters, date_from: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-              </div>
-
-              {/* Date To */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Date To
-                </label>
-                <input
-                  type="date"
-                  value={filters.date_to}
-                  onChange={(e) => setFilters({...filters, date_to: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-              </div>
-            </div>
-
-            {/* Active Filters Display */}
-            {hasActiveFilters() && (
-              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <div className="text-sm text-blue-700 dark:text-blue-300">
-                  Active Filters: 
-                  {filters.gender !== 'all' && ` ${filters.gender}`}
-                  {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
-                  {filters.attendance_status !== 'all' && `, ${filters.attendance_status}`}
-                  {filters.meeting_type !== 'all' && `, ${filters.meeting_type} meetings`}
-                </div>
-              </div>
-            )}
+        {/* Success Message */}
+        {success && (
+          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
+            {success}
           </div>
         )}
 
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{genderStats.male}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Male Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">
-              {genderStats.male_present} present
-            </div>
+        {/* Error Message */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
+            {error}
           </div>
-          <div className="bg-pink-50 dark:bg-pink-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-pink-600 dark:text-pink-400">{genderStats.female}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Female Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">
-              {genderStats.female_present} present
-            </div>
-          </div>
-          <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">{growthMetrics.new_members_this_month}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">New Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
-          </div>
-          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{growthMetrics.became_members_this_month}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Became Members</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
-          </div>
-        </div>
+        )}
 
-        {/* Main Analytics Grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-          {/* Top Inviters */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-              <Star className="h-5 w-5 text-yellow-500" />
-              Top Inviters
-            </h2>
-            <div className="space-y-3">
-              {inviterStats.length > 0 ? inviterStats.map((inviter, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <div className="font-semibold text-gray-900 dark:text-white">{inviter.invited_by}</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                        {inviter.new_members_count} new members
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                      {inviter.invite_count}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-500">invited</div>
-                  </div>
+        {/* Add Member Form */}
+        {showForm && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add New Member</h2>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    First Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter first name"
+                    required
+                  />
                 </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                  No inviter data available
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Last Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.surname}
+                    onChange={(e) => setFormData({ ...formData, surname: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter last name"
+                    required
+                  />
                 </div>
-              )}
-            </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter email address"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Invited By
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.invited_by}
+                    onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Who invited this member?"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Gender *
+                  </label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' | '' })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  >
+                    <option value="">Select gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Cell Group
+                  </label>
+                  <select
+                    value={formData.cell_group_id}
+                    onChange={(e) => setFormData({ ...formData, cell_group_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">Select cell group</option>
+                    {cellGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Ministry Group
+                  </label>
+                  <select
+                    value={formData.ministry_group_id}
+                    onChange={(e) => setFormData({ ...formData, ministry_group_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">Select ministry group</option>
+                    {ministryGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus className="h-4 w-4" />
+                  {loading ? 'Adding Member...' : 'Add Member'}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
+        )}
 
-          {/* Gender Attendance */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Gender Attendance
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-700 dark:text-gray-300">Male Attendance</span>
-                  <span className="font-bold text-blue-600 dark:text-blue-400">
-                    {genderStats.male > 0 ? Math.round((genderStats.male_present / genderStats.male) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-blue-500 h-2 rounded-full" 
-                    style={{ width: `${genderStats.male > 0 ? Math.round((genderStats.male_present / genderStats.male) * 100) : 0}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.male_present} of {genderStats.male} members
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-700 dark:text-gray-300">Female Attendance</span>
-                  <span className="font-bold text-pink-600 dark:text-pink-400">
-                    {genderStats.female > 0 ? Math.round((genderStats.female_present / genderStats.female) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-pink-500 h-2 rounded-full" 
-                    style={{ width: `${genderStats.female > 0 ? Math.round((genderStats.female_present / genderStats.female) * 100) : 0}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.female_present} of {genderStats.female} members
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Cell Group Performance */}
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Cell Group Performance
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {cellGroupStats.length > 0 ? cellGroupStats.map((group, index) => (
-              <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-semibold text-gray-900 dark:text-white">{group.group_name}</div>
-                  {getTrendIcon(group.trend)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                  {group.total_members} members • {group.meetings_this_month} meetings
-                </div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
-                  <span className={`text-sm font-bold ${
-                    group.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
-                    group.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
-                    'text-red-600 dark:text-red-400'
-                  }`}>
-                    {group.avg_attendance}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mb-1">
-                  <div 
-                    className={`h-2 rounded-full ${
-                      group.avg_attendance >= 80 ? 'bg-green-500' :
-                      group.avg_attendance >= 60 ? 'bg-yellow-500' :
-                      'bg-red-500'
-                    }`}
-                    style={{ width: `${group.avg_attendance}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500">
-                  Leader: {group.leader_name}
-                </div>
-              </div>
-            )) : (
-              <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
-                No cell group data available
-              </div>
+        {/* Search Bar */}
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 mb-6 shadow-sm">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search members by name, email, phone, or cell group..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
             )}
           </div>
         </div>
 
-        {/* Absence Alerts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* 2+ Consecutive Absences */}
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
-              <h3 className="font-bold text-red-900 dark:text-red-300">2+ Meeting Absences</h3>
-              <span className="bg-red-600 text-white px-2 py-1 rounded-full text-sm">
-                {absentMembers.length}
-              </span>
-            </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {absentMembers.length > 0 ? absentMembers.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-red-200 dark:border-red-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
-                    {member.name} {member.surname}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.consecutive_absences} absences
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-                  No consecutive absences
-                </div>
-              )}
-            </div>
+        {/* Loading State */}
+        {loading && members.length === 0 && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading members...</p>
           </div>
+        )}
 
-          {/* 2+ Sunday Absences */}
-          <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-              <h3 className="font-bold text-orange-900 dark:text-orange-300">2+ Sunday Absences</h3>
-              <span className="bg-orange-600 text-white px-2 py-1 rounded-full text-sm">
-                {sundayAbsentees.length}
-              </span>
+        {/* Members Grid */}
+        <div className="grid gap-6">
+          {!loading && filteredMembers.length === 0 ? (
+            <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+              <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                {searchQuery ? 'No Members Found' : 'No Members Yet'}
+              </h3>
+              <p className="text-gray-500 dark:text-gray-500">
+                {searchQuery ? 'Try adjusting your search terms' : 'Add your first member to get started'}
+              </p>
             </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {sundayAbsentees.length > 0 ? sundayAbsentees.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-orange-200 dark:border-orange-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
-                    {member.name} {member.surname}
+          ) : (
+            filteredMembers.map((member) => (
+              <div 
+                key={member.id} 
+                className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02] group"
+              >
+                <div className="flex flex-col lg:flex-row justify-between gap-6">
+                  <div className="flex-1">
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                        {getInitials(member.name, member.surname)}
+                      </div>
+                      <div className="flex-1">
+                        {editingMember === member.id ? (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  First Name *
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editFormData.name}
+                                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  required
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Last Name *
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editFormData.surname}
+                                  onChange={(e) => setEditFormData({ ...editFormData, surname: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  required
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Email
+                                </label>
+                                <input
+                                  type="email"
+                                  value={editFormData.email}
+                                  onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Phone
+                                </label>
+                                <input
+                                  type="tel"
+                                  value={editFormData.phone}
+                                  onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Invited By
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editFormData.invited_by}
+                                  onChange={(e) => setEditFormData({ ...editFormData, invited_by: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Gender *
+                                </label>
+                                <select
+                                  value={editFormData.gender}
+                                  onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value as 'male' | 'female' | '' })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  required
+                                >
+                                  <option value="">Select gender</option>
+                                  <option value="male">Male</option>
+                                  <option value="female">Female</option>
+                                </select>
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Cell Group
+                                </label>
+                                <select
+                                  value={editFormData.cell_group_id}
+                                  onChange={(e) => setEditFormData({ ...editFormData, cell_group_id: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                >
+                                  <option value="">Select cell group</option>
+                                  {cellGroups.map((group) => (
+                                    <option key={group.id} value={group.id}>
+                                      {group.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Ministry Group
+                                </label>
+                                <select
+                                  value={editFormData.ministry_group_id}
+                                  onChange={(e) => setEditFormData({ ...editFormData, ministry_group_id: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                >
+                                  <option value="">Select ministry group</option>
+                                  {ministryGroups.map((group) => (
+                                    <option key={group.id} value={group.id}>
+                                      {group.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleSaveMember(member.id)}
+                                disabled={loading}
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                              >
+                                <Save className="h-4 w-4" />
+                                Save Changes
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                {member.name} {member.surname}
+                              </h3>
+                              {member.is_permanent_member && (
+                                <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium flex items-center gap-1">
+                                  <Check className="h-3 w-3" />
+                                  Permanent Member
+                                </span>
+                              )}
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
+                                {getStatusBadge(member.status).text}
+                              </span>
+                            </div>
+                            
+                            <div className="space-y-3 text-gray-600 dark:text-gray-400">
+                              {member.email && (
+                                <div className="flex items-center gap-3">
+                                  <Mail className="h-4 w-4" />
+                                  <span className="font-medium">{member.email}</span>
+                                </div>
+                              )}
+                              {member.phone && (
+                                <div className="flex items-center gap-3">
+                                  <Phone className="h-4 w-4" />
+                                  <span className="font-medium">{member.phone}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-3">
+                                <MapPin className="h-4 w-4" />
+                                <span className="font-medium">{member.cell_groups?.name || 'No Cell Group Assigned'}</span>
+                              </div>
+                              {member.ministry_groups?.name && (
+                                <div className="flex items-center gap-3">
+                                  <User className="h-4 w-4" />
+                                  <span className="font-medium">{member.ministry_groups.name}</span>
+                                </div>
+                              )}
+                              {member.invited_by && (
+                                <div className="flex items-center gap-3 text-sm">
+                                  <User className="h-4 w-4" />
+                                  <span>Invited by: {member.invited_by}</span>
+                                </div>
+                              )}
+                              {member.permanent_member_date && (
+                                <div className="text-sm text-green-600 dark:text-green-400">
+                                  Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.gender}
+                  
+                  <div className="flex flex-col justify-between items-end gap-4">
+                    {editingMember === member.id ? null : editingStatus === member.id ? (
+                      <div className="space-y-4 w-full max-w-xs">
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+                          <select
+                            value={statusFormData.status}
+                            onChange={(e) => setStatusFormData({ ...statusFormData, status: e.target.value as any })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                          >
+                            <option value="newcomer">Newcomer</option>
+                            <option value="signed_member">Signed Member</option>
+                            <option value="not_attending">Not Attending</option>
+                          </select>
+                        </div>
+                        {statusFormData.status === 'signed_member' && (
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date Became Member</label>
+                            <input
+                              type="date"
+                              value={statusFormData.status_date}
+                              onChange={(e) => setStatusFormData({ ...statusFormData, status_date: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                            />
+                          </div>
+                        )}
+                        {statusFormData.status === 'not_attending' && (
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reason</label>
+                            <textarea
+                              value={statusFormData.not_attending_reason}
+                              onChange={(e) => setStatusFormData({ ...statusFormData, not_attending_reason: e.target.value })}
+                              placeholder="Reason for not attending..."
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                              rows={3}
+                            />
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleSaveStatus(member.id)}
+                            disabled={loading}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                          >
+                            <Save className="h-4 w-4" />
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingStatus(null)}
+                            className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <button
+                          onClick={() => handleEditMember(member)}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                        >
+                          <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                          Edit Details
+                        </button>
+                        <button
+                          onClick={() => handleEditStatus(member)}
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                        >
+                          <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                          Edit Status
+                        </button>
+                        {!member.is_permanent_member && (
+                          <button
+                            onClick={() => handleMarkAsPermanent(member.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <Check className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                            Mark as Permanent
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteMember(member.id)}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                        >
+                          <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                    {member.status_date && member.status === 'signed_member' && (
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })}
+                      </div>
+                    )}
+                    {member.not_attending_reason && member.status === 'not_attending' && (
+                      <div className="text-sm text-red-600 dark:text-red-400 max-w-xs">
+                        Reason: {member.not_attending_reason}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Member ID: {member.id.slice(0, 8)}...
+                    </div>
                   </div>
                 </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-                  No Sunday absences
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 3+ Total Absences */}
-          <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-              <h3 className="font-bold text-purple-900 dark:text-purple-300">3+ Total Absences</h3>
-              <span className="bg-purple-600 text-white px-2 py-1 rounded-full text-sm">
-                {threeTimeAbsentees.length}
-              </span>
-            </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {threeTimeAbsentees.length > 0 ? threeTimeAbsentees.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
-                    {member.name} {member.surname}
-                  </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.consecutive_absences} absences
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-                  No multiple absences
-                </div>
-              )}
-            </div>
-          </div>
+              </div>
+            ))
+          )}
         </div>
 
-        {/* Growth Metrics */}
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Growth & Membership Metrics
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-                {growthMetrics.new_members_this_month}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">New Members</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">This period</div>
-            </div>
-            <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-1">
-                {growthMetrics.became_members_this_month}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Became Members</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">This period</div>
-            </div>
-            <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-              <div className={`text-2xl font-bold ${
-                growthMetrics.growth_rate >= 0 ? 'text-purple-600 dark:text-purple-400' : 'text-red-600 dark:text-red-400'
-              } mb-1`}>
-                {growthMetrics.growth_rate}%
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Growth Rate</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">vs last month</div>
-            </div>
-            <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-              <div className="text-2xl font-bold text-orange-600 dark:text-orange-400 mb-1">
-                {growthMetrics.permanent_members}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">Permanent</div>
-              <div className="text-xs text-gray-500 dark:text-gray-500">Members</div>
-            </div>
+        {/* Stats Summary */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Total Members</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.permanent}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Permanent Members</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.newcomer}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
           </div>
         </div>
       </div>
@@ -1097,4 +974,4 @@ const Analytics = () => {
   );
 };
 
-export default Analytics;
+export default Members;
