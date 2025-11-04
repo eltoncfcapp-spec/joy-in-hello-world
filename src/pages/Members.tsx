@@ -1,4 +1,4 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2 } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -39,14 +39,9 @@ const Members = () => {
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [editingStatus, setEditingStatus] = useState<string | null>(null);
+  const [editingMember, setEditingMember] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [statusFormData, setStatusFormData] = useState({
-    status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
-    status_date: '',
-    not_attending_reason: '',
-  });
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
@@ -56,6 +51,19 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
+  });
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
+    invited_by: '',
+    cell_group_id: '',
+    ministry_group_id: '',
+    gender: '' as 'male' | 'female' | '',
+    status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
+    status_date: '',
+    not_attending_reason: '',
   });
 
   useEffect(() => {
@@ -168,7 +176,6 @@ const Members = () => {
       setSuccess('Member added successfully!');
       fetchMembers();
       
-      // Clear success message after 3 seconds
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error adding member:', error);
@@ -176,6 +183,94 @@ const Members = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditMember = (member: Member) => {
+    setEditingMember(member.id);
+    setEditFormData({
+      name: member.name,
+      surname: member.surname,
+      email: member.email || '',
+      phone: member.phone || '',
+      invited_by: member.invited_by || '',
+      cell_group_id: member.cell_group_id || '',
+      ministry_group_id: member.ministry_group_id || '',
+      gender: member.gender || '',
+      status: member.status || 'newcomer',
+      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
+      not_attending_reason: member.not_attending_reason || '',
+    });
+  };
+
+  const handleSaveMember = async (memberId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      // Validate required fields
+      if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.gender) {
+        setError('Name, surname, and gender are required fields.');
+        setLoading(false);
+        return;
+      }
+
+      const updateData: any = {
+        name: editFormData.name.trim(),
+        surname: editFormData.surname.trim(),
+        email: editFormData.email.trim() || null,
+        phone: editFormData.phone.trim() || null,
+        cell_group_id: editFormData.cell_group_id || null,
+        ministry_group_id: editFormData.ministry_group_id || null,
+        gender: editFormData.gender || null,
+        invited_by: editFormData.invited_by.trim() || null,
+        status: editFormData.status,
+        status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
+      };
+
+      if (editFormData.status === 'not_attending') {
+        updateData.not_attending_reason = editFormData.not_attending_reason.trim();
+      } else {
+        updateData.not_attending_reason = null;
+      }
+
+      const { error } = await supabase
+        .from('members')
+        .update(updateData)
+        .eq('id', memberId);
+
+      if (error) {
+        throw error;
+      }
+
+      setEditingMember(null);
+      setSuccess('Member details updated successfully!');
+      fetchMembers();
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error updating member:', error);
+      setError(error.message || 'Failed to update member details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMember(null);
+    setEditFormData({
+      name: '',
+      surname: '',
+      email: '',
+      phone: '',
+      invited_by: '',
+      cell_group_id: '',
+      ministry_group_id: '',
+      gender: '',
+      status: 'newcomer',
+      status_date: '',
+      not_attending_reason: '',
+    });
   };
 
   const handleMarkAsPermanent = async (memberId: string) => {
@@ -202,54 +297,6 @@ const Members = () => {
     } catch (error: any) {
       console.error('Error marking as permanent:', error);
       setError(error.message || 'Failed to update member status.');
-    }
-  };
-
-  const handleEditStatus = (member: Member) => {
-    setEditingStatus(member.id);
-    setStatusFormData({
-      status: member.status || 'newcomer',
-      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      not_attending_reason: member.not_attending_reason || '',
-    });
-  };
-
-  const handleSaveStatus = async (memberId: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-    
-    try {
-      const updateData: any = {
-        status: statusFormData.status,
-        status_date: statusFormData.status_date ? new Date(statusFormData.status_date).toISOString() : new Date().toISOString(),
-      };
-
-      if (statusFormData.status === 'not_attending') {
-        updateData.not_attending_reason = statusFormData.not_attending_reason.trim();
-      } else {
-        updateData.not_attending_reason = null;
-      }
-
-      const { error } = await supabase
-        .from('members')
-        .update(updateData)
-        .eq('id', memberId);
-
-      if (error) {
-        throw error;
-      }
-
-      setEditingStatus(null);
-      setSuccess('Member status updated successfully!');
-      fetchMembers();
-      
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error updating status:', error);
-      setError(error.message || 'Failed to update member status.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -558,130 +605,240 @@ const Members = () => {
             filteredMembers.map((member) => (
               <div 
                 key={member.id} 
-                className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02] group"
+                className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 group"
               >
-                <div className="flex flex-col lg:flex-row justify-between gap-6">
-                  <div className="flex-1">
-                    <div className="flex items-start gap-4 mb-4">
-                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
-                        {getInitials(member.name, member.surname)}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </h3>
-                          {member.is_permanent_member && (
-                            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium flex items-center gap-1">
-                              <Check className="h-3 w-3" />
-                              Permanent Member
-                            </span>
-                          )}
-                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
-                            {getStatusBadge(member.status).text}
-                          </span>
+                {editingMember === member.id ? (
+                  // Edit Mode
+                  <div className="space-y-6">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                          {getInitials(editFormData.name, editFormData.surname)}
                         </div>
-                        
-                        <div className="space-y-3 text-gray-600 dark:text-gray-400">
-                          {member.email && (
-                            <div className="flex items-center gap-3">
-                              <Mail className="h-4 w-4" />
-                              <span className="font-medium">{member.email}</span>
-                            </div>
-                          )}
-                          {member.phone && (
-                            <div className="flex items-center gap-3">
-                              <Phone className="h-4 w-4" />
-                              <span className="font-medium">{member.phone}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-3">
-                            <MapPin className="h-4 w-4" />
-                            <span className="font-medium">{member.cell_groups?.name || 'No Cell Group Assigned'}</span>
+                        <div>
+                          <div className="flex gap-3 mb-2">
+                            <input
+                              type="text"
+                              value={editFormData.name}
+                              onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                              className="text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
+                              placeholder="First Name"
+                            />
+                            <input
+                              type="text"
+                              value={editFormData.surname}
+                              onChange={(e) => setEditFormData({ ...editFormData, surname: e.target.value })}
+                              className="text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
+                              placeholder="Last Name"
+                            />
                           </div>
-                          {member.invited_by && (
-                            <div className="flex items-center gap-3 text-sm">
-                              <User className="h-4 w-4" />
-                              <span>Invited by: {member.invited_by}</span>
-                            </div>
-                          )}
-                          {member.permanent_member_date && (
-                            <div className="text-sm text-green-600 dark:text-green-400">
-                              Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric'
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col justify-between items-end gap-4">
-                    {editingStatus === member.id ? (
-                      <div className="space-y-4 w-full max-w-xs">
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
                           <select
-                            value={statusFormData.status}
-                            onChange={(e) => setStatusFormData({ ...statusFormData, status: e.target.value as any })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                            value={editFormData.status}
+                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                            className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
                           >
                             <option value="newcomer">Newcomer</option>
                             <option value="signed_member">Signed Member</option>
                             <option value="not_attending">Not Attending</option>
                           </select>
                         </div>
-                        {statusFormData.status === 'signed_member' && (
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date Became Member</label>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      {/* Contact Information */}
+                      <div className="flex items-center gap-3">
+                        <Mail className="h-4 w-4 text-gray-400" />
+                        <input
+                          type="email"
+                          value={editFormData.email}
+                          onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                          placeholder="Email address"
+                        />
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        <Phone className="h-4 w-4 text-gray-400" />
+                        <input
+                          type="tel"
+                          value={editFormData.phone}
+                          onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                          placeholder="Phone number"
+                        />
+                      </div>
+
+                      {/* Cell Group */}
+                      <div className="flex items-center gap-3">
+                        <MapPin className="h-4 w-4 text-gray-400" />
+                        <select
+                          value={editFormData.cell_group_id}
+                          onChange={(e) => setEditFormData({ ...editFormData, cell_group_id: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                        >
+                          <option value="">Select cell group</option>
+                          {cellGroups.map((group) => (
+                            <option key={group.id} value={group.id}>
+                              {group.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Invited By */}
+                      <div className="flex items-center gap-3">
+                        <User className="h-4 w-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={editFormData.invited_by}
+                          onChange={(e) => setEditFormData({ ...editFormData, invited_by: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                          placeholder="Invited by"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
+                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Status</h4>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-gray-600 dark:text-gray-400 min-w-20">Status:</span>
+                          <select
+                            value={editFormData.status}
+                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="newcomer">Newcomer</option>
+                            <option value="signed_member">Signed Member</option>
+                            <option value="not_attending">Not Attending</option>
+                          </select>
+                        </div>
+                        
+                        {(editFormData.status === 'signed_member' || editFormData.status === 'not_attending') && (
+                          <div className="flex items-center gap-3">
+                            <Calendar className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-600 dark:text-gray-400 min-w-32">Date Became Member:</span>
                             <input
                               type="date"
-                              value={statusFormData.status_date}
-                              onChange={(e) => setStatusFormData({ ...statusFormData, status_date: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                              value={editFormData.status_date}
+                              onChange={(e) => setEditFormData({ ...editFormData, status_date: e.target.value })}
+                              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                           </div>
                         )}
-                        {statusFormData.status === 'not_attending' && (
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reason</label>
+                        
+                        {editFormData.status === 'not_attending' && (
+                          <div className="flex items-start gap-3">
+                            <span className="text-sm text-gray-600 dark:text-gray-400 min-w-20 mt-2">Reason:</span>
                             <textarea
-                              value={statusFormData.not_attending_reason}
-                              onChange={(e) => setStatusFormData({ ...statusFormData, not_attending_reason: e.target.value })}
+                              value={editFormData.not_attending_reason}
+                              onChange={(e) => setEditFormData({ ...editFormData, not_attending_reason: e.target.value })}
                               placeholder="Reason for not attending..."
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                               rows={3}
                             />
                           </div>
                         )}
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleSaveStatus(member.id)}
-                            disabled={loading}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-                          >
-                            <Save className="h-4 w-4" />
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingStatus(null)}
-                            className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
-                          >
-                            Cancel
-                          </button>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        onClick={() => handleSaveMember(member.id)}
+                        disabled={loading}
+                        className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
+                      >
+                        <Save className="h-4 w-4" />
+                        {loading ? 'Saving...' : 'Save Changes'}
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div className="text-xs text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-600">
+                      Member ID: {member.id.slice(0, 8)}...
+                    </div>
+                  </div>
+                ) : (
+                  // View Mode
+                  <div className="flex flex-col lg:flex-row justify-between gap-6">
+                    <div className="flex-1">
+                      <div className="flex items-start gap-4 mb-4">
+                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                          {getInitials(member.name, member.surname)}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2 flex-wrap">
+                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                              {member.name} {member.surname}
+                            </h3>
+                            {member.is_permanent_member && (
+                              <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium flex items-center gap-1">
+                                <Check className="h-3 w-3" />
+                                Permanent Member
+                              </span>
+                            )}
+                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
+                              {getStatusBadge(member.status).text}
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-3 text-gray-600 dark:text-gray-400">
+                            {member.email && (
+                              <div className="flex items-center gap-3">
+                                <Mail className="h-4 w-4" />
+                                <span className="font-medium">{member.email}</span>
+                              </div>
+                            )}
+                            {member.phone && (
+                              <div className="flex items-center gap-3">
+                                <Phone className="h-4 w-4" />
+                                <span className="font-medium">{member.phone}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-3">
+                              <MapPin className="h-4 w-4" />
+                              <span className="font-medium">{member.cell_groups?.name || 'No Cell Group Assigned'}</span>
+                            </div>
+                            {member.ministry_groups?.name && (
+                              <div className="flex items-center gap-3">
+                                <User className="h-4 w-4" />
+                                <span className="font-medium">{member.ministry_groups.name}</span>
+                              </div>
+                            )}
+                            {member.invited_by && (
+                              <div className="flex items-center gap-3 text-sm">
+                                <User className="h-4 w-4" />
+                                <span>Invited by: {member.invited_by}</span>
+                              </div>
+                            )}
+                            {member.permanent_member_date && (
+                              <div className="text-sm text-green-600 dark:text-green-400">
+                                Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric'
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    ) : (
+                    </div>
+                    
+                    <div className="flex flex-col justify-between items-end gap-4">
                       <div className="flex flex-col gap-3">
                         <button
-                          onClick={() => handleEditStatus(member)}
+                          onClick={() => handleEditMember(member)}
                           className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                         >
                           <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                          Edit Status
+                          Edit Details
                         </button>
                         {!member.is_permanent_member && (
                           <button
@@ -700,26 +857,26 @@ const Members = () => {
                           Delete
                         </button>
                       </div>
-                    )}
-                    {member.status_date && member.status === 'signed_member' && (
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                        Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        })}
+                      {member.status_date && member.status === 'signed_member' && (
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </div>
+                      )}
+                      {member.not_attending_reason && member.status === 'not_attending' && (
+                        <div className="text-sm text-red-600 dark:text-red-400 max-w-xs">
+                          Reason: {member.not_attending_reason}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        Member ID: {member.id.slice(0, 8)}...
                       </div>
-                    )}
-                    {member.not_attending_reason && member.status === 'not_attending' && (
-                      <div className="text-sm text-red-600 dark:text-red-400 max-w-xs">
-                        Reason: {member.not_attending_reason}
-                      </div>
-                    )}
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      Member ID: {member.id.slice(0, 8)}...
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             ))
           )}
