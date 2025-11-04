@@ -1,183 +1,181 @@
-import { BrowserRouter, Routes, Route, Link, useLocation, Outlet } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
-import Dashboard from './pages/Dashboard';
-import Members from './pages/Members';
-import Events from './pages/Events';
-import Groups from './pages/Groups';
-import Trends from './pages/Trends';
-import Analytics from './pages/Analytics';
-import Admin from './pages/Admin';
-import Login from './pages/Login';
-import { 
-  Home, 
-  Users, 
-  Calendar, 
-  BarChart3, 
-  TrendingUp, 
-  Settings,
-  LogOut,
-  Menu,
-  X
-} from 'lucide-react';
-import { useAuth } from './contexts/AuthContext';
+// pages/Departments.tsx
 import { useState, useEffect } from 'react';
+import { Building, Plus, Users, Mail, Phone, MapPin, Edit, Trash2, Search } from 'lucide-react';
+import { supabase } from '../integrations/supabase/client';
 
-// Layout component with responsive sidebar
-const Layout = () => {
-  const location = useLocation();
-  const { signOut } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+interface Department {
+  id: string;
+  name: string;
+  description: string | null;
+  leader_id: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  meeting_schedule: string | null;
+  created_at: string;
+  members_count?: number;
+  leader?: {
+    name: string;
+    surname: string;
+  } | null;
+}
 
-  // Check if mobile on mount and resize
+const Departments = () => {
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    fetchDepartments();
   }, []);
 
-  const navigationItems = [
-    { path: '/', icon: Home, label: 'Dashboard' },
-    { path: '/members', icon: Users, label: 'Members' },
-    { path: '/groups', icon: Users, label: 'Groups' },
-    { path: '/events', icon: Calendar, label: 'Events' },
-    { path: '/trends', icon: TrendingUp, label: 'Trends' },
-    { path: '/analytics', icon: BarChart3, label: 'Analytics' },
-    { path: '/admin', icon: Settings, label: 'Admin' },
-  ];
+  const fetchDepartments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select(`
+          *,
+          leader:members!ministry_groups_leader_id_fkey(name, surname),
+          members:members!members_ministry_group_id_fkey(count)
+        `);
 
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
-
-  const closeSidebar = () => {
-    if (isMobile) {
-      setSidebarOpen(false);
+      if (error) throw error;
+      setDepartments(data || []);
+    } catch (error) {
+      console.error('Error fetching departments:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Mobile menu button */}
-      <button
-        onClick={toggleSidebar}
-        className="md:hidden fixed top-4 left-4 z-50 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700"
-      >
-        {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-      </button>
+  const filteredDepartments = departments.filter(dept =>
+    dept.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    dept.description?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-      {/* Sidebar Overlay for mobile */}
-      {isMobile && sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden"
-          onClick={closeSidebar}
-        />
-      )}
-
-      {/* Sidebar */}
-      <div className={`
-        fixed md:static inset-y-0 left-0 z-40
-        w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
-        transform transition-transform duration-300 ease-in-out
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-      `}>
-        {/* Logo */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-          <Link 
-            to="/" 
-            className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white"
-            onClick={closeSidebar}
-          >
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
-              <Home className="h-5 w-5 text-white" />
-            </div>
-            Church App
-          </Link>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-2">
-          {navigationItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={closeSidebar}
-                className={`
-                  flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
-                  ${isActive
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-r-2 border-blue-600'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }
-                `}
-              >
-                <item.icon className="h-5 w-5" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Logout Button */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-          <button
-            onClick={() => {
-              closeSidebar();
-              signOut();
-            }}
-            className="flex items-center gap-3 w-full px-4 py-3 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all duration-200"
-          >
-            <LogOut className="h-5 w-5" />
-            Logout
-          </button>
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading departments...</p>
+          </div>
         </div>
       </div>
+    );
+  }
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden md:ml-0">
-        {/* Top Bar for mobile */}
-        <div className="md:hidden h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-center">
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {navigationItems.find(item => item.path === location.pathname)?.label || 'Church App'}
-          </h1>
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              Ministry Departments
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">Manage church departments and ministry groups</p>
+          </div>
+          <button 
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+          >
+            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+            Add Department
+          </button>
         </div>
 
-        {/* Page Content */}
-        <main className="flex-1 overflow-auto p-4 md:p-6 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
-          <div className="max-w-7xl mx-auto">
-            <Outlet />
+        {/* Search Bar */}
+        <div className="mb-6">
+          <div className="relative">
+            <Search className="absolute left-3 top-3.5 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search departments..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
-        </main>
+        </div>
+
+        {/* Departments Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredDepartments.map((department) => (
+            <div key={department.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+                    <Building className="h-6 w-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                      {department.name}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {department.members_count || 0} members
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                    <Edit className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  </button>
+                  <button className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                  </button>
+                </div>
+              </div>
+
+              {department.description && (
+                <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">
+                  {department.description}
+                </p>
+              )}
+
+              <div className="space-y-2 text-sm">
+                {department.leader && (
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <Users className="h-4 w-4" />
+                    <span>Leader: {department.leader.name} {department.leader.surname}</span>
+                  </div>
+                )}
+                {department.contact_email && (
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <Mail className="h-4 w-4" />
+                    <span>{department.contact_email}</span>
+                  </div>
+                )}
+                {department.contact_phone && (
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <Phone className="h-4 w-4" />
+                    <span>{department.contact_phone}</span>
+                  </div>
+                )}
+                {department.meeting_schedule && (
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <MapPin className="h-4 w-4" />
+                    <span>Meets: {department.meeting_schedule}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {filteredDepartments.length === 0 && (
+          <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+            <Building className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Departments Found</h3>
+            <p className="text-gray-500 dark:text-gray-500">
+              {searchTerm ? 'Try adjusting your search terms' : 'Create your first department to get started'}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-function App() {
-  return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<Dashboard />} />
-            <Route path="members" element={<Members />} />
-            <Route path="events" element={<Events />} />
-            <Route path="groups" element={<Groups />} />
-            <Route path="trends" element={<Trends />} />
-            <Route path="analytics" element={<Analytics />} />
-            <Route path="admin" element={<Admin />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
-  );
-}
-
-export default App;
+export default Departments;
