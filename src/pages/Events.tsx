@@ -31,7 +31,11 @@ interface EventAttendee {
   invited_by_id: string | null;
   attended_at: string | null;
   members: Member;
-  invited_by_member?: Member | null;
+  invited_by_member?: {
+    id: string;
+    name: string;
+    surname: string;
+  } | null;
 }
 
 interface AttendeeFormData {
@@ -144,9 +148,10 @@ const Events = () => {
             email,
             phone,
             status,
+            cell_group_id,
             cell_groups!fk_cell_group(name)
           ),
-          members!event_attendees_invited_by_id_fkey (
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
             name,
             surname
@@ -159,16 +164,9 @@ const Events = () => {
         throw error;
       }
 
-      // Transform the data to match our interface
-      const transformedData = data?.map(attendee => ({
-        ...attendee,
-        invited_by_member: attendee.members?.[1] || null,
-        members: attendee.members?.[0] || attendee.members
-      })) || [];
-
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...transformedData];
+        return [...filtered, ...(data || []) as EventAttendee[]];
       });
     } catch (error: any) {
       console.error('Error fetching attendees:', error);

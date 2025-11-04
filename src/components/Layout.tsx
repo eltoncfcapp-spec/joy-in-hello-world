@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, DollarSign, UsersRound, Shield, Menu, X, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, UsersRound, Shield, Menu, X, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -17,7 +17,6 @@ const Layout = () => {
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/members', icon: Users, label: 'Members' },
     { to: '/events', icon: Calendar, label: 'Events' },
-    { to: '/donations', icon: DollarSign, label: 'Donations' },
     { to: '/groups', icon: UsersRound, label: 'Groups' },
     { to: '/admin', icon: Shield, label: 'Admin' },
   ];

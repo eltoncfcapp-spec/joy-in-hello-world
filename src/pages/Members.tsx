@@ -9,9 +9,12 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
+  ministry_group_id: string | null;
+  gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
   cell_groups: { name: string } | null;
+  ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   status_date: string | null;
   not_attending_reason: string | null;
@@ -24,10 +27,16 @@ interface CellGroup {
   name: string;
 }
 
+interface MinistryGroup {
+  id: string;
+  name: string;
+}
+
 const Members = () => {
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingStatus, setEditingStatus] = useState<string | null>(null);
@@ -45,11 +54,14 @@ const Members = () => {
     phone: '',
     invited_by: '',
     cell_group_id: '',
+    ministry_group_id: '',
+    gender: '' as 'male' | 'female' | '',
   });
 
   useEffect(() => {
     fetchMembers();
     fetchCellGroups();
+    fetchMinistryGroups();
   }, []);
 
   const fetchMembers = async () => {
@@ -61,7 +73,8 @@ const Members = () => {
         .from('members')
         .select(`
           *,
-          cell_groups!fk_cell_group(name)
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name)
         `)
         .order('created_at', { ascending: false });
 
@@ -96,6 +109,24 @@ const Members = () => {
     }
   };
 
+  const fetchMinistryGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setMinistryGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching ministry groups:', error);
+      setError(error.message || 'Failed to load ministry groups.');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -111,6 +142,8 @@ const Members = () => {
           email: formData.email.trim() || null,
           phone: formData.phone.trim() || null,
           cell_group_id: formData.cell_group_id || null,
+          ministry_group_id: formData.ministry_group_id || null,
+          gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
@@ -128,7 +161,9 @@ const Members = () => {
         email: '', 
         phone: '', 
         invited_by: '', 
-        cell_group_id: '' 
+        cell_group_id: '',
+        ministry_group_id: '',
+        gender: '',
       });
       setSuccess('Member added successfully!');
       fetchMembers();
@@ -266,7 +301,9 @@ const Members = () => {
       email: '', 
       phone: '', 
       invited_by: '', 
-      cell_group_id: '' 
+      cell_group_id: '',
+      ministry_group_id: '',
+      gender: '',
     });
     setShowForm(false);
     setError(null);
@@ -406,6 +443,21 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Gender *
+                  </label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' | '' })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  >
+                    <option value="">Select gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Cell Group
                   </label>
                   <select
@@ -415,6 +467,23 @@ const Members = () => {
                   >
                     <option value="">Select cell group</option>
                     {cellGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Ministry Group
+                  </label>
+                  <select
+                    value={formData.ministry_group_id}
+                    onChange={(e) => setFormData({ ...formData, ministry_group_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">Select ministry group</option>
+                    {ministryGroups.map((group) => (
                       <option key={group.id} value={group.id}>
                         {group.name}
                       </option>
