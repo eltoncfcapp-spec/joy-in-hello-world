@@ -44,7 +44,6 @@ const Analytics = () => {
     try {
       setLoading(true);
 
-      // Fetch all necessary data
       const [membersData, groupsData, meetingsData, attendanceData] = await Promise.all([
         supabase.from('members').select('*'),
         supabase.from('cell_groups').select('*'),
@@ -62,11 +61,9 @@ const Analytics = () => {
       const meetings = meetingsData.data || [];
       const allAttendance = attendanceData.data || [];
 
-      // Calculate statistics
       const totalMembers = members.length;
       const totalGroups = groups.length;
       
-      // Calculate events this month
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
       const eventsThisMonth = meetings.filter(meeting => {
@@ -74,14 +71,12 @@ const Analytics = () => {
         return meetingDate.getMonth() === currentMonth && meetingDate.getFullYear() === currentYear;
       }).length;
 
-      // Calculate average attendance
       const totalPresent = meetings.reduce((acc, meeting) => {
         return acc + (meeting.attendance?.filter((a: any) => a.status === 'present').length || 0);
       }, 0);
       
       const avgAttendance = meetings.length > 0 ? Math.round((totalPresent / (meetings.length * totalMembers)) * 100) : 0;
 
-      // Update stats
       setStats([
         { 
           icon: Users, 
@@ -109,14 +104,12 @@ const Analytics = () => {
         },
       ]);
 
-      // Calculate demographics (simplified - you might want to add age field to members)
       const youth = Math.round(totalMembers * 0.35);
       const adults = Math.round(totalMembers * 0.45);
       const seniors = totalMembers - youth - adults;
 
       setDemographics({ youth, adults, seniors });
 
-      // Calculate attendance by type (simplified - you might want to add event types)
       setAttendanceByType({
         sundayService: Math.round(totalMembers * 0.9),
         prayerMeeting: Math.round(totalMembers * 0.35),
@@ -124,7 +117,6 @@ const Analytics = () => {
         cellGroups: Math.round(totalMembers * 0.6)
       });
 
-      // Find members absent for 2+ consecutive days
       await findConsecutiveAbsences(members, allAttendance, meetings);
 
     } catch (error) {
@@ -140,7 +132,6 @@ const Analytics = () => {
       const twoDaysAgo = new Date();
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
-      // Get recent meetings (last 7 days)
       const recentMeetings = meetings
         .filter(meeting => new Date(meeting.meeting_date) >= twoDaysAgo)
         .sort((a, b) => new Date(a.meeting_date).getTime() - new Date(b.meeting_date).getTime());
@@ -150,13 +141,11 @@ const Analytics = () => {
         return;
       }
 
-      // For each member, check their attendance in recent meetings
       for (const member of members) {
         const memberAttendance = attendance.filter(a => a.member_id === member.id);
         let consecutiveAbsences = 0;
         let lastAttendanceDate: string | null = null;
 
-        // Check last 2 meetings
         const lastTwoMeetings = recentMeetings.slice(-2);
         
         for (const meeting of lastTwoMeetings) {
@@ -165,13 +154,12 @@ const Analytics = () => {
           if (!meetingAttendance || meetingAttendance.status === 'absent') {
             consecutiveAbsences++;
           } else {
-            consecutiveAbsences = 0; // Reset if present
+            consecutiveAbsences = 0;
             lastAttendanceDate = meeting.meeting_date;
           }
         }
 
         if (consecutiveAbsences >= 2) {
-          // Get cell group name
           const { data: cellGroup } = await supabase
             .from('cell_groups')
             .select('name')
@@ -226,7 +214,6 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {stats.map((stat, index) => (
             <div key={index} className={`${stat.color} border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 backdrop-blur-xl`}>
@@ -241,7 +228,6 @@ const Analytics = () => {
           ))}
         </div>
 
-        {/* Absence Alerts */}
         {absentMembers.length > 0 && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-6 mb-8">
             <div className="flex items-center gap-3 mb-4">
@@ -279,7 +265,6 @@ const Analytics = () => {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Demographics */}
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -316,7 +301,6 @@ const Analytics = () => {
             </div>
           </div>
 
-          {/* Attendance by Event Type */}
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
               <Activity className="h-5 w-5" />
@@ -343,7 +327,6 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Performance Metrics */}
         <div className="mt-8 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 shadow-sm">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
@@ -352,19 +335,19 @@ const Analytics = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-2">
-                {Math.round((attendanceByType.sundayService / stats[0]?.value) * 100) || 0}%
+                {Math.round((attendanceByType.sundayService / (stats[0]?.value ? parseInt(stats[0].value) : 1)) * 100) || 0}%
               </div>
               <div className="text-gray-600 dark:text-gray-400">Sunday Service Engagement</div>
             </div>
             <div className="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">
-                {Math.round((attendanceByType.cellGroups / stats[0]?.value) * 100) || 0}%
+                {Math.round((attendanceByType.cellGroups / (stats[0]?.value ? parseInt(stats[0].value) : 1)) * 100) || 0}%
               </div>
               <div className="text-gray-600 dark:text-gray-400">Cell Group Participation</div>
             </div>
             <div className="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mb-2">
-                {Math.round((demographics.youth / stats[0]?.value) * 100) || 0}%
+                {Math.round((demographics.youth / (stats[0]?.value ? parseInt(stats[0].value) : 1)) * 100) || 0}%
               </div>
               <div className="text-gray-600 dark:text-gray-400">Youth Engagement</div>
             </div>
