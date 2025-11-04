@@ -205,30 +205,45 @@ const Groups = () => {
     }
   };
 
-  // Create new group
+  // FIXED: Create new group function
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setLoading(true);
       
+      // Validate required fields
+      if (!groupForm.name.trim()) {
+        alert('Group name is required');
+        return;
+      }
+
+      // Prepare data for insertion
+      const groupData = {
+        name: groupForm.name.trim(),
+        description: groupForm.description.trim() || null,
+        meeting_day: groupForm.meeting_day || null,
+        meeting_time: groupForm.meeting_time || null,
+        location: groupForm.location.trim() || null,
+        leader_id: groupForm.leader_id || null
+      };
+
+      console.log('Creating group with data:', groupData);
+
       const { data, error } = await supabase
         .from('cell_groups')
-        .insert({
-          name: groupForm.name,
-          description: groupForm.description || null,
-          meeting_day: groupForm.meeting_day || null,
-          meeting_time: groupForm.meeting_time || null,
-          location: groupForm.location || null,
-          leader_id: groupForm.leader_id || null
-        })
+        .insert([groupData])
         .select(`
           *,
           leader:members!cell_groups_leader_id_fkey(name, surname)
         `)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
 
+      // Reset form and update state
       setGroups(prev => [data, ...prev]);
       setShowForm(false);
       setGroupForm({
@@ -239,10 +254,11 @@ const Groups = () => {
         location: '',
         leader_id: ''
       });
+      
       alert('Group created successfully!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating group:', error);
-      alert('Error creating group');
+      alert(`Error creating group: ${error.message || 'Please check your data and try again'}`);
     } finally {
       setLoading(false);
     }
@@ -263,6 +279,7 @@ const Groups = () => {
       await fetchGroupMembers(groupId);
       await fetchMembers();
       setSelectedMembers([]);
+      setSearchTerm('');
       alert('Members added to group successfully!');
     } catch (error) {
       console.error('Error adding members to group:', error);
@@ -294,14 +311,22 @@ const Groups = () => {
   };
 
   // Meeting management
-  const handleCreateMeeting = async () => {
+  const handleCreateMeeting = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedGroup) return;
 
     try {
       setLoading(true);
+      
+      // Validate required fields
+      if (!meetingForm.meeting_date || !meetingForm.meeting_time || !meetingForm.location) {
+        alert('Please fill in all required fields');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('meetings')
-        .insert({
+        .insert([{
           group_id: selectedGroup.id,
           meeting_date: meetingForm.meeting_date,
           meeting_time: meetingForm.meeting_time,
@@ -309,7 +334,7 @@ const Groups = () => {
           topic: meetingForm.topic,
           notes: meetingForm.notes,
           status: 'scheduled'
-        })
+        }])
         .select()
         .single();
 
@@ -338,7 +363,8 @@ const Groups = () => {
     await fetchMeetingAttendance(meeting.id);
     
     // Initialize attendance data
-    const groupMembers = groups.find(g => g.id === meeting.group_id)?.members || [];
+    const currentGroup = groups.find(g => g.id === meeting.group_id);
+    const groupMembers = currentGroup?.members || [];
     const initialAttendance: {[key: string]: 'present' | 'absent' | 'late'} = {};
     const initialNotes: {[key: string]: string} = {};
 
@@ -359,7 +385,20 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // Delete existing attendance records
+      // Get current group members
+      const currentGroup = groups.find(g => g.id === selectedMeeting.group_id);
+      const groupMembers = currentGroup?.members || [];
+
+      // Prepare attendance records
+      const attendanceRecords = groupMembers.map(member => ({
+        meeting_id: selectedMeeting.id,
+        member_id: member.id,
+        status: attendanceData[member.id] || 'absent',
+        notes: attendanceNotes[member.id] || '',
+        arrival_time: attendanceData[member.id] === 'late' ? new Date().toTimeString().split(' ')[0] : null
+      }));
+
+      // Delete existing attendance records for this meeting
       const { error: deleteError } = await supabase
         .from('attendance')
         .delete()
@@ -367,15 +406,7 @@ const Groups = () => {
 
       if (deleteError) throw deleteError;
 
-      // Create new attendance records
-      const attendanceRecords = Object.entries(attendanceData).map(([memberId, status]) => ({
-        meeting_id: selectedMeeting.id,
-        member_id: memberId,
-        status: status,
-        notes: attendanceNotes[memberId] || '',
-        arrival_time: status === 'late' ? new Date().toTimeString().split(' ')[0] : null
-      }));
-
+      // Insert new attendance records
       const { error: insertError } = await supabase
         .from('attendance')
         .insert(attendanceRecords);
@@ -417,7 +448,8 @@ const Groups = () => {
     }
   };
 
-  const handleSubmitReport = async () => {
+  const handleSubmitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedMeeting) return;
 
     try {
@@ -425,13 +457,14 @@ const Groups = () => {
       
       const { error } = await supabase
         .from('meeting_reports')
-        .insert({
+        .insert([{
           meeting_id: selectedMeeting.id,
           report_text: reportForm.report_text,
           decisions_made: reportForm.decisions_made,
           action_items: reportForm.action_items,
-          next_meeting_date: reportForm.next_meeting_date || null
-        });
+          next_meeting_date: reportForm.next_meeting_date || null,
+          created_by: 'system' // You might want to use actual user ID here
+        }]);
 
       if (error) throw error;
 
@@ -463,6 +496,14 @@ const Groups = () => {
     
     return { present, absent, late, total: meetingAttendance.length };
   };
+
+  // Filter available members for adding to group
+  const availableMembers = members.filter(member => 
+    !selectedGroup?.members?.some(m => m.id === member.id) &&
+    (member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     member.email?.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
@@ -589,6 +630,7 @@ const Groups = () => {
                 <p className="text-gray-600 dark:text-gray-400">
                   Leader: {selectedGroup.leader ? `${selectedGroup.leader.name} ${selectedGroup.leader.surname}` : 'Not assigned'}
                   {selectedGroup.meeting_day && ` • Meets on ${selectedGroup.meeting_day}s`}
+                  {selectedGroup.location && ` • ${selectedGroup.location}`}
                 </p>
               </div>
               <button
@@ -633,8 +675,16 @@ const Groups = () => {
                     <p className="text-gray-900 dark:text-white">{selectedGroup.name}</p>
                   </div>
                   <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
+                    <p className="text-gray-900 dark:text-white">{selectedGroup.description || 'No description'}</p>
+                  </div>
+                  <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Day</label>
                     <p className="text-gray-900 dark:text-white">{selectedGroup.meeting_day || 'Not set'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Time</label>
+                    <p className="text-gray-900 dark:text-white">{selectedGroup.meeting_time || 'Not set'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
@@ -660,45 +710,91 @@ const Groups = () => {
                     <Users className="h-4 w-4" />
                     Manage Members
                   </button>
+                  <button
+                    onClick={() => setActiveTab('meetings')}
+                    className="w-full flex items-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    View Meetings
+                  </button>
                 </div>
               </div>
             </div>
 
             {/* Recent Meetings */}
             <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Meetings</h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Meetings</h3>
+                <button
+                  onClick={() => setActiveTab('meetings')}
+                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                >
+                  View All
+                </button>
+              </div>
               {meetings.length === 0 ? (
-                <p className="text-gray-600 dark:text-gray-400 text-center py-4">No meetings scheduled yet</p>
+                <div className="text-center py-8">
+                  <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                  <p className="text-gray-600 dark:text-gray-400">No meetings scheduled yet</p>
+                  <button
+                    onClick={() => setShowMeetingForm(true)}
+                    className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                  >
+                    Schedule First Meeting
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {meetings.slice(0, 5).map((meeting) => (
-                    <div key={meeting.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
+                  {meetings.slice(0, 3).map((meeting) => {
+                    const stats = getAttendanceStats(meeting.id);
+                    return (
+                      <div key={meeting.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            {meeting.topic} • {meeting.location}
+                          </div>
+                          {stats.total > 0 && (
+                            <div className="flex gap-4 mt-2 text-xs">
+                              <span className="flex items-center gap-1 text-green-600">
+                                <CheckCircle className="h-3 w-3" />
+                                {stats.present} Present
+                              </span>
+                              <span className="flex items-center gap-1 text-red-600">
+                                <XCircle className="h-3 w-3" />
+                                {stats.absent} Absent
+                              </span>
+                              <span className="flex items-center gap-1 text-yellow-600">
+                                <Clock4 className="h-3 w-3" />
+                                {stats.late} Late
+                              </span>
+                            </div>
+                          )}
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {meeting.topic} • {meeting.location}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleTakeAttendance(meeting)}
-                          className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
-                        >
-                          Take Attendance
-                        </button>
-                        {meeting.status === 'scheduled' && (
+                        <div className="flex gap-2">
                           <button
-                            onClick={() => handleCloseMeeting()}
-                            className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                            onClick={() => handleTakeAttendance(meeting)}
+                            className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
                           >
-                            Close Meeting
+                            Attendance
                           </button>
-                        )}
+                          {meeting.status === 'scheduled' && (
+                            <button
+                              onClick={() => {
+                                setSelectedMeeting(meeting);
+                                handleCloseMeeting();
+                              }}
+                              className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                            >
+                              Close
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -722,7 +818,13 @@ const Groups = () => {
             {meetings.length === 0 ? (
               <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 rounded-2xl">
                 <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 dark:text-gray-400">No meetings scheduled yet</p>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">No meetings scheduled yet</p>
+                <button
+                  onClick={() => setShowMeetingForm(true)}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Schedule First Meeting
+                </button>
               </div>
             ) : (
               <div className="grid gap-4">
@@ -732,14 +834,25 @@ const Groups = () => {
                     <div key={meeting.id} className="bg-white/70 dark:bg-gray-800/70 border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
                       <div className="flex flex-col lg:flex-row justify-between gap-4">
                         <div className="flex-1">
-                          <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                            {new Date(meeting.meeting_date).toLocaleDateString()} • {meeting.meeting_time}
-                          </h4>
-                          <p className="text-gray-600 dark:text-gray-400 mb-2">{meeting.topic}</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-500">Location: {meeting.location}</p>
+                          <div className="flex items-center gap-3 mb-2">
+                            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                              {new Date(meeting.meeting_date).toLocaleDateString()} • {meeting.meeting_time}
+                            </h4>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              meeting.status === 'scheduled' 
+                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                : meeting.status === 'completed'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                            }`}>
+                              {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
+                            </span>
+                          </div>
+                          <p className="text-gray-600 dark:text-gray-400 mb-2">{meeting.topic || 'No topic specified'}</p>
+                          <p className="text-sm text-gray-500 dark:text-gray-500 mb-3">Location: {meeting.location}</p>
                           
                           {stats.total > 0 && (
-                            <div className="flex gap-4 mt-3 text-sm">
+                            <div className="flex gap-4 text-sm">
                               <span className="flex items-center gap-1 text-green-600">
                                 <CheckCircle className="h-4 w-4" />
                                 {stats.present} Present
@@ -780,6 +893,11 @@ const Groups = () => {
                           )}
                         </div>
                       </div>
+                      {meeting.notes && (
+                        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{meeting.notes}</p>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -814,15 +932,13 @@ const Groups = () => {
                 </div>
 
                 {/* Available Members */}
-                <div className="border border-gray-300 dark:border-gray-600 rounded-xl max-h-60 overflow-y-auto">
-                  {members
-                    .filter(member => 
-                      !selectedGroup.members?.some(m => m.id === member.id) &&
-                      (member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       member.email?.toLowerCase().includes(searchTerm.toLowerCase()))
-                    )
-                    .map((member) => (
+                {availableMembers.length === 0 ? (
+                  <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                    {searchTerm ? 'No members found matching your search' : 'No available members to add'}
+                  </div>
+                ) : (
+                  <div className="border border-gray-300 dark:border-gray-600 rounded-xl max-h-60 overflow-y-auto">
+                    {availableMembers.map((member) => (
                       <div key={member.id} className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-600 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
                         <input
                           type="checkbox"
@@ -849,7 +965,8 @@ const Groups = () => {
                         </div>
                       </div>
                     ))}
-                </div>
+                  </div>
+                )}
 
                 {selectedMembers.length > 0 && (
                   <button
@@ -857,7 +974,7 @@ const Groups = () => {
                     disabled={loading}
                     className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
                   >
-                    {loading ? 'Adding Members...' : `Add ${selectedMembers.length} Members to Group`}
+                    {loading ? 'Adding Members...' : `Add ${selectedMembers.length} Member${selectedMembers.length > 1 ? 's' : ''} to Group`}
                   </button>
                 )}
               </div>
@@ -868,11 +985,14 @@ const Groups = () => {
               <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Members</h4>
               
               {!selectedGroup.members || selectedGroup.members.length === 0 ? (
-                <p className="text-gray-600 dark:text-gray-400 text-center py-4">No members in this group yet</p>
+                <div className="text-center py-8">
+                  <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                  <p className="text-gray-600 dark:text-gray-400">No members in this group yet</p>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {selectedGroup.members.map((member) => (
-                    <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
+                    <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
                           {getInitials(member.name, member.surname)}
@@ -882,13 +1002,14 @@ const Groups = () => {
                             {member.name} {member.surname}
                           </div>
                           <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {member.phone}
+                            {member.phone || 'No phone'}
                           </div>
                         </div>
                       </div>
                       <button
                         onClick={() => handleRemoveMemberFromGroup(member.id)}
                         className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        title="Remove from group"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -912,25 +1033,38 @@ const Groups = () => {
               <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Groups Yet</h3>
-                <p className="text-gray-500 dark:text-gray-500">Create your first group to get started</p>
+                <p className="text-gray-500 dark:text-gray-500 mb-6">Create your first group to get started</p>
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium"
+                >
+                  Create First Group
+                </button>
               </div>
             ) : (
               groups.map((group) => (
                 <div
                   key={group.id}
-                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02] cursor-pointer"
+                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02] cursor-pointer group"
                   onClick={() => setSelectedGroup(group)}
                 >
                   <div className="flex items-start gap-4 mb-4">
-                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-200">
                       <Users className="h-7 w-7 text-white" />
                     </div>
                     <div className="flex-1">
                       <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
                       {group.location && (
-                        <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium">
+                        <span className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium mb-2">
                           {group.location}
                         </span>
+                      )}
+                      {group.meeting_day && (
+                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
+                          <Calendar className="h-4 w-4" />
+                          Meets on {group.meeting_day}s
+                          {group.meeting_time && ` at ${group.meeting_time}`}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -938,24 +1072,23 @@ const Groups = () => {
                   <div className="space-y-3 mb-4">
                     <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
                       <User className="h-4 w-4" />
-                      <span className="font-medium">
+                      <span className="text-sm">
                         Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'Not assigned'}
                       </span>
                     </div>
-                    {group.meeting_day && (
-                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                        <Calendar className="h-4 w-4" />
-                        <span className="font-medium">Meets on {group.meeting_day}s</span>
-                      </div>
+                    {group.description && (
+                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                        {group.description}
+                      </p>
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
                     <span className="text-sm text-gray-600 dark:text-gray-400">
                       {group.members?.length || 0} members
                     </span>
-                    <button className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium">
-                      Manage
+                    <button className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium text-sm">
+                      Manage Group
                     </button>
                   </div>
                 </div>
@@ -968,8 +1101,16 @@ const Groups = () => {
         {showMeetingForm && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Schedule New Meeting</h3>
-              <form onSubmit={(e) => { e.preventDefault(); handleCreateMeeting(); }} className="space-y-4">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Schedule New Meeting</h3>
+                <button
+                  onClick={() => setShowMeetingForm(false)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleCreateMeeting} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Date *</label>
@@ -977,7 +1118,7 @@ const Groups = () => {
                       type="date"
                       value={meetingForm.meeting_date}
                       onChange={(e) => setMeetingForm({ ...meetingForm, meeting_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       required
                     />
                   </div>
@@ -987,7 +1128,7 @@ const Groups = () => {
                       type="time"
                       value={meetingForm.meeting_time}
                       onChange={(e) => setMeetingForm({ ...meetingForm, meeting_time: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       required
                     />
                   </div>
@@ -998,7 +1139,7 @@ const Groups = () => {
                     type="text"
                     value={meetingForm.location}
                     onChange={(e) => setMeetingForm({ ...meetingForm, location: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter meeting location"
                     required
                   />
@@ -1009,8 +1150,8 @@ const Groups = () => {
                     type="text"
                     value={meetingForm.topic}
                     onChange={(e) => setMeetingForm({ ...meetingForm, topic: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    placeholder="Enter meeting topic"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter meeting topic or agenda"
                   />
                 </div>
                 <div>
@@ -1018,8 +1159,8 @@ const Groups = () => {
                   <textarea
                     value={meetingForm.notes}
                     onChange={(e) => setMeetingForm({ ...meetingForm, notes: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    placeholder="Additional notes"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Additional notes for the meeting"
                     rows={3}
                   />
                 </div>
@@ -1048,13 +1189,21 @@ const Groups = () => {
         {showAttendanceModal && selectedMeeting && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Take Attendance - {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-              </h3>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Take Attendance - {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                </h3>
+                <button
+                  onClick={() => setShowAttendanceModal(false)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               
-              <div className="space-y-4">
+              <div className="space-y-4 mb-6">
                 {selectedGroup.members?.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
+                  <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
                         {getInitials(member.name, member.surname)}
@@ -1064,7 +1213,7 @@ const Groups = () => {
                           {member.name} {member.surname}
                         </div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                          {member.phone}
+                          {member.phone || 'No phone'}
                         </div>
                       </div>
                     </div>
@@ -1076,7 +1225,7 @@ const Groups = () => {
                           ...attendanceData,
                           [member.id]: e.target.value as 'present' | 'absent' | 'late'
                         })}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="present">Present</option>
                         <option value="absent">Absent</option>
@@ -1091,14 +1240,14 @@ const Groups = () => {
                           ...attendanceNotes,
                           [member.id]: e.target.value
                         })}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-48"
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-48 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="flex gap-3 pt-6">
+              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-600">
                 <button
                   onClick={handleSaveAttendance}
                   disabled={loading}
@@ -1121,15 +1270,23 @@ const Groups = () => {
         {showReportModal && selectedMeeting && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Meeting Report</h3>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Meeting Report</h3>
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               
-              <form onSubmit={(e) => { e.preventDefault(); handleSubmitReport(); }} className="space-y-4">
+              <form onSubmit={handleSubmitReport} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Report *</label>
                   <textarea
                     value={reportForm.report_text}
                     onChange={(e) => setReportForm({ ...reportForm, report_text: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="What was discussed and accomplished..."
                     rows={4}
                     required
@@ -1141,7 +1298,7 @@ const Groups = () => {
                   <textarea
                     value={reportForm.decisions_made}
                     onChange={(e) => setReportForm({ ...reportForm, decisions_made: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Key decisions made during the meeting..."
                     rows={3}
                   />
@@ -1152,7 +1309,7 @@ const Groups = () => {
                   <textarea
                     value={reportForm.action_items}
                     onChange={(e) => setReportForm({ ...reportForm, action_items: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Tasks and responsibilities assigned..."
                     rows={3}
                   />
@@ -1164,7 +1321,7 @@ const Groups = () => {
                     type="date"
                     value={reportForm.next_meeting_date}
                     onChange={(e) => setReportForm({ ...reportForm, next_meeting_date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
