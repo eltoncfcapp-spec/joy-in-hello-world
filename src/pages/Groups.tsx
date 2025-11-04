@@ -80,6 +80,15 @@ const Groups = () => {
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
 
   // Form states
+  const [groupForm, setGroupForm] = useState({
+    name: '',
+    description: '',
+    meeting_day: '',
+    meeting_time: '',
+    location: '',
+    leader_id: ''
+  });
+
   const [meetingForm, setMeetingForm] = useState({
     meeting_date: '',
     meeting_time: '',
@@ -193,6 +202,49 @@ const Groups = () => {
       setAttendance(data || []);
     } catch (error) {
       console.error('Error fetching attendance:', error);
+    }
+  };
+
+  // Create new group
+  const handleCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .insert({
+          name: groupForm.name,
+          description: groupForm.description || null,
+          meeting_day: groupForm.meeting_day || null,
+          meeting_time: groupForm.meeting_time || null,
+          location: groupForm.location || null,
+          leader_id: groupForm.leader_id || null
+        })
+        .select(`
+          *,
+          leader:members!cell_groups_leader_id_fkey(name, surname)
+        `)
+        .single();
+
+      if (error) throw error;
+
+      setGroups(prev => [data, ...prev]);
+      setShowForm(false);
+      setGroupForm({
+        name: '',
+        description: '',
+        meeting_day: '',
+        meeting_time: '',
+        location: '',
+        leader_id: ''
+      });
+      alert('Group created successfully!');
+    } catch (error) {
+      console.error('Error creating group:', error);
+      alert('Error creating group');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -431,6 +483,102 @@ const Groups = () => {
             {showForm ? 'Cancel' : 'Create Group'}
           </button>
         </div>
+
+        {/* Create Group Form */}
+        {showForm && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Group</h2>
+            <form onSubmit={handleCreateGroup} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Name *</label>
+                  <input
+                    type="text"
+                    value={groupForm.name}
+                    onChange={(e) => setGroupForm({ ...groupForm, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter group name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
+                  <input
+                    type="text"
+                    value={groupForm.location}
+                    onChange={(e) => setGroupForm({ ...groupForm, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Meeting location"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Day</label>
+                  <select
+                    value={groupForm.meeting_day}
+                    onChange={(e) => setGroupForm({ ...groupForm, meeting_day: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select day</option>
+                    {daysOfWeek.map(day => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
+                  <input
+                    type="time"
+                    value={groupForm.meeting_time}
+                    onChange={(e) => setGroupForm({ ...groupForm, meeting_time: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                  <textarea
+                    value={groupForm.description}
+                    onChange={(e) => setGroupForm({ ...groupForm, description: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Group description and purpose"
+                    rows={3}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader (Optional)</label>
+                  <select
+                    value={groupForm.leader_id}
+                    onChange={(e) => setGroupForm({ ...groupForm, leader_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select leader</option>
+                    {members.map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus className="h-5 w-5" />
+                  {loading ? 'Creating...' : 'Create Group'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* Group Selection and Tabs */}
         {selectedGroup && (
