@@ -208,6 +208,13 @@ const Members = () => {
     setSuccess(null);
     
     try {
+      // Validate required fields
+      if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.gender) {
+        setError('Name, surname, and gender are required fields.');
+        setLoading(false);
+        return;
+      }
+
       const updateData: any = {
         name: editFormData.name.trim(),
         surname: editFormData.surname.trim(),
@@ -641,12 +648,19 @@ const Members = () => {
                   <div className="flex-1">
                     <div className="flex items-start gap-4 mb-4">
                       <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
-                        {getInitials(member.name, member.surname)}
+                        {getInitials(
+                          editingMember === member.id ? editFormData.name : member.name, 
+                          editingMember === member.id ? editFormData.surname : member.surname
+                        )}
                       </div>
                       <div className="flex-1">
                         {editingMember === member.id ? (
                           <div className="space-y-4">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+                              Edit Member Details
+                            </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Name Fields */}
                               <div className="space-y-2">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                   First Name *
@@ -655,7 +669,8 @@ const Members = () => {
                                   type="text"
                                   value={editFormData.name}
                                   onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                                  placeholder="Enter first name"
                                   required
                                 />
                               </div>
@@ -667,10 +682,13 @@ const Members = () => {
                                   type="text"
                                   value={editFormData.surname}
                                   onChange={(e) => setEditFormData({ ...editFormData, surname: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                                  placeholder="Enter last name"
                                   required
                                 />
                               </div>
+
+                              {/* Contact Fields */}
                               <div className="space-y-2">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                   Email
@@ -679,20 +697,24 @@ const Members = () => {
                                   type="email"
                                   value={editFormData.email}
                                   onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                                  placeholder="Enter email address"
                                 />
                               </div>
                               <div className="space-y-2">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                  Phone
+                                  Phone Number
                                 </label>
                                 <input
                                   type="tel"
                                   value={editFormData.phone}
                                   onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                                  placeholder="Enter phone number"
                                 />
                               </div>
+
+                              {/* Invited By */}
                               <div className="space-y-2">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                   Invited By
@@ -701,9 +723,12 @@ const Members = () => {
                                   type="text"
                                   value={editFormData.invited_by}
                                   onChange={(e) => setEditFormData({ ...editFormData, invited_by: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                                  placeholder="Who invited this member?"
                                 />
                               </div>
+
+                              {/* Gender */}
                               <div className="space-y-2">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                   Gender *
@@ -711,7 +736,7 @@ const Members = () => {
                                 <select
                                   value={editFormData.gender}
                                   onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value as 'male' | 'female' | '' })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                                   required
                                 >
                                   <option value="">Select gender</option>
@@ -719,6 +744,8 @@ const Members = () => {
                                   <option value="female">Female</option>
                                 </select>
                               </div>
+
+                              {/* Groups */}
                               <div className="space-y-2">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                                   Cell Group
@@ -726,7 +753,7 @@ const Members = () => {
                                 <select
                                   value={editFormData.cell_group_id}
                                   onChange={(e) => setEditFormData({ ...editFormData, cell_group_id: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                                 >
                                   <option value="">Select cell group</option>
                                   {cellGroups.map((group) => (
@@ -743,7 +770,7 @@ const Members = () => {
                                 <select
                                   value={editFormData.ministry_group_id}
                                   onChange={(e) => setEditFormData({ ...editFormData, ministry_group_id: e.target.value })}
-                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                                 >
                                   <option value="">Select ministry group</option>
                                   {ministryGroups.map((group) => (
@@ -754,18 +781,18 @@ const Members = () => {
                                 </select>
                               </div>
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 pt-2">
                               <button
                                 onClick={() => handleSaveMember(member.id)}
                                 disabled={loading}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
                               >
                                 <Save className="h-4 w-4" />
-                                Save Changes
+                                {loading ? 'Saving...' : 'Save Changes'}
                               </button>
                               <button
                                 onClick={handleCancelEdit}
-                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
                               >
                                 Cancel
                               </button>
