@@ -1,7 +1,4 @@
-// components/Dashboard.tsx
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, 
   Calendar, 
@@ -17,9 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   PhoneCall,
-  AlertTriangle,
-  LogOut,
-  Settings
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -81,9 +76,6 @@ interface AbsentMember {
 }
 
 const Dashboard = () => {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -123,23 +115,11 @@ const Dashboard = () => {
     try {
       setLoading(true);
       
-      // Load members (with role-based filtering)
-      let membersQuery = supabase
+      // Load members
+      const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select('*')
         .order('created_at', { ascending: false });
-
-      // If user is a group leader, only show members from their assigned groups
-      if (user?.role === 'group_leader' && user.assigned_groups.length > 0) {
-        membersQuery = membersQuery.in('cell_group', user.assigned_groups);
-      }
-      // If user is a department leader, show all members but with limited access
-      else if (user?.role === 'department_leader') {
-        // Department leaders can see all members but with read-only access
-        // unless they have edit permissions
-      }
-
-      const { data: membersData, error: membersError } = await membersQuery;
 
       if (membersError) throw membersError;
       setMembers(membersData || []);
@@ -198,16 +178,10 @@ const Dashboard = () => {
       // Get the last 2 Sunday services
       const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      // Get all members (with role-based filtering)
-      let allMembersQuery = supabase
+      // Get all members
+      const { data: allMembers, error: membersError } = await supabase
         .from('members')
         .select('id, name, surname, phone');
-
-      if (user?.role === 'group_leader' && user.assigned_groups.length > 0) {
-        allMembersQuery = allMembersQuery.in('cell_group', user.assigned_groups);
-      }
-
-      const { data: allMembers, error: membersError } = await allMembersQuery;
 
       if (membersError) throw membersError;
       if (!allMembers) {
@@ -362,23 +336,10 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    if (user) {
-      loadDashboardData();
-    }
-  }, [user]);
+    loadDashboardData();
+  }, []);
 
   const openModal = (modalType: string) => {
-    // Check permissions before opening modals
-    if (modalType === 'addMember' && !user?.can_add_members && user?.role !== 'admin') {
-      alert('You do not have permission to add members');
-      return;
-    }
-    
-    if (modalType === 'createEvent' && !user?.permissions.includes('manage_events') && user?.role !== 'admin') {
-      alert('You do not have permission to create events');
-      return;
-    }
-    
     setActiveModal(modalType);
   };
 
@@ -401,6 +362,7 @@ const Dashboard = () => {
     setActiveModal('eventDetail');
   };
 
+
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
       ...prev,
@@ -414,21 +376,9 @@ const Dashboard = () => {
     return null;
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
   // Add new member handler
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Check permissions
-    if (!user?.can_add_members && user?.role !== 'admin') {
-      alert('You do not have permission to add members');
-      return;
-    }
-
     try {
       const { error } = await supabase
         .from('members')
@@ -456,13 +406,6 @@ const Dashboard = () => {
   // Create event handler
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Check permissions
-    if (!user?.permissions.includes('manage_events') && user?.role !== 'admin') {
-      alert('You do not have permission to create events');
-      return;
-    }
-
     try {
       const { error } = await supabase
         .from('events')
@@ -523,34 +466,11 @@ const Dashboard = () => {
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
             Dashboard
           </h1>
-          <p className="text-foreground/60">
-            Welcome back, {user?.name} {user?.surname} 
-            <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-              {user?.role?.replace('_', ' ')}
-            </span>
-          </p>
+          <p className="text-foreground/60">Welcome to your church management dashboard</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3">
-            {user?.role === 'admin' && (
-              <button
-                onClick={() => navigate('/admin')}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors font-medium"
-              >
-                <Settings className="h-4 w-4" />
-                Admin Panel
-              </button>
-            )}
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
-          </div>
           <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
-            {user?.name?.charAt(0)}{user?.surname?.charAt(0)}
+            AD
           </div>
         </div>
       </div>
@@ -699,24 +619,20 @@ const Dashboard = () => {
       <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
         <div className="flex flex-wrap gap-3">
-          {(user?.can_add_members || user?.role === 'admin') && (
-            <button 
-              onClick={() => openModal('addMember')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add New Member
-            </button>
-          )}
-          {(user?.permissions.includes('manage_events') || user?.role === 'admin') && (
-            <button 
-              onClick={() => openModal('createEvent')}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <Plus className="h-4 w-4" />
-              Create Event
-            </button>
-          )}
+          <button 
+            onClick={() => openModal('addMember')}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+          >
+            <UserPlus className="h-4 w-4" />
+            Add New Member
+          </button>
+          <button 
+            onClick={() => openModal('createEvent')}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+          >
+            <Plus className="h-4 w-4" />
+            Create Event
+          </button>
         </div>
       </div>
 

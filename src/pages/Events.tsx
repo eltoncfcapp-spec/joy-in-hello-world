@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Users, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -100,7 +100,7 @@ const Events = () => {
   });
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [, setSelectedInviter] = useState<Member | null>(null);
+  const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
 
   useEffect(() => {
     fetchEvents();
@@ -123,7 +123,7 @@ const Events = () => {
         throw error;
       }
 
-      const eventsWithDefaults = (data || []).map((event: any) => ({
+      const eventsWithDefaults = (data || []).map(event => ({
         ...event,
         is_whole_church: event.is_whole_church ?? true,
         target_groups: event.target_groups ?? null,
@@ -338,7 +338,7 @@ const Events = () => {
         .update({
           is_completed: true,
           completed_at: new Date().toISOString()
-        } as any)
+        })
         .eq('id', eventId);
 
       if (error) {

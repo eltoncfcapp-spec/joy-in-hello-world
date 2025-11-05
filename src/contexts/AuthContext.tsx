@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+// contexts/AuthContext.tsx
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '../integrations/supabase/client';
 
 interface User {
   id: string;
@@ -41,13 +43,13 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-export const AuthProvider = ({ children }: AuthProviderProps) => {
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Check for existing session on mount
   useEffect(() => {
     checkUserSession();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkUserSession = async () => {
@@ -66,6 +68,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const login = (identifier: string, secret: string, mode: 'email' | 'username'): boolean => {
+    // For demo purposes - in real app, you would query Supabase
     const demoUsers: User[] = [
       {
         id: '1',
@@ -129,10 +132,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     let authenticatedUser: User | null = null;
 
     if (mode === 'email') {
+      // Email login
       authenticatedUser = demoUsers.find(
         u => u.email === identifier && secret === 'admin123'
       ) || null;
     } else {
+      // Username/PIN login
       authenticatedUser = demoUsers.find(
         u => u.login_username === identifier && u.login_pin === secret
       ) || null;
@@ -159,5 +164,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     loading
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
