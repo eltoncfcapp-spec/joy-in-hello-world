@@ -1,3 +1,4 @@
+// components/Login.tsx
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,25 +11,32 @@ export default function Login() {
   const [showSecret, setShowSecret] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    // Try login with identifier and secret
-    const success = login(identifier, secret, loginMode); 
-    // Note: your AuthContext.login() should handle both email/password and username/pin
-
-    if (success) {
-      navigate('/');
-    } else {
-      setError(
-        loginMode === 'email'
-          ? 'Invalid email or password'
-          : 'Invalid username or PIN'
-      );
+    try {
+      const success = login(identifier, secret, loginMode);
+      
+      if (success) {
+        navigate('/dashboard');
+      } else {
+        setError(
+          loginMode === 'email'
+            ? 'Invalid email or password'
+            : 'Invalid username or PIN'
+        );
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setError('An error occurred during login');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -86,6 +94,7 @@ export default function Login() {
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
                 placeholder={loginMode === 'email' ? 'admin@church.com' : 'john_doe'}
+                disabled={loading}
               />
             </div>
 
@@ -102,11 +111,13 @@ export default function Login() {
                   onChange={(e) => setSecret(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 pr-10 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
                   placeholder={loginMode === 'email' ? '••••••••' : '1234'}
+                  disabled={loading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowSecret(!showSecret)}
                   className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground"
+                  disabled={loading}
                 >
                   {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -121,6 +132,7 @@ export default function Login() {
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
                 className="h-4 w-4 text-primary border-border rounded focus:ring-primary"
+                disabled={loading}
               />
               <label htmlFor="remember-me" className="ml-2 block text-sm text-foreground">
                 Keep me logged in
@@ -136,25 +148,36 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => handleDemoLogin('admin@church.com', 'admin123', 'email')}
-                className="w-full text-left hover:text-foreground transition-colors"
+                className="w-full text-left hover:text-foreground transition-colors disabled:opacity-50"
+                disabled={loading}
               >
                 • Email: admin@church.com / Password: admin123
               </button>
               <button
                 type="button"
                 onClick={() => handleDemoLogin('sarah_smith', '5432', 'username')}
-                className="w-full text-left hover:text-foreground transition-colors"
+                className="w-full text-left hover:text-foreground transition-colors disabled:opacity-50"
+                disabled={loading}
               >
                 • Username: sarah_smith / PIN: 5432
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('mike_johnson', '7890', 'username')}
+                className="w-full text-left hover:text-foreground transition-colors disabled:opacity-50"
+                disabled={loading}
+              >
+                • Username: mike_johnson / PIN: 7890
               </button>
             </div>
           </div>
 
           <button
             type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+            disabled={loading}
+            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Sign in
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
       </div>
