@@ -1,5 +1,9 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye, UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText, Columns, Key, Copy, RefreshCw } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import {
+  Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye,
+  UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText,
+  Columns, Key, Copy, RefreshCw
+} from 'lucide-react';
+import { useState } from 'react';
 
 interface Member {
   id: string;
@@ -30,61 +34,14 @@ interface Group {
 
 const Admin = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [members, setMembers] = useState<Member[]>([
-    {
-      id: '1',
-      name: 'John',
-      surname: 'Doe',
-      email: 'john@church.com',
-      phone: '+1234567890',
-      role: 'member',
-      permissions: ['view_members', 'view_events', 'view_groups'],
-      is_active: true,
-      cell_group: 'Youth Ministry',
-      department: null,
-      login_username: null,
-      login_pin: null,
-      assigned_groups: [],
-      assigned_departments: [],
-      can_add_members: false,
-      can_edit_members: false,
-      can_view_own_data: false
-    },
-    {
-      id: '2',
-      name: 'Sarah',
-      surname: 'Smith',
-      email: 'sarah@church.com',
-      phone: '+0987654321',
-      role: 'leader',
-      permissions: ['view_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-      is_active: true,
-      cell_group: 'Women Fellowship',
-      department: 'Worship',
-      login_username: 'sarah_smith',
-      login_pin: '5432',
-      assigned_groups: ['Youth Ministry', 'Women Fellowship'],
-      assigned_departments: [],
-      can_add_members: true,
-      can_edit_members: true,
-      can_view_own_data: true
-    }
-  ]);
-
-  const [groups, setGroups] = useState<Group[]>([
-    { id: '1', name: 'Youth Ministry', description: 'Youth cell group', type: 'cell_group' },
-    { id: '2', name: 'Women Fellowship', description: 'Women ministry', type: 'cell_group' },
-    { id: '3', name: 'Men\'s Group', description: 'Men fellowship', type: 'cell_group' },
-    { id: '4', name: 'Worship', description: 'Worship department', type: 'department' },
-    { id: '5', name: 'Media', description: 'Media department', type: 'department' },
-    { id: '6', name: 'Children', description: 'Children ministry', type: 'department' }
-  ]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
 
   const [selectedUser, setSelectedUser] = useState<Member | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
-  const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
+  const [generatedCredentials, setGeneratedCredentials] = useState<{ username: string; pin: string } | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
@@ -138,22 +95,13 @@ const Admin = () => {
     return `${base}${random}`;
   };
 
-  const generatePIN = () => {
-    return Math.floor(1000 + Math.random() * 9000).toString();
-  };
+  const generatePIN = () => Math.floor(1000 + Math.random() * 9000).toString();
 
   const handleGenerateCredentials = () => {
     if (!selectedUser) return;
-    
     const username = generateUsername(selectedUser.name, selectedUser.surname);
     const pin = generatePIN();
-    
-    setUserFormData(prev => ({
-      ...prev,
-      login_username: username,
-      login_pin: pin
-    }));
-    
+    setUserFormData(prev => ({ ...prev, login_username: username, login_pin: pin }));
     setGeneratedCredentials({ username, pin });
     setShowCredentials(true);
   };
@@ -168,7 +116,6 @@ const Admin = () => {
 
   const openModal = (modalType: string, user?: Member) => {
     setActiveModal(modalType);
-    
     if (user) {
       setSelectedUser(user);
       setUserFormData({
@@ -207,27 +154,14 @@ const Admin = () => {
 
   const handleUserUpdate = () => {
     if (!selectedUser) return;
-
     setLoading(true);
-    
+    // Replace this with your API call (e.g., PUT /api/members/:id)
     setTimeout(() => {
-      setMembers(prev => prev.map(m => 
-        m.id === selectedUser.id 
-          ? { 
-              ...m, 
-              role: userFormData.role,
-              permissions: userFormData.permissions,
-              assigned_groups: userFormData.assigned_groups,
-              assigned_departments: userFormData.assigned_departments,
-              can_add_members: userFormData.can_add_members,
-              can_edit_members: userFormData.can_edit_members,
-              can_view_own_data: userFormData.can_view_own_data,
-              login_username: userFormData.login_username,
-              login_pin: userFormData.login_pin
-            }
+      setMembers(prev => prev.map(m =>
+        m.id === selectedUser.id
+          ? { ...m, ...userFormData }
           : m
       ));
-      
       setLoading(false);
       alert('User updated successfully!');
       closeModal();
@@ -287,16 +221,11 @@ const Admin = () => {
       <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="flex justify-between items-center p-6 border-b border-gray-200">
           <h3 className="text-2xl font-bold text-gray-900">{title}</h3>
-          <button 
-            onClick={closeModal}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          >
+          <button onClick={closeModal} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="p-6">
-          {children}
-        </div>
+        <div className="p-6">{children}</div>
       </div>
     </div>
   );
@@ -304,25 +233,13 @@ const Admin = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Admin Panel
-            </h1>
-            <p className="text-gray-600">Manage system settings and user permissions</p>
-          </div>
-        </div>
+        <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-8">
+          Admin Panel
+        </h1>
 
         <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-            <button
-              onClick={() => openModal('users')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-            >
-              <Users className="h-4 w-4" />
-              Manage All Users
-            </button>
           </div>
 
           <div className="relative mb-6">
@@ -336,42 +253,26 @@ const Admin = () => {
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-            {filteredMembers.map((member) => (
-              <div
-                key={member.id}
-                className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                    {member.name.charAt(0)}{member.surname.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">
-                      {member.name} {member.surname}
-                    </h4>
-                    <p className="text-sm text-gray-500">
-                      {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
-                    </p>
-                    {member.login_username && (
-                      <p className="text-xs text-blue-600 mt-1">
-                        <Key className="h-3 w-3 inline mr-1" />
-                        Login: {member.login_username}
+          {filteredMembers.length === 0 ? (
+            <p className="text-gray-500 text-center py-6">No members found.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {filteredMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors gap-4"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900">{member.name} {member.surname}</h4>
+                      <p className="text-sm text-gray-500">
+                        {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
                       </p>
-                    )}
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-2">
-                  {member.assigned_groups.length > 0 && (
-                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                      {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
-                    </span>
-                  )}
-                  {member.assigned_departments.length > 0 && (
-                    <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                      {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
-                    </span>
-                  )}
                   <button
                     onClick={() => openModal('userDetails', member)}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -379,261 +280,13 @@ const Admin = () => {
                     Manage
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
-            <div className="space-y-4">
-              {roles.map(role => {
-                const count = members.filter(m => m.role === role.value).length;
-                return (
-                  <div key={role.value} className="flex justify-between items-center">
-                    <span className="text-gray-600">{role.label}</span>
-                    <span className="text-gray-900 font-semibold">{count}</span>
-                  </div>
-                );
-              })}
+              ))}
             </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Quick Stats</h2>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Total Members</span>
-                <span className="text-gray-900 font-semibold">{members.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Active Groups</span>
-                <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Departments</span>
-                <span className="text-gray-900 font-semibold">{departments.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Users with Login</span>
-                <span className="text-gray-900 font-semibold">
-                  {members.filter(m => m.login_username).length}
-                </span>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
+      </div>
+    </div>
+  );
+};
 
-        {activeModal === 'userDetails' && selectedUser && (
-          <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
-            <div className="space-y-6">
-              <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
-                    {selectedUser.name.charAt(0)}{selectedUser.surname.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className="text-xl font-bold text-gray-900">
-                      {selectedUser.name} {selectedUser.surname}
-                    </h4>
-                    <p className="text-gray-600">{selectedUser.email}</p>
-                    <p className="text-sm text-gray-500">{selectedUser.phone}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <label className="block text-sm font-medium text-gray-700">
-                    User Role
-                  </label>
-                  <select
-                    value={userFormData.role}
-                    onChange={(e) => {
-                      const newRole = e.target.value;
-                      setUserFormData({
-                        ...userFormData,
-                        role: newRole,
-                        permissions: getRolePermissions(newRole)
-                      });
-                    }}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {roles.map(role => (
-                      <option key={role.value} value={role.value}>
-                        {role.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-sm text-gray-500">
-                    {roles.find(r => r.value === userFormData.role)?.description}
-                  </p>
-                </div>
-
-                <div className="space-y-4">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Login Credentials
-                  </label>
-                  <button
-                    onClick={handleGenerateCredentials}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    Generate Login Credentials
-                  </button>
-                  
-                  {showCredentials && generatedCredentials && (
-                    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-green-900">Generated Credentials</span>
-                        <button
-                          onClick={handleCopyCredentials}
-                          className="flex items-center gap-1 text-green-700 hover:text-green-900"
-                        >
-                          <Copy className="h-4 w-4" />
-                          <span className="text-xs">Copy</span>
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        <div>
-                          <span className="text-xs text-green-700">Username:</span>
-                          <p className="font-mono font-semibold text-green-900">{generatedCredentials.username}</p>
-                        </div>
-                        <div>
-                          <span className="text-xs text-green-700">PIN:</span>
-                          <p className="font-mono font-semibold text-green-900 text-2xl tracking-wider">{generatedCredentials.pin}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {(userFormData.role === 'group_leader' || userFormData.role === 'department_leader') && (
-                <div className="space-y-6">
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                    <h4 className="font-semibold text-blue-900 mb-2">Leadership Permissions</h4>
-                    <p className="text-sm text-blue-700 mb-4">
-                      Configure what this leader can do within their assigned groups/departments
-                    </p>
-                    
-                    <div className="space-y-3">
-                      <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={userFormData.can_add_members}
-                          onChange={(e) => setUserFormData(prev => ({...prev, can_add_members: e.target.checked}))}
-                          className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div>
-                          <span className="font-medium text-gray-900">Can Add Members</span>
-                          <p className="text-xs text-gray-500">Allow adding new members to assigned groups</p>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={userFormData.can_edit_members}
-                          onChange={(e) => setUserFormData(prev => ({...prev, can_edit_members: e.target.checked}))}
-                          className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div>
-                          <span className="font-medium text-gray-900">Can Edit Members</span>
-                          <p className="text-xs text-gray-500">Allow editing member information in assigned groups</p>
-                        </div>
-                      </label>
-
-                      <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={userFormData.can_view_own_data}
-                          onChange={(e) => setUserFormData(prev => ({...prev, can_view_own_data: e.target.checked}))}
-                          className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div>
-                          <span className="font-medium text-gray-900">Can View & Edit Own Group/Department Data</span>
-                          <p className="text-xs text-gray-500">Full access to view and edit all data within assigned areas</p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-
-                  {userFormData.role === 'group_leader' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">
-                        Assigned Cell Groups
-                      </label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {cellGroups.map(group => (
-                          <label
-                            key={group.id}
-                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={userFormData.assigned_groups.includes(group.name)}
-                              onChange={() => handleGroupToggle(group.name)}
-                              className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <div>
-                              <span className="font-medium text-gray-900">{group.name}</span>
-                              <p className="text-xs text-gray-500">{group.description}</p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {userFormData.role === 'department_leader' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">
-                        Assigned Departments
-                      </label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {departments.map(dept => (
-                          <label
-                            key={dept.id}
-                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={userFormData.assigned_departments.includes(dept.name)}
-                              onChange={() => handleDepartmentToggle(dept.name)}
-                              className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-                            />
-                            <div>
-                              <span className="font-medium text-gray-900">{dept.name}</span>
-                              <p className="text-xs text-gray-500">{dept.description}</p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  System Permissions
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto p-2">
-                  {permissions.map(permission => (
-                    <label
-                      key={permission.value}
-                      className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={userFormData.permissions.includes(permission.value)}
-                        onChange={() => handlePermissionToggle(permission.value)}
-                        className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                      />
-                      <div>
-                        <span className="text-sm font-medium text-gray-900">{permission.label}</span>
-                        <p className="text-xs text-gray-500">{permission.description}</p>
-                      </div>
-                    </label>
+export default Admin;
