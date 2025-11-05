@@ -1,43 +1,131 @@
-// components/Unauthorized.tsx
-import { useNavigate } from 'react-router-dom';
-import { Shield, Home } from 'lucide-react';
+// contexts/AuthContext.tsx
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-const Unauthorized = () => {
-  const navigate = useNavigate();
+interface User {
+  id: string;
+  name: string;
+  surname: string;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  permissions: string[];
+  is_active: boolean;
+  cell_group: string | null;
+  department: string | null;
+  login_username: string | null;
+  login_pin: string | null;
+  assigned_groups: string[];
+  assigned_departments: string[];
+  can_add_members: boolean;
+  can_edit_members: boolean;
+  can_view_own_data: boolean;
+}
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-8 p-8 text-center">
-        <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Shield className="h-10 w-10 text-red-600" />
-        </div>
-        
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Access Denied</h1>
-          <p className="text-gray-600 mb-6">
-            You don't have permission to access this page. Please contact an administrator if you believe this is an error.
-          </p>
-        </div>
+interface AuthContextType {
+  user: User | null;
+  login: (identifier: string, secret: string, mode: 'email' | 'username') => boolean;
+  logout: () => void;
+  loading: boolean;
+}
 
-        <div className="space-y-3">
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            <Home className="h-4 w-4" />
-            Go to Dashboard
-          </button>
-          
-          <button
-            onClick={() => navigate('/login')}
-            className="w-full px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-          >
-            Switch Account
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };
 
-export default Unauthorized;
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    checkUserSession();
+  }, []);
+
+  const checkUserSession = async () => {
+    try {
+      const savedUser = localStorage.getItem('church_user');
+      if (savedUser) {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+      }
+    } catch (error) {
+      console.error('Error checking user session:', error);
+      localStorage.removeItem('church_user');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = (identifier: string, secret: string, mode: 'email' | 'username'): boolean => {
+    // Only admin user for demo
+    const adminUser: User = {
+      id: '1',
+      name: 'Admin',
+      surname: 'User',
+      email: 'admin@church.com',
+      phone: '+1234567890',
+      role: 'admin',
+      permissions: ['admin_access'],
+      is_active: true,
+      cell_group: null,
+      department: null,
+      login_username: 'admin_user',
+      login_pin: '1234',
+      assigned_groups: [],
+      assigned_departments: [],
+      can_add_members: true,
+      can_edit_members: true,
+      can_view_own_data: true
+    };
+
+    let authenticatedUser: User | null = null;
+
+    if (mode === 'email') {
+      // Email login - using fixed password for demo
+      if (identifier === 'admin@church.com' && secret === 'admin123') {
+        authenticatedUser = adminUser;
+      }
+    } else {
+      // Username/PIN login
+      if (identifier === 'admin_user' && secret === '1234') {
+        authenticatedUser = adminUser;
+      }
+    }
+
+    if (authenticatedUser) {
+      setUser(authenticatedUser);
+      localStorage.setItem('church_user', JSON.stringify(authenticatedUser));
+      return true;
+    }
+
+    return false;
+  };
+
+  const logout = () => {
+    setUser(null);
+    localStorage.removeItem('church_user');
+  };
+
+  const value = {
+    user,
+    login,
+    logout,
+    loading
+  };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
