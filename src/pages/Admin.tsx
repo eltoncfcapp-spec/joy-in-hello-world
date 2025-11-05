@@ -1,6 +1,5 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye, UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText, Columns } from 'lucide-react';
-import { useState } from 'react';
-import { supabase } from '../integrations/supabase/client';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye, UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText, Columns, Key, Copy, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 interface Member {
   id: string;
@@ -12,153 +11,107 @@ interface Member {
   permissions: string[];
   is_active: boolean;
   cell_group: string | null;
+  department: string | null;
+  login_username: string | null;
+  login_pin: string | null;
+  assigned_groups: string[];
+  assigned_departments: string[];
+  can_add_members: boolean;
+  can_edit_members: boolean;
+  can_view_own_data: boolean;
 }
 
 interface Group {
   id: string;
   name: string;
   description: string | null;
-}
-
-interface ImportColumnMapping {
-  [excelColumn: string]: string;
+  type: 'cell_group' | 'department';
 }
 
 const Admin = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [members, setMembers] = useState<Member[]>([
+    {
+      id: '1',
+      name: 'John',
+      surname: 'Doe',
+      email: 'john@church.com',
+      phone: '+1234567890',
+      role: 'member',
+      permissions: ['view_members', 'view_events', 'view_groups'],
+      is_active: true,
+      cell_group: 'Youth Ministry',
+      department: null,
+      login_username: null,
+      login_pin: null,
+      assigned_groups: [],
+      assigned_departments: [],
+      can_add_members: false,
+      can_edit_members: false,
+      can_view_own_data: false
+    },
+    {
+      id: '2',
+      name: 'Sarah',
+      surname: 'Smith',
+      email: 'sarah@church.com',
+      phone: '+0987654321',
+      role: 'leader',
+      permissions: ['view_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
+      is_active: true,
+      cell_group: 'Women Fellowship',
+      department: 'Worship',
+      login_username: 'sarah_smith',
+      login_pin: '5432',
+      assigned_groups: ['Youth Ministry', 'Women Fellowship'],
+      assigned_departments: [],
+      can_add_members: true,
+      can_edit_members: true,
+      can_view_own_data: true
+    }
+  ]);
+
+  const [groups, setGroups] = useState<Group[]>([
+    { id: '1', name: 'Youth Ministry', description: 'Youth cell group', type: 'cell_group' },
+    { id: '2', name: 'Women Fellowship', description: 'Women ministry', type: 'cell_group' },
+    { id: '3', name: 'Men\'s Group', description: 'Men fellowship', type: 'cell_group' },
+    { id: '4', name: 'Worship', description: 'Worship department', type: 'department' },
+    { id: '5', name: 'Media', description: 'Media department', type: 'department' },
+    { id: '6', name: 'Children', description: 'Children ministry', type: 'department' }
+  ]);
+
   const [selectedUser, setSelectedUser] = useState<Member | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const [excelData, setExcelData] = useState<any[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [columnMapping, setColumnMapping] = useState<ImportColumnMapping>({});
-  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
-  const [importProgress, setImportProgress] = useState(0);
-  const [importResult, setImportResult] = useState<{success: boolean; imported: number; updated: number; errors: number; message: string} | null>(null);
-  const [previewData, setPreviewData] = useState<any[]>([]);
-  const [importMode, setImportMode] = useState<'bulk' | 'manual'>('bulk');
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
     permissions: string[];
-    assignedGroups: string[];
+    assigned_groups: string[];
+    assigned_departments: string[];
+    can_add_members: boolean;
+    can_edit_members: boolean;
+    can_view_own_data: boolean;
+    login_username: string;
+    login_pin: string;
   }>({
     role: 'member',
     permissions: [],
-    assignedGroups: [],
+    assigned_groups: [],
+    assigned_departments: [],
+    can_add_members: false,
+    can_edit_members: false,
+    can_view_own_data: false,
+    login_username: '',
+    login_pin: ''
   });
-
-  const [notificationSettings, setNotificationSettings] = useState({
-    emailNotifications: true,
-    pushNotifications: false,
-    eventReminders: true,
-    donationReceipts: true,
-    weeklyDigest: false,
-    newMemberAlerts: true,
-    emergencyAlerts: true,
-  });
-
-  const [communicationSettings, setCommunicationSettings] = useState({
-    smsEnabled: true,
-    emailEnabled: true,
-    defaultEmailTemplate: 'welcome',
-    smsSignature: 'Your Church Family',
-    emailSignature: 'Blessings,\nYour Church Team',
-    autoWelcomeEmail: true,
-    autoEventReminders: true,
-  });
-
-  const [securitySettings, setSecuritySettings] = useState({
-    twoFactorAuth: false,
-    sessionTimeout: 60,
-    passwordMinLength: 8,
-    requireStrongPassword: true,
-    failedLoginLockout: 5,
-    auditLogRetention: 365,
-  });
-
-  const [emailTemplates] = useState([
-    {
-      id: 'welcome',
-      name: 'Welcome Email',
-      subject: 'Welcome to Our Church Family!',
-      content: 'Dear {{name}},\n\nWelcome to our church family! We are excited to have you join us.\n\nBlessings,\nChurch Team'
-    },
-    {
-      id: 'event_reminder',
-      name: 'Event Reminder',
-      subject: 'Reminder: {{event_name}}',
-      content: 'Dear {{name}},\n\nThis is a reminder about {{event_name}} on {{event_date}}.\n\nWe hope to see you there!'
-    },
-    {
-      id: 'donation_receipt',
-      name: 'Donation Receipt',
-      subject: 'Donation Receipt - Thank You!',
-      content: 'Dear {{name}},\n\nThank you for your generous donation of {{amount}}.\n\nBlessings,\nChurch Team'
-    }
-  ]);
-
-  const databaseFields = [
-    { value: 'name', label: 'First Name', required: true },
-    { value: 'surname', label: 'Surname', required: true },
-    { value: 'email', label: 'Email', required: false },
-    { value: 'phone', label: 'Phone Number', required: false },
-    { value: 'cell_group_id', label: 'Cell Group', required: false },
-    { value: 'gender', label: 'Gender', required: false },
-    { value: 'invited_by', label: 'Invited By', required: false },
-  ];
-
-  const adminSections = [
-    {
-      icon: Settings,
-      title: 'General Settings',
-      description: 'Configure church information and preferences',
-      color: 'from-blue-500 to-blue-600',
-      modal: 'general'
-    },
-    {
-      icon: Users,
-      title: 'User Management',
-      description: 'Manage roles, permissions, and access control',
-      color: 'from-purple-500 to-purple-600',
-      modal: 'users'
-    },
-    {
-      icon: Database,
-      title: 'Data Management',
-      description: 'Backup, import, and export church data',
-      color: 'from-green-500 to-green-600',
-      modal: 'data'
-    },
-    {
-      icon: Shield,
-      title: 'Security',
-      description: 'Security settings and audit logs',
-      color: 'from-red-500 to-red-600',
-      modal: 'security'
-    },
-    {
-      icon: Bell,
-      title: 'Notifications',
-      description: 'Configure email and push notifications',
-      color: 'from-orange-500 to-orange-600',
-      modal: 'notifications'
-    },
-    {
-      icon: Mail,
-      title: 'Communication',
-      description: 'Email templates and messaging settings',
-      color: 'from-pink-500 to-pink-600',
-      modal: 'communication'
-    },
-  ];
 
   const roles = [
     { value: 'member', label: 'Member', description: 'Basic access to personal profile' },
-    { value: 'leader', label: 'Group Leader', description: 'Can manage assigned groups and view members' },
+    { value: 'group_leader', label: 'Group Leader', description: 'Can manage assigned groups and view members' },
+    { value: 'department_leader', label: 'Department Leader', description: 'Can manage assigned departments' },
     { value: 'deacon', label: 'Deacon', description: 'Extended access to ministry areas' },
     { value: 'pastor', label: 'Pastor', description: 'Full administrative access' },
     { value: 'admin', label: 'Administrator', description: 'Complete system access' },
@@ -166,7 +119,9 @@ const Admin = () => {
 
   const permissions = [
     { value: 'view_members', label: 'View Members', description: 'Can see member directory' },
+    { value: 'add_members', label: 'Add Members', description: 'Can add new members' },
     { value: 'edit_members', label: 'Edit Members', description: 'Can modify member information' },
+    { value: 'delete_members', label: 'Delete Members', description: 'Can remove members' },
     { value: 'view_groups', label: 'View Groups', description: 'Can see all groups' },
     { value: 'manage_groups', label: 'Manage Groups', description: 'Can create and edit groups' },
     { value: 'view_events', label: 'View Events', description: 'Can see event calendar' },
@@ -177,332 +132,58 @@ const Admin = () => {
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
 
-  const pageAccess = [
-    { value: 'dashboard', label: 'Dashboard', description: 'Main dashboard overview' },
-    { value: 'members', label: 'Members', description: 'Member directory and management' },
-    { value: 'events', label: 'Events', description: 'Event calendar and management' },
-    { value: 'groups', label: 'Groups', description: 'Groups and ministries' },
-    { value: 'donations', label: 'Donations', description: 'Donation tracking' },
-    { value: 'reports', label: 'Reports', description: 'Analytics and reporting' },
-    { value: 'admin', label: 'Admin', description: 'Administration panel' },
-  ];
-
-  // Fetch members and groups from Supabase
-  const fetchMembers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select(`
-          *,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setMembers(data || []);
-    } catch (error) {
-      console.error('Error fetching members:', error);
-    }
+  const generateUsername = (firstName: string, lastName: string) => {
+    const base = `${firstName.toLowerCase()}_${lastName.toLowerCase()}`;
+    const random = Math.floor(Math.random() * 100);
+    return `${base}${random}`;
   };
 
-  const fetchGroups = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .select('id, name, description')
-        .order('name');
-
-      if (error) throw error;
-      setGroups(data || []);
-    } catch (error) {
-      console.error('Error fetching groups:', error);
-    }
+  const generatePIN = () => {
+    return Math.floor(1000 + Math.random() * 9000).toString();
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setSelectedFile(file);
-    setImportResult(null);
-    setImportProgress(0);
-
-    // For demo purposes, using sample data
-    // In a real app, you would parse the CSV file here
-    const sampleData = [
-      { 'First Name': 'Alice', 'Surname': 'Williams', 'Email': 'alice@example.com', 'Phone Number': '+1111111111', 'Cell Group': 'Youth Ministry', 'Gender': 'female' },
-      { 'First Name': 'Charlie', 'Surname': 'Brown', 'Email': 'charlie@example.com', 'Phone Number': '+2222222222', 'Cell Group': 'Men\'s Group', 'Gender': 'male' }
-    ];
+  const handleGenerateCredentials = () => {
+    if (!selectedUser) return;
     
-    setExcelData(sampleData);
-    setPreviewData(sampleData);
+    const username = generateUsername(selectedUser.name, selectedUser.surname);
+    const pin = generatePIN();
     
-    const columns = Object.keys(sampleData[0]);
-    setAvailableColumns(columns);
-    
-    const autoMapping: ImportColumnMapping = {};
-    columns.forEach((col: string) => {
-      const lowerCol = col.toLowerCase();
-      if (lowerCol.includes('first') || (lowerCol.includes('name') && !lowerCol.includes('surname'))) {
-        autoMapping[col] = 'name';
-      } else if (lowerCol.includes('last') || lowerCol.includes('surname')) {
-        autoMapping[col] = 'surname';
-      } else if (lowerCol.includes('email')) {
-        autoMapping[col] = 'email';
-      } else if (lowerCol.includes('phone')) {
-        autoMapping[col] = 'phone';
-      } else if (lowerCol.includes('cell') || lowerCol.includes('group')) {
-        autoMapping[col] = 'cell_group_id';
-      } else if (lowerCol.includes('gender')) {
-        autoMapping[col] = 'gender';
-      } else if (lowerCol.includes('invited')) {
-        autoMapping[col] = 'invited_by';
-      }
-    });
-    setColumnMapping(autoMapping);
-  };
-
-  const handleColumnMappingChange = (excelColumn: string, databaseField: string) => {
-    setColumnMapping(prev => ({
+    setUserFormData(prev => ({
       ...prev,
-      [excelColumn]: databaseField
+      login_username: username,
+      login_pin: pin
     }));
-  };
-
-  const handleBulkImport = async () => {
-    if (!excelData.length) return;
-
-    setLoading(true);
-    setImportProgress(0);
-
-    let imported = 0;
-    let updated = 0;
-    let errors = 0;
-
-    for (let i = 0; i < excelData.length; i++) {
-      const row = excelData[i];
-      setImportProgress(Math.round(((i + 1) / excelData.length) * 100));
-
-      try {
-        const memberData: any = {
-          name: '',
-          surname: '',
-          email: null,
-          phone: null,
-          cell_group_id: null,
-          gender: null,
-          invited_by: null,
-          status: 'newcomer',
-          status_date: new Date().toISOString(),
-        };
-
-        // Map Excel columns to database fields
-        Object.entries(columnMapping).forEach(([excelCol, dbField]) => {
-          if (row[excelCol] !== undefined && row[excelCol] !== null && row[excelCol] !== '') {
-            memberData[dbField] = row[excelCol];
-          }
-        });
-
-        // Validate required fields
-        if (!memberData.name || !memberData.surname) {
-          errors++;
-          continue;
-        }
-
-        // Find cell group ID if cell group name is provided
-        if (memberData.cell_group_id && typeof memberData.cell_group_id === 'string') {
-          const group = groups.find(g => g.name.toLowerCase() === memberData.cell_group_id.toLowerCase());
-          if (group) {
-            memberData.cell_group_id = group.id;
-          } else {
-            // If group not found, set to null
-            memberData.cell_group_id = null;
-          }
-        }
-
-        // Check if member already exists
-        const { data: existingMember } = await supabase
-          .from('members')
-          .select('id')
-          .eq('email', memberData.email)
-          .single();
-
-        if (existingMember) {
-          // Update existing member
-          const { error } = await supabase
-            .from('members')
-            .update(memberData)
-            .eq('id', existingMember.id);
-
-          if (error) throw error;
-          updated++;
-        } else {
-          // Insert new member
-          const { error } = await supabase
-            .from('members')
-            .insert([memberData]);
-
-          if (error) throw error;
-          imported++;
-        }
-      } catch (error) {
-        console.error('Error importing row:', error);
-        errors++;
-      }
-    }
-
-    setImportResult({
-      success: errors < excelData.length,
-      imported,
-      updated,
-      errors,
-      message: `Processed ${excelData.length} rows`
-    });
-
-    setLoading(false);
-    setImportProgress(100);
     
-    // Refresh members list
-    if (imported > 0 || updated > 0) {
-      fetchMembers();
+    setGeneratedCredentials({ username, pin });
+    setShowCredentials(true);
+  };
+
+  const handleCopyCredentials = () => {
+    if (generatedCredentials) {
+      const text = `Username: ${generatedCredentials.username}\nPIN: ${generatedCredentials.pin}`;
+      navigator.clipboard.writeText(text);
+      alert('Credentials copied to clipboard!');
     }
   };
 
-  const handleManualRowImport = async (row: any, index: number) => {
-    try {
-      const memberData: any = {
-        name: '',
-        surname: '',
-        email: null,
-        phone: null,
-        cell_group_id: null,
-        gender: null,
-        invited_by: null,
-        status: 'newcomer',
-        status_date: new Date().toISOString(),
-      };
-
-      // Map Excel columns to database fields
-      Object.entries(columnMapping).forEach(([excelCol, dbField]) => {
-        if (row[excelCol] !== undefined && row[excelCol] !== null && row[excelCol] !== '') {
-          memberData[dbField] = row[excelCol];
-        }
-      });
-
-      // Validate required fields
-      if (!memberData.name || !memberData.surname) {
-        alert(`Row ${index + 1}: Missing required fields (name and surname)`);
-        return;
-      }
-
-      // Find cell group ID if cell group name is provided
-      if (memberData.cell_group_id && typeof memberData.cell_group_id === 'string') {
-        const group = groups.find(g => g.name.toLowerCase() === memberData.cell_group_id.toLowerCase());
-        if (group) {
-          memberData.cell_group_id = group.id;
-        } else {
-          memberData.cell_group_id = null;
-        }
-      }
-
-      // Insert new member
-      const { error } = await supabase
-        .from('members')
-        .insert([memberData]);
-
-      if (error) throw error;
-
-      alert(`Successfully imported ${memberData.name} ${memberData.surname}`);
-      
-      // Refresh members list
-      fetchMembers();
-    } catch (error) {
-      console.error('Error importing row:', error);
-      alert(`Failed to import row ${index + 1}. Please check the data and try again.`);
-    }
-  };
-
-  const exportToExcel = async () => {
-    setLoading(true);
-    
-    try {
-      const { data: membersData, error } = await supabase
-        .from('members')
-        .select(`
-          *,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const csvContent = [
-        ['First Name', 'Surname', 'Email', 'Phone', 'Cell Group', 'Gender', 'Status', 'Invited By'].join(','),
-        ...(membersData || []).map(m => [
-          m.name,
-          m.surname,
-          m.email,
-          m.phone,
-          m.cell_groups?.name || '',
-          m.gender,
-          m.status,
-          m.invited_by
-        ].join(','))
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `church-data-export-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      
-      alert('Data exported successfully!');
-    } catch (error) {
-      console.error('Error exporting data:', error);
-      alert('Failed to export data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const downloadTemplate = () => {
-    const csvContent = [
-      ['First Name', 'Surname', 'Email', 'Phone Number', 'Cell Group', 'Gender', 'Invited By'].join(','),
-      ['John', 'Doe', 'john.doe@example.com', '+1234567890', 'Youth Ministry', 'male', 'Pastor John'].join(','),
-      ['Jane', 'Smith', 'jane.smith@example.com', '+0987654321', 'Women\'s Fellowship', 'female', 'Deacon Mary'].join(',')
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'church-import-template.csv';
-    a.click();
-  };
-
-  const openModal = async (modalType: string, user?: Member) => {
+  const openModal = (modalType: string, user?: Member) => {
     setActiveModal(modalType);
-    
-    if (modalType === 'data') {
-      // Fetch groups for cell group mapping
-      await fetchGroups();
-    }
-    
-    if (modalType === 'users') {
-      // Fetch members for user management
-      await fetchMembers();
-    }
     
     if (user) {
       setSelectedUser(user);
       setUserFormData({
         role: user.role || 'member',
         permissions: user.permissions || [],
-        assignedGroups: [],
+        assigned_groups: user.assigned_groups || [],
+        assigned_departments: user.assigned_departments || [],
+        can_add_members: user.can_add_members || false,
+        can_edit_members: user.can_edit_members || false,
+        can_view_own_data: user.can_view_own_data || false,
+        login_username: user.login_username || '',
+        login_pin: user.login_pin || ''
       });
+      setShowCredentials(false);
+      setGeneratedCredentials(null);
     }
   };
 
@@ -512,50 +193,45 @@ const Admin = () => {
     setUserFormData({
       role: 'member',
       permissions: [],
-      assignedGroups: [],
+      assigned_groups: [],
+      assigned_departments: [],
+      can_add_members: false,
+      can_edit_members: false,
+      can_view_own_data: false,
+      login_username: '',
+      login_pin: ''
     });
-    setExcelData([]);
-    setSelectedFile(null);
-    setColumnMapping({});
-    setAvailableColumns([]);
-    setImportProgress(0);
-    setImportResult(null);
-    setPreviewData([]);
-    setImportMode('bulk');
+    setShowCredentials(false);
+    setGeneratedCredentials(null);
   };
 
-  const handleUserUpdate = async () => {
+  const handleUserUpdate = () => {
     if (!selectedUser) return;
 
     setLoading(true);
-    try {
-      // Update user in Supabase
-      const { error } = await supabase
-        .from('members')
-        .update({
-          role: userFormData.role,
-          // Note: You might need to add a permissions field to your members table
-          // permissions: userFormData.permissions
-        })
-        .eq('id', selectedUser.id);
-
-      if (error) throw error;
-
-      // Update local state
+    
+    setTimeout(() => {
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id 
-          ? { ...m, role: userFormData.role, permissions: userFormData.permissions }
+          ? { 
+              ...m, 
+              role: userFormData.role,
+              permissions: userFormData.permissions,
+              assigned_groups: userFormData.assigned_groups,
+              assigned_departments: userFormData.assigned_departments,
+              can_add_members: userFormData.can_add_members,
+              can_edit_members: userFormData.can_edit_members,
+              can_view_own_data: userFormData.can_view_own_data,
+              login_username: userFormData.login_username,
+              login_pin: userFormData.login_pin
+            }
           : m
       ));
       
+      setLoading(false);
       alert('User updated successfully!');
       closeModal();
-    } catch (error) {
-      console.error('Error updating user:', error);
-      alert('Failed to update user. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    }, 500);
   };
 
   const handlePermissionToggle = (permission: string) => {
@@ -567,33 +243,31 @@ const Admin = () => {
     }));
   };
 
-  const handleNotificationToggle = (setting: keyof typeof notificationSettings) => {
-    setNotificationSettings(prev => ({
+  const handleGroupToggle = (groupId: string) => {
+    setUserFormData(prev => ({
       ...prev,
-      [setting]: !prev[setting]
+      assigned_groups: prev.assigned_groups.includes(groupId)
+        ? prev.assigned_groups.filter(g => g !== groupId)
+        : [...prev.assigned_groups, groupId]
     }));
   };
 
-  const handleSecuritySettingChange = (setting: keyof typeof securitySettings, value: any) => {
-    setSecuritySettings(prev => ({
+  const handleDepartmentToggle = (deptId: string) => {
+    setUserFormData(prev => ({
       ...prev,
-      [setting]: value
-    }));
-  };
-
-  const handleCommunicationSettingChange = (setting: keyof typeof communicationSettings, value: any) => {
-    setCommunicationSettings(prev => ({
-      ...prev,
-      [setting]: value
+      assigned_departments: prev.assigned_departments.includes(deptId)
+        ? prev.assigned_departments.filter(d => d !== deptId)
+        : [...prev.assigned_departments, deptId]
     }));
   };
 
   const getRolePermissions = (role: string): string[] => {
     const rolePermissions: Record<string, string[]> = {
       member: ['view_members', 'view_events', 'view_groups'],
-      leader: ['view_members', 'view_events', 'view_groups', 'manage_groups'],
-      deacon: ['view_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups', 'view_donations'],
-      pastor: ['view_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'view_reports'],
+      group_leader: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
+      department_leader: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
+      deacon: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups', 'view_donations'],
+      pastor: ['view_members', 'add_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'view_reports'],
       admin: ['admin_access']
     };
     return rolePermissions[role] || [];
@@ -604,6 +278,9 @@ const Admin = () => {
     (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
     member.role.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const cellGroups = groups.filter(g => g.type === 'cell_group');
+  const departments = groups.filter(g => g.type === 'department');
 
   const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -636,45 +313,90 @@ const Admin = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {adminSections.map((section) => (
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
             <button
-              key={section.title}
-              onClick={() => openModal(section.modal)}
-              className="bg-white border border-gray-200 rounded-2xl p-6 hover:scale-105 transition-all duration-200 hover:shadow-xl text-left group"
+              onClick={() => openModal('users')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
             >
-              <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${section.color} flex items-center justify-center mb-4 shadow-lg`}>
-                <section.icon className="h-7 w-7 text-white" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">{section.title}</h3>
-              <p className="text-gray-600 text-sm">{section.description}</p>
+              <Users className="h-4 w-4" />
+              Manage All Users
             </button>
-          ))}
+          </div>
+
+          <div className="relative mb-6">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search users by name, email, or role..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {filteredMembers.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                    {member.name.charAt(0)}{member.surname.charAt(0)}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-900">
+                      {member.name} {member.surname}
+                    </h4>
+                    <p className="text-sm text-gray-500">
+                      {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
+                    </p>
+                    {member.login_username && (
+                      <p className="text-xs text-blue-600 mt-1">
+                        <Key className="h-3 w-3 inline mr-1" />
+                        Login: {member.login_username}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {member.assigned_groups.length > 0 && (
+                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                      {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {member.assigned_departments.length > 0 && (
+                    <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                      {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => openModal('userDetails', member)}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                  >
+                    Manage
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">System Status</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Database</span>
-                <span className="flex items-center gap-2 text-green-500">
-                  <div className="w-2 h-2 rounded-full bg-green-500" />
-                  Healthy
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Storage</span>
-                <span className="text-gray-900">45% Used</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Last Backup</span>
-                <span className="text-gray-900">1 hour ago</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Active Users</span>
-                <span className="text-gray-900">12 online</span>
-              </div>
+              {roles.map(role => {
+                const count = members.filter(m => m.role === role.value).length;
+                return (
+                  <div key={role.value} className="flex justify-between items-center">
+                    <span className="text-gray-600">{role.label}</span>
+                    <span className="text-gray-900 font-semibold">{count}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -683,326 +405,36 @@ const Admin = () => {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Total Members</span>
-                <span className="text-gray-900">{members.length}</span>
+                <span className="text-gray-900 font-semibold">{members.length}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Active Groups</span>
-                <span className="text-gray-900">{groups.length}</span>
+                <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-600">Leaders</span>
-                <span className="text-gray-900">
-                  {members.filter(m => m.role === 'leader').length}
-                </span>
+                <span className="text-gray-600">Departments</span>
+                <span className="text-gray-900 font-semibold">{departments.length}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-600">Pastors</span>
-                <span className="text-gray-900">
-                  {members.filter(m => m.role === 'pastor').length}
+                <span className="text-gray-600">Users with Login</span>
+                <span className="text-gray-900 font-semibold">
+                  {members.filter(m => m.login_username).length}
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {activeModal === 'data' && (
-          <Modal title="Data Management">
-            <div className="space-y-6">
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                <div className="flex items-center gap-3">
-                  <Database className="h-5 w-5 text-green-600" />
-                  <div>
-                    <h4 className="font-semibold text-green-900">Data Management</h4>
-                    <p className="text-green-700 text-sm">Import, export, and manage church data</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-900">Export Data</h3>
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <Download className="h-8 w-8 text-blue-600 mb-2" />
-                  <div className="font-medium text-gray-900">Export to CSV</div>
-                  <p className="text-sm text-gray-500 mb-3">
-                    Export all church data including members and groups to CSV format
-                  </p>
-                  <button
-                    onClick={exportToExcel}
-                    disabled={loading}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
-                  >
-                    <Download className="h-4 w-4" />
-                    {loading ? 'Exporting...' : 'Export to CSV'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-900">Import Data</h3>
-                
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <Upload className="h-8 w-8 text-green-600 mb-2" />
-                  <div className="font-medium text-gray-900">Upload CSV File</div>
-                  <p className="text-sm text-gray-500 mb-3">
-                    Upload CSV file to import member data
-                  </p>
-                  
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Select CSV File
-                    </label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
-                      <input
-                        type="file"
-                        accept=".csv"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                        id="file-upload"
-                      />
-                      <label htmlFor="file-upload" className="cursor-pointer">
-                        <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-600">
-                          {selectedFile ? selectedFile.name : 'Click to upload CSV file'}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Supports .csv files
-                        </p>
-                      </label>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={downloadTemplate}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium text-sm"
-                  >
-                    <FileText className="h-4 w-4" />
-                    Download Template
-                  </button>
-                </div>
-
-                {availableColumns.length > 0 && (
-                  <div className="p-4 border border-gray-200 rounded-lg">
-                    <Columns className="h-6 w-6 text-purple-600 mb-2" />
-                    <div className="font-medium text-gray-900 mb-3">Column Mapping</div>
-                    
-                    <div className="space-y-3">
-                      {availableColumns.map(column => (
-                        <div key={column} className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-gray-700">
-                            Excel: {column}
-                          </span>
-                          <select
-                            value={columnMapping[column] || ''}
-                            onChange={(e) => handleColumnMappingChange(column, e.target.value)}
-                            className="px-3 py-1 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
-                          >
-                            <option value="">Not mapped</option>
-                            {databaseFields.map(field => (
-                              <option key={field.value} value={field.value}>
-                                {field.label} {field.required && '*'}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-4 flex gap-2">
-                      <button
-                        onClick={() => setImportMode('bulk')}
-                        className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                          importMode === 'bulk'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-200 text-gray-700'
-                        }`}
-                      >
-                        Bulk Import
-                      </button>
-                      <button
-                        onClick={() => setImportMode('manual')}
-                        className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                          importMode === 'manual'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-200 text-gray-700'
-                        }`}
-                      >
-                        Manual Import
-                      </button>
-                    </div>
-
-                    {previewData.length > 0 && (
-                      <div className="mt-4">
-                        <div className="font-medium text-gray-900 mb-2">Data Preview</div>
-                        <div className="border border-gray-200 rounded-lg overflow-hidden">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                {availableColumns.map(col => (
-                                  <th key={col} className="px-3 py-2 text-left font-medium text-gray-700 border-b">
-                                    {col}
-                                  </th>
-                                ))}
-                                {importMode === 'manual' && (
-                                  <th className="px-3 py-2 text-left font-medium text-gray-700 border-b">
-                                    Actions
-                                  </th>
-                                )}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {previewData.map((row, index) => (
-                                <tr key={index} className="border-b border-gray-200">
-                                  {availableColumns.map(col => (
-                                    <td key={col} className="px-3 py-2 text-gray-600">
-                                      {row[col]}
-                                    </td>
-                                  ))}
-                                  {importMode === 'manual' && (
-                                    <td className="px-3 py-2">
-                                      <button
-                                        onClick={() => handleManualRowImport(row, index)}
-                                        className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium"
-                                      >
-                                        Import
-                                      </button>
-                                    </td>
-                                  )}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {importMode === 'bulk' && (
-                      <button
-                        onClick={handleBulkImport}
-                        disabled={loading || !excelData.length}
-                        className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
-                      >
-                        <Upload className="h-4 w-4" />
-                        {loading ? 'Importing...' : `Bulk Import (${excelData.length} records)`}
-                      </button>
-                    )}
-
-                    {importProgress > 0 && (
-                      <div className="mt-4">
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-sm font-medium text-gray-700">Progress</span>
-                          <span className="text-sm text-gray-600">{importProgress}%</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${importProgress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {importResult && (
-                      <div className={`mt-4 p-3 rounded-lg ${
-                        importResult.success 
-                          ? 'bg-green-50 border border-green-200' 
-                          : 'bg-red-50 border border-red-200'
-                      }`}>
-                        <div className={`text-sm ${
-                          importResult.success 
-                            ? 'text-green-700' 
-                            : 'text-red-700'
-                        }`}>
-                          {importResult.success ? '✅ ' : '❌ '}
-                          {importResult.message}
-                          {importResult.imported > 0 && ` • Imported: ${importResult.imported}`}
-                          {importResult.updated > 0 && ` • Updated: ${importResult.updated}`}
-                          {importResult.errors > 0 && ` • Errors: ${importResult.errors}`}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                  <div>
-                    <h4 className="font-semibold text-red-900">Danger Zone</h4>
-                    <p className="text-red-700 text-sm">Irreversible actions</p>
-                  </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  <button className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium">
-                    Clear All Data
-                  </button>
-                  <p className="text-xs text-red-600 text-center">
-                    This will permanently delete all church data
-                  </p>
-                </div>
-              </div>
-            </div>
-          </Modal>
-        )}
-
-        {/* Other modals remain the same as in your original code */}
-        {activeModal === 'users' && (
-          <Modal title="User Management">
-            <div className="space-y-6">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search users by name, email, or role..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {filteredMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {member.name.charAt(0)}{member.surname.charAt(0)}
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900">
-                          {member.name} {member.surname}
-                        </h4>
-                        <p className="text-sm text-gray-500">
-                          {member.email} • {member.role}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => openModal('userDetails', member)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-                    >
-                      Manage
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Modal>
-        )}
-
-        {/* Other modals (userDetails, security, notifications, communication, general) remain the same */}
         {activeModal === 'userDetails' && selectedUser && (
           <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
             <div className="space-y-6">
-              <div className="bg-gray-50 rounded-xl p-4">
+              <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
                     {selectedUser.name.charAt(0)}{selectedUser.surname.charAt(0)}
                   </div>
                   <div>
-                    <h4 className="text-lg font-bold text-gray-900">
+                    <h4 className="text-xl font-bold text-gray-900">
                       {selectedUser.name} {selectedUser.surname}
                     </h4>
                     <p className="text-gray-600">{selectedUser.email}</p>
@@ -1011,80 +443,197 @@ const Admin = () => {
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <label className="block text-sm font-medium text-gray-700">
-                  User Role
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    User Role
+                  </label>
+                  <select
+                    value={userFormData.role}
+                    onChange={(e) => {
+                      const newRole = e.target.value;
+                      setUserFormData({
+                        ...userFormData,
+                        role: newRole,
+                        permissions: getRolePermissions(newRole)
+                      });
+                    }}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {roles.map(role => (
+                      <option key={role.value} value={role.value}>
+                        {role.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-sm text-gray-500">
+                    {roles.find(r => r.value === userFormData.role)?.description}
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Login Credentials
+                  </label>
+                  <button
+                    onClick={handleGenerateCredentials}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Generate Login Credentials
+                  </button>
+                  
+                  {showCredentials && generatedCredentials && (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-green-900">Generated Credentials</span>
+                        <button
+                          onClick={handleCopyCredentials}
+                          className="flex items-center gap-1 text-green-700 hover:text-green-900"
+                        >
+                          <Copy className="h-4 w-4" />
+                          <span className="text-xs">Copy</span>
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-xs text-green-700">Username:</span>
+                          <p className="font-mono font-semibold text-green-900">{generatedCredentials.username}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-green-700">PIN:</span>
+                          <p className="font-mono font-semibold text-green-900 text-2xl tracking-wider">{generatedCredentials.pin}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {(userFormData.role === 'group_leader' || userFormData.role === 'department_leader') && (
+                <div className="space-y-6">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <h4 className="font-semibold text-blue-900 mb-2">Leadership Permissions</h4>
+                    <p className="text-sm text-blue-700 mb-4">
+                      Configure what this leader can do within their assigned groups/departments
+                    </p>
+                    
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={userFormData.can_add_members}
+                          onChange={(e) => setUserFormData(prev => ({...prev, can_add_members: e.target.checked}))}
+                          className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div>
+                          <span className="font-medium text-gray-900">Can Add Members</span>
+                          <p className="text-xs text-gray-500">Allow adding new members to assigned groups</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={userFormData.can_edit_members}
+                          onChange={(e) => setUserFormData(prev => ({...prev, can_edit_members: e.target.checked}))}
+                          className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div>
+                          <span className="font-medium text-gray-900">Can Edit Members</span>
+                          <p className="text-xs text-gray-500">Allow editing member information in assigned groups</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={userFormData.can_view_own_data}
+                          onChange={(e) => setUserFormData(prev => ({...prev, can_view_own_data: e.target.checked}))}
+                          className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div>
+                          <span className="font-medium text-gray-900">Can View & Edit Own Group/Department Data</span>
+                          <p className="text-xs text-gray-500">Full access to view and edit all data within assigned areas</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {userFormData.role === 'group_leader' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">
+                        Assigned Cell Groups
+                      </label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {cellGroups.map(group => (
+                          <label
+                            key={group.id}
+                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={userFormData.assigned_groups.includes(group.name)}
+                              onChange={() => handleGroupToggle(group.name)}
+                              className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <div>
+                              <span className="font-medium text-gray-900">{group.name}</span>
+                              <p className="text-xs text-gray-500">{group.description}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {userFormData.role === 'department_leader' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">
+                        Assigned Departments
+                      </label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {departments.map(dept => (
+                          <label
+                            key={dept.id}
+                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={userFormData.assigned_departments.includes(dept.name)}
+                              onChange={() => handleDepartmentToggle(dept.name)}
+                              className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+                            />
+                            <div>
+                              <span className="font-medium text-gray-900">{dept.name}</span>
+                              <p className="text-xs text-gray-500">{dept.description}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  System Permissions
                 </label>
-                <select
-                  value={userFormData.role}
-                  onChange={(e) => {
-                    const newRole = e.target.value;
-                    setUserFormData({
-                      ...userFormData,
-                      role: newRole,
-                      permissions: getRolePermissions(newRole)
-                    });
-                  }}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  {roles.map(role => (
-                    <option key={role.value} value={role.value}>
-                      {role.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-sm text-gray-500">
-                  {roles.find(r => r.value === userFormData.role)?.description}
-                </p>
-              </div>
-
-              {/* Rest of user details modal remains the same */}
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={handleUserUpdate}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
-                >
-                  {loading ? 'Updating...' : 'Update User'}
-                </button>
-                <button
-                  onClick={closeModal}
-                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </Modal>
-        )}
-
-        {/* Security, Notifications, Communication, and General modals remain exactly the same */}
-        {activeModal === 'security' && (
-          <Modal title="Security Settings">
-            {/* Security modal content remains the same */}
-          </Modal>
-        )}
-
-        {activeModal === 'notifications' && (
-          <Modal title="Notification Settings">
-            {/* Notifications modal content remains the same */}
-          </Modal>
-        )}
-
-        {activeModal === 'communication' && (
-          <Modal title="Communication Settings">
-            {/* Communication modal content remains the same */}
-          </Modal>
-        )}
-
-        {activeModal === 'general' && (
-          <Modal title="General Settings">
-            {/* General modal content remains the same */}
-          </Modal>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default Admin;
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto p-2">
+                  {permissions.map(permission => (
+                    <label
+                      key={permission.value}
+                      className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={userFormData.permissions.includes(permission.value)}
+                        onChange={() => handlePermissionToggle(permission.value)}
+                        className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">{permission.label}</span>
+                        <p className="text-xs text-gray-500">{permission.description}</p>
+                      </div>
+                    </label>
