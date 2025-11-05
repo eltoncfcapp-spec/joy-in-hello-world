@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Key } from 'lucide-react';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [loginMode, setLoginMode] = useState<'email' | 'username'>('email');
+  const [identifier, setIdentifier] = useState('');
+  const [secret, setSecret] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const { login } = useAuth();
@@ -16,17 +17,25 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    const success = login(email, password);
+    // Try login with identifier and secret
+    const success = login(identifier, secret, loginMode); 
+    // Note: your AuthContext.login() should handle both email/password and username/pin
+
     if (success) {
       navigate('/');
     } else {
-      setError('Invalid email or password');
+      setError(
+        loginMode === 'email'
+          ? 'Invalid email or password'
+          : 'Invalid username or PIN'
+      );
     }
   };
 
-  const handleDemoLogin = (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
+  const handleDemoLogin = (demoIdentifier: string, demoSecret: string, mode: 'email' | 'username') => {
+    setIdentifier(demoIdentifier);
+    setSecret(demoSecret);
+    setLoginMode(mode);
   };
 
   return (
@@ -36,47 +45,75 @@ export default function Login() {
           <h2 className="text-3xl font-bold text-center text-foreground">Church Management</h2>
           <p className="mt-2 text-center text-muted-foreground">Sign in to your account</p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+
+        {/* Mode Toggle */}
+        <div className="flex justify-center gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => setLoginMode('email')}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              loginMode === 'email'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Email Login
+          </button>
+          <button
+            type="button"
+            onClick={() => setLoginMode('username')}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              loginMode === 'username'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Username Login
+          </button>
+        </div>
+
+        <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-foreground">
-                Email
+              <label htmlFor="identifier" className="block text-sm font-medium text-foreground">
+                {loginMode === 'email' ? 'Email' : 'Username'}
               </label>
               <input
-                id="email"
-                type="email"
+                id="identifier"
+                type={loginMode === 'email' ? 'email' : 'text'}
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                placeholder="admin@church.com"
+                placeholder={loginMode === 'email' ? 'admin@church.com' : 'john_doe'}
               />
             </div>
+
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-foreground">
-                Password
+              <label htmlFor="secret" className="block text-sm font-medium text-foreground">
+                {loginMode === 'email' ? 'Password' : 'PIN'}
               </label>
               <div className="relative">
                 <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
+                  id="secret"
+                  type={showSecret ? 'text' : loginMode === 'username' ? 'number' : 'password'}
                   required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 pr-10 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                  placeholder="••••••••"
+                  placeholder={loginMode === 'email' ? '••••••••' : '1234'}
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => setShowSecret(!showSecret)}
                   className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
-            
-            {/* Remember Me Checkbox */}
+
+            {/* Remember Me */}
             <div className="flex items-center">
               <input
                 id="remember-me"
@@ -91,26 +128,24 @@ export default function Login() {
             </div>
           </div>
 
-          {error && (
-            <div className="text-destructive text-sm text-center">{error}</div>
-          )}
+          {error && <div className="text-destructive text-sm text-center">{error}</div>}
 
           <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground">
-            <p className="font-medium mb-2">Mock Login Credentials:</p>
+            <p className="font-medium mb-2">Demo Login Options:</p>
             <div className="space-y-1">
               <button
                 type="button"
-                onClick={() => handleDemoLogin('admin@church.com', 'admin123')}
+                onClick={() => handleDemoLogin('admin@church.com', 'admin123', 'email')}
                 className="w-full text-left hover:text-foreground transition-colors"
               >
-                • admin@church.com / admin123
+                • Email: admin@church.com / Password: admin123
               </button>
               <button
                 type="button"
-                onClick={() => handleDemoLogin('pastor@church.com', 'pastor123')}
+                onClick={() => handleDemoLogin('sarah_smith', '5432', 'username')}
                 className="w-full text-left hover:text-foreground transition-colors"
               >
-                • pastor@church.com / pastor123
+                • Username: sarah_smith / PIN: 5432
               </button>
             </div>
           </div>
