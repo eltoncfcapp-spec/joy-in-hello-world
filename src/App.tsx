@@ -1,17 +1,8 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/Login';
-import Index from './pages/Index';
-
-function App() {
+export default function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/" element={<Index />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+    <div style={{ padding: '20px' }}>
+      <h1>Church Management System</h1>
+      <p>The application is loading...</p>
+    </div>
   );
 }
-
-export default App;
