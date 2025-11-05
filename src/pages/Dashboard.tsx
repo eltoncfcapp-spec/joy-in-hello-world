@@ -12,7 +12,9 @@ import {
   MapPin,
   Clock,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  PhoneCall,
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -65,6 +67,14 @@ interface Activity {
   action: () => void;
 }
 
+interface AbsentMember {
+  id: string;
+  name: string;
+  surname: string;
+  phone: string | null;
+  consecutiveAbsences: number;
+}
+
 const Dashboard = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -81,6 +91,7 @@ const Dashboard = () => {
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
 
   // Form states
   const [newMember, setNewMember] = useState({
@@ -138,10 +149,81 @@ const Dashboard = () => {
       // Generate recent activities
       generateRecentActivities(membersData || [], eventsData || []);
 
+      // Load absent members
+      await loadAbsentMembers();
+
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAbsentMembers = async () => {
+    try {
+      // Get all Sunday Service events in descending order
+      const { data: sundayEvents, error: eventsError } = await supabase
+        .from('events')
+        .select('id, event_date, name')
+        .ilike('name', '%sunday%service%')
+        .order('event_date', { ascending: false })
+        .limit(10);
+
+      if (eventsError) throw eventsError;
+      if (!sundayEvents || sundayEvents.length < 2) {
+        setAbsentMembers([]);
+        return;
+      }
+
+      // Get the last 2 Sunday services
+      const lastTwoSundays = sundayEvents.slice(0, 2);
+      
+      // Get all members
+      const { data: allMembers, error: membersError } = await supabase
+        .from('members')
+        .select('id, name, surname, phone');
+
+      if (membersError) throw membersError;
+      if (!allMembers) {
+        setAbsentMembers([]);
+        return;
+      }
+
+      // Get attendance for the last 2 Sunday services
+      const { data: attendances, error: attendanceError } = await supabase
+        .from('event_attendees')
+        .select('members_id, event_id')
+        .in('event_id', lastTwoSundays.map(e => e.id));
+
+      if (attendanceError) throw attendanceError;
+
+      // Find members who were absent for both services
+      const absent: AbsentMember[] = [];
+      
+      allMembers.forEach(member => {
+        const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
+        
+        // Check if member was absent for both Sundays (no attendance record = absent)
+        const absentCount = lastTwoSundays.filter(sunday => {
+          const hasAttendance = memberAttendances.some(a => a.event_id === sunday.id);
+          return !hasAttendance; // No attendance record means absent
+        }).length;
+
+        if (absentCount === 2) {
+          absent.push({
+            id: member.id,
+            name: member.name,
+            surname: member.surname,
+            phone: member.phone,
+            consecutiveAbsences: 2
+          });
+        }
+      });
+
+      setAbsentMembers(absent);
+    } catch (error) {
+      console.error('Error loading absent members:', error);
+      setAbsentMembers([]);
     }
   };
 
@@ -193,6 +275,16 @@ const Dashboard = () => {
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
         action: 'viewGroups'
+      },
+      { 
+        icon: AlertTriangle, 
+        label: 'Absent 2 Sundays', 
+        value: absentMembers.length.toString(), 
+        change: absentMembers.length > 0 ? 'Need follow-up' : 'All members present',
+        changeType: absentMembers.length > 0 ? 'negative' : 'positive',
+        color: 'from-red-500 to-red-600',
+        bgColor: 'bg-red-50 dark:bg-red-950/20',
+        action: 'viewAbsentMembers'
       },
     ];
 
@@ -827,6 +919,55 @@ const Dashboard = () => {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {activeModal === 'viewAbsentMembers' && (
+        <Modal title="Members Absent for 2 Sundays">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+              <p className="text-sm text-red-700 dark:text-red-300">
+                These members have been absent for 2 consecutive Sunday services and need follow-up.
+              </p>
+            </div>
+            
+            {absentMembers.length > 0 ? (
+              <div className="space-y-3">
+                {absentMembers.map(member => (
+                  <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        {member.name} {member.surname}
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-1">
+                        <PhoneCall className="h-3 w-3" />
+                        {member.phone || 'No phone number'}
+                      </p>
+                    </div>
+                    {member.phone && (
+                      <a
+                        href={`tel:${member.phone}`}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium"
+                      >
+                        <PhoneCall className="h-4 w-4" />
+                        Call
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Users className="h-8 w-8 text-green-600 dark:text-green-400" />
+                </div>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Great! All members have attended recent Sunday services.
+                </p>
+              </div>
+            )}
+          </div>
         </Modal>
       )}
     </div>
