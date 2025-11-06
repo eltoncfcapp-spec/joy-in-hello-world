@@ -47,7 +47,6 @@ const cloudService = {
         throw error;
       }
 
-      // Transform the data to match the Member interface with safe defaults
       const members: Member[] = (data || []).map(member => ({
         id: member.id,
         name: member.name || '',
@@ -80,7 +79,6 @@ const cloudService = {
 
   async getGroups(): Promise<Group[]> {
     try {
-      // Get cell groups
       const { data: cellGroupsData, error: cellGroupsError } = await supabase
         .from('cell_groups')
         .select('id, name, description')
@@ -91,7 +89,6 @@ const cloudService = {
         throw cellGroupsError;
       }
 
-      // Transform cell groups
       const cellGroups: Group[] = (cellGroupsData || []).map(group => ({
         id: group.id,
         name: group.name || 'Unnamed Group',
@@ -99,7 +96,6 @@ const cloudService = {
         type: 'cell_group'
       }));
 
-      // For departments, we'll create them from cell groups for now
       const departments: Group[] = (cellGroupsData || []).map(group => ({
         id: `dept-${group.id}`,
         name: `${group.name || 'Unnamed'} Department`,
@@ -118,7 +114,6 @@ const cloudService = {
     try {
       console.log('Updating member:', memberId, updates);
 
-      // Prepare the update data
       const updateData: any = {
         role: updates.role,
         permissions: updates.permissions || [],
@@ -150,7 +145,6 @@ const cloudService = {
         throw new Error('No data returned from update');
       }
 
-      // Transform the response
       const updatedMember: Member = {
         id: data.id,
         name: data.name || '',
@@ -180,13 +174,11 @@ const cloudService = {
 
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
-      // Generate random credentials
       const username = `user${Date.now()}`;
-      const pin = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit PIN
+      const pin = Math.floor(1000 + Math.random() * 9000).toString();
       
       console.log('Generating credentials for member:', memberId, { username, pin });
 
-      // Update member with new credentials
       await this.updateMember(memberId, {
         login_username: username,
         login_pin: pin
@@ -197,6 +189,22 @@ const cloudService = {
       console.error('Error generating credentials:', error);
       throw error;
     }
+  },
+
+  async getCellGroupNameById(groupId: string): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('name')
+        .eq('id', groupId)
+        .single();
+
+      if (error || !data) return null;
+      return data.name;
+    } catch (error) {
+      console.error('Error fetching cell group name:', error);
+      return null;
+    }
   }
 };
 
@@ -205,45 +213,14 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
-// Check if user can manage groups based on their role and permissions
-const canManageGroups = (user: any): boolean => {
-  if (user.isAdmin) return true;
-  if (hasPermission(user.permissions, 'manage_groups')) return true;
-  return false;
+// Check if user is admin or pastor
+const isAdminOrPastor = (role: string): boolean => {
+  return role === 'admin' || role === 'pastor';
 };
 
-// Check if user can view groups based on their role
-const canViewGroups = (user: any, group?: Group): boolean => {
-  if (user.isAdmin) return true;
-  if (hasPermission(user.permissions, 'view_groups')) return true;
-  
-  // Regular members can only view groups they are assigned to
-  if (user.role === 'member' || !user.role) {
-    if (!group) return false;
-    return user.assigned_groups?.includes(group.name) || false;
-  }
-  
-  // Group leaders can only view their assigned groups
-  if (user.role === 'group_leader') {
-    if (!group) return false;
-    return user.assigned_groups?.includes(group.name) || false;
-  }
-  
-  return false;
-};
-
-// Check if user can edit groups based on their role
-const canEditGroups = (user: any, group?: Group): boolean => {
-  if (user.isAdmin) return true;
-  if (hasPermission(user.permissions, 'manage_groups')) return true;
-  
-  // Group leaders can only edit their assigned groups
-  if (user.role === 'group_leader') {
-    if (!group) return false;
-    return user.assigned_groups?.includes(group.name) || false;
-  }
-  
-  return false;
+// Check if user can manage groups
+const canManageAllGroups = (permissions: string[] = []): boolean => {
+  return hasPermission(permissions, 'manage_groups');
 };
 
 const Admin = () => {
@@ -259,6 +236,7 @@ const Admin = () => {
   const [error, setError] = useState<string | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+  const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
@@ -291,11 +269,17 @@ const Admin = () => {
         return;
       }
 
-      // Check if user has access to admin panel
-      const userHasAccess = profile.isAdmin || 
-        hasPermission(profile.permissions, 'view_members') ||
-        hasPermission(profile.permissions, 'manage_groups') ||
-        hasPermission(profile.permissions, 'view_groups');
+      // Fetch current user's cell group name if they have a cell_group_id
+      if (profile.cell_group_id) {
+        const groupName = await cloudService.getCellGroupNameById(profile.cell_group_id);
+        setCurrentUserCellGroup(groupName);
+      }
+
+      // Admin, Pastor, or users with manage_groups permission have full access
+      const userHasAccess = 
+        isAdminOrPastor(profile.role) || 
+        canManageAllGroups(profile.permissions) ||
+        hasPermission(profile.permissions, 'view_members');
       
       setHasAccess(userHasAccess);
 
@@ -410,8 +394,7 @@ const Admin = () => {
   const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
     
-    // Check permission
-    if (!profile?.isAdmin && !hasPermission(profile?.permissions, 'edit_members')) {
+    if (!isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to generate credentials');
       return;
     }
@@ -430,7 +413,6 @@ const Admin = () => {
       setGeneratedCredentials(credentials);
       setShowCredentials(true);
       
-      // Refresh the members list to show updated credentials
       await loadData();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate credentials';
@@ -450,13 +432,12 @@ const Admin = () => {
   };
 
   const openModal = (modalType: string, user?: Member) => {
-    // Check permissions for specific modals
-    if (modalType === 'users' && !profile?.isAdmin && !hasPermission(profile?.permissions, 'view_members')) {
+    if (modalType === 'users' && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'view_members')) {
       setError('You do not have permission to view user management');
       return;
     }
     
-    if (user && !profile?.isAdmin && !hasPermission(profile?.permissions, 'edit_members')) {
+    if (user && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to edit users');
       return;
     }
@@ -504,8 +485,7 @@ const Admin = () => {
   const handleUserUpdate = async () => {
     if (!selectedUser) return;
 
-    // Check permission
-    if (!profile?.isAdmin && !hasPermission(profile?.permissions, 'edit_members')) {
+    if (!isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to update users');
       return;
     }
@@ -529,7 +509,6 @@ const Admin = () => {
         login_pin: userFormData.login_pin
       });
 
-      // Update local state
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id ? updatedMember : m
       ));
@@ -584,66 +563,79 @@ const Admin = () => {
     return rolePermissions[role] || [];
   };
 
-  // Filter members based on user's permissions and assignments
+  // CRITICAL: Filter members based on role and permissions
   const getFilteredMembers = () => {
-    let filtered = members.filter(member =>
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      member.role.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    let filtered = members;
 
-    // If user is not admin, filter members based on their permissions and assignments
-    if (!profile?.isAdmin) {
-      // If user has view_members permission but is a group leader, only show members in their groups
-      if (hasPermission(profile?.permissions, 'view_members')) {
-        if (profile?.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
-          filtered = filtered.filter(member => 
-            member.assigned_groups.some(group => profile.assigned_groups.includes(group)) ||
-            profile.assigned_groups.some(group => member.assigned_groups.includes(group))
-          );
-        }
-        // If user is a regular member, only show themselves
-        else if (profile?.role === 'member') {
-          filtered = filtered.filter(member => member.id === profile.id);
-        }
-      } else {
-        // No view permission, show empty
-        filtered = [];
-      }
+    // Apply search filter first
+    if (searchTerm) {
+      filtered = filtered.filter(member =>
+        `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        member.role.toLowerCase().includes(searchTerm.toLowerCase())
+      );
     }
 
-    return filtered;
-  };
-
-  // Filter groups based on user's permissions and assignments
-  const getFilteredGroups = () => {
-    let filtered = groups;
-
-    // If user is not admin, filter groups based on their role
-    if (!profile?.isAdmin) {
-      if (profile?.role === 'group_leader') {
-        // Group leaders can only see their assigned groups
-        filtered = filtered.filter(group => 
-          profile.assigned_groups?.includes(group.name)
-        );
-      } else if (profile?.role === 'member') {
-        // Regular members can only see groups they are members of
-        filtered = filtered.filter(group => 
-          profile.assigned_groups?.includes(group.name)
-        );
-      } else if (!hasPermission(profile?.permissions, 'view_groups')) {
-        // No view_groups permission
-        filtered = [];
-      }
+    // Admin and Pastor can see everyone
+    if (isAdminOrPastor(profile?.role || '')) {
+      return filtered;
     }
 
-    return filtered;
+    // Users with manage_groups permission can see everyone
+    if (canManageAllGroups(profile?.permissions)) {
+      return filtered;
+    }
+
+    // Group Leader: Only see members in their assigned groups
+    if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
+      filtered = filtered.filter(member => {
+        // Check if member's cell_group matches any of the leader's assigned groups
+        if (member.cell_group && profile.assigned_groups.includes(member.cell_group)) {
+          return true;
+        }
+        // Also check assigned_groups array
+        if (member.assigned_groups && member.assigned_groups.some(group => profile.assigned_groups.includes(group))) {
+          return true;
+        }
+        return false;
+      });
+      return filtered;
+    }
+
+    // Department Leader: Only see members in their assigned departments
+    if (profile?.role === 'department_leader' && profile?.assigned_departments && profile.assigned_departments.length > 0) {
+      filtered = filtered.filter(member => {
+        if (member.department && profile.assigned_departments.includes(member.department)) {
+          return true;
+        }
+        if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
+          return true;
+        }
+        return false;
+      });
+      return filtered;
+    }
+
+    // Regular Member: Only see members from their own cell group
+    if (profile?.role === 'member' && currentUserCellGroup) {
+      filtered = filtered.filter(member => 
+        member.cell_group === currentUserCellGroup
+      );
+      return filtered;
+    }
+
+    // If no specific rules apply and user has view_members permission, they can see all
+    if (hasPermission(profile?.permissions, 'view_members')) {
+      return filtered;
+    }
+
+    // Default: no access
+    return [];
   };
 
   const filteredMembers = getFilteredMembers();
-  const filteredGroups = getFilteredGroups();
-  const cellGroups = filteredGroups.filter(g => g.type === 'cell_group');
-  const departments = filteredGroups.filter(g => g.type === 'department');
+  const cellGroups = groups.filter(g => g.type === 'cell_group');
+  const departments = groups.filter(g => g.type === 'department');
 
   const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -664,7 +656,6 @@ const Admin = () => {
     </div>
   );
 
-  // Show loading while checking permissions
   if (initialLoad) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
@@ -676,7 +667,6 @@ const Admin = () => {
     );
   }
 
-  // Show access denied if user doesn't have permission to access admin panel
   if (hasAccess === false) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
@@ -705,21 +695,17 @@ const Admin = () => {
               Admin Panel
             </h1>
             <p className="text-gray-600">
-              {profile?.isAdmin 
-                ? 'Manage system settings and user permissions' 
+              {isAdminOrPastor(profile?.role || '') 
+                ? 'Full administrative access' 
+                : canManageAllGroups(profile?.permissions)
+                ? 'Can manage all groups and members'
+                : profile?.role === 'group_leader'
+                ? `Group Leader - Managing ${profile?.assigned_groups?.length || 0} group(s)`
+                : profile?.role === 'member'
+                ? `Viewing members in your cell group${currentUserCellGroup ? `: ${currentUserCellGroup}` : ''}`
                 : `Limited access - ${profile?.role} role`
               }
             </p>
-            {!profile?.isAdmin && (
-              <p className="text-sm text-gray-500 mt-1">
-                {profile?.role === 'group_leader' 
-                  ? 'You can only view and manage your assigned groups' 
-                  : profile?.role === 'member'
-                  ? 'You can only view your own data and assigned groups'
-                  : 'Limited administrative access based on your permissions'
-                }
-              </p>
-            )}
           </div>
           <button
             onClick={loadData}
@@ -745,7 +731,7 @@ const Admin = () => {
         {/* Admin Sections Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
-            const sectionHasAccess = profile?.isAdmin || hasPermission(profile?.permissions, section.permission);
+            const sectionHasAccess = isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, section.permission);
             
             return (
               <button
@@ -772,17 +758,17 @@ const Admin = () => {
         </div>
 
         {/* User Management Section */}
-        {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_members')) && (
+        {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'view_members')) && (
           <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-              {(profile?.isAdmin || hasPermission(profile?.permissions, 'add_members')) && (
+              {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'add_members')) && (
                 <button
                   onClick={() => openModal('users')}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                 >
                   <Users className="h-4 w-4" />
-                  Manage All Users
+                  View All Users
                 </button>
               )}
             </div>
@@ -807,7 +793,11 @@ const Admin = () => {
               <div className="text-center py-8">
                 <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-600">
-                  {searchTerm ? 'No users found matching your search' : 'No users found in your assigned groups/departments'}
+                  {searchTerm 
+                    ? 'No users found matching your search' 
+                    : profile?.role === 'member'
+                    ? 'No members found in your cell group'
+                    : 'No users found in your assigned groups/departments'}
                 </p>
               </div>
             ) : (
@@ -828,6 +818,11 @@ const Admin = () => {
                         <p className="text-sm text-gray-500">
                           {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
                         </p>
+                        {member.cell_group && (
+                          <p className="text-xs text-gray-500">
+                            Cell Group: {member.cell_group}
+                          </p>
+                        )}
                         {member.login_username && (
                           <p className="text-xs text-blue-600 mt-1">
                             <Key className="h-3 w-3 inline mr-1" />
@@ -847,7 +842,7 @@ const Admin = () => {
                           {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
                         </span>
                       )}
-                      {(profile?.isAdmin || hasPermission(profile?.permissions, 'edit_members')) && (
+                      {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'edit_members')) && (
                         <button
                           onClick={() => openModal('userDetails', member)}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -863,84 +858,14 @@ const Admin = () => {
           </div>
         )}
 
-        {/* Groups Section */}
-        {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_groups')) && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Groups & Departments</h2>
-              {(profile?.isAdmin || hasPermission(profile?.permissions, 'manage_groups')) && (
-                <button
-                  onClick={() => openModal('groups')}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
-                >
-                  <Users className="h-4 w-4" />
-                  Manage Groups
-                </button>
-              )}
-            </div>
-
-            {loading ? (
-              <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">Loading groups...</p>
-              </div>
-            ) : filteredGroups.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">
-                  {searchTerm ? 'No groups found matching your search' : 'No groups available for your role'}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredGroups.map((group) => (
-                  <div
-                    key={group.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold ${
-                        group.type === 'cell_group' 
-                          ? 'bg-gradient-to-br from-blue-500 to-purple-500' 
-                          : 'bg-gradient-to-br from-green-500 to-teal-500'
-                      }`}>
-                        {group.type === 'cell_group' ? 'CG' : 'DP'}
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900">
-                          {group.name}
-                        </h4>
-                        <p className="text-sm text-gray-500">
-                          {group.type === 'cell_group' ? 'Cell Group' : 'Department'}
-                          {group.description && ` • ${group.description}`}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {(profile?.isAdmin || canEditGroups(profile, group)) && (
-                        <button
-                          onClick={() => openModal('groupDetails', group as any)}
-                          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
-                        >
-                          Edit
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Stats Section - Only show if user has view permissions */}
-        {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_reports')) && (
+        {/* Stats Section */}
+        {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'view_reports')) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white border border-gray-200 rounded-2xl p-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
               <div className="space-y-4">
                 {roles.map(role => {
-                  const count = members.filter(m => m.role === role.value).length;
+                  const count = filteredMembers.filter(m => m.role === role.value).length;
                   return (
                     <div key={role.value} className="flex justify-between items-center">
                       <span className="text-gray-600">{role.label}</span>
@@ -955,15 +880,15 @@ const Admin = () => {
               <h2 className="text-2xl font-bold text-gray-900 mb-4">Quick Stats</h2>
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Visible Members</span>
+                  <span className="text-gray-900 font-semibold">{filteredMembers.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
                   <span className="text-gray-600">Total Members</span>
                   <span className="text-gray-900 font-semibold">{members.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Visible Groups</span>
-                  <span className="text-gray-900 font-semibold">{filteredGroups.length}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Cell Groups</span>
+                  <span className="text-gray-600">Active Groups</span>
                   <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -1021,7 +946,7 @@ const Admin = () => {
                           </p>
                         </div>
                       </div>
-                      {(profile?.isAdmin || hasPermission(profile?.permissions, 'edit_members')) && (
+                      {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'edit_members')) && (
                         <button
                           onClick={() => openModal('userDetails', member)}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -1038,7 +963,7 @@ const Admin = () => {
         )}
 
         {/* User Details Modal */}
-        {activeModal === 'userDetails' && selectedUser && (profile?.isAdmin || hasPermission(profile?.permissions, 'edit_members')) && (
+        {activeModal === 'userDetails' && selectedUser && (isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'edit_members')) && (
           <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
             <div className="space-y-6">
               {error && (
@@ -1058,6 +983,9 @@ const Admin = () => {
                     </h4>
                     <p className="text-gray-600">{selectedUser.email}</p>
                     <p className="text-sm text-gray-500">{selectedUser.phone}</p>
+                    {selectedUser.cell_group && (
+                      <p className="text-sm text-gray-500">Cell Group: {selectedUser.cell_group}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1281,7 +1209,7 @@ const Admin = () => {
         )}
 
         {/* Other modals for admin only */}
-        {activeModal === 'data' && profile?.isAdmin && (
+        {activeModal === 'data' && isAdminOrPastor(profile?.role || '') && (
           <Modal title="Data Management">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1293,7 +1221,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'security' && profile?.isAdmin && (
+        {activeModal === 'security' && isAdminOrPastor(profile?.role || '') && (
           <Modal title="Security Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1305,7 +1233,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'notifications' && profile?.isAdmin && (
+        {activeModal === 'notifications' && isAdminOrPastor(profile?.role || '') && (
           <Modal title="Notification Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1317,7 +1245,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'communication' && profile?.isAdmin && (
+        {activeModal === 'communication' && isAdminOrPastor(profile?.role || '') && (
           <Modal title="Communication Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1329,7 +1257,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'general' && profile?.isAdmin && (
+        {activeModal === 'general' && isAdminOrPastor(profile?.role || '') && (
           <Modal title="General Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
