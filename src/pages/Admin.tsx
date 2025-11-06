@@ -205,6 +205,48 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
+// Check if user can manage specific groups
+const canManageGroup = (currentUser: any, groupName: string): boolean => {
+  if (!currentUser) return false;
+  
+  // Admin and users with manage_groups permission can manage all groups
+  if (currentUser.isAdmin || hasPermission(currentUser.permissions, 'manage_groups')) {
+    return true;
+  }
+  
+  // Group leaders can only manage their assigned groups
+  if (currentUser.role === 'group_leader' || currentUser.role === 'department_leader') {
+    return currentUser.assigned_groups?.includes(groupName) || 
+           currentUser.assigned_departments?.includes(groupName);
+  }
+  
+  return false;
+};
+
+// Check if user can view specific groups
+const canViewGroup = (currentUser: any, groupName: string): boolean => {
+  if (!currentUser) return false;
+  
+  // Admin and users with view_groups permission can view all groups
+  if (currentUser.isAdmin || hasPermission(currentUser.permissions, 'view_groups')) {
+    return true;
+  }
+  
+  // Regular members can only view groups they are members of
+  if (currentUser.role === 'member') {
+    return currentUser.assigned_groups?.includes(groupName) || 
+           currentUser.assigned_departments?.includes(groupName);
+  }
+  
+  // Group leaders can view their assigned groups
+  if (currentUser.role === 'group_leader' || currentUser.role === 'department_leader') {
+    return currentUser.assigned_groups?.includes(groupName) || 
+           currentUser.assigned_departments?.includes(groupName);
+  }
+  
+  return false;
+};
+
 const Admin = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -553,12 +595,7 @@ const Admin = () => {
         // Group leaders can only see members in their assigned groups
         if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
           filtered = filtered.filter(member => 
-            member.assigned_groups.some(group => profile.assigned_groups.includes(group))
-          );
-        }
-        // Department leaders can only see members in their assigned departments
-        if (profile?.assigned_departments && profile.assigned_departments.length > 0) {
-          filtered = filtered.filter(member => 
+            member.assigned_groups.some(group => profile.assigned_groups.includes(group)) ||
             member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))
           );
         }
@@ -571,9 +608,39 @@ const Admin = () => {
     return filtered;
   };
 
+  // Filter groups based on user's permissions
+  const getFilteredGroups = (groupType: 'cell_group' | 'department' = 'cell_group') => {
+    const allGroups = groups.filter(g => g.type === groupType);
+    
+    if (!profile) return [];
+    
+    // Admin and users with manage_groups permission can see all groups
+    if (profile.isAdmin || hasPermission(profile.permissions, 'manage_groups')) {
+      return allGroups;
+    }
+    
+    // Group leaders can only see their assigned groups
+    if (profile.role === 'group_leader' || profile.role === 'department_leader') {
+      return allGroups.filter(group => 
+        profile.assigned_groups?.includes(group.name) || 
+        profile.assigned_departments?.includes(group.name)
+      );
+    }
+    
+    // Regular members can only see groups they are members of
+    if (profile.role === 'member') {
+      return allGroups.filter(group => 
+        profile.assigned_groups?.includes(group.name) || 
+        profile.assigned_departments?.includes(group.name)
+      );
+    }
+    
+    return [];
+  };
+
   const filteredMembers = getFilteredMembers();
-  const cellGroups = groups.filter(g => g.type === 'cell_group');
-  const departments = groups.filter(g => g.type === 'department');
+  const filteredCellGroups = getFilteredGroups('cell_group');
+  const filteredDepartments = getFilteredGroups('department');
 
   const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -815,11 +882,11 @@ const Admin = () => {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Active Groups</span>
-                  <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
+                  <span className="text-gray-900 font-semibold">{filteredCellGroups.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Departments</span>
-                  <span className="text-gray-900 font-semibold">{departments.length}</span>
+                  <span className="text-gray-900 font-semibold">{filteredDepartments.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Users with Login</span>
@@ -1036,25 +1103,29 @@ const Admin = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-3">
                         Assigned Cell Groups
                       </label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {cellGroups.map(group => (
-                          <label
-                            key={group.id}
-                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={userFormData.assigned_groups.includes(group.name)}
-                              onChange={() => handleGroupToggle(group.name)}
-                              className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <div>
-                              <span className="font-medium text-gray-900">{group.name}</span>
-                              <p className="text-xs text-gray-500">{group.description}</p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
+                      {filteredCellGroups.length === 0 ? (
+                        <p className="text-gray-500 text-sm">No cell groups available for assignment</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {filteredCellGroups.map(group => (
+                            <label
+                              key={group.id}
+                              className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={userFormData.assigned_groups.includes(group.name)}
+                                onChange={() => handleGroupToggle(group.name)}
+                                className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                              />
+                              <div>
+                                <span className="font-medium text-gray-900">{group.name}</span>
+                                <p className="text-xs text-gray-500">{group.description}</p>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1063,25 +1134,29 @@ const Admin = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-3">
                         Assigned Departments
                       </label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {departments.map(dept => (
-                          <label
-                            key={dept.id}
-                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={userFormData.assigned_departments.includes(dept.name)}
-                              onChange={() => handleDepartmentToggle(dept.name)}
-                              className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-                            />
-                            <div>
-                              <span className="font-medium text-gray-900">{dept.name}</span>
-                              <p className="text-xs text-gray-500">{dept.description}</p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
+                      {filteredDepartments.length === 0 ? (
+                        <p className="text-gray-500 text-sm">No departments available for assignment</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {filteredDepartments.map(dept => (
+                            <label
+                              key={dept.id}
+                              className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={userFormData.assigned_departments.includes(dept.name)}
+                                onChange={() => handleDepartmentToggle(dept.name)}
+                                className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+                              />
+                              <div>
+                                <span className="font-medium text-gray-900">{dept.name}</span>
+                                <p className="text-xs text-gray-500">{dept.description}</p>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1194,6 +1269,6 @@ const Admin = () => {
       </div>
     </div>
   );
-};
+}; 
 
 export default Admin;
