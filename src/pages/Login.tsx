@@ -1,40 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Eye, EyeOff } from 'lucide-react';
 
 export default function Login() {
-  const [loginMode, setLoginMode] = useState<'email' | 'username'>('email');
-  const [identifier, setIdentifier] = useState('');
-  const [secret, setSecret] = useState('');
-  const [showSecret, setShowSecret] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const navigate = useNavigate();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Try login with identifier and secret
-    const success = await login(identifier, secret, loginMode);
+    const success = await login(email, password);
 
     if (success) {
       navigate('/');
     } else {
-      setError(
-        loginMode === 'email'
-          ? 'Invalid email or password'
-          : 'Invalid username or PIN'
-      );
+      setError('Invalid email or password');
     }
   };
 
-  const handleDemoLogin = (demoIdentifier: string, demoSecret: string, mode: 'email' | 'username') => {
-    setIdentifier(demoIdentifier);
-    setSecret(demoSecret);
-    setLoginMode(mode);
+  const handleDemoLogin = (demoEmail: string, demoPassword: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPassword);
   };
 
   return (
@@ -45,106 +44,59 @@ export default function Login() {
           <p className="mt-2 text-center text-muted-foreground">Sign in to your account</p>
         </div>
 
-        {/* Mode Toggle */}
-        <div className="flex justify-center gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => setLoginMode('email')}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              loginMode === 'email'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Email Login
-          </button>
-          <button
-            type="button"
-            onClick={() => setLoginMode('username')}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              loginMode === 'username'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Username Login
-          </button>
-        </div>
-
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <label htmlFor="identifier" className="block text-sm font-medium text-foreground">
-                {loginMode === 'email' ? 'Email' : 'Username'}
+              <label htmlFor="email" className="block text-sm font-medium text-foreground">
+                Email
               </label>
               <input
-                id="identifier"
-                type={loginMode === 'email' ? 'email' : 'text'}
+                id="email"
+                type="email"
                 required
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                placeholder={loginMode === 'email' ? 'admin@church.com' : 'john_doe'}
+                placeholder="admin@church.com"
               />
             </div>
 
             <div>
-              <label htmlFor="secret" className="block text-sm font-medium text-foreground">
-                {loginMode === 'email' ? 'Password' : 'PIN'}
+              <label htmlFor="password" className="block text-sm font-medium text-foreground">
+                Password
               </label>
               <div className="relative">
                 <input
-                  id="secret"
-                  type={showSecret ? 'text' : loginMode === 'username' ? 'number' : 'password'}
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
-                  value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 pr-10 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                  placeholder={loginMode === 'email' ? '••••••••' : '1234'}
+                  placeholder="••••••••"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowSecret(!showSecret)}
+                  onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground"
                 >
-                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-            </div>
-
-            {/* Remember Me */}
-            <div className="flex items-center">
-              <input
-                id="remember-me"
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="h-4 w-4 text-primary border-border rounded focus:ring-primary"
-              />
-              <label htmlFor="remember-me" className="ml-2 block text-sm text-foreground">
-                Keep me logged in
-              </label>
             </div>
           </div>
 
           {error && <div className="text-destructive text-sm text-center">{error}</div>}
 
           <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground">
-            <p className="font-medium mb-2">Demo Login Options:</p>
+            <p className="font-medium mb-2">Demo Credentials:</p>
             <div className="space-y-1">
               <button
                 type="button"
-                onClick={() => handleDemoLogin('admin@church.com', 'admin123', 'email')}
+                onClick={() => handleDemoLogin('admin@church.com', 'admin123')}
                 className="w-full text-left hover:text-foreground transition-colors"
               >
                 • Email: admin@church.com / Password: admin123
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('sarah_smith', '5432', 'username')}
-                className="w-full text-left hover:text-foreground transition-colors"
-              >
-                • Username: sarah_smith / PIN: 5432
               </button>
             </div>
           </div>
