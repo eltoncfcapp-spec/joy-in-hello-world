@@ -205,43 +205,42 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
-// Check if user can manage specific groups
-const canManageGroup = (currentUser: any, groupName: string): boolean => {
-  if (!currentUser) return false;
+// Check if user can manage groups based on their role and permissions
+const canManageGroups = (user: any): boolean => {
+  if (user.isAdmin) return true;
+  if (hasPermission(user.permissions, 'manage_groups')) return true;
+  return false;
+};
+
+// Check if user can view groups based on their role
+const canViewGroups = (user: any, group?: Group): boolean => {
+  if (user.isAdmin) return true;
+  if (hasPermission(user.permissions, 'view_groups')) return true;
   
-  // Admin and users with manage_groups permission can manage all groups
-  if (currentUser.isAdmin || hasPermission(currentUser.permissions, 'manage_groups')) {
-    return true;
+  // Regular members can only view groups they are assigned to
+  if (user.role === 'member' || !user.role) {
+    if (!group) return false;
+    return user.assigned_groups?.includes(group.name) || false;
   }
   
-  // Group leaders can only manage their assigned groups
-  if (currentUser.role === 'group_leader' || currentUser.role === 'department_leader') {
-    return currentUser.assigned_groups?.includes(groupName) || 
-           currentUser.assigned_departments?.includes(groupName);
+  // Group leaders can only view their assigned groups
+  if (user.role === 'group_leader') {
+    if (!group) return false;
+    return user.assigned_groups?.includes(group.name) || false;
   }
   
   return false;
 };
 
-// Check if user can view specific groups
-const canViewGroup = (currentUser: any, groupName: string): boolean => {
-  if (!currentUser) return false;
+// Check if user can edit groups based on their role
+const canEditGroups = (user: any, group?: Group): boolean => {
+  if (user.isAdmin) return true;
+  if (hasPermission(user.permissions, 'manage_groups')) return true;
   
-  // Admin and users with view_groups permission can view all groups
-  if (currentUser.isAdmin || hasPermission(currentUser.permissions, 'view_groups')) {
-    return true;
-  }
-  
-  // Regular members can only view groups they are members of
-  if (currentUser.role === 'member') {
-    return currentUser.assigned_groups?.includes(groupName) || 
-           currentUser.assigned_departments?.includes(groupName);
-  }
-  
-  // Group leaders can view their assigned groups
-  if (currentUser.role === 'group_leader' || currentUser.role === 'department_leader') {
-    return currentUser.assigned_groups?.includes(groupName) || 
-           currentUser.assigned_departments?.includes(groupName);
+  // Group leaders can only edit their assigned groups
+  if (user.role === 'group_leader') {
+    if (!group) return false;
+    return user.assigned_groups?.includes(group.name) || false;
   }
   
   return false;
@@ -293,7 +292,11 @@ const Admin = () => {
       }
 
       // Check if user has access to admin panel
-      const userHasAccess = profile.isAdmin || hasPermission(profile.permissions, 'view_members');
+      const userHasAccess = profile.isAdmin || 
+        hasPermission(profile.permissions, 'view_members') ||
+        hasPermission(profile.permissions, 'manage_groups') ||
+        hasPermission(profile.permissions, 'view_groups');
+      
       setHasAccess(userHasAccess);
 
       if (userHasAccess) {
@@ -589,15 +592,19 @@ const Admin = () => {
       member.role.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // If user is not admin, only show members they have access to
+    // If user is not admin, filter members based on their permissions and assignments
     if (!profile?.isAdmin) {
+      // If user has view_members permission but is a group leader, only show members in their groups
       if (hasPermission(profile?.permissions, 'view_members')) {
-        // Group leaders can only see members in their assigned groups
-        if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+        if (profile?.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
           filtered = filtered.filter(member => 
             member.assigned_groups.some(group => profile.assigned_groups.includes(group)) ||
-            member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))
+            profile.assigned_groups.some(group => member.assigned_groups.includes(group))
           );
+        }
+        // If user is a regular member, only show themselves
+        else if (profile?.role === 'member') {
+          filtered = filtered.filter(member => member.id === profile.id);
         }
       } else {
         // No view permission, show empty
@@ -608,39 +615,35 @@ const Admin = () => {
     return filtered;
   };
 
-  // Filter groups based on user's permissions
-  const getFilteredGroups = (groupType: 'cell_group' | 'department' = 'cell_group') => {
-    const allGroups = groups.filter(g => g.type === groupType);
-    
-    if (!profile) return [];
-    
-    // Admin and users with manage_groups permission can see all groups
-    if (profile.isAdmin || hasPermission(profile.permissions, 'manage_groups')) {
-      return allGroups;
+  // Filter groups based on user's permissions and assignments
+  const getFilteredGroups = () => {
+    let filtered = groups;
+
+    // If user is not admin, filter groups based on their role
+    if (!profile?.isAdmin) {
+      if (profile?.role === 'group_leader') {
+        // Group leaders can only see their assigned groups
+        filtered = filtered.filter(group => 
+          profile.assigned_groups?.includes(group.name)
+        );
+      } else if (profile?.role === 'member') {
+        // Regular members can only see groups they are members of
+        filtered = filtered.filter(group => 
+          profile.assigned_groups?.includes(group.name)
+        );
+      } else if (!hasPermission(profile?.permissions, 'view_groups')) {
+        // No view_groups permission
+        filtered = [];
+      }
     }
-    
-    // Group leaders can only see their assigned groups
-    if (profile.role === 'group_leader' || profile.role === 'department_leader') {
-      return allGroups.filter(group => 
-        profile.assigned_groups?.includes(group.name) || 
-        profile.assigned_departments?.includes(group.name)
-      );
-    }
-    
-    // Regular members can only see groups they are members of
-    if (profile.role === 'member') {
-      return allGroups.filter(group => 
-        profile.assigned_groups?.includes(group.name) || 
-        profile.assigned_departments?.includes(group.name)
-      );
-    }
-    
-    return [];
+
+    return filtered;
   };
 
   const filteredMembers = getFilteredMembers();
-  const filteredCellGroups = getFilteredGroups('cell_group');
-  const filteredDepartments = getFilteredGroups('department');
+  const filteredGroups = getFilteredGroups();
+  const cellGroups = filteredGroups.filter(g => g.type === 'cell_group');
+  const departments = filteredGroups.filter(g => g.type === 'department');
 
   const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -709,7 +712,12 @@ const Admin = () => {
             </p>
             {!profile?.isAdmin && (
               <p className="text-sm text-gray-500 mt-1">
-                You can only view and manage members in your assigned groups/departments
+                {profile?.role === 'group_leader' 
+                  ? 'You can only view and manage your assigned groups' 
+                  : profile?.role === 'member'
+                  ? 'You can only view your own data and assigned groups'
+                  : 'Limited administrative access based on your permissions'
+                }
               </p>
             )}
           </div>
@@ -855,6 +863,76 @@ const Admin = () => {
           </div>
         )}
 
+        {/* Groups Section */}
+        {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_groups')) && (
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Groups & Departments</h2>
+              {(profile?.isAdmin || hasPermission(profile?.permissions, 'manage_groups')) && (
+                <button
+                  onClick={() => openModal('groups')}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+                >
+                  <Users className="h-4 w-4" />
+                  Manage Groups
+                </button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading groups...</p>
+              </div>
+            ) : filteredGroups.length === 0 ? (
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">
+                  {searchTerm ? 'No groups found matching your search' : 'No groups available for your role'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredGroups.map((group) => (
+                  <div
+                    key={group.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold ${
+                        group.type === 'cell_group' 
+                          ? 'bg-gradient-to-br from-blue-500 to-purple-500' 
+                          : 'bg-gradient-to-br from-green-500 to-teal-500'
+                      }`}>
+                        {group.type === 'cell_group' ? 'CG' : 'DP'}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900">
+                          {group.name}
+                        </h4>
+                        <p className="text-sm text-gray-500">
+                          {group.type === 'cell_group' ? 'Cell Group' : 'Department'}
+                          {group.description && ` • ${group.description}`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {(profile?.isAdmin || canEditGroups(profile, group)) && (
+                        <button
+                          onClick={() => openModal('groupDetails', group as any)}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Stats Section - Only show if user has view permissions */}
         {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_reports')) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -881,12 +959,16 @@ const Admin = () => {
                   <span className="text-gray-900 font-semibold">{members.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Active Groups</span>
-                  <span className="text-gray-900 font-semibold">{filteredCellGroups.length}</span>
+                  <span className="text-gray-600">Visible Groups</span>
+                  <span className="text-gray-900 font-semibold">{filteredGroups.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Cell Groups</span>
+                  <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Departments</span>
-                  <span className="text-gray-900 font-semibold">{filteredDepartments.length}</span>
+                  <span className="text-gray-900 font-semibold">{departments.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Users with Login</span>
@@ -1103,29 +1185,25 @@ const Admin = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-3">
                         Assigned Cell Groups
                       </label>
-                      {filteredCellGroups.length === 0 ? (
-                        <p className="text-gray-500 text-sm">No cell groups available for assignment</p>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {filteredCellGroups.map(group => (
-                            <label
-                              key={group.id}
-                              className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={userFormData.assigned_groups.includes(group.name)}
-                                onChange={() => handleGroupToggle(group.name)}
-                                className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                              />
-                              <div>
-                                <span className="font-medium text-gray-900">{group.name}</span>
-                                <p className="text-xs text-gray-500">{group.description}</p>
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {cellGroups.map(group => (
+                          <label
+                            key={group.id}
+                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={userFormData.assigned_groups.includes(group.name)}
+                              onChange={() => handleGroupToggle(group.name)}
+                              className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <div>
+                              <span className="font-medium text-gray-900">{group.name}</span>
+                              <p className="text-xs text-gray-500">{group.description}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -1134,29 +1212,25 @@ const Admin = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-3">
                         Assigned Departments
                       </label>
-                      {filteredDepartments.length === 0 ? (
-                        <p className="text-gray-500 text-sm">No departments available for assignment</p>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {filteredDepartments.map(dept => (
-                            <label
-                              key={dept.id}
-                              className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={userFormData.assigned_departments.includes(dept.name)}
-                                onChange={() => handleDepartmentToggle(dept.name)}
-                                className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-                              />
-                              <div>
-                                <span className="font-medium text-gray-900">{dept.name}</span>
-                                <p className="text-xs text-gray-500">{dept.description}</p>
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {departments.map(dept => (
+                          <label
+                            key={dept.id}
+                            className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={userFormData.assigned_departments.includes(dept.name)}
+                              onChange={() => handleDepartmentToggle(dept.name)}
+                              className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+                            />
+                            <div>
+                              <span className="font-medium text-gray-900">{dept.name}</span>
+                              <p className="text-xs text-gray-500">{dept.description}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
