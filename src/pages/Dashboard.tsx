@@ -14,9 +14,16 @@ import {
   ChevronDown,
   ChevronUp,
   PhoneCall,
-  AlertTriangle
+  AlertTriangle,
+  Eye,
+  Search,
+  Key,
+  Copy,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
 
 // Types
 interface Member {
@@ -29,6 +36,15 @@ interface Member {
   invited_by: string | null;
   created_at: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  role?: string;
+  permissions?: string[];
+  assigned_groups?: string[];
+  assigned_departments?: string[];
+  can_add_members?: boolean;
+  can_edit_members?: boolean;
+  can_view_own_data?: boolean;
+  login_username?: string | null;
+  login_pin?: string | null;
 }
 
 interface CellGroup {
@@ -75,7 +91,13 @@ interface AbsentMember {
   consecutiveAbsences: number;
 }
 
+// Permission checking utility
+const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
+  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
+};
+
 const Dashboard = () => {
+  const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -84,6 +106,8 @@ const Dashboard = () => {
     activity: true
   });
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -110,12 +134,68 @@ const Dashboard = () => {
     topic: ''
   });
 
+  // Check if current user has admin access
+  const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
+  const currentUserPermissions = profile?.permissions || [];
+
+  // Filter data based on user permissions
+  const getFilteredMembers = () => {
+    let filtered = [...members];
+
+    // If user is not admin, filter based on assignments
+    if (!currentUserIsAdmin) {
+      // Group leaders can only see members in their assigned groups
+      if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+        filtered = filtered.filter(member => 
+          member.assigned_groups?.some(group => profile.assigned_groups?.includes(group))
+        );
+      }
+      // Department leaders can only see members in their assigned departments
+      if (profile?.assigned_departments && profile.assigned_departments.length > 0) {
+        filtered = filtered.filter(member => 
+          member.assigned_departments?.some(dept => profile.assigned_departments?.includes(dept))
+        );
+      }
+    }
+
+    return filtered;
+  };
+
+  const getFilteredEvents = () => {
+    // For now, all users can see all events
+    // You could add event filtering logic here based on user permissions
+    return upcomingEvents;
+  };
+
+  const getFilteredAbsentMembers = () => {
+    let filtered = [...absentMembers];
+
+    // If user is not admin, filter based on assignments
+    if (!currentUserIsAdmin) {
+      if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+        filtered = filtered.filter(absentMember => {
+          const member = members.find(m => m.id === absentMember.id);
+          return member?.assigned_groups?.some(group => profile.assigned_groups?.includes(group));
+        });
+      }
+      if (profile?.assigned_departments && profile.assigned_departments.length > 0) {
+        filtered = filtered.filter(absentMember => {
+          const member = members.find(m => m.id === absentMember.id);
+          return member?.assigned_departments?.some(dept => profile.assigned_departments?.includes(dept));
+        });
+      }
+    }
+
+    return filtered;
+  };
+
   // Load dashboard data from Supabase
   const loadDashboardData = async () => {
     try {
       setLoading(true);
+      setError(null);
       
-      // Load members
+      // Load members with additional fields for permissions
       const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select('*')
@@ -143,17 +223,19 @@ const Dashboard = () => {
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
 
-      // Calculate stats
-      calculateStats(membersData || [], eventsData || []);
+      // Calculate stats with filtered data
+      const filteredMembers = getFilteredMembers();
+      calculateStats(filteredMembers, eventsData || []);
 
-      // Generate recent activities
-      generateRecentActivities(membersData || [], eventsData || []);
+      // Generate recent activities with filtered data
+      generateRecentActivities(filteredMembers, eventsData || []);
 
       // Load absent members
       await loadAbsentMembers();
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
+      setError('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
@@ -178,10 +260,10 @@ const Dashboard = () => {
       // Get the last 2 Sunday services
       const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      // Get all members
+      // Get all members (we'll filter later based on permissions)
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, phone');
+        .select('id, name, surname, phone, assigned_groups, assigned_departments');
 
       if (membersError) throw membersError;
       if (!allMembers) {
@@ -227,13 +309,14 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (members: Member[], events: Event[]) => {
-    const totalMembers = members.length;
-    const newcomers = members.filter(m => m.status === 'newcomer').length;
-    const signedMembers = members.filter(m => m.status === 'signed_member').length;
+  const calculateStats = (filteredMembers: Member[], events: Event[]) => {
+    const totalMembers = filteredMembers.length;
+    const newcomers = filteredMembers.filter(m => m.status === 'newcomer').length;
+    const signedMembers = filteredMembers.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     
-    const uniqueGroups = [...new Set(members.map(m => m.cell_group_id).filter(Boolean))].length;
+    const uniqueGroups = [...new Set(filteredMembers.map(m => m.cell_group_id).filter(Boolean))].length;
+    const filteredAbsentMembers = getFilteredAbsentMembers();
 
     const statsData: StatCard[] = [
       { 
@@ -279,9 +362,9 @@ const Dashboard = () => {
       { 
         icon: AlertTriangle, 
         label: 'Absent 2 Sundays', 
-        value: absentMembers.length.toString(), 
-        change: absentMembers.length > 0 ? 'Need follow-up' : 'All members present',
-        changeType: absentMembers.length > 0 ? 'negative' : 'positive',
+        value: filteredAbsentMembers.length.toString(), 
+        change: filteredAbsentMembers.length > 0 ? 'Need follow-up' : 'All members present',
+        changeType: filteredAbsentMembers.length > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
         bgColor: 'bg-red-50 dark:bg-red-950/20',
         action: 'viewAbsentMembers'
@@ -291,11 +374,11 @@ const Dashboard = () => {
     setStats(statsData);
   };
 
-  const generateRecentActivities = (members: Member[], events: Event[]) => {
+  const generateRecentActivities = (filteredMembers: Member[], events: Event[]) => {
     const activities: Activity[] = [];
 
-    // Add recent member joins
-    const recentMembers = members.slice(0, 3);
+    // Add recent member joins (only from filtered members)
+    const recentMembers = filteredMembers.slice(0, 3);
     recentMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
@@ -340,7 +423,24 @@ const Dashboard = () => {
   }, []);
 
   const openModal = (modalType: string) => {
+    // Check permissions for specific modals
+    if (modalType === 'viewMembers' && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'view_members')) {
+      setError('You do not have permission to view all members');
+      return;
+    }
+    
+    if (modalType === 'addMember' && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'add_members')) {
+      setError('You do not have permission to add members');
+      return;
+    }
+    
+    if (modalType === 'createEvent' && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'manage_events')) {
+      setError('You do not have permission to create events');
+      return;
+    }
+
     setActiveModal(modalType);
+    setError(null);
   };
 
   const closeModal = () => {
@@ -350,9 +450,31 @@ const Dashboard = () => {
     // Reset form states
     setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '' });
     setNewEvent({ name: '', location: '', event_date: '', event_time: '', topic: '' });
+    setError(null);
   };
 
   const openMemberDetail = (member: Member) => {
+    // Check if user has permission to view this member
+    if (!currentUserIsAdmin) {
+      // Check if member is in user's assigned groups
+      if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+        const hasAccess = member.assigned_groups?.some(group => profile.assigned_groups?.includes(group));
+        if (!hasAccess) {
+          // Check if member is in user's assigned departments
+          if (profile?.assigned_departments && profile.assigned_departments.length > 0) {
+            const hasDeptAccess = member.assigned_departments?.some(dept => profile.assigned_departments?.includes(dept));
+            if (!hasDeptAccess) {
+              setError('You do not have permission to view this member');
+              return;
+            }
+          } else {
+            setError('You do not have permission to view this member');
+            return;
+          }
+        }
+      }
+    }
+
     setSelectedMember(member);
     setActiveModal('memberDetail');
   };
@@ -361,7 +483,6 @@ const Dashboard = () => {
     setSelectedEvent(event);
     setActiveModal('eventDetail');
   };
-
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
@@ -399,7 +520,7 @@ const Dashboard = () => {
       closeModal();
     } catch (error) {
       console.error('Error adding member:', error);
-      alert('Failed to add member');
+      setError('Failed to add member');
     }
   };
 
@@ -424,18 +545,18 @@ const Dashboard = () => {
       closeModal();
     } catch (error) {
       console.error('Error creating event:', error);
-      alert('Failed to create event');
+      setError('Failed to create event');
     }
   };
 
-  const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
+  const Modal = ({ children, title, size = 'max-w-md' }: { children: React.ReactNode; title: string; size?: string }) => (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto animate-scaleIn">
-        <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white">{title}</h3>
+      <div className={`bg-white rounded-2xl ${size} w-full max-h-[90vh] overflow-y-auto shadow-2xl`}>
+        <div className="flex justify-between items-center p-6 border-b border-gray-200">
+          <h3 className="text-2xl font-bold text-gray-900">{title}</h3>
           <button 
             onClick={closeModal}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
@@ -458,6 +579,10 @@ const Dashboard = () => {
     );
   }
 
+  const filteredMembers = getFilteredMembers();
+  const filteredEvents = getFilteredEvents();
+  const filteredAbsentMembers = getFilteredAbsentMembers();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
       {/* Header */}
@@ -466,14 +591,43 @@ const Dashboard = () => {
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
             Dashboard
           </h1>
-          <p className="text-foreground/60">Welcome to your church management dashboard</p>
+          <p className="text-foreground/60">
+            {currentUserIsAdmin 
+              ? 'Welcome to your church management dashboard' 
+              : `Welcome - ${profile?.role} access`
+            }
+          </p>
+          {!currentUserIsAdmin && (
+            <p className="text-sm text-gray-500 mt-1">
+              You can only view data from your assigned groups/departments
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
+          <button
+            onClick={loadDashboardData}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
           <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
-            AD
+            {profile?.name?.charAt(0)}{profile?.surname?.charAt(0) || 'U'}
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <p className="text-red-700 font-medium">{error}</p>
+            <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -555,7 +709,7 @@ const Dashboard = () => {
                 )}
               </div>
               <button 
-                onClick={() => openModal('activity')}
+                onClick={() => openModal('viewMembers')}
                 className="w-full mt-4 text-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors py-2"
               >
                 View All Activity
@@ -577,7 +731,7 @@ const Dashboard = () => {
           {expandedSections.events && (
             <div className="p-6 pt-0">
               <div className="space-y-4">
-                {upcomingEvents.map((event) => (
+                {filteredEvents.map((event) => (
                   <button
                     key={event.id}
                     onClick={() => openEventDetail(event)}
@@ -600,12 +754,12 @@ const Dashboard = () => {
                     </p>
                   </button>
                 ))}
-                {upcomingEvents.length === 0 && (
+                {filteredEvents.length === 0 && (
                   <p className="text-gray-500 dark:text-gray-400 text-center py-4">No upcoming events</p>
                 )}
               </div>
               <button 
-                onClick={() => openModal('events')}
+                onClick={() => openModal('viewEvents')}
                 className="w-full mt-4 text-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors py-2"
               >
                 View Calendar
@@ -615,49 +769,89 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
-        <div className="flex flex-wrap gap-3">
-          <button 
-            onClick={() => openModal('addMember')}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-          >
-            <UserPlus className="h-4 w-4" />
-            Add New Member
-          </button>
-          <button 
-            onClick={() => openModal('createEvent')}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-          >
-            <Plus className="h-4 w-4" />
-            Create Event
-          </button>
+      {/* Quick Actions - Only show if user has permissions */}
+      {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'add_members') || hasPermission(currentUserPermissions, 'manage_events')) && (
+        <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
+          <div className="flex flex-wrap gap-3">
+            {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'add_members')) && (
+              <button 
+                onClick={() => openModal('addMember')}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add New Member
+              </button>
+            )}
+            {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'manage_events')) && (
+              <button 
+                onClick={() => openModal('createEvent')}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+              >
+                <Plus className="h-4 w-4" />
+                Create Event
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modals */}
       {activeModal === 'viewMembers' && (
-        <Modal title="All Members">
+        <Modal title="Members" size="max-w-4xl">
           <div className="space-y-4">
-            <p className="text-gray-600 dark:text-gray-400">View and manage all church members.</p>
-            <div className="space-y-3">
-              {members.slice(0, 5).map(member => (
-                <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{member.email || member.phone || 'No contact'}</p>
+            <p className="text-gray-600 dark:text-gray-400">
+              {currentUserIsAdmin ? 'All church members' : 'Members in your assigned groups/departments'}
+            </p>
+            
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search members by name, email, or phone..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {filteredMembers
+                .filter(member => 
+                  `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                  (member.phone && member.phone.includes(searchTerm))
+                )
+                .map(member => (
+                <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                      <p className="text-sm text-gray-500">{member.email || member.phone || 'No contact'}</p>
+                      {member.login_username && (
+                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                          <Key className="h-3 w-3" />
+                          Login: {member.login_username}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <button 
                     onClick={() => openMemberDetail(member)}
-                    className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 text-sm font-medium"
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                   >
+                    <Eye className="h-4 w-4" />
                     View Details
                   </button>
                 </div>
               ))}
-              {members.length === 0 && (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-4">No members found</p>
+              {filteredMembers.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
+                  {currentUserIsAdmin ? 'No members found' : 'No members found in your assigned groups/departments'}
+                </p>
               )}
             </div>
           </div>
@@ -666,40 +860,69 @@ const Dashboard = () => {
 
       {activeModal === 'memberDetail' && selectedMember && (
         <Modal title="Member Details">
-          <div className="space-y-4">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xl mx-auto mb-3">
-                {selectedMember.name.charAt(0)}{selectedMember.surname.charAt(0)}
+          <div className="space-y-6">
+            <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
+                  {selectedMember.name.charAt(0)}{selectedMember.surname.charAt(0)}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">{selectedMember.name} {selectedMember.surname}</h3>
+                  <p className="text-gray-600">
+                    {selectedMember.cell_group_id ? 'Member of cell group' : 'No cell group'}
+                  </p>
+                </div>
               </div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedMember.name} {selectedMember.surname}</h3>
-              <p className="text-gray-500 dark:text-gray-400">{selectedMember.cell_group_id ? 'Member of cell group' : 'No cell group'}</p>
             </div>
             
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Email:</span>
-                <span className="text-gray-900 dark:text-white">{selectedMember.email || 'N/A'}</span>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <p className="text-gray-900">{selectedMember.email || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <p className="text-gray-900">{selectedMember.phone || 'N/A'}</p>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Phone:</span>
-                <span className="text-gray-900 dark:text-white">{selectedMember.phone || 'N/A'}</span>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Invited By</label>
+                  <p className="text-gray-900">{selectedMember.invited_by || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                    selectedMember.status === 'signed_member' 
+                      ? 'bg-green-100 text-green-700'
+                      : selectedMember.status === 'not_attending'
+                      ? 'bg-red-100 text-red-700'
+                      : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {selectedMember.status || 'newcomer'}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Invited By:</span>
-                <span className="text-gray-900 dark:text-white">{selectedMember.invited_by || 'N/A'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Status:</span>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  selectedMember.status === 'signed_member' 
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                    : selectedMember.status === 'not_attending'
-                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                }`}>
-                  {selectedMember.status || 'newcomer'}
-                </span>
-              </div>
+
+              {selectedMember.login_username && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <h4 className="font-semibold text-green-900 mb-2">Login Credentials</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-green-700">Username:</span>
+                      <span className="font-mono font-semibold text-green-900">{selectedMember.login_username}</span>
+                    </div>
+                    {selectedMember.login_pin && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-green-700">PIN:</span>
+                        <span className="font-mono font-semibold text-green-900 text-xl tracking-wider">{selectedMember.login_pin}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Modal>
@@ -707,27 +930,39 @@ const Dashboard = () => {
 
       {activeModal === 'eventDetail' && selectedEvent && (
         <Modal title="Event Details">
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">{selectedEvent.name}</h3>
+          <div className="space-y-6">
+            <h3 className="text-xl font-bold text-gray-900">{selectedEvent.name}</h3>
             
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-gray-500" />
-                <span className="text-gray-900 dark:text-white">{selectedEvent.event_time}</span>
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <Clock className="h-5 w-5 text-gray-500" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Time</p>
+                  <p className="text-gray-900">{selectedEvent.event_time}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-gray-500" />
-                <span className="text-gray-900 dark:text-white">{selectedEvent.location || 'No location'}</span>
+              
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <MapPin className="h-5 w-5 text-gray-500" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Location</p>
+                  <p className="text-gray-900">{selectedEvent.location || 'No location specified'}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="text-gray-900 dark:text-white">{selectedEvent.event_date}</span>
+              
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <Calendar className="h-5 w-5 text-gray-500" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Date</p>
+                  <p className="text-gray-900">{selectedEvent.event_date}</p>
+                </div>
               </div>
             </div>
 
             {selectedEvent.topic && (
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <p className="text-gray-600 dark:text-gray-400 text-sm">{selectedEvent.topic}</p>
+              <div className="pt-4 border-t border-gray-200">
+                <h4 className="font-semibold text-gray-900 mb-2">Description</h4>
+                <p className="text-gray-600">{selectedEvent.topic}</p>
               </div>
             )}
           </div>
@@ -736,99 +971,104 @@ const Dashboard = () => {
 
       {activeModal === 'addMember' && (
         <Modal title="Add New Member">
-          <form onSubmit={handleAddMember} className="space-y-4">
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  First Name *
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="Enter first name"
-                  value={newMember.name}
-                  onChange={(e) => setNewMember({...newMember, name: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  required
-                />
+          <form onSubmit={handleAddMember} className="space-y-6">
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    First Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newMember.name}
+                    onChange={(e) => setNewMember({...newMember, name: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter first name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Last Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newMember.surname}
+                    onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter last name"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Last Name *
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="Enter last name"
-                  value={newMember.surname}
-                  onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Email
                 </label>
-                <input 
-                  type="email" 
-                  placeholder="Enter email address"
+                <input
+                  type="email"
                   value={newMember.email}
                   onChange={(e) => setNewMember({...newMember, email: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter email address"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Phone
                 </label>
-                <input 
-                  type="tel" 
-                  placeholder="Enter phone number"
+                <input
+                  type="tel"
                   value={newMember.phone}
                   onChange={(e) => setNewMember({...newMember, phone: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter phone number"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Invited By
                 </label>
-                <input 
-                  type="text" 
-                  placeholder="Who invited this member?"
+                <input
+                  type="text"
                   value={newMember.invited_by}
                   onChange={(e) => setNewMember({...newMember, invited_by: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Who invited this member?"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Cell Group
                 </label>
-                <select 
+                <select
                   value={newMember.cell_group_id}
                   onChange={(e) => setNewMember({...newMember, cell_group_id: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                 >
-                  <option value="">Select cell group</option>
-                  {cellGroups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
+                  <option value="">Select a cell group</option>
+                  {cellGroups.map(group => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
                   ))}
                 </select>
               </div>
             </div>
-            <div className="flex gap-3">
-              <button 
-                type="submit" 
+            
+            <div className="flex gap-3 pt-4">
+              <button
+                type="submit"
                 className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
               >
                 Add Member
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={closeModal}
-                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
               >
                 Cancel
               </button>
@@ -838,82 +1078,88 @@ const Dashboard = () => {
       )}
 
       {activeModal === 'createEvent' && (
-        <Modal title="Create New Event">
-          <form onSubmit={handleCreateEvent} className="space-y-4">
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <Modal title="Create Event">
+          <form onSubmit={handleCreateEvent} className="space-y-6">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Event Name *
                 </label>
-                <input 
-                  type="text" 
-                  placeholder="Enter event name"
+                <input
+                  type="text"
+                  required
                   value={newEvent.name}
                   onChange={(e) => setNewEvent({...newEvent, name: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  required
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter event name"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={newEvent.event_date}
+                    onChange={(e) => setNewEvent({...newEvent, event_date: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Time *
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={newEvent.event_time}
+                    onChange={(e) => setNewEvent({...newEvent, event_time: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Location
                 </label>
-                <input 
-                  type="text" 
-                  placeholder="Event location"
+                <input
+                  type="text"
                   value={newEvent.location}
                   onChange={(e) => setNewEvent({...newEvent, location: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Event location"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Date *
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Topic/Description
                 </label>
-                <input 
-                  type="date"
-                  value={newEvent.event_date}
-                  onChange={(e) => setNewEvent({...newEvent, event_date: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Time *
-                </label>
-                <input 
-                  type="time"
-                  value={newEvent.event_time}
-                  onChange={(e) => setNewEvent({...newEvent, event_time: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Topic
-                </label>
-                <textarea 
-                  placeholder="Event topic or description"
-                  rows={3}
+                <textarea
                   value={newEvent.topic}
                   onChange={(e) => setNewEvent({...newEvent, topic: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Event topic or description"
                 />
               </div>
             </div>
-            <div className="flex gap-3">
-              <button 
-                type="submit" 
+            
+            <div className="flex gap-3 pt-4">
+              <button
+                type="submit"
                 className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:shadow-lg text-white py-3 rounded-xl font-medium transition-all duration-200"
               >
                 Create Event
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={closeModal}
-                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
               >
                 Cancel
               </button>
@@ -923,50 +1169,169 @@ const Dashboard = () => {
       )}
 
       {activeModal === 'viewAbsentMembers' && (
-        <Modal title="Members Absent for 2 Sundays">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
-              <p className="text-sm text-red-700 dark:text-red-300">
-                These members have been absent for 2 consecutive Sunday services and need follow-up.
+        <Modal title="Members Absent for 2+ Sundays" size="max-w-2xl">
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <p className="text-sm text-red-700">
+                Members who have missed the last 2 Sunday services and may need follow-up.
               </p>
             </div>
             
-            {absentMembers.length > 0 ? (
-              <div className="space-y-3">
-                {absentMembers.map(member => (
-                  <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900 dark:text-white">
-                        {member.name} {member.surname}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-1">
-                        <PhoneCall className="h-3 w-3" />
-                        {member.phone || 'No phone number'}
-                      </p>
-                    </div>
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {filteredAbsentMembers.map(member => (
+                <div key={member.id} className="flex items-center justify-between p-4 border border-red-200 rounded-xl bg-red-50/50">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900">
+                      {member.name} {member.surname}
+                    </p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1 mt-1">
+                      <PhoneCall className="h-3 w-3" />
+                      {member.phone || 'No phone number'}
+                    </p>
+                    <p className="text-xs text-red-600 mt-1">
+                      Missed 2 consecutive Sundays
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
                     {member.phone && (
                       <a
                         href={`tel:${member.phone}`}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium"
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
                       >
                         <PhoneCall className="h-4 w-4" />
                         Call
                       </a>
                     )}
+                    <button 
+                      onClick={() => {
+                        const foundMember = members.find(m => m.id === member.id);
+                        if (foundMember) {
+                          openMemberDetail(foundMember);
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                    >
+                      <Eye className="h-4 w-4" />
+                      Details
+                    </button>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Users className="h-8 w-8 text-green-600 dark:text-green-400" />
                 </div>
-                <p className="text-gray-600 dark:text-gray-400">
-                  Great! All members have attended recent Sunday services.
+              ))}
+              {filteredAbsentMembers.length === 0 && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <TrendingUp className="h-8 w-8 text-green-600" />
+                  </div>
+                  <p className="text-gray-900 font-medium">Great news!</p>
+                  <p className="text-gray-600">
+                    All members have attended recent Sunday services.
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            {filteredAbsentMembers.length > 0 && (
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-sm text-gray-600 text-center">
+                  {filteredAbsentMembers.length} member{filteredAbsentMembers.length !== 1 ? 's' : ''} need{filteredAbsentMembers.length === 1 ? 's' : ''} follow-up
                 </p>
               </div>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {activeModal === 'viewEvents' && (
+        <Modal title="All Events" size="max-w-4xl">
+          <div className="space-y-6">
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {filteredEvents.map(event => (
+                <button
+                  key={event.id}
+                  onClick={() => openEventDetail(event)}
+                  className="w-full text-left p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <h4 className="font-semibold text-gray-900">{event.name}</h4>
+                    <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                      {event.event_date}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-600 flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      {event.event_time}
+                    </p>
+                    <p className="text-sm text-gray-500 flex items-center gap-2">
+                      <MapPin className="h-4 w-4" />
+                      {event.location || 'No location specified'}
+                    </p>
+                  </div>
+                </button>
+              ))}
+              {filteredEvents.length === 0 && (
+                <p className="text-gray-500 text-center py-6">No events found</p>
+              )}
+            </div>
+            
+            {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'manage_events')) && (
+              <button
+                onClick={() => openModal('createEvent')}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-gray-300 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Create New Event
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {activeModal === 'viewGroups' && (
+        <Modal title="Cell Groups" size="max-w-2xl">
+          <div className="space-y-6">
+            <p className="text-gray-600">
+              {currentUserIsAdmin ? 'All active cell groups' : 'Cell groups you have access to'}
+            </p>
+            
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {cellGroups.map(group => {
+                const groupMembers = filteredMembers.filter(m => m.cell_group_id === group.id);
+                return (
+                  <div key={group.id} className="p-4 border border-gray-200 rounded-xl">
+                    <div className="flex justify-between items-start mb-3">
+                      <h4 className="font-semibold text-gray-900">{group.name}</h4>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                        {groupMembers.length} members
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {groupMembers.length > 0 ? (
+                        <div className="space-y-2">
+                          {groupMembers.slice(0, 3).map(member => (
+                            <div key={member.id} className="flex items-center gap-2">
+                              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                              <span>{member.name} {member.surname}</span>
+                            </div>
+                          ))}
+                          {groupMembers.length > 3 && (
+                            <p className="text-gray-500 text-xs">
+                              +{groupMembers.length - 3} more members
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-gray-500 text-xs">No members in this group</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {cellGroups.length === 0 && (
+                <p className="text-gray-500 text-center py-6">No cell groups found</p>
+              )}
+            </div>
           </div>
         </Modal>
       )}
