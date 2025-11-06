@@ -1,5 +1,6 @@
 import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { supabase } from '../integrations/supabase/client';
 
 interface Member {
   id: string;
@@ -19,6 +20,9 @@ interface Member {
   can_add_members: boolean;
   can_edit_members: boolean;
   can_view_own_data: boolean;
+  cell_group_id?: string | null;
+  status?: string | null;
+  created_at?: string | null;
 }
 
 interface Group {
@@ -28,218 +32,132 @@ interface Group {
   type: 'cell_group' | 'department';
 }
 
-// Mock data for development
-const mockMembers: Member[] = [
-  {
-    id: '1',
-    name: 'Admin',
-    surname: 'User',
-    email: 'admin@church.com',
-    phone: '+1234567890',
-    role: 'admin',
-    permissions: ['admin_access'],
-    is_active: true,
-    cell_group: null,
-    department: null,
-    login_username: 'admin@church.com',
-    login_pin: 'admin123',
-    assigned_groups: [],
-    assigned_departments: [],
-    can_add_members: true,
-    can_edit_members: true,
-    can_view_own_data: true
-  },
-  {
-    id: '2',
-    name: 'John',
-    surname: 'Pastor',
-    email: 'john@church.com',
-    phone: '+1234567891',
-    role: 'pastor',
-    permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'view_reports'],
-    is_active: true,
-    cell_group: 'Main Sanctuary',
-    department: 'Leadership',
-    login_username: 'john.pastor',
-    login_pin: '1234',
-    assigned_groups: ['Main Sanctuary'],
-    assigned_departments: ['Leadership'],
-    can_add_members: true,
-    can_edit_members: true,
-    can_view_own_data: true
-  },
-  {
-    id: '3',
-    name: 'Sarah',
-    surname: 'Leader',
-    email: 'sarah@church.com',
-    phone: '+1234567892',
-    role: 'group_leader',
-    permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-    is_active: true,
-    cell_group: 'Youth Group',
-    department: null,
-    login_username: 'sarah.leader',
-    login_pin: '5678',
-    assigned_groups: ['Youth Group'],
-    assigned_departments: [],
-    can_add_members: true,
-    can_edit_members: true,
-    can_view_own_data: true
-  }
-];
-
-const mockGroups: Group[] = [
-  {
-    id: '1',
-    name: 'Main Sanctuary',
-    description: 'Main church cell group',
-    type: 'cell_group'
-  },
-  {
-    id: '2',
-    name: 'Youth Group',
-    description: 'Youth ministry group',
-    type: 'cell_group'
-  },
-  {
-    id: '3',
-    name: 'Leadership',
-    description: 'Church leadership department',
-    type: 'department'
-  },
-  {
-    id: '4',
-    name: 'Worship',
-    description: 'Worship and music department',
-    type: 'department'
-  }
-];
-
-// Simple cloud service with timeout protection
+// Cloud service functions using Supabase
 const cloudService = {
+  // Fetch members from Supabase
   async getMembers(): Promise<Member[]> {
-    // Use a timeout to prevent hanging
-    const timeoutPromise = new Promise<Member[]>((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout')), 3000)
-    );
-
-    const fetchPromise = (async () => {
-      try {
-        // Try to get from localStorage first
-        const storedMembers = localStorage.getItem('church_members');
-        if (storedMembers) {
-          console.log('Using stored members from localStorage');
-          return JSON.parse(storedMembers);
-        }
-
-        // Try API if available
-        console.log('Attempting to fetch from API...');
-        const response = await fetch('/api/members', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          const members = data.members || mockMembers;
-          localStorage.setItem('church_members', JSON.stringify(members));
-          return members;
-        }
-        
-        // If API fails, use mock data
-        console.log('API failed, using mock data');
-        localStorage.setItem('church_members', JSON.stringify(mockMembers));
-        return mockMembers;
-      } catch (error) {
-        console.log('Error fetching members, using mock data:', error);
-        localStorage.setItem('church_members', JSON.stringify(mockMembers));
-        return mockMembers;
-      }
-    })();
-
     try {
-      return await Promise.race([fetchPromise, timeoutPromise]);
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Transform the data to match the Member interface
+      const members: Member[] = (data || []).map(member => ({
+        id: member.id,
+        name: member.name,
+        surname: member.surname,
+        email: member.email,
+        phone: member.phone,
+        role: member.role || 'member',
+        permissions: member.permissions || [],
+        is_active: member.is_active !== false,
+        cell_group: member.cell_group,
+        department: member.department,
+        login_username: member.login_username,
+        login_pin: member.login_pin,
+        assigned_groups: member.assigned_groups || [],
+        assigned_departments: member.assigned_departments || [],
+        can_add_members: member.can_add_members || false,
+        can_edit_members: member.can_edit_members || false,
+        can_view_own_data: member.can_view_own_data || false,
+        cell_group_id: member.cell_group_id,
+        status: member.status,
+        created_at: member.created_at
+      }));
+
+      return members;
     } catch (error) {
-      console.log('Request timeout or error, using mock data');
-      localStorage.setItem('church_members', JSON.stringify(mockMembers));
-      return mockMembers;
+      console.error('Error fetching members:', error);
+      throw error;
     }
   },
 
+  // Fetch groups from Supabase
   async getGroups(): Promise<Group[]> {
-    const timeoutPromise = new Promise<Group[]>((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout')), 3000)
-    );
-
-    const fetchPromise = (async () => {
-      try {
-        const storedGroups = localStorage.getItem('church_groups');
-        if (storedGroups) {
-          return JSON.parse(storedGroups);
-        }
-
-        const response = await fetch('/api/groups', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          const groups = data.groups || mockGroups;
-          localStorage.setItem('church_groups', JSON.stringify(groups));
-          return groups;
-        }
-        
-        console.log('API failed, using mock groups data');
-        localStorage.setItem('church_groups', JSON.stringify(mockGroups));
-        return mockGroups;
-      } catch (error) {
-        console.log('Error fetching groups, using mock data:', error);
-        localStorage.setItem('church_groups', JSON.stringify(mockGroups));
-        return mockGroups;
-      }
-    })();
-
     try {
-      return await Promise.race([fetchPromise, timeoutPromise]);
+      // First get cell groups
+      const { data: cellGroupsData, error: cellGroupsError } = await supabase
+        .from('cell_groups')
+        .select('id, name, description')
+        .order('name');
+
+      if (cellGroupsError) throw cellGroupsError;
+
+      // Transform cell groups
+      const cellGroups: Group[] = (cellGroupsData || []).map(group => ({
+        id: group.id,
+        name: group.name,
+        description: group.description,
+        type: 'cell_group'
+      }));
+
+      // For departments, we'll use the same cell_groups table but filter by type if needed
+      // Or create a separate departments table. For now, using cell_groups as both
+      const departments: Group[] = (cellGroupsData || []).map(group => ({
+        id: `dept-${group.id}`,
+        name: `${group.name} Department`,
+        description: group.description,
+        type: 'department'
+      }));
+
+      return [...cellGroups, ...departments];
     } catch (error) {
-      console.log('Request timeout or error, using mock groups data');
-      localStorage.setItem('church_groups', JSON.stringify(mockGroups));
-      return mockGroups;
+      console.error('Error fetching groups:', error);
+      throw error;
     }
   },
 
+  // Update member in Supabase
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
-      // Update in localStorage
-      const storedMembers = localStorage.getItem('church_members');
-      let members: Member[] = storedMembers ? JSON.parse(storedMembers) : mockMembers;
-      
-      const updatedMembers = members.map(member => 
-        member.id === memberId ? { ...member, ...updates } : member
-      );
-      
-      localStorage.setItem('church_members', JSON.stringify(updatedMembers));
-      
-      // Return the updated member
-      const updatedMember = updatedMembers.find(m => m.id === memberId);
-      return updatedMember || members.find(m => m.id === memberId)!;
+      const { data, error } = await supabase
+        .from('members')
+        .update(updates)
+        .eq('id', memberId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Transform the response
+      const updatedMember: Member = {
+        id: data.id,
+        name: data.name,
+        surname: data.surname,
+        email: data.email,
+        phone: data.phone,
+        role: data.role || 'member',
+        permissions: data.permissions || [],
+        is_active: data.is_active !== false,
+        cell_group: data.cell_group,
+        department: data.department,
+        login_username: data.login_username,
+        login_pin: data.login_pin,
+        assigned_groups: data.assigned_groups || [],
+        assigned_departments: data.assigned_departments || [],
+        can_add_members: data.can_add_members || false,
+        can_edit_members: data.can_edit_members || false,
+        can_view_own_data: data.can_view_own_data || false
+      };
+
+      return updatedMember;
     } catch (error) {
       console.error('Error updating member:', error);
       throw error;
     }
   },
 
+  // Generate credentials
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
+      // Generate random credentials
       const username = `user${Date.now()}`;
-      const pin = Math.floor(1000 + Math.random() * 9000).toString();
+      const pin = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit PIN
       
+      // Update member with new credentials
       await this.updateMember(memberId, {
         login_username: username,
         login_pin: pin
@@ -287,7 +205,7 @@ const Admin = () => {
     login_pin: ''
   });
 
-  // Load data from cloud on component mount
+  // Load data from Supabase on component mount
   useEffect(() => {
     loadData();
   }, []);
@@ -296,31 +214,20 @@ const Admin = () => {
     setLoading(true);
     setError(null);
     try {
-      console.log('Starting data load...');
-      
       const [membersData, groupsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups()
       ]);
       
-      console.log('Data loaded successfully:', { 
-        members: membersData.length, 
-        groups: groupsData.length 
-      });
-      
       setMembers(membersData);
       setGroups(groupsData);
+      setInitialLoad(false);
     } catch (err) {
-      console.error('Error in loadData:', err);
       setError(err instanceof Error ? err.message : 'Failed to load data');
-      
-      // Even on error, set some data to prevent infinite loading
-      setMembers(mockMembers);
-      setGroups(mockGroups);
+      console.error('Error loading data:', err);
+      setInitialLoad(false);
     } finally {
       setLoading(false);
-      setInitialLoad(false);
-      console.log('Initial load completed');
     }
   };
 
@@ -411,7 +318,7 @@ const Admin = () => {
       setShowCredentials(true);
       
       // Refresh the members list to show updated credentials
-      loadData();
+      await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate credentials');
     } finally {
@@ -575,12 +482,6 @@ const Admin = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading admin panel...</p>
-          <button 
-            onClick={() => setInitialLoad(false)}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Skip Loading
-          </button>
         </div>
       </div>
     );
