@@ -61,7 +61,6 @@ const Groups = () => {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'groups' | 'meetings' | 'members'>('groups');
   
@@ -70,7 +69,7 @@ const Groups = () => {
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [showMeetingForm, setShowMeetingForm] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [showReportModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
 
   // Form states
@@ -151,7 +150,7 @@ const Groups = () => {
 
   const fetchGroupMembers = async (groupId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('members')
         .select('*')
         .eq('cell_group_id', groupId)
@@ -169,7 +168,7 @@ const Groups = () => {
 
   const fetchGroupMeetings = async (groupId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('meetings')
         .select('*')
         .eq('group_id', groupId)
@@ -184,7 +183,7 @@ const Groups = () => {
 
   const fetchMeetingAttendance = async (meetingId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('attendance')
         .select(`
           *,
@@ -223,7 +222,7 @@ const Groups = () => {
 
       console.log('Creating group with data:', groupData);
 
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('cell_groups')
         .insert([groupData])
         .select(`
@@ -318,7 +317,7 @@ const Groups = () => {
         return;
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('meetings')
         .insert([{
           group_id: selectedGroup.id,
@@ -393,7 +392,7 @@ const Groups = () => {
       }));
 
       // Delete existing attendance records for this meeting
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await db
         .from('attendance')
         .delete()
         .eq('meeting_id', selectedMeeting.id);
@@ -401,7 +400,7 @@ const Groups = () => {
       if (deleteError) throw deleteError;
 
       // Insert new attendance records
-      const { error: insertError } = await supabase
+      const { error: insertError } = await db
         .from('attendance')
         .insert(attendanceRecords);
 
@@ -424,9 +423,9 @@ const Groups = () => {
       setLoading(true);
       
       // Update meeting status to completed
-      const { error } = await supabase
+      const { error } = await db
         .from('meetings')
-        .update({ status: 'completed' })
+        .update({ status: 'completed' as any })
         .eq('id', selectedMeeting.id);
 
       if (error) throw error;
@@ -449,7 +448,7 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      const { error } = await supabase
+      const { error } = await db
         .from('meeting_reports')
         .insert([{
           meeting_id: selectedMeeting.id,
@@ -458,7 +457,7 @@ const Groups = () => {
           action_items: reportForm.action_items,
           next_meeting_date: reportForm.next_meeting_date || null,
           created_by: 'system' // You might want to use actual user ID here
-        }]);
+        }] as any);
 
       if (error) throw error;
 
