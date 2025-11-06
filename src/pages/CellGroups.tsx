@@ -1,5 +1,386 @@
-{/* Edit modal */}
-{showEditForm && selectedGroup && (
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
+
+interface CellGroup { /* ... your existing interface ... */ }
+interface CellGroupMember { /* ... your existing interface ... */ }
+interface Member { /* ... your existing interface ... */ }
+
+// Helper permission function
+const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
+  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
+};
+
+const CellGroups = () => {
+  const { profile } = useAuth();
+
+  // State variables
+  const [showForm, setShowForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [allCellGroups, setAllCellGroups] = useState<CellGroup[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+  const [initialLoad, setInitialLoad] = useState(true);
+
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    leader_id: '',
+  });
+
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  // Permission utility
+  const canCreateGroups = () => profile?.isAdmin ?? false;
+
+  const canManageGroup = (group: CellGroup) => {
+    if (!profile) return false;
+    if (profile.isAdmin) return true;
+    if (hasPermission(profile.permissions, 'manage_groups') && profile.assigned_groups) {
+      return profile.assigned_groups.some(assigned => assigned.toLowerCase() === group.name.toLowerCase());
+    }
+    if (group.leader_id === profile.id) return true;
+    return false;
+  };
+
+  const canViewGroup = (group: CellGroup) => {
+    if (!profile) return false;
+    if (profile.isAdmin || hasPermission(profile.permissions, 'view_groups')) return true;
+    if (profile.role === 'member') {
+      return group.members?.some(m => m.member_id === profile.id) ?? false;
+    }
+    if (hasPermission(profile.permissions, 'manage_groups') && profile.assigned_groups) {
+      return profile.assigned_groups.some(assigned => assigned.toLowerCase() === group.name.toLowerCase());
+    }
+    if (profile.role === 'group_leader' && profile.assigned_groups) {
+      return profile.assigned_groups.some(assigned => assigned.toLowerCase() === group.name.toLowerCase());
+    }
+    return false;
+  };
+
+  // Load Data
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      await Promise.all([fetchCellGroups(), fetchMembers()]);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      setError('Failed to load data');
+    } finally {
+      setLoading(false);
+      setInitialLoad(false);
+    }
+  };
+
+  const fetchCellGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          *,
+          leader:members!leader_id(id, name, surname, email, phone),
+          cell_group_members(
+            *,
+            member:members(id, name, surname, email, phone)
+          )
+        `)
+        .order('name');
+
+      if (error) throw error;
+      const cellGroupsData = data || [];
+      setAllCellGroups(cellGroupsData);
+      // Apply filtering
+      const filtered = getFilteredCellGroups();
+      setCellGroups(filtered);
+    } catch (error) {
+      console.error('Error fetching cell groups:', error);
+      setError('Error fetching cell groups');
+    }
+  };
+
+  const fetchMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setMembers(data || []);
+    } catch (error) {
+      console.error('Error fetching members:', error);
+      setError('Error fetching members');
+    }
+  };
+
+  const fetchGroupMembers = async (groupId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('cell_group_members')
+        .select(`
+          *,
+          member:members(id, name, surname, email, phone)
+        `)
+        .eq('cell_group_id', groupId);
+
+      if (error) throw error;
+      setAllCellGroups(prev => prev.map(g => g.id === groupId ? { ...g, members: data || [] } : g));
+      // Re-apply filtering
+      const filtered = getFilteredCellGroups();
+      setCellGroups(filtered);
+    } catch (error) {
+      console.error('Error fetching group members:', error);
+    }
+  };
+
+  // Effect: check permissions & load data
+  useEffect(() => {
+    const checkAccessAndLoad = async () => {
+      if (!profile) {
+        setHasAccess(false);
+        setInitialLoad(false);
+        return;
+      }
+      const access =
+        profile.isAdmin ||
+        hasPermission(profile.permissions, 'view_groups') ||
+        hasPermission(profile.permissions, 'manage_groups') ||
+        (profile.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) ||
+        (profile.role === 'member' && allCellGroups.some(g => g.members?.some(m => m.member_id === profile.id)));
+
+      setHasAccess(access);
+      if (access) await loadData();
+      else setInitialLoad(false);
+    };
+    checkAccessAndLoad();
+  }, [profile]);
+
+  // Filter groups based on permissions
+  const getFilteredCellGroups = () => {
+    if (!profile) return [];
+    if (profile.isAdmin || hasPermission(profile.permissions, 'view_groups')) return allCellGroups;
+
+    let userGroups: CellGroup[] = [];
+    if (hasPermission(profile.permissions, 'manage_groups') && profile.assigned_groups) {
+      userGroups = allCellGroups.filter(group => profile.assigned_groups.some(assigned => assigned.toLowerCase() === group.name.toLowerCase()));
+    }
+    if (profile.role === 'group_leader' && profile.assigned_groups) {
+      const leaderGroups = allCellGroups.filter(group => profile.assigned_groups.some(assigned => assigned.toLowerCase() === group.name.toLowerCase()));
+      userGroups = [...userGroups, ...leaderGroups];
+    }
+    if (profile.role === 'member') {
+      const memberGroups = allCellGroups.filter(group => group.members?.some(m => m.member_id === profile.id));
+      userGroups = [...userGroups, ...memberGroups];
+    }
+    // Remove duplicates
+    return userGroups.filter((g, index, self) => self.findIndex(item => item.id === g.id) === index);
+  };
+
+  // Handlers for create, update, delete, manage members
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canCreateGroups()) {
+      setError('You do not have permission to create cell groups.');
+      return;
+    }
+    // ... create logic ...
+  };
+
+  const handleUpdateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGroup || !canManageGroup(selectedGroup)) {
+      setError('You do not have permission to edit this group.');
+      return;
+    }
+    // ... update logic ...
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    const group = allCellGroups.find(g => g.id === groupId);
+    if (!group || !canManageGroup(group)) {
+      setError('You do not have permission to delete this group.');
+      return;
+    }
+    if (!confirm('Are you sure?')) return;
+    // ... delete logic ...
+  };
+
+  const handleAddMembersToGroup = async (groupId: string, memberIds: string[], role: string = 'member') => {
+    if (!selectedGroup || !canManageGroup(selectedGroup)) {
+      setError('You do not have permission to manage this group.');
+      return;
+    }
+    // ... add members logic ...
+  };
+
+  const handleRemoveMemberFromGroup = async (groupMemberId: string) => {
+    if (!selectedGroup || !canManageGroup(selectedGroup)) {
+      setError('You do not have permission to manage this group.');
+      return;
+    }
+    // ... remove member logic ...
+  };
+
+  const handleUpdateMemberRole = async (groupMemberId: string, newRole: string) => {
+    if (!selectedGroup || !canManageGroup(selectedGroup)) {
+      setError('You do not have permission to manage this group.');
+      return;
+    }
+    // ... update role logic ...
+  };
+
+  // Get available members for adding
+  const availableMembers = members.filter(member =>
+    !selectedGroup?.members?.some(m => m.member_id === member.id) &&
+    (member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())))
+  );
+
+  // Render
+  if (initialLoad) {
+    return (
+      <div className="min-h-screen ...">
+        {/* Loading indicator */}
+      </div>
+    );
+  }
+
+  if (hasAccess === false) {
+    return (
+      <div className="min-h-screen ...">
+        {/* Access Denied */}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen ...">
+      {/* Header and Create Button */}
+      {canCreateGroups() && (
+        <button onClick={() => setShowForm(!showForm)} className="...">
+          <Plus /> {showForm ? 'Cancel' : 'Create Cell Group'}
+        </button>
+      )}
+
+      {/* Create / Edit Form (if showForm or showEditForm) */}
+      {/* ... Your form code ... */}
+
+      {/* Cell Groups List */}
+      <div className="grid ...">
+        {loading && cellGroups.length === 0 ? (
+          // Loading
+        ) : cellGroups.length === 0 ? (
+          // No groups message
+        ) : (
+          cellGroups.map((group) => {
+            const canManage = canManageGroup(group);
+            const canView = canViewGroup(group);
+            return (
+              <div key={group.id} className="...">
+                {/* Group Card */}
+                <div className="...">
+                  {/* Group Info */}
+                  {/* ... */}
+                </div>
+                {/* Action Buttons */}
+                {canManage && (
+                  <>
+                    <button onClick={() => {
+                      setSelectedGroup(group);
+                      setFormData({ /* populate form data */ });
+                      setShowEditForm(true);
+                    }} className="...">
+                      <Edit />
+                    </button>
+                    <button onClick={() => handleDeleteGroup(group.id)} className="...">
+                      <Trash2 />
+                    </button>
+                  </>
+                )}
+                {/* View Members Button */}
+                <button onClick={() => {
+                  setSelectedGroup(group);
+                  setShowMembersModal(true);
+                }} className="...">
+                  View Members
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* ======= Edit Group Modal ======= */}
+      {showEditForm && selectedGroup && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Edit Cell Group</h3>
+              <button onClick={() => setShowEditForm(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"><X className="h-5 w-5" /></button>
+            </div>
+            {/* Form */}
+            <form onSubmit={handleUpdateGroup} className="space-y-6">
+              {/* ... same form fields as above, pre-filled with selectedGroup data ... */}
+              {/* Save / Cancel buttons */}
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======= Members Management Modal ======= */}
+      {showMembersModal && selectedGroup && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedGroup.name} - Members ({selectedGroup.members?.length || 0})</h3>
+              <button onClick={() => setShowMembersModal(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"><X className="h-5 w-5" /></button>
+            </div>
+            {/* Add Members Section */}
+            {canManageGroup(selectedGroup) && (
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 mb-6">
+                {/* Search and Add Members */}
+                {/* ... */}
+                {/* Available Members List */}
+                {/* ... */}
+                {/* Add as Role Dropdown */}
+                {/* ... */}
+              </div>
+            )}
+
+            {/* Current Members List */}
+            <div>
+              {/* ... */}
+              {selectedGroup.members?.length === 0 ? (
+                // No members message
+              ) : (
+                // Members list with role change and remove buttons if canManageGroup
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CellGroups;
+{/* Edit modal - Only show if user can manage this group */}
+{showEditForm && selectedGroup && canManageGroup(selectedGroup) && (
   <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
@@ -97,7 +478,7 @@
   </div>
 )}
 
-{/* Members modal */}
+{/* Members modal - Show to all but restrict actions based on permissions */}
 {showMembersModal && selectedGroup && (
   <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -186,7 +567,9 @@
 
       {/* Current Members List */}
       <div>
-        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Members</h4>
+        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          Current Members {!canManageGroup(selectedGroup) && '(Read Only)'}
+        </h4>
         {!selectedGroup.members || selectedGroup.members.length === 0 ? (
           <div className="text-center py-8">
             <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
@@ -212,20 +595,22 @@
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${
                       groupMember.role === 'leader'
-                        ? 'bg-yellow-100 text-yellow-800'
+                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
                         : groupMember.role === 'assistant'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-gray-100 text-gray-800'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                     }`}
                   >
                     {groupMember.role}
                   </span>
-                  {canManageGroup(selectedGroup) && (
+                  
+                  {/* Only show management controls if user can manage the group */}
+                  {canManageGroup(selectedGroup) ? (
                     <>
                       <select
                         value={groupMember.role}
                         onChange={(e) => handleUpdateMemberRole(groupMember.id, e.target.value)}
-                        className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700"
+                        className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       >
                         <option value="member">Member</option>
                         <option value="leader">Leader</option>
@@ -239,6 +624,11 @@
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </>
+                  ) : (
+                    // Show read-only view for non-managers
+                    <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                      {groupMember.role}
+                    </span>
                   )}
                 </div>
               </div>
@@ -249,5 +639,3 @@
     </div>
   </div>
 )}
-</div>
-);
