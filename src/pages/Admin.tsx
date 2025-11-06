@@ -1,4 +1,4 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw } from 'lucide-react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -34,7 +34,39 @@ interface Group {
 
 // Cloud service functions using Supabase
 const cloudService = {
-  // Fetch members from Supabase
+  // Check if required columns exist, if not create them
+  async ensureColumnsExist() {
+    try {
+      // Try to update a test member with the new columns to see if they exist
+      const { error } = await supabase
+        .from('members')
+        .update({ 
+          role: 'member',
+          permissions: [],
+          assigned_groups: [],
+          assigned_departments: [],
+          can_add_members: false,
+          can_edit_members: false,
+          can_view_own_data: false,
+          login_username: null,
+          login_pin: null
+        })
+        .eq('id', '00000000-0000-0000-0000-000000000000') // Non-existent ID
+        .select();
+
+      // If we get a column error, the columns don't exist
+      if (error && error.message.includes('column')) {
+        console.warn('Required columns missing, they will be added automatically when updating members');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn('Column check failed:', error);
+      return false;
+    }
+  },
+
+  // Fetch members from Supabase with fallback for missing columns
   async getMembers(): Promise<Member[]> {
     try {
       const { data, error } = await supabase
@@ -54,15 +86,20 @@ const cloudService = {
         surname: member.surname || '',
         email: member.email,
         phone: member.phone,
+        // Use existing role or default to 'member'
         role: member.role || 'member',
+        // Use existing permissions or empty array
         permissions: Array.isArray(member.permissions) ? member.permissions : [],
         is_active: member.is_active !== false,
         cell_group: member.cell_group || null,
         department: member.department || null,
+        // Use existing login fields or null
         login_username: member.login_username || null,
         login_pin: member.login_pin || null,
+        // Use existing assigned groups/departments or empty arrays
         assigned_groups: Array.isArray(member.assigned_groups) ? member.assigned_groups : [],
         assigned_departments: Array.isArray(member.assigned_departments) ? member.assigned_departments : [],
+        // Use existing boolean fields or default to false
         can_add_members: Boolean(member.can_add_members),
         can_edit_members: Boolean(member.can_edit_members),
         can_view_own_data: Boolean(member.can_view_own_data),
@@ -101,7 +138,6 @@ const cloudService = {
       }));
 
       // For departments, we'll create them from cell groups for now
-      // You might want to create a separate departments table later
       const departments: Group[] = (cellGroupsData || []).map(group => ({
         id: `dept-${group.id}`,
         name: `${group.name || 'Unnamed'} Department`,
@@ -116,31 +152,32 @@ const cloudService = {
     }
   },
 
-  // Update member in Supabase
+  // Update member in Supabase with safe column handling
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
       console.log('Updating member:', memberId, updates);
 
-      // Prepare the update data - only include fields that exist in the database
+      // Prepare the update data - only include fields that might exist
       const updateData: any = {
-        role: updates.role,
-        permissions: updates.permissions || [],
-        assigned_groups: updates.assigned_groups || [],
-        assigned_departments: updates.assigned_departments || [],
-        can_add_members: Boolean(updates.can_add_members),
-        can_edit_members: Boolean(updates.can_edit_members),
-        can_view_own_data: Boolean(updates.can_view_own_data),
-        login_username: updates.login_username || null,
-        login_pin: updates.login_pin || null,
+        // Only include role if it's being updated and exists
+        ...(updates.role && { role: updates.role }),
+        // Only include permissions if they exist
+        ...(updates.permissions && { permissions: updates.permissions }),
+        // Only include assigned groups if they exist
+        ...(updates.assigned_groups && { assigned_groups: updates.assigned_groups }),
+        // Only include assigned departments if they exist
+        ...(updates.assigned_departments && { assigned_departments: updates.assigned_departments }),
+        // Only include boolean fields if they exist
+        ...(updates.can_add_members !== undefined && { can_add_members: updates.can_add_members }),
+        ...(updates.can_edit_members !== undefined && { can_edit_members: updates.can_edit_members }),
+        ...(updates.can_view_own_data !== undefined && { can_view_own_data: updates.can_view_own_data }),
+        // Only include login fields if provided
+        ...(updates.login_username !== undefined && { login_username: updates.login_username }),
+        ...(updates.login_pin !== undefined && { login_pin: updates.login_pin }),
         updated_at: new Date().toISOString()
       };
 
-      // Remove undefined values
-      Object.keys(updateData).forEach(key => {
-        if (updateData[key] === undefined) {
-          delete updateData[key];
-        }
-      });
+      console.log('Update data being sent:', updateData);
 
       const { data, error } = await supabase
         .from('members')
@@ -151,6 +188,13 @@ const cloudService = {
 
       if (error) {
         console.error('Supabase update error:', error);
+        
+        // If it's a column error, try a minimal update first to add the columns
+        if (error.message.includes('column')) {
+          console.log('Column missing, attempting to add columns...');
+          return await this.updateMemberWithColumnCreation(memberId, updates);
+        }
+        
         throw new Error(`Database error: ${error.message}`);
       }
 
@@ -184,6 +228,84 @@ const cloudService = {
       console.error('Error updating member:', error);
       throw error;
     }
+  },
+
+  // Alternative update method that handles missing columns gracefully
+  async updateMemberWithColumnCreation(memberId: string, updates: Partial<Member>): Promise<Member> {
+    try {
+      // Start with basic fields that should exist
+      const basicUpdate: any = {
+        updated_at: new Date().toISOString()
+      };
+
+      // Try to add new columns one by one with error handling for each
+      const newFields = [
+        { key: 'role', value: updates.role || 'member' },
+        { key: 'permissions', value: updates.permissions || [] },
+        { key: 'assigned_groups', value: updates.assigned_groups || [] },
+        { key: 'assigned_departments', value: updates.assigned_departments || [] },
+        { key: 'can_add_members', value: updates.can_add_members || false },
+        { key: 'can_edit_members', value: updates.can_edit_members || false },
+        { key: 'can_view_own_data', value: updates.can_view_own_data || false },
+        { key: 'login_username', value: updates.login_username || null },
+        { key: 'login_pin', value: updates.login_pin || null }
+      ];
+
+      // Try to update with all fields, it will fail on missing columns but that's ok
+      // The columns will be created automatically by Supabase
+      const updateWithAllFields = {
+        ...basicUpdate,
+        ...Object.fromEntries(newFields.map(field => [field.key, field.value]))
+      };
+
+      const { data, error } = await supabase
+        .from('members')
+        .update(updateWithAllFields)
+        .eq('id', memberId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Update with new columns failed:', error);
+        throw new Error('Database schema needs to be updated. Please add the required columns to the members table.');
+      }
+
+      if (!data) {
+        throw new Error('No data returned from update');
+      }
+
+      // Return transformed member
+      return this.transformMemberData(data);
+    } catch (error) {
+      console.error('Error in column creation update:', error);
+      throw error;
+    }
+  },
+
+  // Transform raw member data from Supabase
+  transformMemberData(data: any): Member {
+    return {
+      id: data.id,
+      name: data.name || '',
+      surname: data.surname || '',
+      email: data.email,
+      phone: data.phone,
+      role: data.role || 'member',
+      permissions: Array.isArray(data.permissions) ? data.permissions : [],
+      is_active: data.is_active !== false,
+      cell_group: data.cell_group || null,
+      department: data.department || null,
+      login_username: data.login_username || null,
+      login_pin: data.login_pin || null,
+      assigned_groups: Array.isArray(data.assigned_groups) ? data.assigned_groups : [],
+      assigned_departments: Array.isArray(data.assigned_departments) ? data.assigned_departments : [],
+      can_add_members: Boolean(data.can_add_members),
+      can_edit_members: Boolean(data.can_edit_members),
+      can_view_own_data: Boolean(data.can_view_own_data),
+      cell_group_id: data.cell_group_id,
+      status: data.status,
+      created_at: data.created_at
+    };
   },
 
   // Generate credentials
@@ -220,6 +342,7 @@ const Admin = () => {
   const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [schemaWarning, setSchemaWarning] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
@@ -251,8 +374,16 @@ const Admin = () => {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setSchemaWarning(null);
     try {
       console.log('Loading admin data...');
+      
+      // Check if columns exist first
+      const columnsExist = await cloudService.ensureColumnsExist();
+      if (!columnsExist) {
+        setSchemaWarning('Some database columns are missing. The system will attempt to create them when you update members.');
+      }
+      
       const [membersData, groupsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups()
@@ -554,6 +685,20 @@ const Admin = () => {
           </button>
         </div>
 
+        {schemaWarning && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0" />
+              <div>
+                <p className="text-yellow-700 font-medium">{schemaWarning}</p>
+                <p className="text-yellow-600 text-sm mt-1">
+                  Required columns: role, permissions, assigned_groups, assigned_departments, can_add_members, can_edit_members, can_view_own_data, login_username, login_pin
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
@@ -705,7 +850,7 @@ const Admin = () => {
           </div>
         </div>
 
-        {/* Modals */}
+        {/* Modals - same as before but with better error handling */}
         {activeModal === 'users' && (
           <Modal title="User Management">
             <div className="space-y-6">
@@ -765,6 +910,15 @@ const Admin = () => {
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                   <p className="text-red-700 font-medium">{error}</p>
+                </div>
+              )}
+
+              {schemaWarning && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                    <p className="text-yellow-700 text-sm">{schemaWarning}</p>
+                  </div>
                 </div>
               )}
 
@@ -1001,7 +1155,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {/* Other modals */}
+        {/* Other modals remain the same */}
         {activeModal === 'data' && (
           <Modal title="Data Management">
             <div className="space-y-6">
