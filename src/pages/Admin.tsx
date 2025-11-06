@@ -42,27 +42,30 @@ const cloudService = {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error fetching members:', error);
+        throw error;
+      }
 
-      // Transform the data to match the Member interface
+      // Transform the data to match the Member interface with safe defaults
       const members: Member[] = (data || []).map(member => ({
         id: member.id,
-        name: member.name,
-        surname: member.surname,
+        name: member.name || '',
+        surname: member.surname || '',
         email: member.email,
         phone: member.phone,
         role: member.role || 'member',
-        permissions: member.permissions || [],
+        permissions: Array.isArray(member.permissions) ? member.permissions : [],
         is_active: member.is_active !== false,
-        cell_group: member.cell_group,
-        department: member.department,
-        login_username: member.login_username,
-        login_pin: member.login_pin,
-        assigned_groups: member.assigned_groups || [],
-        assigned_departments: member.assigned_departments || [],
-        can_add_members: member.can_add_members || false,
-        can_edit_members: member.can_edit_members || false,
-        can_view_own_data: member.can_view_own_data || false,
+        cell_group: member.cell_group || null,
+        department: member.department || null,
+        login_username: member.login_username || null,
+        login_pin: member.login_pin || null,
+        assigned_groups: Array.isArray(member.assigned_groups) ? member.assigned_groups : [],
+        assigned_departments: Array.isArray(member.assigned_departments) ? member.assigned_departments : [],
+        can_add_members: Boolean(member.can_add_members),
+        can_edit_members: Boolean(member.can_edit_members),
+        can_view_own_data: Boolean(member.can_view_own_data),
         cell_group_id: member.cell_group_id,
         status: member.status,
         created_at: member.created_at
@@ -78,27 +81,30 @@ const cloudService = {
   // Fetch groups from Supabase
   async getGroups(): Promise<Group[]> {
     try {
-      // First get cell groups
+      // Get cell groups
       const { data: cellGroupsData, error: cellGroupsError } = await supabase
         .from('cell_groups')
         .select('id, name, description')
         .order('name');
 
-      if (cellGroupsError) throw cellGroupsError;
+      if (cellGroupsError) {
+        console.error('Supabase error fetching cell groups:', cellGroupsError);
+        throw cellGroupsError;
+      }
 
       // Transform cell groups
       const cellGroups: Group[] = (cellGroupsData || []).map(group => ({
         id: group.id,
-        name: group.name,
+        name: group.name || 'Unnamed Group',
         description: group.description,
         type: 'cell_group'
       }));
 
-      // For departments, we'll use the same cell_groups table but filter by type if needed
-      // Or create a separate departments table. For now, using cell_groups as both
+      // For departments, we'll create them from cell groups for now
+      // You might want to create a separate departments table later
       const departments: Group[] = (cellGroupsData || []).map(group => ({
         id: `dept-${group.id}`,
-        name: `${group.name} Department`,
+        name: `${group.name || 'Unnamed'} Department`,
         description: group.description,
         type: 'department'
       }));
@@ -113,34 +119,64 @@ const cloudService = {
   // Update member in Supabase
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
+      console.log('Updating member:', memberId, updates);
+
+      // Prepare the update data - only include fields that exist in the database
+      const updateData: any = {
+        role: updates.role,
+        permissions: updates.permissions || [],
+        assigned_groups: updates.assigned_groups || [],
+        assigned_departments: updates.assigned_departments || [],
+        can_add_members: Boolean(updates.can_add_members),
+        can_edit_members: Boolean(updates.can_edit_members),
+        can_view_own_data: Boolean(updates.can_view_own_data),
+        login_username: updates.login_username || null,
+        login_pin: updates.login_pin || null,
+        updated_at: new Date().toISOString()
+      };
+
+      // Remove undefined values
+      Object.keys(updateData).forEach(key => {
+        if (updateData[key] === undefined) {
+          delete updateData[key];
+        }
+      });
+
       const { data, error } = await supabase
         .from('members')
-        .update(updates)
+        .update(updateData)
         .eq('id', memberId)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase update error:', error);
+        throw new Error(`Database error: ${error.message}`);
+      }
+
+      if (!data) {
+        throw new Error('No data returned from update');
+      }
 
       // Transform the response
       const updatedMember: Member = {
         id: data.id,
-        name: data.name,
-        surname: data.surname,
+        name: data.name || '',
+        surname: data.surname || '',
         email: data.email,
         phone: data.phone,
         role: data.role || 'member',
-        permissions: data.permissions || [],
+        permissions: Array.isArray(data.permissions) ? data.permissions : [],
         is_active: data.is_active !== false,
-        cell_group: data.cell_group,
-        department: data.department,
-        login_username: data.login_username,
-        login_pin: data.login_pin,
-        assigned_groups: data.assigned_groups || [],
-        assigned_departments: data.assigned_departments || [],
-        can_add_members: data.can_add_members || false,
-        can_edit_members: data.can_edit_members || false,
-        can_view_own_data: data.can_view_own_data || false
+        cell_group: data.cell_group || null,
+        department: data.department || null,
+        login_username: data.login_username || null,
+        login_pin: data.login_pin || null,
+        assigned_groups: Array.isArray(data.assigned_groups) ? data.assigned_groups : [],
+        assigned_departments: Array.isArray(data.assigned_departments) ? data.assigned_departments : [],
+        can_add_members: Boolean(data.can_add_members),
+        can_edit_members: Boolean(data.can_edit_members),
+        can_view_own_data: Boolean(data.can_view_own_data)
       };
 
       return updatedMember;
@@ -157,6 +193,8 @@ const cloudService = {
       const username = `user${Date.now()}`;
       const pin = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit PIN
       
+      console.log('Generating credentials for member:', memberId, { username, pin });
+
       // Update member with new credentials
       await this.updateMember(memberId, {
         login_username: username,
@@ -214,16 +252,19 @@ const Admin = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('Loading admin data...');
       const [membersData, groupsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups()
       ]);
       
+      console.log('Data loaded:', { members: membersData.length, groups: groupsData.length });
       setMembers(membersData);
       setGroups(groupsData);
       setInitialLoad(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
+      setError(errorMessage);
       console.error('Error loading data:', err);
       setInitialLoad(false);
     } finally {
@@ -320,7 +361,9 @@ const Admin = () => {
       // Refresh the members list to show updated credentials
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate credentials');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to generate credentials';
+      setError(errorMessage);
+      console.error('Error generating credentials:', err);
     } finally {
       setLoading(false);
     }
@@ -382,6 +425,9 @@ const Admin = () => {
     setError(null);
     
     try {
+      console.log('Starting user update for:', selectedUser.id);
+      console.log('Update data:', userFormData);
+
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
         role: userFormData.role,
         permissions: userFormData.permissions,
@@ -402,7 +448,8 @@ const Admin = () => {
       alert('User updated successfully!');
       closeModal();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update user');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update user';
+      setError(errorMessage);
       console.error('Error updating user:', err);
     } finally {
       setLoading(false);
@@ -510,7 +557,7 @@ const Admin = () => {
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
-              <p className="text-red-700">{error}</p>
+              <p className="text-red-700 font-medium">{error}</p>
               <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
                 <X className="h-4 w-4" />
               </button>
@@ -717,7 +764,7 @@ const Admin = () => {
             <div className="space-y-6">
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                  <p className="text-red-700">{error}</p>
+                  <p className="text-red-700 font-medium">{error}</p>
                 </div>
               )}
 
