@@ -103,7 +103,6 @@ const Events = () => {
   });
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
 
   useEffect(() => {
     fetchEvents();
@@ -508,7 +507,6 @@ const Events = () => {
       invitedById: '',
     });
     setSelectedMember(null);
-    setSelectedInviter(null);
     setSearchTerm('');
     setInviterSearchTerm('');
     setIsMemberDropdownOpen(false);
@@ -530,7 +528,6 @@ const Events = () => {
       ...attendeeFormData,
       invitedById: member.id,
     });
-    setSelectedInviter(member);
     setInviterSearchTerm(`${member.name} ${member.surname}`);
     setIsInviterDropdownOpen(false);
   };

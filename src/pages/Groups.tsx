@@ -53,15 +53,6 @@ interface Attendance {
   member?: Member;
 }
 
-interface MeetingReport {
-  id: string;
-  meeting_id: string;
-  report_text: string;
-  decisions_made: string;
-  action_items: string;
-  next_meeting_date: string;
-  created_by: string;
-}
 
 const Groups = () => {
   const [showForm, setShowForm] = useState(false);
@@ -79,7 +70,7 @@ const Groups = () => {
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [showMeetingForm, setShowMeetingForm] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [showReportModal, setShowReportModal] = useState(false);
+  const [showReportModal] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
 
   // Form states
