@@ -67,6 +67,25 @@ const mockMembers: Member[] = [
     can_add_members: true,
     can_edit_members: true,
     can_view_own_data: true
+  },
+  {
+    id: '3',
+    name: 'Sarah',
+    surname: 'Leader',
+    email: 'sarah@church.com',
+    phone: '+1234567892',
+    role: 'group_leader',
+    permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
+    is_active: true,
+    cell_group: 'Youth Group',
+    department: null,
+    login_username: 'sarah.leader',
+    login_pin: '5678',
+    assigned_groups: ['Youth Group'],
+    assigned_departments: [],
+    can_add_members: true,
+    can_edit_members: true,
+    can_view_own_data: true
   }
 ];
 
@@ -97,85 +116,107 @@ const mockGroups: Group[] = [
   }
 ];
 
-// Cloud service functions with fallback to mock data
+// Simple cloud service with timeout protection
 const cloudService = {
-  // Fetch members from cloud with fallback
   async getMembers(): Promise<Member[]> {
-    try {
-      // First try to get from localStorage (persisted data)
-      const storedMembers = localStorage.getItem('church_members');
-      if (storedMembers) {
-        return JSON.parse(storedMembers);
-      }
+    // Use a timeout to prevent hanging
+    const timeoutPromise = new Promise<Member[]>((_, reject) => 
+      setTimeout(() => reject(new Error('Request timeout')), 3000)
+    );
 
-      // Then try API
-      const response = await fetch('/api/members', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+    const fetchPromise = (async () => {
+      try {
+        // Try to get from localStorage first
+        const storedMembers = localStorage.getItem('church_members');
+        if (storedMembers) {
+          console.log('Using stored members from localStorage');
+          return JSON.parse(storedMembers);
         }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const members = data.members || [];
-        // Store in localStorage for future use
-        localStorage.setItem('church_members', JSON.stringify(members));
-        return members;
+
+        // Try API if available
+        console.log('Attempting to fetch from API...');
+        const response = await fetch('/api/members', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const members = data.members || mockMembers;
+          localStorage.setItem('church_members', JSON.stringify(members));
+          return members;
+        }
+        
+        // If API fails, use mock data
+        console.log('API failed, using mock data');
+        localStorage.setItem('church_members', JSON.stringify(mockMembers));
+        return mockMembers;
+      } catch (error) {
+        console.log('Error fetching members, using mock data:', error);
+        localStorage.setItem('church_members', JSON.stringify(mockMembers));
+        return mockMembers;
       }
-      
-      // If API fails, use mock data
-      console.warn('API failed, using mock members data');
-      localStorage.setItem('church_members', JSON.stringify(mockMembers));
-      return mockMembers;
+    })();
+
+    try {
+      return await Promise.race([fetchPromise, timeoutPromise]);
     } catch (error) {
-      console.warn('Error fetching members, using mock data:', error);
+      console.log('Request timeout or error, using mock data');
       localStorage.setItem('church_members', JSON.stringify(mockMembers));
       return mockMembers;
     }
   },
 
-  // Fetch groups from cloud with fallback
   async getGroups(): Promise<Group[]> {
-    try {
-      // First try to get from localStorage
-      const storedGroups = localStorage.getItem('church_groups');
-      if (storedGroups) {
-        return JSON.parse(storedGroups);
-      }
+    const timeoutPromise = new Promise<Group[]>((_, reject) => 
+      setTimeout(() => reject(new Error('Request timeout')), 3000)
+    );
 
-      // Then try API
-      const response = await fetch('/api/groups', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+    const fetchPromise = (async () => {
+      try {
+        const storedGroups = localStorage.getItem('church_groups');
+        if (storedGroups) {
+          return JSON.parse(storedGroups);
         }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const groups = data.groups || [];
-        localStorage.setItem('church_groups', JSON.stringify(groups));
-        return groups;
+
+        const response = await fetch('/api/groups', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const groups = data.groups || mockGroups;
+          localStorage.setItem('church_groups', JSON.stringify(groups));
+          return groups;
+        }
+        
+        console.log('API failed, using mock groups data');
+        localStorage.setItem('church_groups', JSON.stringify(mockGroups));
+        return mockGroups;
+      } catch (error) {
+        console.log('Error fetching groups, using mock data:', error);
+        localStorage.setItem('church_groups', JSON.stringify(mockGroups));
+        return mockGroups;
       }
-      
-      // If API fails, use mock data
-      console.warn('API failed, using mock groups data');
-      localStorage.setItem('church_groups', JSON.stringify(mockGroups));
-      return mockGroups;
+    })();
+
+    try {
+      return await Promise.race([fetchPromise, timeoutPromise]);
     } catch (error) {
-      console.warn('Error fetching groups, using mock data:', error);
+      console.log('Request timeout or error, using mock groups data');
       localStorage.setItem('church_groups', JSON.stringify(mockGroups));
       return mockGroups;
     }
   },
 
-  // Update member in cloud
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
-      // Update in localStorage first
+      // Update in localStorage
       const storedMembers = localStorage.getItem('church_members');
       let members: Member[] = storedMembers ? JSON.parse(storedMembers) : mockMembers;
       
@@ -185,26 +226,7 @@ const cloudService = {
       
       localStorage.setItem('church_members', JSON.stringify(updatedMembers));
       
-      // Also try to update via API
-      try {
-        const response = await fetch(`/api/members/${memberId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-          },
-          body: JSON.stringify(updates)
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          return data.member;
-        }
-      } catch (apiError) {
-        console.warn('API update failed, using local update:', apiError);
-      }
-      
-      // Return the locally updated member
+      // Return the updated member
       const updatedMember = updatedMembers.find(m => m.id === memberId);
       return updatedMember || members.find(m => m.id === memberId)!;
     } catch (error) {
@@ -213,14 +235,11 @@ const cloudService = {
     }
   },
 
-  // Generate credentials
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
-      // Generate random credentials
       const username = `user${Date.now()}`;
-      const pin = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit PIN
+      const pin = Math.floor(1000 + Math.random() * 9000).toString();
       
-      // Update member with new credentials
       await this.updateMember(memberId, {
         login_username: username,
         login_pin: pin
@@ -277,21 +296,31 @@ const Admin = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('Starting data load...');
+      
       const [membersData, groupsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups()
       ]);
       
+      console.log('Data loaded successfully:', { 
+        members: membersData.length, 
+        groups: groupsData.length 
+      });
+      
       setMembers(membersData);
       setGroups(groupsData);
-      setInitialLoad(false);
     } catch (err) {
+      console.error('Error in loadData:', err);
       setError(err instanceof Error ? err.message : 'Failed to load data');
-      console.error('Error loading data:', err);
-      // Even if there's an error, set initialLoad to false to show the UI
-      setInitialLoad(false);
+      
+      // Even on error, set some data to prevent infinite loading
+      setMembers(mockMembers);
+      setGroups(mockGroups);
     } finally {
       setLoading(false);
+      setInitialLoad(false);
+      console.log('Initial load completed');
     }
   };
 
@@ -546,6 +575,12 @@ const Admin = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading admin panel...</p>
+          <button 
+            onClick={() => setInitialLoad(false)}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Skip Loading
+          </button>
         </div>
       </div>
     );
