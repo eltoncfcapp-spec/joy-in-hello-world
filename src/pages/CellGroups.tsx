@@ -94,7 +94,9 @@ const CellGroups = () => {
       const userHasAccess = profile.isAdmin || 
         hasPermission(profile.permissions, 'admin_access') ||
         hasPermission(profile.permissions, 'manage_groups') ||
-        (profile.assigned_groups && profile.assigned_groups.length > 0);
+        (profile.assigned_groups && profile.assigned_groups.length > 0) ||
+        // Users can access if they are members of any group
+        await checkUserGroupMembership();
       
       setHasAccess(userHasAccess);
 
@@ -108,8 +110,27 @@ const CellGroups = () => {
     checkAccessAndLoadData();
   }, [profile]);
 
+  // Check if user is a member of any cell group
+  const checkUserGroupMembership = async (): Promise<boolean> => {
+    if (!profile) return false;
+    
+    try {
+      const { data, error } = await supabase
+        .from('cell_group_members')
+        .select('cell_group_id')
+        .eq('member_id', profile.id)
+        .limit(1);
+
+      if (error) throw error;
+      return (data && data.length > 0) || false;
+    } catch (error) {
+      console.error('Error checking group membership:', error);
+      return false;
+    }
+  };
+
   // Filter cell groups based on user permissions
-  const getFilteredCellGroups = () => {
+  const getFilteredCellGroups = async () => {
     if (!profile) return [];
 
     // Admin users can see all cell groups
@@ -117,17 +138,29 @@ const CellGroups = () => {
       return allCellGroups;
     }
 
+    let userGroups: CellGroup[] = [];
+
     // Group leaders can only see their assigned groups
     if (profile.assigned_groups && profile.assigned_groups.length > 0) {
-      return allCellGroups.filter(group => 
-        profile.assigned_groups?.includes(group.name)
+      userGroups = allCellGroups.filter(group => 
+        profile.assigned_groups?.some(assignedGroup => 
+          assignedGroup.toLowerCase() === group.name.toLowerCase()
+        )
       );
     }
 
-    // Regular users with group access can see groups they are members of
-    return allCellGroups.filter(group => 
+    // Also include groups where user is a member (if not already included)
+    const userMemberGroups = allCellGroups.filter(group => 
       group.members?.some(member => member.member_id === profile.id)
     );
+
+    // Merge and remove duplicates
+    const allUserGroups = [...userGroups, ...userMemberGroups];
+    const uniqueGroups = allUserGroups.filter((group, index, self) => 
+      index === self.findIndex(g => g.id === group.id)
+    );
+
+    return uniqueGroups;
   };
 
   const loadData = async () => {
@@ -168,7 +201,7 @@ const CellGroups = () => {
       setAllCellGroups(cellGroupsData);
       
       // Apply filtering based on user permissions
-      const filtered = getFilteredCellGroups();
+      const filtered = await getFilteredCellGroups();
       setCellGroups(filtered);
     } catch (error) {
       console.error('Error fetching cell groups:', error);
@@ -212,7 +245,7 @@ const CellGroups = () => {
     }
   };
 
-  // Check if user can manage cell group
+  // Check if user can manage cell group - FIXED LOGIC
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -221,15 +254,27 @@ const CellGroups = () => {
       return true;
     }
 
-    // Group leaders can manage their assigned groups
-    if (profile.assigned_groups && profile.assigned_groups.includes(group.name)) {
+    // Check if user has explicit manage_groups permission
+    if (hasPermission(profile.permissions, 'manage_groups')) {
       return true;
     }
 
+    // Group leaders can manage their assigned groups
+    if (profile.assigned_groups && profile.assigned_groups.length > 0) {
+      const canManage = profile.assigned_groups.some(assignedGroup => 
+        assignedGroup.toLowerCase() === group.name.toLowerCase()
+      );
+      if (canManage) return true;
+    }
+
     // Users can manage groups they are leaders of
-    if (group.members?.some(member => 
+    const isGroupLeader = group.members?.some(member => 
       member.member_id === profile.id && member.role === 'leader'
-    )) {
+    );
+    if (isGroupLeader) return true;
+
+    // Check if user is the leader of this group (from leader_id)
+    if (group.leader_id === profile.id) {
       return true;
     }
 
@@ -246,14 +291,16 @@ const CellGroups = () => {
     }
 
     // Group leaders can view their assigned groups
-    if (profile.assigned_groups && profile.assigned_groups.includes(group.name)) {
-      return true;
+    if (profile.assigned_groups && profile.assigned_groups.length > 0) {
+      const canView = profile.assigned_groups.some(assignedGroup => 
+        assignedGroup.toLowerCase() === group.name.toLowerCase()
+      );
+      if (canView) return true;
     }
 
     // Users can view groups they are members of
-    if (group.members?.some(member => member.member_id === profile.id)) {
-      return true;
-    }
+    const isMember = group.members?.some(member => member.member_id === profile.id);
+    if (isMember) return true;
 
     return false;
   };
@@ -351,7 +398,8 @@ const CellGroups = () => {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    if (!canManageGroup(cellGroups.find(g => g.id === groupId)!)) {
+    const groupToDelete = cellGroups.find(g => g.id === groupId);
+    if (!groupToDelete || !canManageGroup(groupToDelete)) {
       setError('You do not have permission to delete this cell group');
       return;
     }
@@ -702,79 +750,90 @@ const CellGroups = () => {
               )}
             </div>
           ) : (
-            cellGroups.map((group) => (
-              <div
-                key={group.id}
-                className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
-              >
-                <div className="flex items-start gap-4 mb-4">
-                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
-                    <Users className="h-7 w-7 text-white" />
+            cellGroups.map((group) => {
+              const canManage = canManageGroup(group);
+              const canView = canViewGroup(group);
+              
+              return (
+                <div
+                  key={group.id}
+                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+                >
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+                      <Users className="h-7 w-7 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
+                      {!canManage && canView && (
+                        <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium mb-2">
+                          <Shield className="h-3 w-3 mr-1" />
+                          View Only
+                        </span>
+                      )}
+                      {group.location && (
+                        <span className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium mb-2">
+                          {group.location}
+                        </span>
+                      )}
+                      {group.meeting_day && (
+                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
+                          <Calendar className="h-4 w-4" />
+                          Meets on {group.meeting_day}s
+                          {group.meeting_time && ` at ${group.meeting_time}`}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
-                    {group.location && (
-                      <span className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium mb-2">
-                        {group.location}
+
+                  <div className="space-y-3 mb-4">
+                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                      <User className="h-4 w-4" />
+                      <span className="text-sm">
+                        Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'Not assigned'}
                       </span>
-                    )}
-                    {group.meeting_day && (
-                      <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
-                        <Calendar className="h-4 w-4" />
-                        Meets on {group.meeting_day}s
-                        {group.meeting_time && ` at ${group.meeting_time}`}
-                      </div>
+                    </div>
+                    {group.description && (
+                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                        {group.description}
+                      </p>
                     )}
                   </div>
-                </div>
 
-                <div className="space-y-3 mb-4">
-                  <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                    <User className="h-4 w-4" />
-                    <span className="text-sm">
-                      Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'Not assigned'}
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {group.members?.length || 0} members
                     </span>
-                  </div>
-                  {group.description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                      {group.description}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    {group.members?.length || 0} members
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => openMembersModal(group)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                    >
-                      View Members
-                    </button>
-                    {canManageGroup(group) && (
-                      <>
-                        <button
-                          onClick={() => openEditForm(group)}
-                          className="p-2 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                          title="Edit group"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGroup(group.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                          title="Delete group"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </>
-                    )}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openMembersModal(group)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                      >
+                        View Members
+                      </button>
+                      {canManage && (
+                        <>
+                          <button
+                            onClick={() => openEditForm(group)}
+                            className="p-2 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                            title="Edit group"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteGroup(group.id)}
+                            className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                            title="Delete group"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
