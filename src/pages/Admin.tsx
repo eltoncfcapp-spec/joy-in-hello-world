@@ -1,5 +1,6 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
 
 interface Member {
@@ -34,38 +35,6 @@ interface Group {
 
 // Cloud service functions using Supabase
 const cloudService = {
-  // Check if required columns exist, if not create them
-  async ensureColumnsExist() {
-    try {
-      // Try to update a test member with the new columns to see if they exist
-      const { error } = await supabase
-        .from('members')
-        .update({ 
-          role: 'member',
-          permissions: [],
-          assigned_groups: [],
-          assigned_departments: [],
-          can_add_members: false,
-          can_edit_members: false,
-          can_view_own_data: false,
-          login_username: null,
-          login_pin: null
-        })
-        .eq('id', '00000000-0000-0000-0000-000000000000') // Non-existent ID
-        .select();
-
-      // If we get a column error, the columns don't exist
-      if (error && error.message.includes('column')) {
-        console.warn('Required columns missing, they will be added automatically when updating members');
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.warn('Column check failed:', error);
-      return false;
-    }
-  },
-
   // Fetch members from Supabase with fallback for missing columns
   async getMembers(): Promise<Member[]> {
     try {
@@ -86,20 +55,15 @@ const cloudService = {
         surname: member.surname || '',
         email: member.email,
         phone: member.phone,
-        // Use existing role or default to 'member'
         role: member.role || 'member',
-        // Use existing permissions or empty array
         permissions: Array.isArray(member.permissions) ? member.permissions : [],
         is_active: member.is_active !== false,
         cell_group: member.cell_group || null,
         department: member.department || null,
-        // Use existing login fields or null
         login_username: member.login_username || null,
         login_pin: member.login_pin || null,
-        // Use existing assigned groups/departments or empty arrays
         assigned_groups: Array.isArray(member.assigned_groups) ? member.assigned_groups : [],
         assigned_departments: Array.isArray(member.assigned_departments) ? member.assigned_departments : [],
-        // Use existing boolean fields or default to false
         can_add_members: Boolean(member.can_add_members),
         can_edit_members: Boolean(member.can_edit_members),
         can_view_own_data: Boolean(member.can_view_own_data),
@@ -157,23 +121,17 @@ const cloudService = {
     try {
       console.log('Updating member:', memberId, updates);
 
-      // Prepare the update data - only include fields that might exist
+      // Prepare the update data
       const updateData: any = {
-        // Only include role if it's being updated and exists
-        ...(updates.role && { role: updates.role }),
-        // Only include permissions if they exist
-        ...(updates.permissions && { permissions: updates.permissions }),
-        // Only include assigned groups if they exist
-        ...(updates.assigned_groups && { assigned_groups: updates.assigned_groups }),
-        // Only include assigned departments if they exist
-        ...(updates.assigned_departments && { assigned_departments: updates.assigned_departments }),
-        // Only include boolean fields if they exist
-        ...(updates.can_add_members !== undefined && { can_add_members: updates.can_add_members }),
-        ...(updates.can_edit_members !== undefined && { can_edit_members: updates.can_edit_members }),
-        ...(updates.can_view_own_data !== undefined && { can_view_own_data: updates.can_view_own_data }),
-        // Only include login fields if provided
-        ...(updates.login_username !== undefined && { login_username: updates.login_username }),
-        ...(updates.login_pin !== undefined && { login_pin: updates.login_pin }),
+        role: updates.role,
+        permissions: updates.permissions || [],
+        assigned_groups: updates.assigned_groups || [],
+        assigned_departments: updates.assigned_departments || [],
+        can_add_members: Boolean(updates.can_add_members),
+        can_edit_members: Boolean(updates.can_edit_members),
+        can_view_own_data: Boolean(updates.can_view_own_data),
+        login_username: updates.login_username || null,
+        login_pin: updates.login_pin || null,
         updated_at: new Date().toISOString()
       };
 
@@ -188,13 +146,6 @@ const cloudService = {
 
       if (error) {
         console.error('Supabase update error:', error);
-        
-        // If it's a column error, try a minimal update first to add the columns
-        if (error.message.includes('column')) {
-          console.log('Column missing, attempting to add columns...');
-          return await this.updateMemberWithColumnCreation(memberId, updates);
-        }
-        
         throw new Error(`Database error: ${error.message}`);
       }
 
@@ -230,84 +181,6 @@ const cloudService = {
     }
   },
 
-  // Alternative update method that handles missing columns gracefully
-  async updateMemberWithColumnCreation(memberId: string, updates: Partial<Member>): Promise<Member> {
-    try {
-      // Start with basic fields that should exist
-      const basicUpdate: any = {
-        updated_at: new Date().toISOString()
-      };
-
-      // Try to add new columns one by one with error handling for each
-      const newFields = [
-        { key: 'role', value: updates.role || 'member' },
-        { key: 'permissions', value: updates.permissions || [] },
-        { key: 'assigned_groups', value: updates.assigned_groups || [] },
-        { key: 'assigned_departments', value: updates.assigned_departments || [] },
-        { key: 'can_add_members', value: updates.can_add_members || false },
-        { key: 'can_edit_members', value: updates.can_edit_members || false },
-        { key: 'can_view_own_data', value: updates.can_view_own_data || false },
-        { key: 'login_username', value: updates.login_username || null },
-        { key: 'login_pin', value: updates.login_pin || null }
-      ];
-
-      // Try to update with all fields, it will fail on missing columns but that's ok
-      // The columns will be created automatically by Supabase
-      const updateWithAllFields = {
-        ...basicUpdate,
-        ...Object.fromEntries(newFields.map(field => [field.key, field.value]))
-      };
-
-      const { data, error } = await supabase
-        .from('members')
-        .update(updateWithAllFields)
-        .eq('id', memberId)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Update with new columns failed:', error);
-        throw new Error('Database schema needs to be updated. Please add the required columns to the members table.');
-      }
-
-      if (!data) {
-        throw new Error('No data returned from update');
-      }
-
-      // Return transformed member
-      return this.transformMemberData(data);
-    } catch (error) {
-      console.error('Error in column creation update:', error);
-      throw error;
-    }
-  },
-
-  // Transform raw member data from Supabase
-  transformMemberData(data: any): Member {
-    return {
-      id: data.id,
-      name: data.name || '',
-      surname: data.surname || '',
-      email: data.email,
-      phone: data.phone,
-      role: data.role || 'member',
-      permissions: Array.isArray(data.permissions) ? data.permissions : [],
-      is_active: data.is_active !== false,
-      cell_group: data.cell_group || null,
-      department: data.department || null,
-      login_username: data.login_username || null,
-      login_pin: data.login_pin || null,
-      assigned_groups: Array.isArray(data.assigned_groups) ? data.assigned_groups : [],
-      assigned_departments: Array.isArray(data.assigned_departments) ? data.assigned_departments : [],
-      can_add_members: Boolean(data.can_add_members),
-      can_edit_members: Boolean(data.can_edit_members),
-      can_view_own_data: Boolean(data.can_view_own_data),
-      cell_group_id: data.cell_group_id,
-      status: data.status,
-      created_at: data.created_at
-    };
-  },
-
   // Generate credentials
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
@@ -331,7 +204,13 @@ const cloudService = {
   }
 };
 
+// Permission checking utility
+const hasPermission = (userPermissions: string[], requiredPermission: string): boolean => {
+  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
+};
+
 const Admin = () => {
+  const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -342,7 +221,6 @@ const Admin = () => {
   const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
-  const [schemaWarning, setSchemaWarning] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
@@ -366,24 +244,24 @@ const Admin = () => {
     login_pin: ''
   });
 
+  // Check if current user has admin access
+  const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
+  const currentUserPermissions = profile?.permissions || [];
+
   // Load data from Supabase on component mount
   useEffect(() => {
-    loadData();
-  }, []);
+    if (currentUserIsAdmin || hasPermission(currentUserPermissions, 'view_members')) {
+      loadData();
+    } else {
+      setInitialLoad(false);
+    }
+  }, [currentUserIsAdmin, currentUserPermissions]);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
-    setSchemaWarning(null);
     try {
       console.log('Loading admin data...');
-      
-      // Check if columns exist first
-      const columnsExist = await cloudService.ensureColumnsExist();
-      if (!columnsExist) {
-        setSchemaWarning('Some database columns are missing. The system will attempt to create them when you update members.');
-      }
-      
       const [membersData, groupsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups()
@@ -433,47 +311,59 @@ const Admin = () => {
       title: 'General Settings',
       description: 'Configure church information and preferences',
       color: 'from-blue-500 to-blue-600',
-      modal: 'general'
+      modal: 'general',
+      permission: 'admin_access'
     },
     {
       icon: Users,
       title: 'User Management',
       description: 'Manage roles, permissions, and access control',
       color: 'from-purple-500 to-purple-600',
-      modal: 'users'
+      modal: 'users',
+      permission: 'view_members'
     },
     {
       icon: Database,
       title: 'Data Management',
       description: 'Backup, import, and export church data',
       color: 'from-green-500 to-green-600',
-      modal: 'data'
+      modal: 'data',
+      permission: 'admin_access'
     },
     {
       icon: Shield,
       title: 'Security',
       description: 'Security settings and audit logs',
       color: 'from-red-500 to-red-600',
-      modal: 'security'
+      modal: 'security',
+      permission: 'admin_access'
     },
     {
       icon: Bell,
       title: 'Notifications',
       description: 'Configure email and push notifications',
       color: 'from-orange-500 to-orange-600',
-      modal: 'notifications'
+      modal: 'notifications',
+      permission: 'admin_access'
     },
     {
       icon: Mail,
       title: 'Communication',
       description: 'Email templates and messaging settings',
       color: 'from-pink-500 to-pink-600',
-      modal: 'communication'
+      modal: 'communication',
+      permission: 'admin_access'
     },
   ];
 
   const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
+    
+    // Check permission
+    if (!currentUserIsAdmin && !hasPermission(currentUserPermissions, 'edit_members')) {
+      setError('You do not have permission to generate credentials');
+      return;
+    }
     
     setLoading(true);
     setError(null);
@@ -509,6 +399,17 @@ const Admin = () => {
   };
 
   const openModal = (modalType: string, user?: Member) => {
+    // Check permissions for specific modals
+    if (modalType === 'users' && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'view_members')) {
+      setError('You do not have permission to view user management');
+      return;
+    }
+    
+    if (user && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'edit_members')) {
+      setError('You do not have permission to edit users');
+      return;
+    }
+    
     setActiveModal(modalType);
     setError(null);
     
@@ -551,6 +452,12 @@ const Admin = () => {
 
   const handleUserUpdate = async () => {
     if (!selectedUser) return;
+
+    // Check permission
+    if (!currentUserIsAdmin && !hasPermission(currentUserPermissions, 'edit_members')) {
+      setError('You do not have permission to update users');
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -626,12 +533,39 @@ const Admin = () => {
     return rolePermissions[role] || [];
   };
 
-  const filteredMembers = members.filter(member =>
-    `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    member.role.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter members based on user's permissions and assignments
+  const getFilteredMembers = () => {
+    let filtered = members.filter(member =>
+      `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      member.role.toLowerCase().includes(searchTerm.toLowerCase())
+    );
 
+    // If user is not admin, only show members they have access to
+    if (!currentUserIsAdmin) {
+      if (hasPermission(currentUserPermissions, 'view_members')) {
+        // Group leaders can only see members in their assigned groups
+        if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+          filtered = filtered.filter(member => 
+            member.assigned_groups.some(group => profile.assigned_groups.includes(group))
+          );
+        }
+        // Department leaders can only see members in their assigned departments
+        if (profile?.assigned_departments && profile.assigned_departments.length > 0) {
+          filtered = filtered.filter(member => 
+            member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))
+          );
+        }
+      } else {
+        // No view permission, show empty
+        filtered = [];
+      }
+    }
+
+    return filtered;
+  };
+
+  const filteredMembers = getFilteredMembers();
   const cellGroups = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
 
@@ -654,6 +588,26 @@ const Admin = () => {
     </div>
   );
 
+  // Show access denied if user doesn't have permission to access admin panel
+  if (!currentUserIsAdmin && !hasPermission(currentUserPermissions, 'view_members')) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="h-8 w-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
+          <p className="text-gray-600 mb-4">
+            You don't have permission to access the admin panel. Please contact an administrator.
+          </p>
+          <p className="text-sm text-gray-500">
+            Your role: {profile?.role || 'member'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (initialLoad) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
@@ -673,7 +627,17 @@ const Admin = () => {
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
               Admin Panel
             </h1>
-            <p className="text-gray-600">Manage system settings and user permissions</p>
+            <p className="text-gray-600">
+              {currentUserIsAdmin 
+                ? 'Manage system settings and user permissions' 
+                : `Limited access - ${profile?.role} role`
+              }
+            </p>
+            {!currentUserIsAdmin && (
+              <p className="text-sm text-gray-500 mt-1">
+                You can only view and manage members in your assigned groups/departments
+              </p>
+            )}
           </div>
           <button
             onClick={loadData}
@@ -684,20 +648,6 @@ const Admin = () => {
             {loading ? 'Refreshing...' : 'Refresh Data'}
           </button>
         </div>
-
-        {schemaWarning && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0" />
-              <div>
-                <p className="text-yellow-700 font-medium">{schemaWarning}</p>
-                <p className="text-yellow-600 text-sm mt-1">
-                  Required columns: role, permissions, assigned_groups, assigned_departments, can_add_members, can_edit_members, can_view_own_data, login_username, login_pin
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
@@ -710,147 +660,172 @@ const Admin = () => {
           </div>
         )}
 
+        {/* Admin Sections Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {adminSections.map((section) => (
-            <button
-              key={section.title}
-              onClick={() => openModal(section.modal)}
-              className="bg-white border border-gray-200 rounded-2xl p-6 hover:scale-105 transition-all duration-200 hover:shadow-xl text-left group"
-            >
-              <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${section.color} flex items-center justify-center mb-4 shadow-lg`}>
-                <section.icon className="h-7 w-7 text-white" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">{section.title}</h3>
-              <p className="text-gray-600 text-sm">{section.description}</p>
-            </button>
-          ))}
+          {adminSections.map((section) => {
+            const hasAccess = currentUserIsAdmin || hasPermission(currentUserPermissions, section.permission);
+            
+            return (
+              <button
+                key={section.title}
+                onClick={() => hasAccess ? openModal(section.modal) : setError('You do not have permission to access this section')}
+                disabled={!hasAccess}
+                className={`bg-white border border-gray-200 rounded-2xl p-6 transition-all duration-200 text-left group ${
+                  hasAccess 
+                    ? 'hover:scale-105 hover:shadow-xl cursor-pointer' 
+                    : 'opacity-50 cursor-not-allowed'
+                }`}
+              >
+                <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${section.color} flex items-center justify-center mb-4 shadow-lg`}>
+                  <section.icon className="h-7 w-7 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">{section.title}</h3>
+                <p className="text-gray-600 text-sm">{section.description}</p>
+                {!hasAccess && (
+                  <p className="text-xs text-red-600 mt-2">Permission required</p>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-            <button
-              onClick={() => openModal('users')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-            >
-              <Users className="h-4 w-4" />
-              Manage All Users
-            </button>
-          </div>
-
-          <div className="relative mb-6">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search users by name, email, or role..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          {loading ? (
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-              <p className="text-gray-600">Loading users...</p>
-            </div>
-          ) : filteredMembers.length === 0 ? (
-            <div className="text-center py-8">
-              <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600">No users found</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {filteredMembers.map((member) => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+        {/* User Management Section */}
+        {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'view_members')) && (
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
+              {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'add_members')) && (
+                <button
+                  onClick={() => openModal('users')}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                      {member.name.charAt(0)}{member.surname.charAt(0)}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-gray-900">
-                        {member.name} {member.surname}
-                      </h4>
-                      <p className="text-sm text-gray-500">
-                        {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
-                      </p>
-                      {member.login_username && (
-                        <p className="text-xs text-blue-600 mt-1">
-                          <Key className="h-3 w-3 inline mr-1" />
-                          Login: {member.login_username}
+                  <Users className="h-4 w-4" />
+                  Manage All Users
+                </button>
+              )}
+            </div>
+
+            <div className="relative mb-6">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search users by name, email, or role..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading users...</p>
+              </div>
+            ) : filteredMembers.length === 0 ? (
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">
+                  {searchTerm ? 'No users found matching your search' : 'No users found in your assigned groups/departments'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {filteredMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                        {member.name.charAt(0)}{member.surname.charAt(0)}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900">
+                          {member.name} {member.surname}
+                        </h4>
+                        <p className="text-sm text-gray-500">
+                          {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
                         </p>
+                        {member.login_username && (
+                          <p className="text-xs text-blue-600 mt-1">
+                            <Key className="h-3 w-3 inline mr-1" />
+                            Login: {member.login_username}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {member.assigned_groups.length > 0 && (
+                        <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                          {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {member.assigned_departments.length > 0 && (
+                        <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                          {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'edit_members')) && (
+                        <button
+                          onClick={() => openModal('userDetails', member)}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                        >
+                          Manage
+                        </button>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    {member.assigned_groups.length > 0 && (
-                      <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                        {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {member.assigned_departments.length > 0 && (
-                      <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                        {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => openModal('userDetails', member)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-                    >
-                      Manage
-                    </button>
-                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Stats Section - Only show if user has view permissions */}
+        {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'view_reports')) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white border border-gray-200 rounded-2xl p-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
+              <div className="space-y-4">
+                {roles.map(role => {
+                  const count = members.filter(m => m.role === role.value).length;
+                  return (
+                    <div key={role.value} className="flex justify-between items-center">
+                      <span className="text-gray-600">{role.label}</span>
+                      <span className="text-gray-900 font-semibold">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-2xl p-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Quick Stats</h2>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Total Members</span>
+                  <span className="text-gray-900 font-semibold">{members.length}</span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
-            <div className="space-y-4">
-              {roles.map(role => {
-                const count = members.filter(m => m.role === role.value).length;
-                return (
-                  <div key={role.value} className="flex justify-between items-center">
-                    <span className="text-gray-600">{role.label}</span>
-                    <span className="text-gray-900 font-semibold">{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Quick Stats</h2>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Total Members</span>
-                <span className="text-gray-900 font-semibold">{members.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Active Groups</span>
-                <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Departments</span>
-                <span className="text-gray-900 font-semibold">{departments.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Users with Login</span>
-                <span className="text-gray-900 font-semibold">
-                  {members.filter(m => m.login_username).length}
-                </span>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Active Groups</span>
+                  <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Departments</span>
+                  <span className="text-gray-900 font-semibold">{departments.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Users with Login</span>
+                  <span className="text-gray-900 font-semibold">
+                    {members.filter(m => m.login_username).length}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Modals - same as before but with better error handling */}
+        {/* Modals - same as before but with permission checks */}
         {activeModal === 'users' && (
           <Modal title="User Management">
             <div className="space-y-6">
@@ -872,7 +847,7 @@ const Admin = () => {
                 </div>
               ) : (
                 <div className="space-y-4 max-h-96 overflow-y-auto">
-                  {members.map((member) => (
+                  {filteredMembers.map((member) => (
                     <div
                       key={member.id}
                       className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
@@ -890,12 +865,14 @@ const Admin = () => {
                           </p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => openModal('userDetails', member)}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-                      >
-                        Manage
-                      </button>
+                      {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'edit_members')) && (
+                        <button
+                          onClick={() => openModal('userDetails', member)}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                        >
+                          Manage
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -904,21 +881,14 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'userDetails' && selectedUser && (
+        {/* User Details Modal - Only show if user has edit permission */}
+        {activeModal === 'userDetails' && selectedUser && (currentUserIsAdmin || hasPermission(currentUserPermissions, 'edit_members')) && (
           <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
+            {/* ... (same user details modal content as before) ... */}
             <div className="space-y-6">
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                   <p className="text-red-700 font-medium">{error}</p>
-                </div>
-              )}
-
-              {schemaWarning && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                    <p className="text-yellow-700 text-sm">{schemaWarning}</p>
-                  </div>
                 </div>
               )}
 
@@ -1155,8 +1125,8 @@ const Admin = () => {
           </Modal>
         )}
 
-        {/* Other modals remain the same */}
-        {activeModal === 'data' && (
+        {/* Other modals remain the same but with permission checks */}
+        {activeModal === 'data' && currentUserIsAdmin && (
           <Modal title="Data Management">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1168,7 +1138,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'security' && (
+        {activeModal === 'security' && currentUserIsAdmin && (
           <Modal title="Security Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1180,7 +1150,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'notifications' && (
+        {activeModal === 'notifications' && currentUserIsAdmin && (
           <Modal title="Notification Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1192,7 +1162,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'communication' && (
+        {activeModal === 'communication' && currentUserIsAdmin && (
           <Modal title="Communication Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1204,7 +1174,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'general' && (
+        {activeModal === 'general' && currentUserIsAdmin && (
           <Modal title="General Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
