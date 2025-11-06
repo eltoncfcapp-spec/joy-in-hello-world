@@ -2,10 +2,51 @@ import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, A
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+interface CellGroup {
+  id: string;
+  name: string;
+  location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  leader_id: string | null;
+  leader?: { 
+    id: string;
+    name: string; 
+    surname: string;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  members?: CellGroupMember[];
+  description?: string | null;
+  created_at?: string;
+}
 
-interface CellGroup { /* ... your existing interface ... */ }
-interface CellGroupMember { /* ... your existing interface ... */ }
-interface Member { /* ... your existing interface ... */ }
+interface CellGroupMember {
+  id: string;
+  cell_group_id: string;
+  member_id: string;
+  role: 'leader' | 'member' | 'assistant';
+  assigned_at: string;
+  member?: {
+    id: string;
+    name: string;
+    surname: string;
+    email: string | null;
+    phone: string | null;
+  };
+}
+
+interface Member {
+  id: string;
+  name: string;
+  surname: string;
+  email: string | null;
+  phone: string | null;
+  role?: string;
+  permissions?: string[];
+  assigned_groups?: string[];
+  assigned_departments?: string[];
+}
 
 // Helper permission function
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
