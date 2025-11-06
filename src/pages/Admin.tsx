@@ -35,7 +35,6 @@ interface Group {
 
 // Cloud service functions using Supabase
 const cloudService = {
-  // Fetch members from Supabase with fallback for missing columns
   async getMembers(): Promise<Member[]> {
     try {
       const { data, error } = await supabase
@@ -79,7 +78,6 @@ const cloudService = {
     }
   },
 
-  // Fetch groups from Supabase
   async getGroups(): Promise<Group[]> {
     try {
       // Get cell groups
@@ -116,7 +114,6 @@ const cloudService = {
     }
   },
 
-  // Update member in Supabase with safe column handling
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
       console.log('Updating member:', memberId, updates);
@@ -181,7 +178,6 @@ const cloudService = {
     }
   },
 
-  // Generate credentials
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
       // Generate random credentials
@@ -205,7 +201,7 @@ const cloudService = {
 };
 
 // Permission checking utility
-const hasPermission = (userPermissions: string[], requiredPermission: string): boolean => {
+const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
@@ -221,6 +217,7 @@ const Admin = () => {
   const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
@@ -244,18 +241,28 @@ const Admin = () => {
     login_pin: ''
   });
 
-  // Check if current user has admin access
-  const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
-  const currentUserPermissions = profile?.permissions || [];
-
-  // Load data from Supabase on component mount
+  // Check permissions and load data
   useEffect(() => {
-    if (currentUserIsAdmin || hasPermission(currentUserPermissions, 'view_members')) {
-      loadData();
-    } else {
-      setInitialLoad(false);
-    }
-  }, [currentUserIsAdmin, currentUserPermissions]);
+    const checkAccessAndLoadData = async () => {
+      if (!profile) {
+        setHasAccess(false);
+        setInitialLoad(false);
+        return;
+      }
+
+      // Check if user has access to admin panel
+      const userHasAccess = profile.isAdmin || hasPermission(profile.permissions, 'view_members');
+      setHasAccess(userHasAccess);
+
+      if (userHasAccess) {
+        await loadData();
+      } else {
+        setInitialLoad(false);
+      }
+    };
+
+    checkAccessAndLoadData();
+  }, [profile]);
 
   const loadData = async () => {
     setLoading(true);
@@ -270,14 +277,13 @@ const Admin = () => {
       console.log('Data loaded:', { members: membersData.length, groups: groupsData.length });
       setMembers(membersData);
       setGroups(groupsData);
-      setInitialLoad(false);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
       setError(errorMessage);
       console.error('Error loading data:', err);
-      setInitialLoad(false);
     } finally {
       setLoading(false);
+      setInitialLoad(false);
     }
   };
 
@@ -360,7 +366,7 @@ const Admin = () => {
     if (!selectedUser) return;
     
     // Check permission
-    if (!currentUserIsAdmin && !hasPermission(currentUserPermissions, 'edit_members')) {
+    if (!profile?.isAdmin && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to generate credentials');
       return;
     }
@@ -400,12 +406,12 @@ const Admin = () => {
 
   const openModal = (modalType: string, user?: Member) => {
     // Check permissions for specific modals
-    if (modalType === 'users' && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'view_members')) {
+    if (modalType === 'users' && !profile?.isAdmin && !hasPermission(profile?.permissions, 'view_members')) {
       setError('You do not have permission to view user management');
       return;
     }
     
-    if (user && !currentUserIsAdmin && !hasPermission(currentUserPermissions, 'edit_members')) {
+    if (user && !profile?.isAdmin && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to edit users');
       return;
     }
@@ -454,7 +460,7 @@ const Admin = () => {
     if (!selectedUser) return;
 
     // Check permission
-    if (!currentUserIsAdmin && !hasPermission(currentUserPermissions, 'edit_members')) {
+    if (!profile?.isAdmin && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to update users');
       return;
     }
@@ -542,8 +548,8 @@ const Admin = () => {
     );
 
     // If user is not admin, only show members they have access to
-    if (!currentUserIsAdmin) {
-      if (hasPermission(currentUserPermissions, 'view_members')) {
+    if (!profile?.isAdmin) {
+      if (hasPermission(profile?.permissions, 'view_members')) {
         // Group leaders can only see members in their assigned groups
         if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
           filtered = filtered.filter(member => 
@@ -588,8 +594,20 @@ const Admin = () => {
     </div>
   );
 
+  // Show loading while checking permissions
+  if (initialLoad) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Checking permissions...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Show access denied if user doesn't have permission to access admin panel
-  if (!currentUserIsAdmin && !hasPermission(currentUserPermissions, 'view_members')) {
+  if (hasAccess === false) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
         <div className="text-center max-w-md">
@@ -608,17 +626,6 @@ const Admin = () => {
     );
   }
 
-  if (initialLoad) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading admin panel...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
@@ -628,12 +635,12 @@ const Admin = () => {
               Admin Panel
             </h1>
             <p className="text-gray-600">
-              {currentUserIsAdmin 
+              {profile?.isAdmin 
                 ? 'Manage system settings and user permissions' 
                 : `Limited access - ${profile?.role} role`
               }
             </p>
-            {!currentUserIsAdmin && (
+            {!profile?.isAdmin && (
               <p className="text-sm text-gray-500 mt-1">
                 You can only view and manage members in your assigned groups/departments
               </p>
@@ -663,15 +670,15 @@ const Admin = () => {
         {/* Admin Sections Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
-            const hasAccess = currentUserIsAdmin || hasPermission(currentUserPermissions, section.permission);
+            const sectionHasAccess = profile?.isAdmin || hasPermission(profile?.permissions, section.permission);
             
             return (
               <button
                 key={section.title}
-                onClick={() => hasAccess ? openModal(section.modal) : setError('You do not have permission to access this section')}
-                disabled={!hasAccess}
+                onClick={() => sectionHasAccess ? openModal(section.modal) : setError('You do not have permission to access this section')}
+                disabled={!sectionHasAccess}
                 className={`bg-white border border-gray-200 rounded-2xl p-6 transition-all duration-200 text-left group ${
-                  hasAccess 
+                  sectionHasAccess 
                     ? 'hover:scale-105 hover:shadow-xl cursor-pointer' 
                     : 'opacity-50 cursor-not-allowed'
                 }`}
@@ -681,7 +688,7 @@ const Admin = () => {
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-2">{section.title}</h3>
                 <p className="text-gray-600 text-sm">{section.description}</p>
-                {!hasAccess && (
+                {!sectionHasAccess && (
                   <p className="text-xs text-red-600 mt-2">Permission required</p>
                 )}
               </button>
@@ -690,11 +697,11 @@ const Admin = () => {
         </div>
 
         {/* User Management Section */}
-        {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'view_members')) && (
+        {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_members')) && (
           <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-              {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'add_members')) && (
+              {(profile?.isAdmin || hasPermission(profile?.permissions, 'add_members')) && (
                 <button
                   onClick={() => openModal('users')}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -765,7 +772,7 @@ const Admin = () => {
                           {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
                         </span>
                       )}
-                      {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'edit_members')) && (
+                      {(profile?.isAdmin || hasPermission(profile?.permissions, 'edit_members')) && (
                         <button
                           onClick={() => openModal('userDetails', member)}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -782,7 +789,7 @@ const Admin = () => {
         )}
 
         {/* Stats Section - Only show if user has view permissions */}
-        {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'view_reports')) && (
+        {(profile?.isAdmin || hasPermission(profile?.permissions, 'view_reports')) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white border border-gray-200 rounded-2xl p-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
@@ -825,7 +832,7 @@ const Admin = () => {
           </div>
         )}
 
-        {/* Modals - same as before but with permission checks */}
+        {/* Modals */}
         {activeModal === 'users' && (
           <Modal title="User Management">
             <div className="space-y-6">
@@ -865,7 +872,7 @@ const Admin = () => {
                           </p>
                         </div>
                       </div>
-                      {(currentUserIsAdmin || hasPermission(currentUserPermissions, 'edit_members')) && (
+                      {(profile?.isAdmin || hasPermission(profile?.permissions, 'edit_members')) && (
                         <button
                           onClick={() => openModal('userDetails', member)}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -881,10 +888,9 @@ const Admin = () => {
           </Modal>
         )}
 
-        {/* User Details Modal - Only show if user has edit permission */}
-        {activeModal === 'userDetails' && selectedUser && (currentUserIsAdmin || hasPermission(currentUserPermissions, 'edit_members')) && (
+        {/* User Details Modal */}
+        {activeModal === 'userDetails' && selectedUser && (profile?.isAdmin || hasPermission(profile?.permissions, 'edit_members')) && (
           <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
-            {/* ... (same user details modal content as before) ... */}
             <div className="space-y-6">
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
@@ -1125,8 +1131,8 @@ const Admin = () => {
           </Modal>
         )}
 
-        {/* Other modals remain the same but with permission checks */}
-        {activeModal === 'data' && currentUserIsAdmin && (
+        {/* Other modals for admin only */}
+        {activeModal === 'data' && profile?.isAdmin && (
           <Modal title="Data Management">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1138,7 +1144,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'security' && currentUserIsAdmin && (
+        {activeModal === 'security' && profile?.isAdmin && (
           <Modal title="Security Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1150,7 +1156,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'notifications' && currentUserIsAdmin && (
+        {activeModal === 'notifications' && profile?.isAdmin && (
           <Modal title="Notification Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1162,7 +1168,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'communication' && currentUserIsAdmin && (
+        {activeModal === 'communication' && profile?.isAdmin && (
           <Modal title="Communication Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1174,7 +1180,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'general' && currentUserIsAdmin && (
+        {activeModal === 'general' && profile?.isAdmin && (
           <Modal title="General Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
