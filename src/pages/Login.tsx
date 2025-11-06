@@ -13,13 +13,12 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     // Try login with identifier and secret
-    const success = login(identifier, secret, loginMode); 
-    // Note: your AuthContext.login() should handle both email/password and username/pin
+    const success = await login(identifier, secret, loginMode);
 
     if (success) {
       navigate('/');

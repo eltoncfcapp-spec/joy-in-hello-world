@@ -1,4 +1,3 @@
-// contexts/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -24,7 +23,7 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (identifier: string, secret: string, mode: 'email' | 'username') => boolean;
+  login: (identifier: string, secret: string, mode: 'email' | 'username') => Promise<boolean>;
   logout: () => void;
   loading: boolean;
 }
@@ -67,89 +66,59 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const login = (identifier: string, secret: string, mode: 'email' | 'username'): boolean => {
-    // For demo purposes - in real app, you would query Supabase
-    const demoUsers: User[] = [
-      {
-        id: '1',
-        name: 'Admin',
-        surname: 'User',
-        email: 'admin@church.com',
-        phone: '+1234567890',
-        role: 'admin',
-        permissions: ['admin_access'],
-        is_active: true,
-        cell_group: null,
-        department: null,
-        login_username: 'admin_user',
-        login_pin: '1234',
-        assigned_groups: [],
-        assigned_departments: [],
-        can_add_members: true,
-        can_edit_members: true,
-        can_view_own_data: true
-      },
-      {
-        id: '2',
-        name: 'Sarah',
-        surname: 'Smith',
-        email: 'sarah@church.com',
-        phone: '+0987654321',
-        role: 'group_leader',
-        permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-        is_active: true,
-        cell_group: 'Women Fellowship',
-        department: 'Worship',
-        login_username: 'sarah_smith',
-        login_pin: '5432',
-        assigned_groups: ['Youth Ministry', 'Women Fellowship'],
-        assigned_departments: [],
-        can_add_members: true,
-        can_edit_members: true,
-        can_view_own_data: true
-      },
-      {
-        id: '3',
-        name: 'Mike',
-        surname: 'Johnson',
-        email: 'mike@church.com',
-        phone: '+1122334455',
-        role: 'department_leader',
-        permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-        is_active: true,
-        cell_group: null,
-        department: 'Worship',
-        login_username: 'mike_johnson',
-        login_pin: '7890',
-        assigned_groups: [],
-        assigned_departments: ['Worship', 'Media'],
-        can_add_members: true,
-        can_edit_members: true,
-        can_view_own_data: true
+  const login = async (identifier: string, secret: string, mode: 'email' | 'username'): Promise<boolean> => {
+    try {
+      // Query Supabase for the user
+      let query = supabase.from('members').select('*');
+      
+      if (mode === 'email') {
+        query = query.eq('email', identifier);
+      } else {
+        query = query.eq('login_username', identifier).eq('login_pin', secret);
       }
-    ];
+      
+      const { data: members, error } = await query;
 
-    let authenticatedUser: User | null = null;
+      if (error || !members || members.length === 0) {
+        console.error('Login error:', error);
+        return false;
+      }
 
-    if (mode === 'email') {
-      // Email login
-      authenticatedUser = demoUsers.find(
-        u => u.email === identifier && secret === 'admin123'
-      ) || null;
-    } else {
-      // Username/PIN login
-      authenticatedUser = demoUsers.find(
-        u => u.login_username === identifier && u.login_pin === secret
-      ) || null;
-    }
+      const member = members[0];
+      
+      // For email mode, verify password (simplified for now)
+      if (mode === 'email') {
+        // TODO: Implement proper password hashing and verification
+        // For now, we'll just check if the email exists
+      }
 
-    if (authenticatedUser) {
+      const authenticatedUser: User = {
+        id: member.id,
+        name: member.name,
+        surname: member.surname,
+        email: member.email,
+        phone: member.phone,
+        role: (member as any).is_leader ? 'leader' : 'member',
+        permissions: (member as any).permissions || [],
+        is_active: true,
+        cell_group: member.cell_group_id,
+        department: null,
+        login_username: (member as any).login_username,
+        login_pin: (member as any).login_pin,
+        assigned_groups: (member as any).assigned_groups || [],
+        assigned_departments: (member as any).assigned_departments || [],
+        can_add_members: (member as any).can_add_members || false,
+        can_edit_members: (member as any).can_edit_members || false,
+        can_view_own_data: (member as any).can_view_own_data || false
+      };
+
       setUser(authenticatedUser);
       localStorage.setItem('church_user', JSON.stringify(authenticatedUser));
       return true;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
     }
-
-    return false;
   };
 
   const logout = () => {

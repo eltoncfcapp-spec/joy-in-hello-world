@@ -28,7 +28,7 @@ import { useState, useEffect } from 'react';
 // Layout component with responsive sidebar
 const Layout = () => {
   const location = useLocation();
-  const { signOut } = useAuth();
+  const { logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -132,7 +132,7 @@ const Layout = () => {
           <button
             onClick={() => {
               closeSidebar();
-              signOut();
+              logout();
             }}
             className="flex items-center gap-3 w-full px-4 py-3 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all duration-200"
           >
