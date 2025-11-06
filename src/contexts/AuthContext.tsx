@@ -9,7 +9,7 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  role: 'admin' | 'group_leader' | 'member'; // CHANGED: 'leader' → 'group_leader'
+  role: 'admin' | 'group_leader' | 'member';
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
@@ -81,20 +81,45 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const fetchUserProfile = async (userId: string) => {
     try {
+      console.log('🔍 Fetching user profile for:', userId);
+      
       // First try to fetch from members table (where your data is stored)
-      const { data: memberData } = await supabase
+      const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
         .eq('id', userId)
         .single();
 
+      if (memberError) {
+        console.error('❌ Error fetching from members table:', memberError);
+      }
+
+      console.log('📊 Raw member data from database:', memberData);
+
       if (memberData) {
+        // Debug: Check what role value actually comes from database
+        console.log('🎭 Database role value:', memberData.role);
+        console.log('🔑 Database permissions:', memberData.permissions);
+        console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
+
         // Create profile from member data with ALL required fields
         const isAdmin = memberData.role === 'admin';
-        // CHANGED: Map 'leader' to 'group_leader' to match CellGroups expectations
-        const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'group_leader' : 'member';
         
-        setProfile({
+        // FIXED: Better role mapping that handles various database values
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        
+        if (isAdmin) {
+          primaryRole = 'admin';
+        } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
+          primaryRole = 'group_leader';
+        } else {
+          primaryRole = 'member';
+        }
+
+        console.log('🎯 Mapped role:', primaryRole);
+        console.log('👑 Is admin:', isAdmin);
+        
+        const userProfile: UserProfile = {
           id: userId,
           name: memberData.name || null,
           surname: memberData.surname || null,
@@ -105,34 +130,58 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           isAdmin,
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
-          // Add the missing fields with proper defaults
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
           assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
           assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
-        });
+        };
+
+        console.log('✅ Final profile object:', userProfile);
+        setProfile(userProfile);
         return;
       }
 
       // Fallback to profiles table if members table doesn't have the user
-      const { data: profileData } = await supabase
+      console.log('🔄 Trying profiles table as fallback...');
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
+      if (profileError) {
+        console.error('❌ Error fetching from profiles table:', profileError);
+      }
+
       if (profileData) {
+        console.log('📊 Profile data found:', profileData);
+        
         // Fetch user roles
-        const { data: rolesData } = await supabase
+        const { data: rolesData, error: rolesError } = await supabase
           .from('user_roles')
           .select('role')
           .eq('user_id', userId);
 
-        const roles = rolesData?.map(r => r.role) || [];
-        const isAdmin = roles.includes('admin');
-        // CHANGED: Map 'leader' to 'group_leader'
-        const primaryRole = isAdmin ? 'admin' : roles.includes('leader') ? 'group_leader' : 'member';
+        if (rolesError) {
+          console.error('❌ Error fetching roles:', rolesError);
+        }
 
-        setProfile({
+        const roles = rolesData?.map(r => r.role) || [];
+        console.log('🎭 User roles:', roles);
+        
+        const isAdmin = roles.includes('admin');
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        
+        if (isAdmin) {
+          primaryRole = 'admin';
+        } else if (roles.includes('group_leader') || roles.includes('leader')) {
+          primaryRole = 'group_leader';
+        } else {
+          primaryRole = 'member';
+        }
+
+        console.log('🎯 Mapped role from profiles:', primaryRole);
+
+        const userProfile: UserProfile = {
           id: userId,
           name: profileData.name || null,
           surname: profileData.surname || null,
@@ -143,20 +192,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           isAdmin,
           login_username: profileData.login_username || null,
           login_pin: profileData.login_pin || null,
-          // Add the missing fields with defaults
           permissions: [],
           assigned_groups: [],
           assigned_departments: []
-        });
+        };
+
+        console.log('✅ Final profile from profiles table:', userProfile);
+        setProfile(userProfile);
+      } else {
+        console.log('❌ No user data found in members or profiles table');
       }
     } catch (error) {
-      console.error('Error fetching user profile:', error);
+      console.error('💥 Error fetching user profile:', error);
     }
   };
 
   const loginWithUsernamePin = async (username: string, pin: string): Promise<boolean> => {
     try {
-      console.log('Attempting username/PIN login:', { username, pin });
+      console.log('🔐 Attempting username/PIN login:', { username, pin });
       
       // Search for member with matching username and PIN
       const { data: memberData, error } = await supabase
@@ -167,11 +220,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         .single();
 
       if (error || !memberData) {
-        console.error('Username/PIN login error:', error);
+        console.error('❌ Username/PIN login error:', error);
         return false;
       }
 
-      console.log('Member found:', memberData);
+      console.log('✅ Member found:', memberData);
+      console.log('🎭 Database role:', memberData.role);
+      console.log('🔑 Database permissions:', memberData.permissions);
 
       // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
@@ -206,8 +261,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Create and set the profile with ALL required fields
       const isAdmin = memberData.role === 'admin';
-      // CHANGED: Map 'leader' to 'group_leader'
-      const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'group_leader' : 'member';
+      
+      // FIXED: Better role mapping
+      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+      
+      if (isAdmin) {
+        primaryRole = 'admin';
+      } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
+        primaryRole = 'group_leader';
+      } else {
+        primaryRole = 'member';
+      }
+
+      console.log('🎯 Final mapped role for login:', primaryRole);
       
       const userProfile: UserProfile = {
         id: memberData.id,
@@ -220,12 +286,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isAdmin,
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
-        // Add the missing fields
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
         assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
         assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
       };
 
+      console.log('✅ Final profile for login:', userProfile);
       setProfile(userProfile);
       
       // Store in localStorage for persistence
@@ -236,10 +302,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         timestamp: Date.now()
       }));
 
-      console.log('Username/PIN login successful');
+      console.log('🎉 Username/PIN login successful');
       return true;
     } catch (error) {
-      console.error('Username/PIN login error:', error);
+      console.error('💥 Username/PIN login error:', error);
       return false;
     }
   };
@@ -252,13 +318,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
 
       if (error) {
-        console.error('Email/password login error:', error);
+        console.error('❌ Email/password login error:', error);
         return false;
       }
 
       return !!data.session;
     } catch (error) {
-      console.error('Email/password login error:', error);
+      console.error('💥 Email/password login error:', error);
       return false;
     }
   };
@@ -278,7 +344,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return await loginWithUsernamePin(identifier, credential);
       }
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('💥 Login error:', error);
       return false;
     } finally {
       setLoading(false);
@@ -298,8 +364,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(null);
       setSession(null);
       setProfile(null);
+      console.log('👋 Logout successful');
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('💥 Logout error:', error);
     }
   };
 
@@ -319,13 +386,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setUser(authData.user);
             setSession(authData.session);
             setProfile(authData.profile);
+            console.log('🔄 Restored auth from localStorage');
           } else {
             // Clear expired auth
             localStorage.removeItem('username_pin_auth');
+            console.log('🗑️ Cleared expired auth from localStorage');
           }
         }
       } catch (error) {
-        console.error('Error checking stored auth:', error);
+        console.error('💥 Error checking stored auth:', error);
         localStorage.removeItem('username_pin_auth');
       }
     };
