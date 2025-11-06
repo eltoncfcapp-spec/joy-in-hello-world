@@ -13,6 +13,9 @@ interface UserProfile {
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
+  permissions: string[];
+  assigned_groups: string[];
+  assigned_departments: string[];
 }
 
 interface AuthContextType {
@@ -78,64 +81,72 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      // First try to fetch from profiles table
+      // First try to fetch from members table (where your data is stored)
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (memberData) {
+        // Create profile from member data with ALL required fields
+        const isAdmin = memberData.role === 'admin';
+        const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'leader' : 'member';
+        
+        setProfile({
+          id: userId,
+          name: memberData.name || null,
+          surname: memberData.surname || null,
+          email: memberData.email || null,
+          phone: memberData.phone || null,
+          cell_group_id: memberData.cell_group_id || null,
+          role: primaryRole,
+          isAdmin,
+          login_username: memberData.login_username || null,
+          login_pin: memberData.login_pin || null,
+          // Add the missing fields with proper defaults
+          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
+          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+        });
+        return;
+      }
+
+      // Fallback to profiles table if members table doesn't have the user
       const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
-      // If no profile found, try members table as fallback
-      if (!profileData) {
-        const { data: memberData } = await supabase
-          .from('members')
-          .select('*')
-          .eq('id', userId)
-          .single();
+      if (profileData) {
+        // Fetch user roles
+        const { data: rolesData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId);
 
-        if (memberData) {
-          // Create profile from member data
-          const isAdmin = memberData.role === 'admin';
-          const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'leader' : 'member';
-          
-          setProfile({
-            id: userId,
-            name: memberData.name || null,
-            surname: memberData.surname || null,
-            email: memberData.email || null,
-            phone: memberData.phone || null,
-            cell_group_id: memberData.cell_group_id || null,
-            role: primaryRole,
-            isAdmin,
-            login_username: memberData.login_username || null,
-            login_pin: memberData.login_pin || null
-          });
-          return;
-        }
+        const roles = rolesData?.map(r => r.role) || [];
+        const isAdmin = roles.includes('admin');
+        const primaryRole = isAdmin ? 'admin' : roles.includes('leader') ? 'leader' : 'member';
+
+        setProfile({
+          id: userId,
+          name: profileData.name || null,
+          surname: profileData.surname || null,
+          email: profileData.email || null,
+          phone: profileData.phone || null,
+          cell_group_id: profileData.cell_group_id || null,
+          role: primaryRole,
+          isAdmin,
+          login_username: profileData.login_username || null,
+          login_pin: profileData.login_pin || null,
+          // Add the missing fields with defaults
+          permissions: [],
+          assigned_groups: [],
+          assigned_departments: []
+        });
       }
-
-      // Fetch user roles
-      const { data: rolesData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId);
-
-      const roles = rolesData?.map(r => r.role) || [];
-      const isAdmin = roles.includes('admin');
-      const primaryRole = isAdmin ? 'admin' : roles.includes('leader') ? 'leader' : 'member';
-
-      setProfile({
-        id: userId,
-        name: profileData?.name || null,
-        surname: profileData?.surname || null,
-        email: profileData?.email || null,
-        phone: profileData?.phone || null,
-        cell_group_id: profileData?.cell_group_id || null,
-        role: primaryRole,
-        isAdmin,
-        login_username: profileData?.login_username || null,
-        login_pin: profileData?.login_pin || null
-      });
     } catch (error) {
       console.error('Error fetching user profile:', error);
     }
@@ -191,7 +202,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(mockUser);
       setSession(mockSession);
 
-      // Create and set the profile
+      // Create and set the profile with ALL required fields
       const isAdmin = memberData.role === 'admin';
       const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'leader' : 'member';
       
@@ -205,7 +216,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         role: primaryRole,
         isAdmin,
         login_username: memberData.login_username || null,
-        login_pin: memberData.login_pin || null
+        login_pin: memberData.login_pin || null,
+        // Add the missing fields
+        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
+        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
       };
 
       setProfile(userProfile);
