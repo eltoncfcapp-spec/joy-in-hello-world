@@ -81,35 +81,6 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Check permissions and load data
-  useEffect(() => {
-    const checkAccessAndLoadData = async () => {
-      if (!profile) {
-        setHasAccess(false);
-        setInitialLoad(false);
-        return;
-      }
-
-      // Check if user has access to cell groups
-      const userHasAccess = profile.isAdmin || 
-        hasPermission(profile.permissions, 'admin_access') ||
-        hasPermission(profile.permissions, 'manage_groups') ||
-        (profile.assigned_groups && profile.assigned_groups.length > 0) ||
-        // Users can access if they are members of any group
-        await checkUserGroupMembership();
-      
-      setHasAccess(userHasAccess);
-
-      if (userHasAccess) {
-        await loadData();
-      } else {
-        setInitialLoad(false);
-      }
-    };
-
-    checkAccessAndLoadData();
-  }, [profile]);
-
   // Check if user is a member of any cell group
   const checkUserGroupMembership = async (): Promise<boolean> => {
     if (!profile) return false;
@@ -130,11 +101,13 @@ const CellGroups = () => {
   };
 
   // Filter cell groups based on user permissions
-  const getFilteredCellGroups = async () => {
+  const getFilteredCellGroups = () => {
     if (!profile) return [];
 
-    // Admin users can see all cell groups
-    if (profile.isAdmin || hasPermission(profile.permissions, 'admin_access')) {
+    // Admin users and users with admin_access or manage_groups can see all cell groups
+    if (profile.isAdmin || 
+        hasPermission(profile.permissions, 'admin_access') || 
+        hasPermission(profile.permissions, 'manage_groups')) {
       return allCellGroups;
     }
 
@@ -154,8 +127,13 @@ const CellGroups = () => {
       group.members?.some(member => member.member_id === profile.id)
     );
 
+    // Also include groups where user is the leader (by leader_id)
+    const userLeaderGroups = allCellGroups.filter(group => 
+      group.leader_id === profile.id
+    );
+
     // Merge and remove duplicates
-    const allUserGroups = [...userGroups, ...userMemberGroups];
+    const allUserGroups = [...userGroups, ...userMemberGroups, ...userLeaderGroups];
     const uniqueGroups = allUserGroups.filter((group, index, self) => 
       index === self.findIndex(g => g.id === group.id)
     );
@@ -201,7 +179,7 @@ const CellGroups = () => {
       setAllCellGroups(cellGroupsData);
       
       // Apply filtering based on user permissions
-      const filtered = await getFilteredCellGroups();
+      const filtered = getFilteredCellGroups();
       setCellGroups(filtered);
     } catch (error) {
       console.error('Error fetching cell groups:', error);
@@ -237,15 +215,56 @@ const CellGroups = () => {
 
       if (error) throw error;
       
-      setCellGroups(prev => prev.map(group => 
+      setAllCellGroups(prev => prev.map(group => 
         group.id === groupId ? { ...group, members: data || [] } : group
       ));
+
+      // Re-apply filtering after updating members
+      const filtered = getFilteredCellGroups();
+      setCellGroups(filtered);
     } catch (error) {
       console.error('Error fetching group members:', error);
     }
   };
 
-  // Check if user can manage cell group - FIXED LOGIC
+  // Check permissions and load data
+  useEffect(() => {
+    const checkAccessAndLoadData = async () => {
+      if (!profile) {
+        setHasAccess(false);
+        setInitialLoad(false);
+        return;
+      }
+
+      // Check if user has access to cell groups
+      const userHasAccess = profile.isAdmin || 
+        hasPermission(profile.permissions, 'admin_access') ||
+        hasPermission(profile.permissions, 'manage_groups') ||
+        (profile.assigned_groups && profile.assigned_groups.length > 0) ||
+        // Users can access if they are members of any group
+        await checkUserGroupMembership();
+      
+      setHasAccess(userHasAccess);
+
+      if (userHasAccess) {
+        await loadData();
+      } else {
+        setInitialLoad(false);
+      }
+    };
+
+    checkAccessAndLoadData();
+  }, [profile]);
+
+  // Update filtered cell groups when allCellGroups or profile changes
+  useEffect(() => {
+    if (allCellGroups.length > 0 && profile) {
+      const filtered = getFilteredCellGroups();
+      setCellGroups(filtered);
+    }
+  }, [allCellGroups, profile]);
+
+  // Check if user can manage cell group
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -592,12 +611,12 @@ const CellGroups = () => {
               Cell Groups
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              {profile?.isAdmin 
+              {profile?.isAdmin || hasPermission(profile?.permissions, 'admin_access') || hasPermission(profile?.permissions, 'manage_groups')
                 ? 'Manage all church cell groups and member assignments' 
-                : `View and manage cell groups you are assigned to - ${profile?.role} access`
+                : `View and manage your assigned cell groups - ${profile?.role} access`
               }
             </p>
-            {!profile?.isAdmin && (
+            {!profile?.isAdmin && !hasPermission(profile?.permissions, 'admin_access') && !hasPermission(profile?.permissions, 'manage_groups') && (
               <p className="text-sm text-gray-500 mt-1">
                 You can only view and manage cell groups you are assigned to as a leader or member
               </p>
@@ -732,15 +751,15 @@ const CellGroups = () => {
             <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                {profile?.isAdmin ? 'No Cell Groups Yet' : 'No Access to Cell Groups'}
+                {profile?.isAdmin || hasPermission(profile?.permissions, 'manage_groups') ? 'No Cell Groups Yet' : 'No Access to Cell Groups'}
               </h3>
               <p className="text-gray-500 dark:text-gray-500 mb-6">
-                {profile?.isAdmin 
+                {profile?.isAdmin || hasPermission(profile?.permissions, 'manage_groups')
                   ? 'Create your first cell group to get started' 
                   : 'You are not assigned to any cell groups. Please contact an administrator.'
                 }
               </p>
-              {profile?.isAdmin && (
+              {(profile?.isAdmin || hasPermission(profile?.permissions, 'manage_groups')) && (
                 <button
                   onClick={() => setShowForm(true)}
                   className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium"
