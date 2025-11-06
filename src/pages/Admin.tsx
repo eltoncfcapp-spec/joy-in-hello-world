@@ -1,5 +1,5 @@
 import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Member {
   id: string;
@@ -28,82 +28,113 @@ interface Group {
   type: 'cell_group' | 'department';
 }
 
+// Cloud service functions - replace with your actual API endpoints
+const cloudService = {
+  // Fetch members from cloud
+  async getMembers(): Promise<Member[]> {
+    try {
+      const response = await fetch('/api/members', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch members: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      return data.members || [];
+    } catch (error) {
+      console.error('Error fetching members:', error);
+      throw error;
+    }
+  },
+
+  // Fetch groups from cloud
+  async getGroups(): Promise<Group[]> {
+    try {
+      const response = await fetch('/api/groups', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch groups: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      return data.groups || [];
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+      throw error;
+    }
+  },
+
+  // Update member in cloud
+  async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
+    try {
+      const response = await fetch(`/api/members/${memberId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(updates)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to update member: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      return data.member;
+    } catch (error) {
+      console.error('Error updating member:', error);
+      throw error;
+    }
+  },
+
+  // Generate credentials in cloud
+  async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
+    try {
+      const response = await fetch(`/api/members/${memberId}/generate-credentials`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to generate credentials: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      return data.credentials;
+    } catch (error) {
+      console.error('Error generating credentials:', error);
+      throw error;
+    }
+  }
+};
+
 const Admin = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [members, setMembers] = useState<Member[]>([
-    {
-      id: '1',
-      name: 'John',
-      surname: 'Doe',
-      email: 'john@church.com',
-      phone: '+1234567890',
-      role: 'member',
-      permissions: ['view_members', 'view_events', 'view_groups'],
-      is_active: true,
-      cell_group: 'Youth Ministry',
-      department: null,
-      login_username: null,
-      login_pin: null,
-      assigned_groups: [],
-      assigned_departments: [],
-      can_add_members: false,
-      can_edit_members: false,
-      can_view_own_data: false
-    },
-    {
-      id: '2',
-      name: 'Sarah',
-      surname: 'Smith',
-      email: 'sarah@church.com',
-      phone: '+0987654321',
-      role: 'group_leader',
-      permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-      is_active: true,
-      cell_group: 'Women Fellowship',
-      department: 'Worship',
-      login_username: 'sarah_smith',
-      login_pin: '5432',
-      assigned_groups: ['Youth Ministry', 'Women Fellowship'],
-      assigned_departments: [],
-      can_add_members: true,
-      can_edit_members: true,
-      can_view_own_data: true
-    },
-    {
-      id: '3',
-      name: 'Mike',
-      surname: 'Johnson',
-      email: 'mike@church.com',
-      phone: '+1122334455',
-      role: 'department_leader',
-      permissions: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-      is_active: true,
-      cell_group: null,
-      department: 'Worship',
-      login_username: 'mike_johnson',
-      login_pin: '7890',
-      assigned_groups: [],
-      assigned_departments: ['Worship', 'Media'],
-      can_add_members: true,
-      can_edit_members: true,
-      can_view_own_data: true
-    }
-  ]);
-
-  const [groups] = useState<Group[]>([
-    { id: '1', name: 'Youth Ministry', description: 'Youth cell group', type: 'cell_group' },
-    { id: '2', name: 'Women Fellowship', description: 'Women ministry', type: 'cell_group' },
-    { id: '3', name: 'Men\'s Group', description: 'Men fellowship', type: 'cell_group' },
-    { id: '4', name: 'Worship', description: 'Worship department', type: 'department' },
-    { id: '5', name: 'Media', description: 'Media department', type: 'department' },
-    { id: '6', name: 'Children', description: 'Children ministry', type: 'department' }
-  ]);
-
+  const [members, setMembers] = useState<Member[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [selectedUser, setSelectedUser] = useState<Member | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
   const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [initialLoad, setInitialLoad] = useState(true);
 
   const [userFormData, setUserFormData] = useState<{
     role: string;
@@ -126,6 +157,31 @@ const Admin = () => {
     login_username: '',
     login_pin: ''
   });
+
+  // Load data from cloud on component mount
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [membersData, groupsData] = await Promise.all([
+        cloudService.getMembers(),
+        cloudService.getGroups()
+      ]);
+      
+      setMembers(membersData);
+      setGroups(groupsData);
+      setInitialLoad(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+      console.error('Error loading data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const roles = [
     { value: 'member', label: 'Member', description: 'Basic access to personal profile' },
@@ -196,30 +252,27 @@ const Admin = () => {
     },
   ];
 
-  const generateUsername = (firstName: string, lastName: string) => {
-    const base = `${firstName.toLowerCase()}_${lastName.toLowerCase()}`;
-    const random = Math.floor(Math.random() * 100);
-    return `${base}${random}`;
-  };
-
-  const generatePIN = () => {
-    return Math.floor(1000 + Math.random() * 9000).toString();
-  };
-
-  const handleGenerateCredentials = () => {
+  const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
     
-    const username = generateUsername(selectedUser.name, selectedUser.surname);
-    const pin = generatePIN();
-    
-    setUserFormData(prev => ({
-      ...prev,
-      login_username: username,
-      login_pin: pin
-    }));
-    
-    setGeneratedCredentials({ username, pin });
-    setShowCredentials(true);
+    setLoading(true);
+    setError(null);
+    try {
+      const credentials = await cloudService.generateCredentials(selectedUser.id);
+      
+      setUserFormData(prev => ({
+        ...prev,
+        login_username: credentials.username,
+        login_pin: credentials.pin
+      }));
+      
+      setGeneratedCredentials(credentials);
+      setShowCredentials(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate credentials');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCopyCredentials = () => {
@@ -232,6 +285,7 @@ const Admin = () => {
 
   const openModal = (modalType: string, user?: Member) => {
     setActiveModal(modalType);
+    setError(null);
     
     if (user) {
       setSelectedUser(user);
@@ -267,35 +321,41 @@ const Admin = () => {
     });
     setShowCredentials(false);
     setGeneratedCredentials(null);
+    setError(null);
   };
 
-  const handleUserUpdate = () => {
+  const handleUserUpdate = async () => {
     if (!selectedUser) return;
 
     setLoading(true);
+    setError(null);
     
-    setTimeout(() => {
+    try {
+      const updatedMember = await cloudService.updateMember(selectedUser.id, {
+        role: userFormData.role,
+        permissions: userFormData.permissions,
+        assigned_groups: userFormData.assigned_groups,
+        assigned_departments: userFormData.assigned_departments,
+        can_add_members: userFormData.can_add_members,
+        can_edit_members: userFormData.can_edit_members,
+        can_view_own_data: userFormData.can_view_own_data,
+        login_username: userFormData.login_username,
+        login_pin: userFormData.login_pin
+      });
+
+      // Update local state with the updated member from cloud
       setMembers(prev => prev.map(m => 
-        m.id === selectedUser.id 
-          ? { 
-              ...m, 
-              role: userFormData.role,
-              permissions: userFormData.permissions,
-              assigned_groups: userFormData.assigned_groups,
-              assigned_departments: userFormData.assigned_departments,
-              can_add_members: userFormData.can_add_members,
-              can_edit_members: userFormData.can_edit_members,
-              can_view_own_data: userFormData.can_view_own_data,
-              login_username: userFormData.login_username,
-              login_pin: userFormData.login_pin
-            }
-          : m
+        m.id === selectedUser.id ? updatedMember : m
       ));
       
-      setLoading(false);
       alert('User updated successfully!');
       closeModal();
-    }, 500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update user');
+      console.error('Error updating user:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePermissionToggle = (permission: string) => {
@@ -365,6 +425,17 @@ const Admin = () => {
     </div>
   );
 
+  if (initialLoad) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading data from cloud...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
@@ -375,7 +446,26 @@ const Admin = () => {
             </h1>
             <p className="text-gray-600">Manage system settings and user permissions</p>
           </div>
+          <button
+            onClick={loadData}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Refreshing...' : 'Refresh Data'}
+          </button>
         </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <p className="text-red-700">{error}</p>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => (
@@ -416,52 +506,64 @@ const Admin = () => {
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-            {filteredMembers.map((member) => (
-              <div
-                key={member.id}
-                className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                    {member.name.charAt(0)}{member.surname.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">
-                      {member.name} {member.surname}
-                    </h4>
-                    <p className="text-sm text-gray-500">
-                      {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
-                    </p>
-                    {member.login_username && (
-                      <p className="text-xs text-blue-600 mt-1">
-                        <Key className="h-3 w-3 inline mr-1" />
-                        Login: {member.login_username}
+          {loading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading users...</p>
+            </div>
+          ) : filteredMembers.length === 0 ? (
+            <div className="text-center py-8">
+              <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600">No users found</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {filteredMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900">
+                        {member.name} {member.surname}
+                      </h4>
+                      <p className="text-sm text-gray-500">
+                        {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
                       </p>
+                      {member.login_username && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          <Key className="h-3 w-3 inline mr-1" />
+                          Login: {member.login_username}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {member.assigned_groups.length > 0 && (
+                      <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                        {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
+                      </span>
                     )}
+                    {member.assigned_departments.length > 0 && (
+                      <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                        {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => openModal('userDetails', member)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                    >
+                      Manage
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  {member.assigned_groups.length > 0 && (
-                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                      {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
-                    </span>
-                  )}
-                  {member.assigned_departments.length > 0 && (
-                    <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                      {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => openModal('userDetails', member)}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-                  >
-                    Manage
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -519,34 +621,41 @@ const Admin = () => {
                 />
               </div>
 
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {members.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {member.name.charAt(0)}{member.surname.charAt(0)}
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900">
-                          {member.name} {member.surname}
-                        </h4>
-                        <p className="text-sm text-gray-500">
-                          {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => openModal('userDetails', member)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading users...</p>
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                     >
-                      Manage
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                          {member.name.charAt(0)}{member.surname.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900">
+                            {member.name} {member.surname}
+                          </h4>
+                          <p className="text-sm text-gray-500">
+                            {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => openModal('userDetails', member)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </Modal>
         )}
@@ -554,6 +663,12 @@ const Admin = () => {
         {activeModal === 'userDetails' && selectedUser && (
           <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
             <div className="space-y-6">
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                  <p className="text-red-700">{error}</p>
+                </div>
+              )}
+
               <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
@@ -603,10 +718,11 @@ const Admin = () => {
                   </label>
                   <button
                     onClick={handleGenerateCredentials}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium"
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
                   >
-                    <RefreshCw className="h-4 w-4" />
-                    Generate Login Credentials
+                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    {loading ? 'Generating...' : 'Generate Login Credentials'}
                   </button>
                   
                   {showCredentials && generatedCredentials && (
