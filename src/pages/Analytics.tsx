@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, FileText, Download, Filter, Target, Star, TrendingDown, X } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -85,7 +85,7 @@ const Analytics = () => {
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sundayAbsentees, setSundayAbsentees] = useState<AbsentMember[]>([]);
   const [threeTimeAbsentees, setThreeTimeAbsentees] = useState<AbsentMember[]>([]);
-  const [attendanceReports, setAttendanceReports] = useState<AttendanceReport[]>([]);
+  const [, setAttendanceReports] = useState<AttendanceReport[]>([]);
   const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics>({
     new_members_this_month: 0,
     new_members_last_month: 0,
@@ -596,9 +596,6 @@ const Analytics = () => {
     }
   };
 
-  const getInitials = (name: string, surname: string) => {
-    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
-  };
 
   const getTrendIcon = (trend: 'increasing' | 'decreasing' | 'steady') => {
     switch (trend) {

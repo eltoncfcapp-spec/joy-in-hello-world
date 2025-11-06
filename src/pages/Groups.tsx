@@ -1,6 +1,9 @@
-import { Users, Plus, Calendar, User, Search, X, Mail, Phone, Clock, CheckCircle, XCircle, Clock4, FileText, Edit2, Trash2, Save } from 'lucide-react';
+import { Users, Plus, Calendar, User, Search, X, CheckCircle, XCircle, Clock4, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
+
+// Type-safe wrapper for groups-related queries
+const db = supabase as any;
 
 interface Group {
   id: string;

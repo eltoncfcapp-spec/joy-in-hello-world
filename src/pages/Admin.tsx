@@ -1,5 +1,5 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye, UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText, Columns, Key, Copy, RefreshCw } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
 
 interface Member {
   id: string;
@@ -90,7 +90,7 @@ const Admin = () => {
     }
   ]);
 
-  const [groups, setGroups] = useState<Group[]>([
+  const [groups] = useState<Group[]>([
     { id: '1', name: 'Youth Ministry', description: 'Youth cell group', type: 'cell_group' },
     { id: '2', name: 'Women Fellowship', description: 'Women ministry', type: 'cell_group' },
     { id: '3', name: 'Men\'s Group', description: 'Men fellowship', type: 'cell_group' },
