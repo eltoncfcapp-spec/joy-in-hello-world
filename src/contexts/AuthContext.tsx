@@ -9,7 +9,7 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  role: 'admin' | 'leader' | 'member';
+  role: 'admin' | 'group_leader' | 'member'; // CHANGED: 'leader' → 'group_leader'
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
@@ -91,7 +91,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (memberData) {
         // Create profile from member data with ALL required fields
         const isAdmin = memberData.role === 'admin';
-        const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'leader' : 'member';
+        // CHANGED: Map 'leader' to 'group_leader' to match CellGroups expectations
+        const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'group_leader' : 'member';
         
         setProfile({
           id: userId,
@@ -128,7 +129,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         const roles = rolesData?.map(r => r.role) || [];
         const isAdmin = roles.includes('admin');
-        const primaryRole = isAdmin ? 'admin' : roles.includes('leader') ? 'leader' : 'member';
+        // CHANGED: Map 'leader' to 'group_leader'
+        const primaryRole = isAdmin ? 'admin' : roles.includes('leader') ? 'group_leader' : 'member';
 
         setProfile({
           id: userId,
@@ -204,7 +206,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Create and set the profile with ALL required fields
       const isAdmin = memberData.role === 'admin';
-      const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'leader' : 'member';
+      // CHANGED: Map 'leader' to 'group_leader'
+      const primaryRole = isAdmin ? 'admin' : memberData.role === 'leader' ? 'group_leader' : 'member';
       
       const userProfile: UserProfile = {
         id: memberData.id,
