@@ -10,6 +10,24 @@ interface CellGroup {
   meeting_day: string | null;
   meeting_time: string | null;
   leader_id: string | null;
+  leader?: {
+    id: string;
+    name: string;
+    surname: string;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  description?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  members?: any[];
+}
+  id: string;
+  name: string;
+  location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  leader_id: string | null;
   leader?: { 
     id: string;
     name: string; 
@@ -43,10 +61,10 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  role?: string;
-  permissions?: string[];
-  assigned_groups?: string[];
-  assigned_departments?: string[];
+  role?: string | null;
+  permissions?: string[] | null;
+  assigned_groups?: string[] | null;
+  assigned_departments?: string[] | null;
   cell_group_id?: string | null;
 }
 
@@ -80,7 +98,6 @@ const CellGroups = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
-  const [currentUserCellGroupId, setCurrentUserCellGroupId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -255,10 +272,10 @@ const CellGroups = () => {
       // Map the data properly
       const mappedGroups = cellGroupsData.map(group => ({
         ...group,
-        members: group.cell_group_members || []
+        members: []
       }));
       
-      setAllCellGroups(mappedGroups);
+      setAllCellGroups(mappedGroups as any);
       
       // Apply filtering based on user permissions will happen in useEffect
     } catch (error) {
@@ -285,11 +302,8 @@ const CellGroups = () => {
   const fetchGroupMembers = async (groupId: string) => {
     try {
       const { data, error } = await supabase
-        .from('cell_group_members')
-        .select(`
-          *,
-          member:members(id, name, surname, email, phone)
-        `)
+        .from('members')
+        .select('id, name, surname, email, phone')
         .eq('cell_group_id', groupId)
         .order('role', { ascending: false });
 
@@ -312,10 +326,8 @@ const CellGroups = () => {
         return;
       }
 
-      // Store user's cell group ID
-      if (profile.cell_group_id) {
-        setCurrentUserCellGroupId(profile.cell_group_id);
-      }
+      // Store user's cell group ID for future use if needed
+      // const userCellGroupId = profile.cell_group_id;
 
       // Determine access based on role and permissions
       let userHasAccess = false;
@@ -489,15 +501,11 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      const memberAssignments = memberIds.map(memberId => ({
-        cell_group_id: groupId,
-        member_id: memberId,
-        role: role
-      }));
-
+      // Update members to assign them to this group
       const { error } = await supabase
-        .from('cell_group_members')
-        .insert(memberAssignments);
+        .from('members')
+        .update({ cell_group_id: groupId })
+        .in('id', memberIds);
 
       if (error) throw error;
 
@@ -521,8 +529,8 @@ const CellGroups = () => {
 
     try {
       const { error } = await supabase
-        .from('cell_group_members')
-        .delete()
+        .from('members')
+        .update({ cell_group_id: null })
         .eq('id', groupMemberId);
 
       if (error) throw error;
@@ -544,7 +552,7 @@ const CellGroups = () => {
 
     try {
       const { error } = await supabase
-        .from('cell_group_members')
+        .from('members')
         .update({ role: newRole })
         .eq('id', groupMemberId);
 

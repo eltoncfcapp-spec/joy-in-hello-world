@@ -173,7 +173,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (isAdmin) {
           primaryRole = 'admin';
-        } else if (roles.includes('group_leader') || roles.includes('leader')) {
+        } else if (roles.includes('leader' as any)) {
           primaryRole = 'group_leader';
         } else {
           primaryRole = 'member';
@@ -190,8 +190,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           cell_group_id: profileData.cell_group_id || null,
           role: primaryRole,
           isAdmin,
-          login_username: profileData.login_username || null,
-          login_pin: profileData.login_pin || null,
+          login_username: null,
+          login_pin: null,
           permissions: [],
           assigned_groups: [],
           assigned_departments: []

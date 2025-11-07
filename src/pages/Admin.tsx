@@ -9,11 +9,8 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  role: string;
+  role: string | null;
   permissions: string[];
-  is_active: boolean;
-  cell_group: string | null;
-  department: string | null;
   login_username: string | null;
   login_pin: string | null;
   assigned_groups: string[];
@@ -21,9 +18,9 @@ interface Member {
   can_add_members: boolean;
   can_edit_members: boolean;
   can_view_own_data: boolean;
-  cell_group_id?: string | null;
-  status?: string | null;
-  created_at?: string | null;
+  cell_group_id: string | null;
+  status: string | null;
+  created_at: string | null;
 }
 
 interface Group {
@@ -53,11 +50,8 @@ const cloudService = {
         surname: member.surname || '',
         email: member.email,
         phone: member.phone,
-        role: member.role || 'member',
+        role: member.role,
         permissions: Array.isArray(member.permissions) ? member.permissions : [],
-        is_active: member.is_active !== false,
-        cell_group: member.cell_group || null,
-        department: member.department || null,
         login_username: member.login_username || null,
         login_pin: member.login_pin || null,
         assigned_groups: Array.isArray(member.assigned_groups) ? member.assigned_groups : [],
@@ -151,18 +145,18 @@ const cloudService = {
         surname: data.surname || '',
         email: data.email,
         phone: data.phone,
-        role: data.role || 'member',
+        role: data.role,
         permissions: Array.isArray(data.permissions) ? data.permissions : [],
-        is_active: data.is_active !== false,
-        cell_group: data.cell_group || null,
-        department: data.department || null,
         login_username: data.login_username || null,
         login_pin: data.login_pin || null,
         assigned_groups: Array.isArray(data.assigned_groups) ? data.assigned_groups : [],
         assigned_departments: Array.isArray(data.assigned_departments) ? data.assigned_departments : [],
         can_add_members: Boolean(data.can_add_members),
         can_edit_members: Boolean(data.can_edit_members),
-        can_view_own_data: Boolean(data.can_view_own_data)
+        can_view_own_data: Boolean(data.can_view_own_data),
+        cell_group_id: data.cell_group_id,
+        status: data.status,
+        created_at: data.created_at
       };
 
       return updatedMember;
@@ -572,7 +566,7 @@ const Admin = () => {
       filtered = filtered.filter(member =>
         `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        member.role.toLowerCase().includes(searchTerm.toLowerCase())
+        (member.role && member.role.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
 
@@ -589,8 +583,8 @@ const Admin = () => {
     // Group Leader: Only see members in their assigned groups
     if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
       filtered = filtered.filter(member => {
-        // Check if member's cell_group matches any of the leader's assigned groups
-        if (member.cell_group && profile.assigned_groups.includes(member.cell_group)) {
+        // Check if member's cell_group_id matches any of the leader's assigned groups
+        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
           return true;
         }
         // Also check assigned_groups array
@@ -602,10 +596,10 @@ const Admin = () => {
       return filtered;
     }
 
-    // Department Leader: Only see members in their assigned departments
-    if (profile?.role === 'department_leader' && profile?.assigned_departments && profile.assigned_departments.length > 0) {
+    // Group Leader: Only see members in their assigned groups
+    if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
       filtered = filtered.filter(member => {
-        if (member.department && profile.assigned_departments.includes(member.department)) {
+        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
           return true;
         }
         if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
@@ -619,7 +613,7 @@ const Admin = () => {
     // Regular Member: Only see members from their own cell group
     if (profile?.role === 'member' && currentUserCellGroup) {
       filtered = filtered.filter(member => 
-        member.cell_group === currentUserCellGroup
+        member.cell_group_id === currentUserCellGroup
       );
       return filtered;
     }
@@ -816,11 +810,11 @@ const Admin = () => {
                           {member.name} {member.surname}
                         </h4>
                         <p className="text-sm text-gray-500">
-                          {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
+                          {member.email} • {roles.find(r => r.value === member.role)?.label || member.role || 'member'}
                         </p>
-                        {member.cell_group && (
+                        {member.cell_group_id && (
                           <p className="text-xs text-gray-500">
-                            Cell Group: {member.cell_group}
+                            Cell Group ID: {member.cell_group_id}
                           </p>
                         )}
                         {member.login_username && (
@@ -942,7 +936,7 @@ const Admin = () => {
                             {member.name} {member.surname}
                           </h4>
                           <p className="text-sm text-gray-500">
-                            {member.email} • {roles.find(r => r.value === member.role)?.label || member.role}
+                            {member.email} • {roles.find(r => r.value === member.role)?.label || member.role || 'member'}
                           </p>
                         </div>
                       </div>
@@ -983,8 +977,8 @@ const Admin = () => {
                     </h4>
                     <p className="text-gray-600">{selectedUser.email}</p>
                     <p className="text-sm text-gray-500">{selectedUser.phone}</p>
-                    {selectedUser.cell_group && (
-                      <p className="text-sm text-gray-500">Cell Group: {selectedUser.cell_group}</p>
+                    {selectedUser.cell_group_id && (
+                      <p className="text-sm text-gray-500">Cell Group ID: {selectedUser.cell_group_id}</p>
                     )}
                   </div>
                 </div>

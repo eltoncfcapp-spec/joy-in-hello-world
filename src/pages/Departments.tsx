@@ -370,7 +370,7 @@ const Departments = () => {
         leader_id: departmentForm.leader_id || null
       };
 
-      const { data, error } = await db
+      const { error } = await db
         .from('departments')
         .insert([departmentData])
         .select(`

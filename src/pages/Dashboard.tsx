@@ -18,9 +18,7 @@ import {
   Eye,
   Search,
   Key,
-  Copy,
-  RefreshCw,
-  AlertCircle
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -36,13 +34,13 @@ interface Member {
   invited_by: string | null;
   created_at: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  role?: string;
-  permissions?: string[];
-  assigned_groups?: string[];
-  assigned_departments?: string[];
-  can_add_members?: boolean;
-  can_edit_members?: boolean;
-  can_view_own_data?: boolean;
+  role?: string | null;
+  permissions?: string[] | null;
+  assigned_groups?: string[] | null;
+  assigned_departments?: string[] | null;
+  can_add_members?: boolean | null;
+  can_edit_members?: boolean | null;
+  can_view_own_data?: boolean | null;
   login_username?: string | null;
   login_pin?: string | null;
 }
