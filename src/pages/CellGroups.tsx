@@ -20,22 +20,8 @@ interface CellGroup {
   description?: string | null;
   created_at?: string;
   updated_at?: string | null;
-  members?: CellGroupMember[];
-}
-
-interface CellGroupMember {
-  id: string;
-  cell_group_id: string;
-  member_id: string;
-  role: 'leader' | 'member' | 'assistant';
-  assigned_at: string;
-  member?: {
-    id: string;
-    name: string;
-    surname: string;
-    email: string | null;
-    phone: string | null;
-  };
+  current_member_count?: number | null;
+  status?: string | null;
 }
 
 interface Member {
@@ -100,7 +86,7 @@ const CellGroups = () => {
     return isAdminOrPastor(profile.role);
   };
 
-  // FIXED: Improved group management permission check
+  // FIXED: Group leaders can only manage groups where they are the leader_id
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -114,25 +100,15 @@ const CellGroups = () => {
       return true;
     }
     
-    // FIXED: Group leaders can only manage groups where they are the leader
+    // FIXED: Group leaders can only manage groups where they are the leader_id
     if (profile.role === 'group_leader') {
-      // Check if user is the leader of this group (from leader_id)
-      if (group.leader_id === profile.id) {
-        return true;
-      }
-
-      // Check if user is marked as leader in cell_group_members
-      const isGroupLeader = group.members?.some(member => 
-        member.member_id === profile.id && member.role === 'leader'
-      );
-      
-      return isGroupLeader;
+      return group.leader_id === profile.id;
     }
     
     return false;
   };
 
-  // FIXED: Improved group view permission check
+  // FIXED: Group leaders can only view groups where they are the leader_id
   const canViewGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -146,36 +122,20 @@ const CellGroups = () => {
       return true;
     }
     
-    // FIXED: Group leaders can only view groups they lead
+    // FIXED: Group leaders can only view groups where they are the leader_id
     if (profile.role === 'group_leader') {
-      // Check if user is the leader of this group (from leader_id)
-      if (group.leader_id === profile.id) {
-        return true;
-      }
-
-      // Check if user is marked as leader in cell_group_members
-      const isGroupLeader = group.members?.some(member => 
-        member.member_id === profile.id && member.role === 'leader'
-      );
-      
-      return isGroupLeader;
+      return group.leader_id === profile.id;
     }
     
-    // Regular members can only view groups they are members of
+    // Regular members can only view groups they are assigned to via cell_group_id
     if (profile.role === 'member') {
-      // Check if member belongs to this group via cell_group_members
-      const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-      
-      // Or check if their cell_group_id matches this group
-      const isMemberByCellGroupId = profile.cell_group_id === group.id;
-      
-      return isMemberOfGroup || isMemberByCellGroupId || false;
+      return profile.cell_group_id === group.id;
     }
     
     return false;
   };
 
-  // FIXED: Improved filtering logic - Group leaders only see groups they lead
+  // FIXED: Improved filtering logic - Group leaders only see groups where they are leader_id
   const getFilteredCellGroups = () => {
     if (!profile) return [];
 
@@ -191,21 +151,9 @@ const CellGroups = () => {
 
     let userGroups: CellGroup[] = [];
 
-    // FIXED: Group leaders only see groups they lead (based on leader_id or cell_group_members role)
+    // FIXED: Group leaders only see groups where they are leader_id
     if (profile.role === 'group_leader') {
-      userGroups = allCellGroups.filter(group => {
-        // Check if user is the leader of this group (from leader_id)
-        if (group.leader_id === profile.id) {
-          return true;
-        }
-
-        // Check if user is marked as leader in cell_group_members
-        const isGroupLeader = group.members?.some(member => 
-          member.member_id === profile.id && member.role === 'leader'
-        );
-        
-        return isGroupLeader;
-      });
+      userGroups = allCellGroups.filter(group => group.leader_id === profile.id);
       
       console.log(`👑 Group leader ${profile.name} can view groups:`, {
         totalGroups: allCellGroups.length,
@@ -215,32 +163,18 @@ const CellGroups = () => {
       });
     }
 
-    // Regular members can see groups they are members of
+    // Regular members can see groups they are assigned to via cell_group_id
     if (profile.role === 'member') {
-      const memberGroups = allCellGroups.filter(group => {
-        // Check via cell_group_members table
-        const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-        
-        // Check via cell_group_id field
-        const isMemberByCellGroupId = profile.cell_group_id === group.id;
-        
-        return isMemberOfGroup || isMemberByCellGroupId;
-      });
-      userGroups = [...userGroups, ...memberGroups];
+      userGroups = allCellGroups.filter(group => profile.cell_group_id === group.id);
     }
-
-    // Remove duplicates
-    const uniqueGroups = userGroups.filter((group, index, self) => 
-      index === self.findIndex(g => g.id === group.id)
-    );
 
     console.log(`📊 Filtered groups for ${profile.role}:`, {
       allGroups: allCellGroups.length,
-      filteredGroups: uniqueGroups.length,
-      userGroups: uniqueGroups.map(g => g.name)
+      filteredGroups: userGroups.length,
+      userGroups: userGroups.map(g => g.name)
     });
 
-    return uniqueGroups;
+    return userGroups;
   };
 
   const loadData = async () => {
@@ -267,25 +201,13 @@ const CellGroups = () => {
         .from('cell_groups')
         .select(`
           *,
-          leader:members!leader_id(id, name, surname, email, phone),
-          cell_group_members(
-            *,
-            member:members(id, name, surname, email, phone)
-          )
+          leader:members!leader_id(id, name, surname, email, phone)
         `)
         .order('name');
 
       if (error) throw error;
       
-      const cellGroupsData = data || [];
-      
-      // Map the data properly
-      const mappedGroups = cellGroupsData.map(group => ({
-        ...group,
-        members: group.cell_group_members || []
-      }));
-      
-      setAllCellGroups(mappedGroups as CellGroup[]);
+      setAllCellGroups(data as CellGroup[] || []);
       
     } catch (error) {
       console.error('Error fetching cell groups:', error);
@@ -310,20 +232,18 @@ const CellGroups = () => {
 
   const fetchGroupMembers = async (groupId: string) => {
     try {
+      // Since there's no cell_group_members table, we fetch members who have this cell_group_id
       const { data, error } = await supabase
-        .from('cell_group_members')
-        .select(`
-          *,
-          member:members(id, name, surname, email, phone)
-        `)
+        .from('members')
+        .select('*')
         .eq('cell_group_id', groupId)
-        .order('role', { ascending: false });
+        .order('name');
 
       if (error) throw error;
       
-      setAllCellGroups(prev => prev.map(group => 
-        group.id === groupId ? { ...group, members: data || [] } : group
-      ));
+      // Update the selected group with member count
+      setSelectedGroup(prev => prev ? { ...prev, current_member_count: data?.length || 0 } : null);
+      
     } catch (error) {
       console.error('Error fetching group members:', error);
     }
@@ -410,21 +330,6 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      // If leader was assigned, add them to cell_group_members as leader
-      if (formData.leader_id && data && data[0]) {
-        const { error: memberError } = await supabase
-          .from('cell_group_members')
-          .insert({
-            cell_group_id: data[0].id,
-            member_id: formData.leader_id,
-            role: 'leader'
-          });
-
-        if (memberError) {
-          console.error('Error adding leader to group members:', memberError);
-        }
-      }
-
       await fetchCellGroups();
       setShowForm(false);
       setFormData({ 
@@ -468,33 +373,6 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      // Update leader in cell_group_members if changed
-      if (formData.leader_id && selectedGroup.leader_id !== formData.leader_id) {
-        // Remove previous leader role
-        if (selectedGroup.leader_id) {
-          await supabase
-            .from('cell_group_members')
-            .update({ role: 'member' })
-            .eq('cell_group_id', selectedGroup.id)
-            .eq('member_id', selectedGroup.leader_id);
-        }
-
-        // Add new leader role
-        const { error: memberError } = await supabase
-          .from('cell_group_members')
-          .upsert({
-            cell_group_id: selectedGroup.id,
-            member_id: formData.leader_id,
-            role: 'leader'
-          }, {
-            onConflict: 'cell_group_id,member_id'
-          });
-
-        if (memberError) {
-          console.error('Error updating leader in group members:', memberError);
-        }
-      }
-
       await fetchCellGroups();
       setShowEditForm(false);
       setSelectedGroup(null);
@@ -528,14 +406,6 @@ const CellGroups = () => {
     try {
       setLoading(true);
       setError(null);
-      
-      // First delete related records in cell_group_members
-      const { error: membersError } = await supabase
-        .from('cell_group_members')
-        .delete()
-        .eq('cell_group_id', groupId);
-
-      if (membersError) throw membersError;
 
       // Then delete the cell group
       const { error } = await supabase
@@ -554,7 +424,7 @@ const CellGroups = () => {
     }
   };
 
-  const handleAddMembersToGroup = async (groupId: string, memberIds: string[], role: string = 'member') => {
+  const handleAddMembersToGroup = async (groupId: string, memberIds: string[]) => {
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
       setError('You do not have permission to manage this cell group');
       return;
@@ -564,21 +434,16 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      // Add members to cell_group_members table
-      const membersToAdd = memberIds.map(memberId => ({
-        cell_group_id: groupId,
-        member_id: memberId,
-        role: role as 'leader' | 'member' | 'assistant'
-      }));
-
+      // Update members' cell_group_id to add them to the group
       const { error } = await supabase
-        .from('cell_group_members')
-        .insert(membersToAdd);
+        .from('members')
+        .update({ cell_group_id: groupId })
+        .in('id', memberIds);
 
       if (error) throw error;
 
-      await fetchGroupMembers(groupId);
       await fetchMembers();
+      await fetchGroupMembers(groupId);
       setSelectedMembers([]);
       setSearchTerm('');
     } catch (error: any) {
@@ -589,7 +454,7 @@ const CellGroups = () => {
     }
   };
 
-  const handleRemoveMemberFromGroup = async (groupMemberId: string) => {
+  const handleRemoveMemberFromGroup = async (memberId: string) => {
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
       setError('You do not have permission to manage this cell group');
       return;
@@ -597,14 +462,15 @@ const CellGroups = () => {
 
     try {
       const { error } = await supabase
-        .from('cell_group_members')
-        .delete()
-        .eq('id', groupMemberId);
+        .from('members')
+        .update({ cell_group_id: null })
+        .eq('id', memberId);
 
       if (error) throw error;
 
       if (selectedGroup) {
         await fetchGroupMembers(selectedGroup.id);
+        await fetchMembers();
       }
     } catch (error: any) {
       console.error('Error removing member from cell group:', error);
@@ -612,20 +478,32 @@ const CellGroups = () => {
     }
   };
 
-  const handleUpdateMemberRole = async (groupMemberId: string, newRole: string) => {
+  const handleUpdateMemberRole = async (memberId: string, makeLeader: boolean) => {
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
       setError('You do not have permission to manage this cell group');
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('cell_group_members')
-        .update({ role: newRole })
-        .eq('id', groupMemberId);
+      if (makeLeader) {
+        // Make this member the leader of the group
+        const { error } = await supabase
+          .from('cell_groups')
+          .update({ leader_id: memberId })
+          .eq('id', selectedGroup.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // Remove as leader (set leader_id to null)
+        const { error } = await supabase
+          .from('cell_groups')
+          .update({ leader_id: null })
+          .eq('id', selectedGroup.id);
 
+        if (error) throw error;
+      }
+
+      await fetchCellGroups();
       if (selectedGroup) {
         await fetchGroupMembers(selectedGroup.id);
       }
@@ -653,7 +531,7 @@ const CellGroups = () => {
     setShowEditForm(true);
   };
 
-  const openMembersModal = (group: CellGroup) => {
+  const openMembersModal = async (group: CellGroup) => {
     if (!canViewGroup(group)) {
       setError('You do not have permission to view this cell group');
       return;
@@ -661,6 +539,9 @@ const CellGroups = () => {
 
     setSelectedGroup(group);
     setShowMembersModal(true);
+    
+    // Fetch members for this group
+    await fetchGroupMembers(group.id);
   };
 
   const getInitials = (name: string, surname: string) => {
@@ -668,11 +549,15 @@ const CellGroups = () => {
   };
 
   const availableMembers = members.filter(member => 
-    !selectedGroup?.members?.some(m => m.member_id === member.id) &&
+    !member.cell_group_id && // Members not in any group
     (member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
      member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
      member.email?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  const getGroupMembers = (groupId: string) => {
+    return members.filter(member => member.cell_group_id === groupId);
+  };
 
   // Show loading while checking permissions
   if (initialLoad) {
@@ -900,6 +785,7 @@ const CellGroups = () => {
             cellGroups.map((group) => {
               const canManage = canManageGroup(group);
               const canView = canViewGroup(group);
+              const groupMembers = getGroupMembers(group.id);
               
               return (
                 <div
@@ -955,7 +841,7 @@ const CellGroups = () => {
 
                   <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
                     <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {group.members?.length || 0} member{(group.members?.length || 0) !== 1 ? 's' : ''}
+                      {groupMembers.length} member{groupMembers.length !== 1 ? 's' : ''}
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -1098,7 +984,7 @@ const CellGroups = () => {
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {selectedGroup.name} - Members ({selectedGroup.members?.length || 0})
+                  {selectedGroup.name} - Members
                 </h3>
                 <button
                   onClick={() => {
@@ -1167,29 +1053,13 @@ const CellGroups = () => {
                     )}
 
                     {selectedMembers.length > 0 && (
-                      <div className="flex gap-3">
-                        <button
-                          onClick={() => handleAddMembersToGroup(selectedGroup.id, selectedMembers, 'member')}
-                          disabled={loading}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                        >
-                          Add as Member ({selectedMembers.length})
-                        </button>
-                        <button
-                          onClick={() => handleAddMembersToGroup(selectedGroup.id, selectedMembers, 'assistant')}
-                          disabled={loading}
-                          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-                        >
-                          Add as Assistant
-                        </button>
-                        <button
-                          onClick={() => handleAddMembersToGroup(selectedGroup.id, selectedMembers, 'leader')}
-                          disabled={loading}
-                          className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50"
-                        >
-                          Add as Leader
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => handleAddMembersToGroup(selectedGroup.id, selectedMembers)}
+                        disabled={loading}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                      >
+                        Add to Group ({selectedMembers.length})
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1201,7 +1071,7 @@ const CellGroups = () => {
                   Current Members {!canManageGroup(selectedGroup) && '(Read Only)'}
                 </h4>
                 
-                {!selectedGroup.members || selectedGroup.members.length === 0 ? (
+                {getGroupMembers(selectedGroup.id).length === 0 ? (
                   <div className="text-center py-8">
                     <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
                     <p className="text-gray-600 dark:text-gray-400">No members in this group yet</p>
@@ -1213,46 +1083,52 @@ const CellGroups = () => {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedGroup.members.map((groupMember) => (
-                      <div key={groupMember.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
+                    {getGroupMembers(selectedGroup.id).map((member) => (
+                      <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                            {getInitials(groupMember.member?.name || '', groupMember.member?.surname || '')}
+                            {getInitials(member.name, member.surname)}
                           </div>
                           <div>
                             <div className="font-medium text-gray-900 dark:text-white">
-                              {groupMember.member?.name} {groupMember.member?.surname}
+                              {member.name} {member.surname}
                             </div>
                             <div className="text-sm text-gray-500 dark:text-gray-400">
-                              {groupMember.member?.phone || 'No phone'}
+                              {member.phone || 'No phone'}
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            groupMember.role === 'leader' 
+                            selectedGroup.leader_id === member.id
                               ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                              : groupMember.role === 'assistant'
-                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                               : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                           }`}>
-                            {groupMember.role}
+                            {selectedGroup.leader_id === member.id ? 'Leader' : 'Member'}
                           </span>
                           
                           {/* Only show management controls if user can manage the group */}
                           {canManageGroup(selectedGroup) && (
                             <>
-                              <select
-                                value={groupMember.role}
-                                onChange={(e) => handleUpdateMemberRole(groupMember.id, e.target.value)}
-                                className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                              >
-                                <option value="member">Member</option>
-                                <option value="leader">Leader</option>
-                                <option value="assistant">Assistant</option>
-                              </select>
+                              {selectedGroup.leader_id !== member.id ? (
+                                <button
+                                  onClick={() => handleUpdateMemberRole(member.id, true)}
+                                  className="px-2 py-1 bg-yellow-600 text-white rounded text-sm hover:bg-yellow-700 transition-colors"
+                                  title="Make leader"
+                                >
+                                  Make Leader
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleUpdateMemberRole(member.id, false)}
+                                  className="px-2 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700 transition-colors"
+                                  title="Remove as leader"
+                                >
+                                  Remove Leader
+                                </button>
+                              )}
                               <button
-                                onClick={() => handleRemoveMemberFromGroup(groupMember.id)}
+                                onClick={() => handleRemoveMemberFromGroup(member.id)}
                                 className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                 title="Remove from group"
                               >
