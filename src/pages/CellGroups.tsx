@@ -18,9 +18,26 @@ interface CellGroup {
     phone: string | null;
   } | null;
   description?: string | null;
-  created_at?: string;
+  created_at?: string | null;
   updated_at?: string | null;
+  members?: any[];
+}
+  id: string;
+  name: string;
+  location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  leader_id: string | null;
+  leader?: { 
+    id: string;
+    name: string; 
+    surname: string;
+    email: string | null;
+    phone: string | null;
+  } | null;
   members?: CellGroupMember[];
+  description?: string | null;
+  created_at?: string;
 }
 
 interface CellGroupMember {
@@ -255,11 +272,12 @@ const CellGroups = () => {
       // Map the data properly
       const mappedGroups = cellGroupsData.map(group => ({
         ...group,
-        members: group.cell_group_members || []
+        members: []
       }));
       
-      setAllCellGroups(mappedGroups as CellGroup[]);
+      setAllCellGroups(mappedGroups as any);
       
+      // Apply filtering based on user permissions will happen in useEffect
     } catch (error) {
       console.error('Error fetching cell groups:', error);
       throw error;
@@ -284,11 +302,8 @@ const CellGroups = () => {
   const fetchGroupMembers = async (groupId: string) => {
     try {
       const { data, error } = await supabase
-        .from('cell_group_members')
-        .select(`
-          *,
-          member:members(id, name, surname, email, phone)
-        `)
+        .from('members')
+        .select('id, name, surname, email, phone')
         .eq('cell_group_id', groupId)
         .order('role', { ascending: false });
 
@@ -310,6 +325,9 @@ const CellGroups = () => {
         setInitialLoad(false);
         return;
       }
+
+      // Store user's cell group ID for future use if needed
+      // const userCellGroupId = profile.cell_group_id;
 
       // Determine access based on role and permissions
       let userHasAccess = false;
@@ -369,34 +387,16 @@ const CellGroups = () => {
         return;
       }
 
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .insert({
-          name: formData.name.trim(),
-          description: formData.description.trim() || null,
-          location: formData.location.trim() || null,
-          meeting_day: formData.meeting_day || null,
-          meeting_time: formData.meeting_time || null,
-          leader_id: formData.leader_id || null,
-        })
-        .select();
+      const { error } = await supabase.from('cell_groups').insert({
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
+        location: formData.location.trim() || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        leader_id: formData.leader_id || null,
+      });
 
       if (error) throw error;
-
-      // If leader was assigned, add them to cell_group_members as leader
-      if (formData.leader_id && data && data[0]) {
-        const { error: memberError } = await supabase
-          .from('cell_group_members')
-          .insert({
-            cell_group_id: data[0].id,
-            member_id: formData.leader_id,
-            role: 'leader'
-          });
-
-        if (memberError) {
-          console.error('Error adding leader to group members:', memberError);
-        }
-      }
 
       await fetchCellGroups();
       setShowForm(false);
@@ -441,33 +441,6 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      // Update leader in cell_group_members if changed
-      if (formData.leader_id && selectedGroup.leader_id !== formData.leader_id) {
-        // Remove previous leader role
-        if (selectedGroup.leader_id) {
-          await supabase
-            .from('cell_group_members')
-            .update({ role: 'member' })
-            .eq('cell_group_id', selectedGroup.id)
-            .eq('member_id', selectedGroup.leader_id);
-        }
-
-        // Add new leader role
-        const { error: memberError } = await supabase
-          .from('cell_group_members')
-          .upsert({
-            cell_group_id: selectedGroup.id,
-            member_id: formData.leader_id,
-            role: 'leader'
-          }, {
-            onConflict: 'cell_group_id,member_id'
-          });
-
-        if (memberError) {
-          console.error('Error updating leader in group members:', memberError);
-        }
-      }
-
       await fetchCellGroups();
       setShowEditForm(false);
       setSelectedGroup(null);
@@ -502,15 +475,6 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      // First delete related records in cell_group_members
-      const { error: membersError } = await supabase
-        .from('cell_group_members')
-        .delete()
-        .eq('cell_group_id', groupId);
-
-      if (membersError) throw membersError;
-
-      // Then delete the cell group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -537,16 +501,11 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      // Add members to cell_group_members table
-      const membersToAdd = memberIds.map(memberId => ({
-        cell_group_id: groupId,
-        member_id: memberId,
-        role: role as 'leader' | 'member' | 'assistant'
-      }));
-
+      // Update members to assign them to this group
       const { error } = await supabase
-        .from('cell_group_members')
-        .insert(membersToAdd);
+        .from('members')
+        .update({ cell_group_id: groupId })
+        .in('id', memberIds);
 
       if (error) throw error;
 
@@ -554,9 +513,9 @@ const CellGroups = () => {
       await fetchMembers();
       setSelectedMembers([]);
       setSearchTerm('');
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error adding members to cell group:', error);
-      setError(`Error adding members to cell group: ${error.message}`);
+      setError('Error adding members to cell group');
     } finally {
       setLoading(false);
     }
@@ -570,8 +529,8 @@ const CellGroups = () => {
 
     try {
       const { error } = await supabase
-        .from('cell_group_members')
-        .delete()
+        .from('members')
+        .update({ cell_group_id: null })
         .eq('id', groupMemberId);
 
       if (error) throw error;
@@ -579,9 +538,9 @@ const CellGroups = () => {
       if (selectedGroup) {
         await fetchGroupMembers(selectedGroup.id);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error removing member from cell group:', error);
-      setError(`Error removing member from cell group: ${error.message}`);
+      setError('Error removing member from cell group');
     }
   };
 
@@ -593,7 +552,7 @@ const CellGroups = () => {
 
     try {
       const { error } = await supabase
-        .from('cell_group_members')
+        .from('members')
         .update({ role: newRole })
         .eq('id', groupMemberId);
 
@@ -602,9 +561,9 @@ const CellGroups = () => {
       if (selectedGroup) {
         await fetchGroupMembers(selectedGroup.id);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error updating member role:', error);
-      setError(`Error updating member role: ${error.message}`);
+      setError('Error updating member role');
     }
   };
 
