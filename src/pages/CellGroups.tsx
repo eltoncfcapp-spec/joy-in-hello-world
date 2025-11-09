@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, Mail, Phone, Eye } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, Mail, Phone, Eye, MoreVertical, TrendingUp, UserPlus, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -53,6 +53,17 @@ interface Member {
   status?: string;
 }
 
+interface StatCard {
+  icon: any;
+  label: string;
+  value: string;
+  change: string;
+  changeType: 'positive' | 'negative' | 'info';
+  color: string;
+  bgColor: string;
+  action: string;
+}
+
 const CellGroups = () => {
   const { profile } = useAuth();
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
@@ -68,6 +79,10 @@ const CellGroups = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
+    stats: true,
+    groups: true
+  });
 
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -89,9 +104,65 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+  // Stats state
+  const [stats, setStats] = useState<StatCard[]>([]);
+
   // Check if user is group_leader and can manage all groups
   const isGroupLeader = profile?.role === 'group_leader' || profile?.is_leader === true;
   const canManageAllGroups = isGroupLeader;
+
+  // Calculate stats
+  const calculateStats = () => {
+    const totalGroups = cellGroups.length;
+    const totalMembers = cellGroups.reduce((sum, group) => sum + (group.members?.length || 0), 0);
+    const groupsWithLeaders = cellGroups.filter(group => group.leader_id).length;
+    const activeGroups = cellGroups.filter(group => group.status === 'active' || !group.status).length;
+
+    const statsData: StatCard[] = [
+      { 
+        icon: Users, 
+        label: 'Total Groups', 
+        value: totalGroups.toString(), 
+        change: `${activeGroups} active`, 
+        changeType: 'positive',
+        color: 'from-blue-500 to-blue-600',
+        bgColor: 'bg-blue-50 dark:bg-blue-950/20',
+        action: 'viewGroups'
+      },
+      { 
+        icon: User, 
+        label: 'Total Members', 
+        value: totalMembers.toString(), 
+        change: `${totalMembers} across all groups`,
+        changeType: 'info',
+        color: 'from-purple-500 to-purple-600',
+        bgColor: 'bg-purple-50 dark:bg-purple-950/20',
+        action: 'viewMembers'
+      },
+      { 
+        icon: UserPlus, 
+        label: 'Groups with Leaders', 
+        value: groupsWithLeaders.toString(), 
+        change: `${Math.round((groupsWithLeaders / totalGroups) * 100)}% coverage`, 
+        changeType: groupsWithLeaders === totalGroups ? 'positive' : 'info',
+        color: 'from-green-500 to-green-600',
+        bgColor: 'bg-green-50 dark:bg-green-950/20',
+        action: 'viewGroups'
+      },
+      { 
+        icon: TrendingUp, 
+        label: 'Active Groups', 
+        value: activeGroups.toString(), 
+        change: `${Math.round((activeGroups / totalGroups) * 100)}% active`, 
+        changeType: 'positive',
+        color: 'from-orange-500 to-orange-600',
+        bgColor: 'bg-orange-50 dark:bg-orange-950/20',
+        action: 'viewGroups'
+      },
+    ];
+
+    setStats(statsData);
+  };
 
   // Load ALL cell groups for group_leader, or user's group for regular users
   const loadCellGroups = async () => {
@@ -569,6 +640,14 @@ const CellGroups = () => {
     setShowMembersModal(true);
   };
 
+  // Toggle section expansion
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
+
   // Filter available members based on search
   const filteredAvailableMembers = availableMembers.filter(member =>
     `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -587,6 +666,12 @@ const CellGroups = () => {
       loadAllMembers();
     }
   }, [selectedGroup]);
+
+  useEffect(() => {
+    if (cellGroups.length > 0) {
+      calculateStats();
+    }
+  }, [cellGroups]);
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -678,126 +763,196 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Cell Groups Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {cellGroups.map((group) => (
-            <div key={group.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 hover:shadow-xl transition-shadow duration-200">
-              {/* Group Header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                      {group.name}
-                    </h3>
-                    <div className="flex items-center gap-2 bg-green-100 dark:bg-green-900 px-2 py-1 rounded">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <span className="text-green-800 dark:text-green-200 text-xs font-medium">
-                        {group.status || 'Active'}
-                      </span>
+        {/* Stats Section */}
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300 mb-6">
+          <button 
+            onClick={() => toggleSection('stats')}
+            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+          >
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Cell Groups Overview</h2>
+            {expandedSections.stats ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+          </button>
+          
+          {expandedSections.stats && (
+            <div className="p-6 pt-0">
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {stats.map((stat) => (
+                  <div
+                    key={stat.label}
+                    className="group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50"
+                  >
+                    <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300`} />
+                    
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className={`p-3 rounded-xl ${stat.bgColor}`}>
+                          <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+                        </div>
+                        <MoreVertical className="h-5 w-5 text-gray-400 cursor-pointer hover:text-gray-600 transition-colors" />
+                      </div>
+                      
+                      <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                        {stat.value}
+                      </h3>
+                      <p className="text-gray-600 dark:text-gray-400 text-sm font-medium mb-3">
+                        {stat.label}
+                      </p>
+                      
+                      <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                        stat.changeType === 'positive' 
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                          : stat.changeType === 'negative'
+                          ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      }`}>
+                        {stat.change}
+                      </div>
                     </div>
                   </div>
-                  {group.description && (
-                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3 line-clamp-2">
-                      {group.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Group Details */}
-              <div className="space-y-3 mb-4">
-                {group.location && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <MapPin className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{group.location}</span>
-                  </div>
-                )}
-                
-                {(group.meeting_day || group.meeting_time) && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <Calendar className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">
-                      {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
-                    </span>
-                  </div>
-                )}
-                
-                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                  <Users className="h-4 w-4 flex-shrink-0" />
-                  <span>{group.members?.length || 0} members</span>
-                </div>
-
-                {group.leader && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <User className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">Leader: {group.leader.name} {group.leader.surname}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap gap-2 pt-4 border-t dark:border-gray-700">
-                <button
-                  onClick={() => openMembersModal(group)}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex-1 justify-center"
-                >
-                  <Eye className="h-3 w-3" />
-                  View Members
-                </button>
-                
-                {canManageAllGroups && (
-                  <>
-                    <button
-                      onClick={() => initializeEditForm(group)}
-                      className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex-1 justify-center"
-                    >
-                      <Edit className="h-3 w-3" />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => openAddMemberModal(group)}
-                      className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors flex-1 justify-center"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Add Member
-                    </button>
-                    <button
-                      onClick={() => deleteCellGroup(group.id)}
-                      disabled={actionLoading}
-                      className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors flex-1 justify-center disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      Delete
-                    </button>
-                  </>
-                )}
+                ))}
               </div>
             </div>
-          ))}
+          )}
         </div>
 
-        {/* Empty State */}
-        {cellGroups.length === 0 && !loading && (
-          <div className="text-center py-12">
-            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Cell Groups Found</h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {canManageAllGroups 
-                ? "Get started by creating your first cell group." 
-                : "You are not assigned to any cell group yet."
-              }
-            </p>
-            {canManageAllGroups && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium mx-auto"
-              >
-                <Plus className="h-5 w-5" />
-                Create Your First Cell Group
-              </button>
-            )}
-          </div>
-        )}
+        {/* Cell Groups Section */}
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
+          <button 
+            onClick={() => toggleSection('groups')}
+            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+          >
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              {canManageAllGroups ? 'All Cell Groups' : 'Your Cell Group'} ({cellGroups.length})
+            </h2>
+            {expandedSections.groups ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+          </button>
+          
+          {expandedSections.groups && (
+            <div className="p-6 pt-0">
+              {/* Cell Groups Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {cellGroups.map((group) => (
+                  <div key={group.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 hover:shadow-xl transition-shadow duration-200">
+                    {/* Group Header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                            {group.name}
+                          </h3>
+                          <div className="flex items-center gap-2 bg-green-100 dark:bg-green-900 px-2 py-1 rounded">
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            <span className="text-green-800 dark:text-green-200 text-xs font-medium">
+                              {group.status || 'Active'}
+                            </span>
+                          </div>
+                        </div>
+                        {group.description && (
+                          <p className="text-gray-600 dark:text-gray-400 text-sm mb-3 line-clamp-2">
+                            {group.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Group Details */}
+                    <div className="space-y-3 mb-4">
+                      {group.location && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                          <MapPin className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">{group.location}</span>
+                        </div>
+                      )}
+                      
+                      {(group.meeting_day || group.meeting_time) && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                          <Calendar className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">
+                            {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                          </span>
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                        <Users className="h-4 w-4 flex-shrink-0" />
+                        <span>{group.members?.length || 0} members</span>
+                      </div>
+
+                      {group.leader && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                          <User className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">Leader: {group.leader.name} {group.leader.surname}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap gap-2 pt-4 border-t dark:border-gray-700">
+                      <button
+                        onClick={() => openMembersModal(group)}
+                        className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex-1 justify-center"
+                      >
+                        <Eye className="h-3 w-3" />
+                        View Members
+                      </button>
+                      
+                      {canManageAllGroups && (
+                        <>
+                          <button
+                            onClick={() => initializeEditForm(group)}
+                            className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex-1 justify-center"
+                          >
+                            <Edit className="h-3 w-3" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => openAddMemberModal(group)}
+                            className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors flex-1 justify-center"
+                          >
+                            <Plus className="h-3 w-3" />
+                            Add Member
+                          </button>
+                          <button
+                            onClick={() => deleteCellGroup(group.id)}
+                            disabled={actionLoading}
+                            className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors flex-1 justify-center disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Empty State */}
+              {cellGroups.length === 0 && !loading && (
+                <div className="text-center py-12">
+                  <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Cell Groups Found</h3>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    {canManageAllGroups 
+                      ? "Get started by creating your first cell group." 
+                      : "You are not assigned to any cell group yet."
+                    }
+                  </p>
+                  {canManageAllGroups && (
+                    <button
+                      onClick={() => setShowCreateModal(true)}
+                      className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium mx-auto"
+                    >
+                      <Plus className="h-5 w-5" />
+                      Create Your First Cell Group
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Create Group Modal */}
         {showCreateModal && (
