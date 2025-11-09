@@ -17,10 +17,9 @@ interface UserProfile {
   assigned_groups: string[];
   assigned_departments: string[];
   is_leader: boolean;
-  originalRole: string; // Keep the original role for reference
+  originalRole: string;
 }
 
-// New interface for group matches
 interface GroupMatch {
   user_id: string;
   user_name: string;
@@ -39,7 +38,6 @@ interface AuthContextType {
   login: (identifier: string, credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
-  // Group matching functionality
   groupMatches: GroupMatch[];
   fetchGroupMatches: () => Promise<void>;
   groupMatchesLoading: boolean;
@@ -64,8 +62,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  
-  // Group matching state
   const [groupMatches, setGroupMatches] = useState<GroupMatch[]>([]);
   const [groupMatchesLoading, setGroupMatchesLoading] = useState(false);
 
@@ -81,7 +77,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }, 0);
         } else {
           setProfile(null);
-          setGroupMatches([]); // Clear matches on logout
+          setGroupMatches([]);
         }
       }
     );
@@ -98,7 +94,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Group matching function
   const fetchGroupMatches = async () => {
     if (!profile) {
       console.log('❌ No profile available for group matching');
@@ -109,7 +104,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setGroupMatchesLoading(true);
       console.log('🔍 Fetching group matches for:', profile.id);
       
-      // Use the RPC function if it exists, otherwise fall back to direct query
       const { data, error } = await supabase.rpc('get_group_matches', {
         p_user_id: profile.id,
         p_user_name: `${profile.name} ${profile.surname}`.trim(),
@@ -118,7 +112,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (error) {
         console.error('❌ Error fetching group matches via RPC:', error);
-        // Fallback to direct query
         await fetchGroupMatchesDirect();
         return;
       }
@@ -127,21 +120,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setGroupMatches(data || []);
     } catch (error) {
       console.error('💥 Error in fetchGroupMatches:', error);
-      // Fallback to direct query
       await fetchGroupMatchesDirect();
     } finally {
       setGroupMatchesLoading(false);
     }
   };
 
-  // Fallback direct query for group matching
   const fetchGroupMatchesDirect = async () => {
     if (!profile) return;
 
     try {
       console.log('🔄 Using direct query for group matching');
       
-      // Get all cell groups
       const { data: allGroups, error: groupsError } = await supabase
         .from('cell_groups')
         .select('id, name')
@@ -152,7 +142,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // Create matches manually
       const matches: GroupMatch[] = [];
       const assignedGroups = profile.assigned_groups || [];
 
@@ -194,7 +183,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Auto-fetch group matches when profile changes
   useEffect(() => {
     if (profile) {
       console.log('🔄 Profile updated, fetching group matches...');
@@ -220,15 +208,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('📊 Raw member data from database:', memberData);
 
       if (memberData) {
-        // FIXED: Enhanced role determination for cell group leaders
         const isAdmin = memberData.role === 'admin';
         
-        // Check if user should be treated as group_leader for cell group purposes
         const shouldBeGroupLeader = 
           memberData.is_leader === true || 
           memberData.role === 'group_leader' || 
           memberData.role === 'leader' ||
-          memberData.role === 'department_leader' || // Treat department_leader as group_leader for cell groups
+          memberData.role === 'department_leader' ||
           (memberData.assigned_groups && memberData.assigned_groups.length > 0);
         
         let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
@@ -236,7 +222,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (isAdmin) {
           primaryRole = 'admin';
         } else if (shouldBeGroupLeader) {
-          // FIXED: Always use 'group_leader' role for cell group management
           primaryRole = 'group_leader';
         } else {
           primaryRole = 'member';
@@ -251,7 +236,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           isAdmin
         });
 
-        // Normalize assigned_groups
         const assignedGroups = Array.isArray(memberData.assigned_groups) 
           ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
           : [];
@@ -265,7 +249,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
-          role: primaryRole, // Use the mapped role for permissions
+          role: primaryRole,
           isAdmin,
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
@@ -273,7 +257,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           assigned_groups: assignedGroups,
           assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
           is_leader: memberData.is_leader === true,
-          originalRole: memberData.role // Keep original for display purposes
+          originalRole: memberData.role
         };
 
         console.log('✅ Final profile object:', userProfile);
@@ -335,15 +319,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(mockUser);
       setSession(mockSession);
 
-      // FIXED: Enhanced role determination for login
       const isAdmin = memberData.role === 'admin';
       
-      // Check if user should be treated as group_leader for cell group purposes
       const shouldBeGroupLeader = 
         memberData.is_leader === true || 
         memberData.role === 'group_leader' || 
         memberData.role === 'leader' ||
-        memberData.role === 'department_leader' || // Treat department_leader as group_leader for cell groups
+        memberData.role === 'department_leader' ||
         (memberData.assigned_groups && memberData.assigned_groups.length > 0);
       
       let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
@@ -449,7 +431,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(null);
       setSession(null);
       setProfile(null);
-      setGroupMatches([]); // Clear group matches on logout
+      setGroupMatches([]);
       console.log('👋 Logout successful');
     } catch (error) {
       console.error('💥 Logout error:', error);
@@ -492,7 +474,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     logout,
     loading,
-    // Group matching functionality
     groupMatches,
     fetchGroupMatches,
     groupMatchesLoading
