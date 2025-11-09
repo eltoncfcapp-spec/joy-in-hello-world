@@ -9,7 +9,7 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  role: 'admin' | 'group_leader' | 'member' | 'department_leader';
+  role: 'admin' | 'group_leader' | 'member';
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
@@ -17,6 +17,7 @@ interface UserProfile {
   assigned_groups: string[];
   assigned_departments: string[];
   is_leader: boolean;
+  originalRole: string; // Keep the original role for reference
 }
 
 interface AuthContextType {
@@ -48,16 +49,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for existing session and set up auth listener
   useEffect(() => {
-    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Fetch user profile and role
           setTimeout(() => {
             fetchUserProfile(session.user.id);
           }, 0);
@@ -67,7 +65,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     );
 
-    // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -84,7 +81,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔍 Fetching user profile for:', userId);
       
-      // First try to fetch from members table (where your data is stored)
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -99,20 +95,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('📊 Raw member data from database:', memberData);
 
       if (memberData) {
-        // Enhanced role determination that handles both role field and is_leader field
+        // FIXED: Enhanced role determination for cell group leaders
         const isAdmin = memberData.role === 'admin';
-        const isLeader = memberData.is_leader === true || 
-                        memberData.role === 'group_leader' || 
-                        memberData.role === 'leader' ||
-                        memberData.role === 'department_leader';
         
-        let primaryRole: 'admin' | 'group_leader' | 'member' | 'department_leader' = 'member';
+        // Check if user should be treated as group_leader for cell group purposes
+        const shouldBeGroupLeader = 
+          memberData.is_leader === true || 
+          memberData.role === 'group_leader' || 
+          memberData.role === 'leader' ||
+          memberData.role === 'department_leader' || // Treat department_leader as group_leader for cell groups
+          (memberData.assigned_groups && memberData.assigned_groups.length > 0);
+        
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
         
         if (isAdmin) {
           primaryRole = 'admin';
-        } else if (isLeader) {
-          // Use the actual role from database for leaders
-          primaryRole = (memberData.role as 'group_leader' | 'department_leader') || 'group_leader';
+        } else if (shouldBeGroupLeader) {
+          // FIXED: Always use 'group_leader' role for cell group management
+          primaryRole = 'group_leader';
         } else {
           primaryRole = 'member';
         }
@@ -120,6 +120,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('🎭 Role determination:', {
           databaseRole: memberData.role,
           isLeader: memberData.is_leader,
+          assignedGroups: memberData.assigned_groups,
+          shouldBeGroupLeader: shouldBeGroupLeader,
           finalRole: primaryRole,
           isAdmin
         });
@@ -138,14 +140,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
-          role: primaryRole,
+          role: primaryRole, // Use the mapped role for permissions
           isAdmin,
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
           assigned_groups: assignedGroups,
           assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
-          is_leader: memberData.is_leader === true
+          is_leader: memberData.is_leader === true,
+          originalRole: memberData.role // Keep original for display purposes
         };
 
         console.log('✅ Final profile object:', userProfile);
@@ -164,7 +167,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔐 Attempting username/PIN login:', { username, pin });
       
-      // Search for member with matching username and PIN
       const { data: memberData, error } = await supabase
         .from('members')
         .select('*')
@@ -179,7 +181,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('✅ Member found:', memberData);
 
-      // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
         id: memberData.id,
         email: memberData.email,
@@ -206,30 +207,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         provider_refresh_token: null
       } as Session;
 
-      // Set the user and session
       setUser(mockUser);
       setSession(mockSession);
 
-      // Enhanced role determination for login
+      // FIXED: Enhanced role determination for login
       const isAdmin = memberData.role === 'admin';
-      const isLeader = memberData.is_leader === true || 
-                      memberData.role === 'group_leader' || 
-                      memberData.role === 'leader' ||
-                      memberData.role === 'department_leader';
       
-      let primaryRole: 'admin' | 'group_leader' | 'member' | 'department_leader' = 'member';
+      // Check if user should be treated as group_leader for cell group purposes
+      const shouldBeGroupLeader = 
+        memberData.is_leader === true || 
+        memberData.role === 'group_leader' || 
+        memberData.role === 'leader' ||
+        memberData.role === 'department_leader' || // Treat department_leader as group_leader for cell groups
+        (memberData.assigned_groups && memberData.assigned_groups.length > 0);
+      
+      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
       
       if (isAdmin) {
         primaryRole = 'admin';
-      } else if (isLeader) {
-        primaryRole = (memberData.role as 'group_leader' | 'department_leader') || 'group_leader';
+      } else if (shouldBeGroupLeader) {
+        primaryRole = 'group_leader';
       } else {
         primaryRole = 'member';
       }
 
       console.log('🎯 Final mapped role for login:', primaryRole);
       
-      // Normalize assigned_groups
       const assignedGroups = Array.isArray(memberData.assigned_groups) 
         ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
         : [];
@@ -250,13 +253,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
         assigned_groups: assignedGroups,
         assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
-        is_leader: memberData.is_leader === true
+        is_leader: memberData.is_leader === true,
+        originalRole: memberData.role
       };
 
       console.log('✅ Final profile for login:', userProfile);
       setProfile(userProfile);
       
-      // Store in localStorage for persistence
       localStorage.setItem('username_pin_auth', JSON.stringify({
         user: mockUser,
         session: mockSession,
@@ -295,14 +298,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setLoading(true);
 
-      // Check if identifier is email format
       const isEmail = identifier.includes('@');
       
       if (isEmail) {
-        // Email/password login
         return await loginWithEmailPassword(identifier, credential);
       } else {
-        // Username/PIN login
         return await loginWithUsernamePin(identifier, credential);
       }
     } catch (error) {
@@ -315,10 +315,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      // Clear username/PIN auth from localStorage
       localStorage.removeItem('username_pin_auth');
       
-      // Only call Supabase logout if it's an email/password session
       if (session?.access_token !== 'username-pin-token') {
         await supabase.auth.signOut();
       }
@@ -332,7 +330,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Check for stored username/PIN auth on component mount
   useEffect(() => {
     const checkStoredAuth = () => {
       try {
@@ -343,14 +340,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           const now = Date.now();
           const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
           
-          // If less than 24 hours old, restore the auth
           if (hoursElapsed < 24) {
             setUser(authData.user);
             setSession(authData.session);
             setProfile(authData.profile);
             console.log('🔄 Restored auth from localStorage');
           } else {
-            // Clear expired auth
             localStorage.removeItem('username_pin_auth');
             console.log('🗑️ Cleared expired auth from localStorage');
           }
