@@ -67,9 +67,11 @@ const canManageAllGroups = (permissions: string[] = []): boolean => {
   return hasPermission(permissions, 'manage_groups');
 };
 
-// Check if user is a leader (based on both role and is_leader field)
+// Enhanced leader check - include department_leader
 const isUserLeader = (profile: any): boolean => {
-  return profile?.role === 'group_leader' || profile?.is_leader === true;
+  return profile?.role === 'group_leader' || 
+         profile?.role === 'department_leader' || 
+         profile?.is_leader === true;
 };
 
 const CellGroups = () => {
@@ -105,49 +107,62 @@ const CellGroups = () => {
     return isAdminOrPastor(profile.role);
   };
 
-  // FIXED: Improved group management permission check based on is_leader and assigned_groups
+  // Enhanced group management permission check
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
+    console.log('🔍 Checking manage permissions for group:', group.name, {
+      userRole: profile.role,
+      isLeader: profile.is_leader,
+      assignedGroups: profile.assigned_groups,
+      groupLeaderId: group.leader_id,
+      userId: profile.id
+    });
+    
     // Admin and Pastor can manage all groups
     if (isAdminOrPastor(profile.role)) {
+      console.log('✅ Admin/Pastor can manage all groups');
       return true;
     }
     
     // Users with manage_groups permission can manage all groups
     if (canManageAllGroups(profile.permissions)) {
+      console.log('✅ User has manage_groups permission');
       return true;
     }
     
-    // FIXED: Leaders (is_leader = true) can only manage their assigned groups
+    // Enhanced leader check with better matching
     if (isUserLeader(profile) && profile.assigned_groups) {
       const canManage = profile.assigned_groups.some(assignedGroup => {
-        // Compare group names in a case-insensitive manner
         const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
         const groupName = group.name.toLowerCase().trim();
         
-        // Check for exact match or partial match
+        // More flexible matching
         const canManageGroup = assignedGroupName === groupName || 
                               groupName.includes(assignedGroupName) || 
-                              assignedGroupName.includes(groupName);
+                              assignedGroupName.includes(groupName) ||
+                              groupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
         
         console.log(`🔍 Leader group assignment check:`, {
           assignedGroup: assignedGroupName,
           groupName: groupName,
           canManage: canManageGroup,
           leaderId: profile.id,
-          isLeader: profile.is_leader
+          isLeader: profile.is_leader,
+          role: profile.role
         });
         
         return canManageGroup;
       });
       
-      console.log(`👑 Leader (is_leader: ${profile.is_leader}) can manage group "${group.name}":`, canManage);
-      return canManage;
+      console.log(`👑 Leader (role: ${profile.role}, is_leader: ${profile.is_leader}) can manage group "${group.name}":`, canManage);
+      
+      if (canManage) return true;
     }
     
     // Check if user is the leader of this group (from leader_id)
     if (group.leader_id === profile.id) {
+      console.log('✅ User is the leader of this group (leader_id match)');
       return true;
     }
 
@@ -155,12 +170,16 @@ const CellGroups = () => {
     const isGroupLeader = group.members?.some(member => 
       member.member_id === profile.id && member.role === 'leader'
     );
-    if (isGroupLeader) return true;
+    if (isGroupLeader) {
+      console.log('✅ User is leader in cell_group_members');
+      return true;
+    }
 
+    console.log('❌ User cannot manage this group');
     return false;
   };
 
-  // FIXED: Improved group view permission check
+  // Enhanced group view permission check
   const canViewGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -174,7 +193,7 @@ const CellGroups = () => {
       return true;
     }
     
-    // FIXED: Leaders can view their assigned groups
+    // Enhanced leader view check
     if (isUserLeader(profile) && profile.assigned_groups) {
       const canView = profile.assigned_groups.some(assignedGroup => {
         const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
@@ -182,7 +201,8 @@ const CellGroups = () => {
         
         const canViewGroup = assignedGroupName === groupName || 
                            groupName.includes(assignedGroupName) || 
-                           assignedGroupName.includes(groupName);
+                           assignedGroupName.includes(groupName) ||
+                           groupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
         
         return canViewGroup;
       });
@@ -192,10 +212,7 @@ const CellGroups = () => {
     
     // Regular members can only view groups they are members of
     if (profile.role === 'member' && !profile.is_leader) {
-      // Check if member belongs to this group via cell_group_members
       const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-      
-      // Or check if their cell_group_id matches this group
       const isMemberByCellGroupId = profile.cell_group_id === group.id;
       
       return isMemberOfGroup || isMemberByCellGroupId || false;
@@ -204,49 +221,74 @@ const CellGroups = () => {
     return false;
   };
 
-  // FIXED: Improved filtering logic for leaders
+  // Enhanced filtering logic with debug logging
   const getFilteredCellGroups = () => {
     if (!profile) return [];
 
+    console.log('🔍 Filtering cell groups for user:', {
+      role: profile.role,
+      is_leader: profile.is_leader,
+      assigned_groups: profile.assigned_groups,
+      permissions: profile.permissions
+    });
+
     // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
+      console.log('👑 Admin/Pastor - showing all groups');
       return allCellGroups;
     }
 
     // Users with view_groups or manage_groups permission can see all groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
+      console.log('🔑 User has view/manage permission - showing all groups');
       return allCellGroups;
     }
 
     let userGroups: CellGroup[] = [];
 
-    // FIXED: Leaders see only their assigned groups
+    // Enhanced leader filtering
     if (isUserLeader(profile) && profile.assigned_groups && profile.assigned_groups.length > 0) {
+      console.log('👨‍💼 Leader with assigned groups:', profile.assigned_groups);
+      
       userGroups = allCellGroups.filter(group => {
         const canView = profile.assigned_groups?.some(assignedGroup => {
           const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
           const groupName = group.name.toLowerCase().trim();
           
-          return assignedGroupName === groupName || 
-                 groupName.includes(assignedGroupName) || 
-                 assignedGroupName.includes(groupName);
+          const match = assignedGroupName === groupName || 
+                       groupName.includes(assignedGroupName) || 
+                       assignedGroupName.includes(groupName) ||
+                       groupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
+          
+          if (match) {
+            console.log(`✅ Leader can view group "${group.name}" - matches assigned group "${assignedGroup}"`);
+          }
+          
+          return match;
         });
         
-        console.log(`👀 Leader (is_leader: ${profile.is_leader}) can view group "${group.name}":`, canView);
+        if (!canView) {
+          console.log(`❌ Leader cannot view group "${group.name}" - no matching assigned group`);
+        }
+        
         return canView;
       });
     }
 
     // Regular members (non-leaders) can see groups they are members of
     if (profile.role === 'member' && !profile.is_leader) {
+      console.log('👤 Regular member filtering');
       const memberGroups = allCellGroups.filter(group => {
-        // Check via cell_group_members table
         const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-        
-        // Check via cell_group_id field
         const isMemberByCellGroupId = profile.cell_group_id === group.id;
         
-        return isMemberOfGroup || isMemberByCellGroupId;
+        const canView = isMemberOfGroup || isMemberByCellGroupId;
+        
+        if (canView) {
+          console.log(`✅ Member can view group "${group.name}" - is member`);
+        }
+        
+        return canView;
       });
       userGroups = [...userGroups, ...memberGroups];
     }
@@ -256,11 +298,12 @@ const CellGroups = () => {
       index === self.findIndex(g => g.id === group.id)
     );
 
-    console.log(`📊 Filtered groups for user (role: ${profile.role}, is_leader: ${profile.is_leader}):`, {
+    console.log(`📊 Final filtered groups:`, {
       allGroups: allCellGroups.length,
       filteredGroups: uniqueGroups.length,
-      userGroups: uniqueGroups.map(g => g.name),
-      assignedGroups: profile.assigned_groups
+      userGroups: uniqueGroups.map(g => ({ id: g.id, name: g.name })),
+      userRole: profile.role,
+      isLeader: profile.is_leader
     });
 
     return uniqueGroups;
@@ -286,6 +329,7 @@ const CellGroups = () => {
 
   const fetchCellGroups = async () => {
     try {
+      console.log('📡 Fetching cell groups...');
       const { data, error } = await supabase
         .from('cell_groups')
         .select(`
@@ -302,7 +346,8 @@ const CellGroups = () => {
       
       const cellGroupsData = data || [];
       
-      // Map the data properly
+      console.log('📋 All cell groups from database:', cellGroupsData.map(g => ({ id: g.id, name: g.name, leader_id: g.leader_id })));
+      
       const mappedGroups = cellGroupsData.map(group => ({
         ...group,
         members: group.cell_group_members || []
@@ -361,24 +406,37 @@ const CellGroups = () => {
         return;
       }
 
-      // Determine access based on role and permissions
+      console.log('🔐 Checking access for user:', {
+        id: profile.id,
+        role: profile.role,
+        is_leader: profile.is_leader,
+        assigned_groups: profile.assigned_groups,
+        permissions: profile.permissions
+      });
+
       let userHasAccess = false;
 
       // Admin and Pastor always have access
       if (isAdminOrPastor(profile.role)) {
         userHasAccess = true;
+        console.log('✅ Admin/Pastor - has access');
       }
       // Users with view_groups or manage_groups permission
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
+        console.log('✅ Has view_groups/manage_groups permission - has access');
       }
       // Leaders with assigned groups
       else if (isUserLeader(profile) && profile.assigned_groups && profile.assigned_groups.length > 0) {
         userHasAccess = true;
+        console.log('✅ Leader with assigned groups - has access');
       }
       // Regular members who belong to a cell group
       else if (profile.role === 'member' && profile.cell_group_id) {
         userHasAccess = true;
+        console.log('✅ Member with cell_group_id - has access');
+      } else {
+        console.log('❌ User does not have access to cell groups');
       }
       
       setHasAccess(userHasAccess);
@@ -393,9 +451,10 @@ const CellGroups = () => {
     checkAccessAndLoadData();
   }, [profile]);
 
-  // FIXED: Update filtered cell groups when allCellGroups or profile changes
+  // Update filtered cell groups when allCellGroups or profile changes
   useEffect(() => {
     if (allCellGroups.length > 0 && profile) {
+      console.log('🔄 Updating filtered cell groups...');
       const filtered = getFilteredCellGroups();
       setCellGroups(filtered);
     }
@@ -754,7 +813,7 @@ const CellGroups = () => {
                 : canManageAllGroups(profile?.permissions)
                 ? 'Can manage all cell groups and members'
                 : isUserLeader(profile)
-                ? `Managing ${cellGroups.length} assigned group(s) as Leader`
+                ? `Managing ${cellGroups.length} assigned group(s) as ${profile?.role}`
                 : `Viewing your cell group - ${profile?.role} access`
               }
             </p>
@@ -763,7 +822,7 @@ const CellGroups = () => {
                 {canManageAllGroups(profile?.permissions)
                   ? 'You have full access to manage all cell groups'
                   : isUserLeader(profile)
-                  ? 'You can only view and manage cell groups assigned to you'
+                  ? `You can only view and manage assigned groups: ${profile?.assigned_groups?.join(', ') || 'None'}`
                   : 'You can only view the cell group you belong to'
                 }
               </p>
