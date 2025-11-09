@@ -12,13 +12,14 @@ interface UserProfile {
   role: 'admin' | 'leader' | 'member';
   isAdmin: boolean;
   isLeader: boolean;
+  login_username: string | null;
 }
 
 interface AuthContextType {
   user: SupabaseUser | null;
   session: Session | null;
   profile: UserProfile | null;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (identifier: string, password: string, isEmailLogin?: boolean) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   loading: boolean;
 }
@@ -55,15 +56,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.error('Error fetching user roles:', rolesError);
       }
 
-      // Fetch member data to check if user is a leader from members table
+      // Fetch member data - this is where user profile data comes from
       const { data: memberData, error: memberError } = await supabase
         .from('members')
-        .select('is_leader, role, cell_group_id, name, surname, email, phone')
+        .select('*')
         .eq('id', userId)
         .single();
 
       if (memberError) {
         console.error('Error fetching member data:', memberError);
+        // If member not found, user might be an admin without a member record
+        // Try to get basic info from auth users
+        const { data: authUser } = await supabase.auth.getUser();
+        
+        setProfile({
+          id: userId,
+          name: authUser.user?.user_metadata?.name || null,
+          surname: authUser.user?.user_metadata?.surname || null,
+          email: authUser.user?.email || null,
+          phone: null,
+          cell_group_id: null,
+          role: 'member',
+          isAdmin: false,
+          isLeader: false,
+          login_username: null
+        });
+        return;
       }
 
       const roles = rolesData?.map(r => r.role) || [];
@@ -80,7 +98,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         primaryRole = 'leader';
       }
 
-      // Use data from members table
+      // Create profile from member data
       const userProfile: UserProfile = {
         id: userId,
         name: memberData?.name || null,
@@ -90,7 +108,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         cell_group_id: memberData?.cell_group_id || null,
         role: primaryRole,
         isAdmin,
-        isLeader: isLeaderFromMembers || roles.includes('leader')
+        isLeader: isLeaderFromMembers || roles.includes('leader'),
+        login_username: memberData?.login_username || null
       };
 
       setProfile(userProfile);
@@ -106,8 +125,132 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         cell_group_id: null,
         role: 'member',
         isAdmin: false,
-        isLeader: false
+        isLeader: false,
+        login_username: null
       });
+    }
+  };
+
+  // Universal login function that supports both email/password and username/pin
+  const login = async (identifier: string, password: string, isEmailLogin: boolean = false): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setLoading(true);
+      
+      if (isEmailLogin) {
+        // Email/Password authentication (for admins and users with email accounts)
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: identifier.trim(),
+          password: password
+        });
+
+        if (error) {
+          return { 
+            success: false, 
+            error: 'Invalid email or password' 
+          };
+        }
+
+        if (data.session && data.user) {
+          setSession(data.session);
+          setUser(data.user);
+          await fetchUserProfile(data.user.id);
+          return { success: true };
+        }
+      } else {
+        // Username/PIN authentication (for members)
+        // First, find the member by username and pin
+        const { data: memberData, error: memberError } = await supabase
+          .from('members')
+          .select('*')
+          .eq('login_username', identifier.trim().toLowerCase())
+          .eq('login_pin', password)
+          .single();
+
+        if (memberError || !memberData) {
+          return { 
+            success: false, 
+            error: 'Invalid username or PIN' 
+          };
+        }
+
+        // Check if this member has an associated auth user
+        // Try to sign in with email if available, otherwise create mock session
+        if (memberData.email) {
+          try {
+            // Try to sign in with email/password
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+              email: memberData.email,
+              password: password // Use PIN as password for email login
+            });
+
+            if (!authError && authData.session) {
+              setSession(authData.session);
+              setUser(authData.user);
+              await fetchUserProfile(memberData.id);
+              return { success: true };
+            }
+          } catch (emailError) {
+            console.log('Email login failed, falling back to mock session');
+          }
+        }
+
+        // Fallback: Create mock session for members without email auth
+        const mockUser: SupabaseUser = {
+          id: memberData.id,
+          email: memberData.email || '',
+          app_metadata: {},
+          user_metadata: {},
+          aud: 'authenticated',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        const mockSession: Session = {
+          access_token: 'mock-token-' + memberData.id,
+          token_type: 'bearer',
+          expires_in: 3600,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          refresh_token: 'mock-refresh-' + memberData.id,
+          user: mockUser,
+        };
+
+        setSession(mockSession);
+        setUser(mockUser);
+        await fetchUserProfile(memberData.id);
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Login error:', error);
+      return { 
+        success: false, 
+        error: 'An unexpected error occurred during login' 
+      };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      setLoading(true);
+      // Sign out from Supabase auth if it's a real session
+      if (session?.access_token?.startsWith('mock-token-')) {
+        // Mock session - just clear local state
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+      } else {
+        // Real Supabase session
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -115,19 +258,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     let mounted = true;
 
-    // Set up auth state listener
+    // Set up auth state listener for real Supabase sessions
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
 
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
+        if (event === 'SIGNED_IN' && session) {
+          setSession(session);
+          setUser(session.user);
           await fetchUserProfile(session.user.id);
-        } else {
+        } else if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
           setProfile(null);
         }
+        
         setLoading(false);
       }
     );
@@ -138,10 +283,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const { data: { session } } = await supabase.auth.getSession();
         if (!mounted) return;
 
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
+        if (session) {
+          setSession(session);
+          setUser(session.user);
           await fetchUserProfile(session.user.id);
         }
       } catch (error) {
@@ -160,39 +304,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       subscription.unsubscribe();
     };
   }, []);
-
-  const login = async (email: string, password: string): Promise<boolean> => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (error) {
-        console.error('Login error:', error);
-        return false;
-      }
-
-      return !!data.session;
-    } catch (error) {
-      console.error('Login error:', error);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      setLoading(true);
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const value = {
     user,
