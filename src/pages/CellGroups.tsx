@@ -167,7 +167,7 @@ const CellGroups = () => {
     setStats(statsData);
   };
 
-  // Load cell groups based on user role
+  // Load cell groups based on user role - FIXED QUERIES
   const loadCellGroups = async () => {
     try {
       setLoading(true);
@@ -203,15 +203,18 @@ const CellGroups = () => {
           .order('name');
 
         if (queryError) {
+          console.error('❌ Error loading all cell groups:', queryError);
           throw new Error(`Error loading cell groups: ${queryError.message}`);
         }
+
+        console.log('📋 Raw data from supabase:', data);
 
         const groupsWithMembers = (data || []).map(group => ({
           ...group,
           members: group.cell_group_members || []
         })) as CellGroup[];
 
-        console.log('📋 All cell groups loaded:', groupsWithMembers.length);
+        console.log('📋 All cell groups loaded:', groupsWithMembers.length, groupsWithMembers);
         setCellGroups(groupsWithMembers);
       } else if (canManageOwnGroup && profile.cell_group_id) {
         // Load only the cell leader's own group
@@ -230,11 +233,42 @@ const CellGroups = () => {
           .single();
 
         if (queryError) {
-          console.error('Error loading cell leader group:', queryError);
-          throw new Error('No cell group found for this cell leader');
-        }
+          console.error('❌ Error loading cell leader group:', queryError);
+          // Try alternative approach - get group by member's cell_group_id
+          const { data: memberData, error: memberError } = await supabase
+            .from('members')
+            .select('cell_group_id')
+            .eq('id', profile.id)
+            .single();
 
-        if (data) {
+          if (memberError || !memberData?.cell_group_id) {
+            throw new Error('No cell group found for this cell leader');
+          }
+
+          // Try again with the cell_group_id from members table
+          const { data: retryData, error: retryError } = await supabase
+            .from('cell_groups')
+            .select(`
+              *,
+              leader:members!leader_id(id, name, surname, email, phone),
+              cell_group_members(
+                *,
+                member:members(id, name, surname, email, phone, status)
+              )
+            `)
+            .eq('id', memberData.cell_group_id)
+            .single();
+
+          if (retryError) {
+            throw new Error('No cell group found for this cell leader');
+          }
+
+          setCellGroups([{
+            ...retryData,
+            members: retryData.cell_group_members || []
+          } as CellGroup]);
+        } else if (data) {
+          console.log('✅ Cell leader group loaded:', data);
           setCellGroups([{
             ...data,
             members: data.cell_group_members || []
@@ -243,24 +277,34 @@ const CellGroups = () => {
       } else {
         // Load only user's cell group for regular users
         console.log('👤 Regular user - loading user cell group');
-        const { data, error: queryError } = await supabase
-          .from('cell_groups')
+        
+        // First try to get user's cell group via cell_group_members table
+        const { data: userMembership, error: membershipError } = await supabase
+          .from('cell_group_members')
           .select(`
-            *,
-            leader:members!leader_id(id, name, surname, email, phone),
-            cell_group_members(
+            cell_group_id,
+            cell_groups(
               *,
-              member:members(id, name, surname, email, phone, status)
+              leader:members!leader_id(id, name, surname, email, phone),
+              cell_group_members(
+                *,
+                member:members(id, name, surname, email, phone, status)
+              )
             )
           `)
-          .eq('members.login_username', profile.login_username)
+          .eq('member_id', profile.id)
           .single();
 
-        if (queryError) {
-          console.error('Error loading user cell group:', queryError);
-          
-          // Fallback: Try to get cell group via cell_group_id
+        if (!membershipError && userMembership?.cell_groups) {
+          console.log('✅ Found user group via cell_group_members:', userMembership.cell_groups);
+          setCellGroups([{
+            ...userMembership.cell_groups,
+            members: userMembership.cell_groups.cell_group_members || []
+          } as CellGroup]);
+        } else {
+          // Fallback: Try to get cell group via profile.cell_group_id
           if (profile.cell_group_id) {
+            console.log('🔄 Trying fallback with cell_group_id:', profile.cell_group_id);
             const { data: fallbackData, error: fallbackError } = await supabase
               .from('cell_groups')
               .select(`
@@ -275,8 +319,11 @@ const CellGroups = () => {
               .single();
 
             if (fallbackError) {
+              console.error('❌ Fallback error:', fallbackError);
               throw new Error('No cell group found for this user');
             }
+            
+            console.log('✅ Found user group via fallback:', fallbackData);
             setCellGroups([{
               ...fallbackData,
               members: fallbackData.cell_group_members || []
@@ -284,17 +331,13 @@ const CellGroups = () => {
           } else {
             throw new Error('No cell group found for this user');
           }
-        } else {
-          setCellGroups([{
-            ...data,
-            members: data.cell_group_members || []
-          } as CellGroup]);
         }
       }
 
     } catch (error: any) {
-      console.error('Error loading cell groups:', error);
+      console.error('❌ Error loading cell groups:', error);
       setError(error.message);
+      setCellGroups([]); // Ensure empty array on error
     } finally {
       setLoading(false);
     }
@@ -303,13 +346,18 @@ const CellGroups = () => {
   // Load all members for adding to groups
   const loadAllMembers = async () => {
     try {
+      console.log('👥 Loading all members...');
       const { data, error } = await supabase
         .from('members')
         .select('*')
         .order('name');
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error loading members:', error);
+        throw error;
+      }
       
+      console.log('✅ Members loaded:', data?.length);
       setAllMembers(data || []);
       
       // Filter available members for the selected group
@@ -317,9 +365,11 @@ const CellGroups = () => {
         const currentMemberIds = new Set(selectedGroup.members?.map(m => m.member_id) || []);
         const available = data?.filter(member => !currentMemberIds.has(member.id)) || [];
         setAvailableMembers(available);
+        console.log('✅ Available members filtered:', available.length);
       }
     } catch (error) {
-      console.error('Error loading members:', error);
+      console.error('❌ Error loading members:', error);
+      setAllMembers([]);
     }
   };
 
@@ -340,6 +390,8 @@ const CellGroups = () => {
         return;
       }
 
+      console.log('🔄 Creating new cell group:', createFormData);
+
       const { data, error } = await supabase
         .from('cell_groups')
         .insert({
@@ -355,6 +407,8 @@ const CellGroups = () => {
 
       if (error) throw error;
 
+      console.log('✅ Cell group created:', data);
+
       // Add leader to group members if specified
       if (createFormData.leader_id && data) {
         const { error: memberError } = await supabase
@@ -366,7 +420,7 @@ const CellGroups = () => {
           });
 
         if (memberError) {
-          console.error('Error adding leader to group:', memberError);
+          console.error('❌ Error adding leader to group:', memberError);
         }
 
         // Also update the member's cell_group_id
@@ -376,7 +430,7 @@ const CellGroups = () => {
           .eq('id', createFormData.leader_id);
 
         if (updateError) {
-          console.error('Error updating leader cell_group_id:', updateError);
+          console.error('❌ Error updating leader cell_group_id:', updateError);
         }
       }
 
@@ -393,7 +447,7 @@ const CellGroups = () => {
       });
       
     } catch (error: any) {
-      console.error('Error creating cell group:', error);
+      console.error('❌ Error creating cell group:', error);
       setError(`Error creating cell group: ${error.message}`);
     } finally {
       setActionLoading(false);
@@ -422,6 +476,8 @@ const CellGroups = () => {
         setError('You do not have permission to edit cell groups');
         return;
       }
+
+      console.log('🔄 Updating cell group:', selectedGroup.id, editFormData);
 
       const { error } = await supabase
         .from('cell_groups')
@@ -460,7 +516,7 @@ const CellGroups = () => {
           });
 
         if (memberError) {
-          console.error('Error updating leader:', memberError);
+          console.error('❌ Error updating leader:', memberError);
         }
 
         // Update new leader's cell_group_id
@@ -470,7 +526,7 @@ const CellGroups = () => {
           .eq('id', editFormData.leader_id);
 
         if (updateError) {
-          console.error('Error updating leader cell_group_id:', updateError);
+          console.error('❌ Error updating leader cell_group_id:', updateError);
         }
       }
 
@@ -480,7 +536,7 @@ const CellGroups = () => {
       setSelectedGroup(null);
       
     } catch (error: any) {
-      console.error('Error updating cell group:', error);
+      console.error('❌ Error updating cell group:', error);
       setError(`Error updating cell group: ${error.message}`);
     } finally {
       setActionLoading(false);
@@ -509,6 +565,8 @@ const CellGroups = () => {
         return;
       }
 
+      console.log('🔄 Adding member to group:', memberId, selectedGroup.id);
+
       const { error } = await supabase
         .from('cell_group_members')
         .insert({
@@ -526,7 +584,7 @@ const CellGroups = () => {
         .eq('id', memberId);
 
       if (updateError) {
-        console.error('Error updating member cell_group_id:', updateError);
+        console.error('❌ Error updating member cell_group_id:', updateError);
       }
 
       setSuccess('Member added to cell group successfully');
@@ -535,7 +593,7 @@ const CellGroups = () => {
       setShowAddMemberModal(false);
       
     } catch (error: any) {
-      console.error('Error adding member to group:', error);
+      console.error('❌ Error adding member to group:', error);
       setError(`Error adding member: ${error.message}`);
     } finally {
       setActionLoading(false);
@@ -564,6 +622,8 @@ const CellGroups = () => {
         return;
       }
 
+      console.log('🔄 Removing member from group:', memberId, selectedGroup.id);
+
       const { error } = await supabase
         .from('cell_group_members')
         .delete()
@@ -579,7 +639,7 @@ const CellGroups = () => {
         .eq('id', memberId);
 
       if (updateError) {
-        console.error('Error clearing member cell_group_id:', updateError);
+        console.error('❌ Error clearing member cell_group_id:', updateError);
       }
 
       setSuccess('Member removed from cell group successfully');
@@ -587,7 +647,7 @@ const CellGroups = () => {
       await loadAllMembers();
       
     } catch (error: any) {
-      console.error('Error removing member from group:', error);
+      console.error('❌ Error removing member from group:', error);
       setError(`Error removing member: ${error.message}`);
     } finally {
       setActionLoading(false);
@@ -616,6 +676,8 @@ const CellGroups = () => {
         return;
       }
 
+      console.log('🔄 Setting member as leader:', memberId, selectedGroup.id);
+
       // Update cell group leader
       const { error } = await supabase
         .from('cell_groups')
@@ -632,7 +694,7 @@ const CellGroups = () => {
         .eq('member_id', memberId);
 
       if (memberError) {
-        console.error('Error updating member role:', memberError);
+        console.error('❌ Error updating member role:', memberError);
       }
 
       // Update member's cell_group_id
@@ -642,14 +704,14 @@ const CellGroups = () => {
         .eq('id', memberId);
 
       if (updateError) {
-        console.error('Error updating leader cell_group_id:', updateError);
+        console.error('❌ Error updating leader cell_group_id:', updateError);
       }
 
       setSuccess('Leader assigned successfully');
       await loadCellGroups();
       
     } catch (error: any) {
-      console.error('Error setting leader:', error);
+      console.error('❌ Error setting leader:', error);
       setError(`Error setting leader: ${error.message}`);
     } finally {
       setActionLoading(false);
@@ -671,6 +733,8 @@ const CellGroups = () => {
         return;
       }
 
+      console.log('🔄 Deleting cell group:', groupId);
+
       // First, remove all members from the group
       const { error: membersError } = await supabase
         .from('cell_group_members')
@@ -678,7 +742,7 @@ const CellGroups = () => {
         .eq('cell_group_id', groupId);
 
       if (membersError) {
-        console.error('Error removing group members:', membersError);
+        console.error('❌ Error removing group members:', membersError);
       }
 
       // Then delete the cell group
@@ -693,7 +757,7 @@ const CellGroups = () => {
       await loadCellGroups();
       
     } catch (error: any) {
-      console.error('Error deleting cell group:', error);
+      console.error('❌ Error deleting cell group:', error);
       setError(`Error deleting cell group: ${error.message}`);
     } finally {
       setActionLoading(false);
@@ -769,6 +833,7 @@ const CellGroups = () => {
 
   useEffect(() => {
     if (profile) {
+      console.log('🎯 Profile loaded, loading cell groups...');
       loadCellGroups();
       loadAllMembers();
     }
@@ -776,13 +841,18 @@ const CellGroups = () => {
 
   useEffect(() => {
     if (selectedGroup) {
+      console.log('🎯 Selected group changed, loading members...');
       loadAllMembers();
     }
   }, [selectedGroup]);
 
   useEffect(() => {
     if (cellGroups.length > 0) {
+      console.log('📊 Calculating stats for', cellGroups.length, 'groups');
       calculateStats();
+    } else {
+      console.log('📊 No groups to calculate stats for');
+      setStats([]);
     }
   }, [cellGroups]);
 
@@ -884,57 +954,59 @@ const CellGroups = () => {
         )}
 
         {/* Stats Section */}
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300 mb-6">
-          <button 
-            onClick={() => toggleSection('stats')}
-            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
-          >
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Cell Groups Overview</h2>
-            {expandedSections.stats ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-          </button>
-          
-          {expandedSections.stats && (
-            <div className="p-6 pt-0">
-              {/* Stats Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {stats.map((stat) => (
-                  <div
-                    key={stat.label}
-                    className="group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50"
-                  >
-                    <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300`} />
-                    
-                    <div className="relative z-10">
-                      <div className="flex justify-between items-start mb-4">
-                        <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                          <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+        {stats.length > 0 && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300 mb-6">
+            <button 
+              onClick={() => toggleSection('stats')}
+              className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+            >
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Cell Groups Overview</h2>
+              {expandedSections.stats ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+            </button>
+            
+            {expandedSections.stats && (
+              <div className="p-6 pt-0">
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {stats.map((stat) => (
+                    <div
+                      key={stat.label}
+                      className="group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50"
+                    >
+                      <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300`} />
+                      
+                      <div className="relative z-10">
+                        <div className="flex justify-between items-start mb-4">
+                          <div className={`p-3 rounded-xl ${stat.bgColor}`}>
+                            <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+                          </div>
+                          <MoreVertical className="h-5 w-5 text-gray-400 cursor-pointer hover:text-gray-600 transition-colors" />
                         </div>
-                        <MoreVertical className="h-5 w-5 text-gray-400 cursor-pointer hover:text-gray-600 transition-colors" />
-                      </div>
-                      
-                      <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                        {stat.value}
-                      </h3>
-                      <p className="text-gray-600 dark:text-gray-400 text-sm font-medium mb-3">
-                        {stat.label}
-                      </p>
-                      
-                      <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                        stat.changeType === 'positive' 
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                          : stat.changeType === 'negative'
-                          ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                      }`}>
-                        {stat.change}
+                        
+                        <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                          {stat.value}
+                        </h3>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm font-medium mb-3">
+                          {stat.label}
+                        </p>
+                        
+                        <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                          stat.changeType === 'positive' 
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                            : stat.changeType === 'negative'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        }`}>
+                          {stat.change}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* Cell Groups Section */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
