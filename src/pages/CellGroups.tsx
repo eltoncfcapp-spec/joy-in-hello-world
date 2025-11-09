@@ -67,10 +67,9 @@ const canManageAllGroups = (permissions: string[] = []): boolean => {
   return hasPermission(permissions, 'manage_groups');
 };
 
-// Enhanced leader check - include department_leader
+// Enhanced leader check
 const isUserLeader = (profile: any): boolean => {
   return profile?.role === 'group_leader' || 
-         profile?.role === 'department_leader' || 
          profile?.is_leader === true;
 };
 
@@ -113,6 +112,7 @@ const CellGroups = () => {
     
     console.log('🔍 Checking manage permissions for group:', group.name, {
       userRole: profile.role,
+      originalRole: profile.originalRole,
       isLeader: profile.is_leader,
       assignedGroups: profile.assigned_groups,
       groupLeaderId: group.leader_id,
@@ -149,13 +149,14 @@ const CellGroups = () => {
           canManage: canManageGroup,
           leaderId: profile.id,
           isLeader: profile.is_leader,
-          role: profile.role
+          role: profile.role,
+          originalRole: profile.originalRole
         });
         
         return canManageGroup;
       });
       
-      console.log(`👑 Leader (role: ${profile.role}, is_leader: ${profile.is_leader}) can manage group "${group.name}":`, canManage);
+      console.log(`👑 Leader (role: ${profile.role}, original: ${profile.originalRole}, is_leader: ${profile.is_leader}) can manage group "${group.name}":`, canManage);
       
       if (canManage) return true;
     }
@@ -227,6 +228,7 @@ const CellGroups = () => {
 
     console.log('🔍 Filtering cell groups for user:', {
       role: profile.role,
+      originalRole: profile.originalRole,
       is_leader: profile.is_leader,
       assigned_groups: profile.assigned_groups,
       permissions: profile.permissions
@@ -303,6 +305,7 @@ const CellGroups = () => {
       filteredGroups: uniqueGroups.length,
       userGroups: uniqueGroups.map(g => ({ id: g.id, name: g.name })),
       userRole: profile.role,
+      originalRole: profile.originalRole,
       isLeader: profile.is_leader
     });
 
@@ -409,6 +412,7 @@ const CellGroups = () => {
       console.log('🔐 Checking access for user:', {
         id: profile.id,
         role: profile.role,
+        originalRole: profile.originalRole,
         is_leader: profile.is_leader,
         assigned_groups: profile.assigned_groups,
         permissions: profile.permissions
@@ -781,7 +785,7 @@ const CellGroups = () => {
             You don't have permission to access the cell groups section.
           </p>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Your role: {profile?.role || 'member'}, is_leader: {profile?.is_leader ? 'true' : 'false'}
+            Your role: {profile?.originalRole || profile?.role || 'member'}, is_leader: {profile?.is_leader ? 'true' : 'false'}
           </p>
           {profile?.role === 'member' && !profile?.cell_group_id && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
@@ -813,8 +817,8 @@ const CellGroups = () => {
                 : canManageAllGroups(profile?.permissions)
                 ? 'Can manage all cell groups and members'
                 : isUserLeader(profile)
-                ? `Managing ${cellGroups.length} assigned group(s) as ${profile?.role}`
-                : `Viewing your cell group - ${profile?.role} access`
+                ? `Managing ${cellGroups.length} assigned group(s) as ${profile?.originalRole || profile?.role}`
+                : `Viewing your cell group - ${profile?.originalRole || profile?.role} access`
               }
             </p>
             {!isAdminOrPastor(profile?.role || '') && (
