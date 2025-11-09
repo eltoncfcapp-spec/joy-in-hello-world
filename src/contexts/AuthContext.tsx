@@ -1,211 +1,496 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { Plus, Users, MapPin, Edit, Save, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { User as SupabaseUser, Session } from '@supabase/supabase-js';
+import { useAuth } from '../path-to-your-auth-context'; // Adjust the import path
 
-interface UserProfile {
+interface CellGroup {
   id: string;
-  name: string | null;
-  surname: string | null;
-  email: string | null;
-  phone: string | null;
-  cell_group_id: string | null;
-  role: 'admin' | 'leader' | 'member';
-  isAdmin: boolean;
-  isLeader: boolean;
+  name: string;
+  location: string | null;
+  meeting_day: string | null;
+  leader_id: string | null;
+  leader: { name: string; surname: string } | null;
 }
 
-interface AuthContextType {
-  user: SupabaseUser | null;
-  session: Session | null;
-  profile: UserProfile | null;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => Promise<void>;
-  loading: boolean;
+interface Member {
+  id: string;
+  name: string;
+  surname: string;
+  is_leader: boolean;
+  role: string;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const CellGroups = () => {
+  const { profile, user } = useAuth();
+  const [showForm, setShowForm] = useState(false);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [formData, setFormData] = useState({
+    groupName: '',
+    leaderId: '',
+    location: '',
+    meetingDay: '',
+  });
+  const [editingGroup, setEditingGroup] = useState<string | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    leader_id: '',
+    location: '',
+    meeting_day: '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
-
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<SupabaseUser | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Check for existing session and set up auth listener
   useEffect(() => {
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          // Fetch user profile and role
-          await fetchUserProfile(session.user.id);
-        } else {
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    );
-
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    fetchCellGroups();
+    fetchMembers();
   }, []);
 
-  const fetchUserProfile = async (userId: string) => {
+  const fetchCellGroups = async () => {
     try {
-      // Fetch profile from profiles table
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (profileError && profileError.code !== 'PGRST116') {
-        console.error('Error fetching profile:', profileError);
-      }
-
-      // Fetch user roles from user_roles table
-      const { data: rolesData, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId);
-
-      if (rolesError) {
-        console.error('Error fetching user roles:', rolesError);
-      }
-
-      // Fetch member data to check if user is a leader from members table
-      const { data: memberData, error: memberError } = await supabase
-        .from('members')
-        .select('is_leader, role, cell_group_id, name, surname, email, phone')
-        .eq('id', userId)
-        .single();
-
-      if (memberError && memberError.code !== 'PGRST116') {
-        console.error('Error fetching member data:', memberError);
-      }
-
-      const roles = rolesData?.map(r => r.role) || [];
-      const isAdmin = roles.includes('admin');
-      
-      // Check if user is a leader from members table
-      const isLeaderFromMembers = memberData?.is_leader === true || memberData?.role === 'leader';
-      
-      // Determine primary role - prioritize admin, then leader
-      let primaryRole: 'admin' | 'leader' | 'member' = 'member';
-      if (isAdmin) {
-        primaryRole = 'admin';
-      } else if (isLeaderFromMembers || roles.includes('leader')) {
-        primaryRole = 'leader';
-      }
-
-      // Use data from members table if available, otherwise use profiles table
-      const userProfile: UserProfile = {
-        id: userId,
-        name: memberData?.name || profileData?.name || null,
-        surname: memberData?.surname || profileData?.surname || null,
-        email: memberData?.email || profileData?.email || null,
-        phone: memberData?.phone || profileData?.phone || null,
-        cell_group_id: memberData?.cell_group_id || profileData?.cell_group_id || null,
-        role: primaryRole,
-        isAdmin,
-        isLeader: isLeaderFromMembers || roles.includes('leader')
-      };
-
-      setProfile(userProfile);
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      // Set a basic profile if there's an error
-      setProfile({
-        id: userId,
-        name: null,
-        surname: null,
-        email: null,
-        phone: null,
-        cell_group_id: null,
-        role: 'member',
-        isAdmin: false,
-        isLeader: false
-      });
-    }
-  };
-
-  const login = async (email: string, password: string): Promise<boolean> => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          id,
+          name,
+          location,
+          meeting_day,
+          leader_id,
+          leader:members!leader_id(name, surname)
+        `)
+        .order('name');
 
       if (error) {
-        console.error('Login error:', error);
-        return false;
+        console.error('Error fetching cell groups:', error);
+        setError('Failed to fetch cell groups');
+      } else {
+        setCellGroups(data || []);
       }
-
-      if (data.session?.user) {
-        await fetchUserProfile(data.session.user.id);
-      }
-
-      return !!data.session;
-    } catch (error) {
-      console.error('Login error:', error);
-      return false;
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching cell groups:', err);
+      setError('Failed to fetch cell groups');
     }
   };
 
-  const logout = async () => {
+  const fetchMembers = async () => {
     try {
-      setLoading(true);
-      await supabase.auth.signOut();
-      setUser(null);
-      setSession(null);
-      setProfile(null);
-    } catch (error) {
-      console.error('Logout error:', error);
+      const { data, error } = await supabase
+        .from('members')
+        .select('id, name, surname, is_leader, role')
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching members:', error);
+        setError('Failed to fetch members');
+      } else {
+        setMembers(data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching members:', err);
+      setError('Failed to fetch members');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    
+    if (!user) {
+      setError('You must be logged in to create a cell group');
+      setLoading(false);
+      return;
+    }
+
+    // Check permission from both user_roles and members table
+    const hasPermission = profile?.isAdmin || profile?.isLeader;
+    
+    if (!hasPermission) {
+      setError('You do not have permission to create cell groups. Only admins and leaders can create cell groups.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { error: insertError } = await supabase.from('cell_groups').insert({
+        name: formData.groupName,
+        leader_id: formData.leaderId || null,
+        location: formData.location || null,
+        meeting_day: formData.meetingDay || null,
+      });
+
+      if (insertError) {
+        console.error('Error creating cell group:', insertError);
+        setError(`Error creating cell group: ${insertError.message}`);
+      } else {
+        setShowForm(false);
+        setFormData({ groupName: '', leaderId: '', location: '', meetingDay: '' });
+        fetchCellGroups();
+      }
+    } catch (err) {
+      console.error('Error creating cell group:', err);
+      setError('Failed to create cell group');
     } finally {
       setLoading(false);
     }
   };
 
-  const value = {
-    user,
-    session,
-    profile,
-    login,
-    logout,
-    loading
+  const startEditing = (group: CellGroup) => {
+    setEditingGroup(group.id);
+    setEditFormData({
+      name: group.name,
+      leader_id: group.leader_id || '',
+      location: group.location || '',
+      meeting_day: group.meeting_day || '',
+    });
   };
+
+  const cancelEditing = () => {
+    setEditingGroup(null);
+    setEditFormData({ name: '', leader_id: '', location: '', meeting_day: '' });
+  };
+
+  const handleEditSubmit = async (groupId: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const { error: updateError } = await supabase
+        .from('cell_groups')
+        .update({
+          name: editFormData.name,
+          leader_id: editFormData.leader_id || null,
+          location: editFormData.location || null,
+          meeting_day: editFormData.meeting_day || null,
+        })
+        .eq('id', groupId);
+
+      if (updateError) {
+        console.error('Error updating cell group:', updateError);
+        setError(`Error updating cell group: ${updateError.message}`);
+      } else {
+        setEditingGroup(null);
+        setEditFormData({ name: '', leader_id: '', location: '', meeting_day: '' });
+        fetchCellGroups();
+      }
+    } catch (err) {
+      console.error('Error updating cell group:', err);
+      setError('Failed to update cell group');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check if user can create cell groups
+  const canCreateCellGroup = profile?.isAdmin || profile?.isLeader;
+
+  // Check if user can edit a specific cell group
+  const canEditCellGroup = (group: CellGroup) => {
+    if (profile?.isAdmin) return true;
+    // User is the leader of this cell group (checking against members table)
+    if (group.leader_id === user?.id && profile?.isLeader) return true;
+    return false;
+  };
+
+  // Check if user can view cell groups
+  const canViewCellGroup = (group: CellGroup) => {
+    if (profile?.isAdmin) return true;
+    // User is the leader of this cell group
+    if (group.leader_id === user?.id && profile?.isLeader) return true;
+    // User is a member of this cell group
+    if (profile?.cell_group_id === group.id) return true;
+    return false;
+  };
+
+  // Filter cell groups based on user permissions
+  const visibleCellGroups = profile?.isAdmin 
+    ? cellGroups 
+    : cellGroups.filter(group => canViewCellGroup(group));
+
+  // Filter members who are leaders for dropdowns
+  const leaderMembers = members.filter(member => 
+    member.is_leader === true || member.role === 'leader'
+  );
+
+  if (loading && cellGroups.length === 0) {
+    return (
+      <div className="animate-fadeIn">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-foreground">Cell Groups</h1>
+        </div>
+        <div className="flex justify-center items-center py-12">
+          <div className="text-muted-foreground">Loading cell groups...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+    <div className="animate-fadeIn">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-foreground">Cell Groups</h1>
+        {canCreateCellGroup && (
+          <button
+            onClick={() => setShowForm(!showForm)}
+            disabled={loading}
+            className="bg-primary text-primary-foreground px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            <Plus className="h-5 w-5" />
+            {showForm ? 'Cancel' : 'Create Cell Group'}
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded-lg mb-4">
+          {error}
+          <button 
+            onClick={() => setError(null)}
+            className="float-right text-sm underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {showForm && canCreateCellGroup && (
+        <div className="bg-card border border-border rounded-xl p-6 mb-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-foreground mb-4">Create New Cell Group</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Group Name *
+                </label>
+                <input
+                  type="text"
+                  value={formData.groupName}
+                  onChange={(e) => setFormData({ ...formData, groupName: e.target.value })}
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                  required
+                  disabled={loading}
+                  placeholder="Enter group name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Leader *
+                </label>
+                <select
+                  value={formData.leaderId}
+                  onChange={(e) => setFormData({ ...formData, leaderId: e.target.value })}
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                  required
+                  disabled={loading}
+                >
+                  <option value="">Select a leader</option>
+                  {leaderMembers.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name} {member.surname}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Location *
+                </label>
+                <input
+                  type="text"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                  required
+                  disabled={loading}
+                  placeholder="Enter meeting location"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Meeting Day *
+                </label>
+                <select
+                  value={formData.meetingDay}
+                  onChange={(e) => setFormData({ ...formData, meetingDay: e.target.value })}
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                  required
+                  disabled={loading}
+                >
+                  <option value="">Select day</option>
+                  <option value="Monday">Monday</option>
+                  <option value="Tuesday">Tuesday</option>
+                  <option value="Wednesday">Wednesday</option>
+                  <option value="Thursday">Thursday</option>
+                  <option value="Friday">Friday</option>
+                  <option value="Saturday">Saturday</option>
+                  <option value="Sunday">Sunday</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                disabled={loading}
+                className="px-6 py-2 rounded-lg border border-border hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-primary text-primary-foreground px-6 py-2 rounded-lg hover:opacity-90 transition-opacity font-medium disabled:opacity-50"
+              >
+                {loading ? 'Creating...' : 'Save Cell Group'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {visibleCellGroups.length === 0 ? (
+        <div className="text-center py-12">
+          <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-foreground mb-2">No Cell Groups Found</h3>
+          <p className="text-muted-foreground">
+            {profile?.isAdmin || profile?.isLeader 
+              ? 'Create your first cell group to get started.'
+              : 'No cell groups are assigned to you.'
+            }
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {visibleCellGroups.map((group) => (
+            <div key={group.id} className="bg-card border border-border rounded-xl p-6 hover:shadow-md transition-shadow">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  {editingGroup === group.id ? (
+                    <div className="space-y-4">
+                      <input
+                        type="text"
+                        value={editFormData.name}
+                        onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                        className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-xl font-semibold bg-background"
+                        required
+                      />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-2">
+                            Leader *
+                          </label>
+                          <select
+                            value={editFormData.leader_id}
+                            onChange={(e) => setEditFormData({ ...editFormData, leader_id: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                            required
+                          >
+                            <option value="">Select a leader</option>
+                            {leaderMembers.map((member) => (
+                              <option key={member.id} value={member.id}>
+                                {member.name} {member.surname}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-2">
+                            Location *
+                          </label>
+                          <input
+                            type="text"
+                            value={editFormData.location}
+                            onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-foreground mb-2">
+                            Meeting Day *
+                          </label>
+                          <select
+                            value={editFormData.meeting_day}
+                            onChange={(e) => setEditFormData({ ...editFormData, meeting_day: e.target.value })}
+                            className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
+                            required
+                          >
+                            <option value="">Select day</option>
+                            <option value="Monday">Monday</option>
+                            <option value="Tuesday">Tuesday</option>
+                            <option value="Wednesday">Wednesday</option>
+                            <option value="Thursday">Thursday</option>
+                            <option value="Friday">Friday</option>
+                            <option value="Saturday">Saturday</option>
+                            <option value="Sunday">Sunday</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <h3 className="text-xl font-semibold text-foreground mb-2">{group.name}</h3>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Users className="h-4 w-4" />
+                          <span>
+                            Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'No leader assigned'}
+                          </span>
+                        </div>
+                        {group.location && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <MapPin className="h-4 w-4" />
+                            <span>{group.location}</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-muted-foreground mt-2">
+                    {editingGroup === group.id ? (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEditSubmit(group.id)}
+                          disabled={loading}
+                          className="p-2 text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
+                          title="Save changes"
+                        >
+                          <Save className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={cancelEditing}
+                          disabled={loading}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                          title="Cancel editing"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-2">{group.meeting_day || 'No meeting day set'}</div>
+                        {canEditCellGroup(group) && (
+                          <button
+                            onClick={() => startEditing(group)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Edit cell group"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
+
+export default CellGroups;
