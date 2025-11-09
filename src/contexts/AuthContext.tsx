@@ -1,372 +1,419 @@
-import React, { useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../contexts/AuthContext';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Grid,
-  Button,
-  Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Alert,
-  IconButton,
-  Paper
-} from '@mui/material';
-import { Edit, Delete, Add, Group } from '@mui/icons-material';
+import { User as SupabaseUser, Session } from '@supabase/supabase-js';
 
-interface CellGroup {
+interface UserProfile {
   id: string;
-  name: string;
-  description: string | null;
-  meeting_day: string | null;
-  meeting_time: string | null;
-  location: string | null;
-  leader_id: string | null;
-  status: 'active' | 'inactive';
-  created_at: string;
-  members_count?: number;
+  name: string | null;
+  surname: string | null;
+  email: string | null;
+  phone: string | null;
+  cell_group_id: string | null;
+  role: 'admin' | 'group_leader' | 'member';
+  isAdmin: boolean;
+  login_username: string | null;
+  login_pin: string | null;
+  permissions: string[];
+  assigned_groups: string[];
+  assigned_departments: string[];
 }
 
-const CellGroups: React.FC = () => {
-  const { profile } = useAuth();
-  const [groups, setGroups] = useState<CellGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingGroup, setEditingGroup] = useState<CellGroup | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    meeting_day: '',
-    meeting_time: '',
-    location: '',
-    status: 'active' as 'active' | 'inactive'
-  });
+interface AuthContextType {
+  user: SupabaseUser | null;
+  session: Session | null;
+  profile: UserProfile | null;
+  login: (identifier: string, credential: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  loading: boolean;
+}
 
-  const fetchGroups = async () => {
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check for existing session and set up auth listener
+  useEffect(() => {
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          // Fetch user profile and role
+          setTimeout(() => {
+            fetchUserProfile(session.user.id);
+          }, 0);
+        } else {
+          setProfile(null);
+        }
+      }
+    );
+
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchUserProfile(session.user.id);
+      }
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchUserProfile = async (userId: string) => {
+    try {
+      console.log('🔍 Fetching user profile for:', userId);
+      
+      // First try to fetch from members table (where your data is stored)
+      const { data: memberData, error: memberError } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (memberError) {
+        console.error('❌ Error fetching from members table:', memberError);
+      }
+
+      console.log('📊 Raw member data from database:', memberData);
+
+      if (memberData) {
+        // Debug: Check what role value actually comes from database
+        console.log('🎭 Database role value:', memberData.role);
+        console.log('🔑 Database permissions:', memberData.permissions);
+        console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
+
+        // Create profile from member data with ALL required fields
+        const isAdmin = memberData.role === 'admin';
+        
+        // FIXED: Better role mapping that handles various database values
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        
+        if (isAdmin) {
+          primaryRole = 'admin';
+        } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
+          primaryRole = 'group_leader';
+        } else {
+          primaryRole = 'member';
+        }
+
+        console.log('🎯 Mapped role:', primaryRole);
+        console.log('👑 Is admin:', isAdmin);
+        
+        const userProfile: UserProfile = {
+          id: userId,
+          name: memberData.name || null,
+          surname: memberData.surname || null,
+          email: memberData.email || null,
+          phone: memberData.phone || null,
+          cell_group_id: memberData.cell_group_id || null,
+          role: primaryRole,
+          isAdmin,
+          login_username: memberData.login_username || null,
+          login_pin: memberData.login_pin || null,
+          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
+          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+        };
+
+        console.log('✅ Final profile object:', userProfile);
+        setProfile(userProfile);
+        return;
+      }
+
+      // Fallback to profiles table if members table doesn't have the user
+      console.log('🔄 Trying profiles table as fallback...');
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (profileError) {
+        console.error('❌ Error fetching from profiles table:', profileError);
+      }
+
+      if (profileData) {
+        console.log('📊 Profile data found:', profileData);
+        
+        // Fetch user roles
+        const { data: rolesData, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId);
+
+        if (rolesError) {
+          console.error('❌ Error fetching roles:', rolesError);
+        }
+
+        const roles = rolesData?.map(r => r.role) || [];
+        console.log('🎭 User roles:', roles);
+        
+        const isAdmin = roles.includes('admin');
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        
+        if (isAdmin) {
+          primaryRole = 'admin';
+        } else if (roles.includes('leader' as any)) {
+          primaryRole = 'group_leader';
+        } else {
+          primaryRole = 'member';
+        }
+
+        console.log('🎯 Mapped role from profiles:', primaryRole);
+
+        const userProfile: UserProfile = {
+          id: userId,
+          name: profileData.name || null,
+          surname: profileData.surname || null,
+          email: profileData.email || null,
+          phone: profileData.phone || null,
+          cell_group_id: profileData.cell_group_id || null,
+          role: primaryRole,
+          isAdmin,
+          login_username: null,
+          login_pin: null,
+          permissions: [],
+          assigned_groups: [],
+          assigned_departments: []
+        };
+
+        console.log('✅ Final profile from profiles table:', userProfile);
+        setProfile(userProfile);
+      } else {
+        console.log('❌ No user data found in members or profiles table');
+      }
+    } catch (error) {
+      console.error('💥 Error fetching user profile:', error);
+    }
+  };
+
+  const loginWithUsernamePin = async (username: string, pin: string): Promise<boolean> => {
+    try {
+      console.log('🔐 Attempting username/PIN login:', { username, pin });
+      
+      // Search for member with matching username and PIN
+      const { data: memberData, error } = await supabase
+        .from('members')
+        .select('*')
+        .eq('login_username', username)
+        .eq('login_pin', pin)
+        .single();
+
+      if (error || !memberData) {
+        console.error('❌ Username/PIN login error:', error);
+        return false;
+      }
+
+      console.log('✅ Member found:', memberData);
+      console.log('🎭 Database role:', memberData.role);
+      console.log('🔑 Database permissions:', memberData.permissions);
+
+      // Create a mock session and user for username/PIN login
+      const mockUser: SupabaseUser = {
+        id: memberData.id,
+        email: memberData.email,
+        phone: memberData.phone,
+        created_at: memberData.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        app_metadata: {},
+        user_metadata: {
+          name: memberData.name,
+          surname: memberData.surname
+        },
+        aud: 'authenticated',
+        role: 'authenticated'
+      } as SupabaseUser;
+
+      const mockSession: Session = {
+        access_token: 'username-pin-token',
+        token_type: 'bearer',
+        expires_in: 3600,
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        refresh_token: 'username-pin-refresh',
+        user: mockUser,
+        provider_token: null,
+        provider_refresh_token: null
+      } as Session;
+
+      // Set the user and session
+      setUser(mockUser);
+      setSession(mockSession);
+
+      // Create and set the profile with ALL required fields
+      const isAdmin = memberData.role === 'admin';
+      
+      // FIXED: Better role mapping
+      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+      
+      if (isAdmin) {
+        primaryRole = 'admin';
+      } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
+        primaryRole = 'group_leader';
+      } else {
+        primaryRole = 'member';
+      }
+
+      console.log('🎯 Final mapped role for login:', primaryRole);
+      
+      const userProfile: UserProfile = {
+        id: memberData.id,
+        name: memberData.name || null,
+        surname: memberData.surname || null,
+        email: memberData.email || null,
+        phone: memberData.phone || null,
+        cell_group_id: memberData.cell_group_id || null,
+        role: primaryRole,
+        isAdmin,
+        login_username: memberData.login_username || null,
+        login_pin: memberData.login_pin || null,
+        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
+        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+      };
+
+      console.log('✅ Final profile for login:', userProfile);
+      setProfile(userProfile);
+      
+      // Store in localStorage for persistence
+      localStorage.setItem('username_pin_auth', JSON.stringify({
+        user: mockUser,
+        session: mockSession,
+        profile: userProfile,
+        timestamp: Date.now()
+      }));
+
+      console.log('🎉 Username/PIN login successful');
+      return true;
+    } catch (error) {
+      console.error('💥 Username/PIN login error:', error);
+      return false;
+    }
+  };
+
+  const loginWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        console.error('❌ Email/password login error:', error);
+        return false;
+      }
+
+      return !!data.session;
+    } catch (error) {
+      console.error('💥 Email/password login error:', error);
+      return false;
+    }
+  };
+
+  const login = async (identifier: string, credential: string): Promise<boolean> => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .select(`
-          *,
-          members:members(count)
-        `)
-        .order('name');
 
-      if (error) throw error;
-
-      const groupsWithCount = data?.map(group => ({
-        ...group,
-        members_count: group.members?.[0]?.count || 0
-      })) || [];
-
-      setGroups(groupsWithCount);
-    } catch (err) {
-      console.error('Error fetching groups:', err);
-      setError('Failed to load cell groups');
+      // Check if identifier is email format
+      const isEmail = identifier.includes('@');
+      
+      if (isEmail) {
+        // Email/password login
+        return await loginWithEmailPassword(identifier, credential);
+      } else {
+        // Username/PIN login
+        return await loginWithUsernamePin(identifier, credential);
+      }
+    } catch (error) {
+      console.error('💥 Login error:', error);
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
+  const logout = async () => {
+    try {
+      // Clear username/PIN auth from localStorage
+      localStorage.removeItem('username_pin_auth');
+      
+      // Only call Supabase logout if it's an email/password session
+      if (session?.access_token !== 'username-pin-token') {
+        await supabase.auth.signOut();
+      }
+      
+      setUser(null);
+      setSession(null);
+      setProfile(null);
+      console.log('👋 Logout successful');
+    } catch (error) {
+      console.error('💥 Logout error:', error);
+    }
+  };
+
+  // Check for stored username/PIN auth on component mount
   useEffect(() => {
-    fetchGroups();
+    const checkStoredAuth = () => {
+      try {
+        const storedAuth = localStorage.getItem('username_pin_auth');
+        if (storedAuth) {
+          const authData = JSON.parse(storedAuth);
+          const timestamp = authData.timestamp;
+          const now = Date.now();
+          const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
+          
+          // If less than 24 hours old, restore the auth
+          if (hoursElapsed < 24) {
+            setUser(authData.user);
+            setSession(authData.session);
+            setProfile(authData.profile);
+            console.log('🔄 Restored auth from localStorage');
+          } else {
+            // Clear expired auth
+            localStorage.removeItem('username_pin_auth');
+            console.log('🗑️ Cleared expired auth from localStorage');
+          }
+        }
+      } catch (error) {
+        console.error('💥 Error checking stored auth:', error);
+        localStorage.removeItem('username_pin_auth');
+      }
+    };
+
+    checkStoredAuth();
   }, []);
 
-  const handleOpenDialog = (group?: CellGroup) => {
-    if (group) {
-      setEditingGroup(group);
-      setFormData({
-        name: group.name,
-        description: group.description || '',
-        meeting_day: group.meeting_day || '',
-        meeting_time: group.meeting_time || '',
-        location: group.location || '',
-        status: group.status
-      });
-    } else {
-      setEditingGroup(null);
-      setFormData({
-        name: '',
-        description: '',
-        meeting_day: '',
-        meeting_time: '',
-        location: '',
-        status: 'active'
-      });
-    }
-    setDialogOpen(true);
+  const value = {
+    user,
+    session,
+    profile,
+    login,
+    logout,
+    loading
   };
-
-  const handleCloseDialog = () => {
-    setDialogOpen(false);
-    setEditingGroup(null);
-    setError(null);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setError(null);
-
-      if (editingGroup) {
-        const { error } = await supabase
-          .from('cell_groups')
-          .update(formData)
-          .eq('id', editingGroup.id);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('cell_groups')
-          .insert([formData]);
-
-        if (error) throw error;
-      }
-
-      await fetchGroups();
-      handleCloseDialog();
-    } catch (err) {
-      console.error('Error saving group:', err);
-      setError('Failed to save cell group');
-    }
-  };
-
-  const handleDelete = async (groupId: string) => {
-    if (!window.confirm('Are you sure you want to delete this cell group?')) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('cell_groups')
-        .delete()
-        .eq('id', groupId);
-
-      if (error) throw error;
-
-      await fetchGroups();
-    } catch (err) {
-      console.error('Error deleting group:', err);
-      setError('Failed to delete cell group');
-    }
-  };
-
-  const canEditGroup = (group: CellGroup) => {
-    if (!profile) return false;
-    if (profile.isAdmin) return true;
-    if (profile.role === 'group_leader') {
-      return profile.assigned_groups?.includes(group.id);
-    }
-    return false;
-  };
-
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <Typography>Loading cell groups...</Typography>
-      </Box>
-    );
-  }
 
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1">
-          Cell Groups
-        </Typography>
-        {profile?.isAdmin && (
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => handleOpenDialog()}
-          >
-            Add Group
-          </Button>
-        )}
-      </Box>
-
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      <Grid container spacing={3}>
-        {groups.map((group) => (
-          <Grid item xs={12} md={6} lg={4} key={group.id}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                  <Box display="flex" alignItems="center">
-                    <Group sx={{ mr: 1, color: 'primary.main' }} />
-                    <Typography variant="h6" component="h2">
-                      {group.name}
-                    </Typography>
-                  </Box>
-                  <Chip
-                    label={group.status}
-                    color={group.status === 'active' ? 'success' : 'default'}
-                    size="small"
-                  />
-                </Box>
-
-                {group.description && (
-                  <Typography color="textSecondary" paragraph>
-                    {group.description}
-                  </Typography>
-                )}
-
-                <Box mb={2}>
-                  {group.meeting_day && group.meeting_time && (
-                    <Typography variant="body2">
-                      <strong>Meeting:</strong> {group.meeting_day} at {group.meeting_time}
-                    </Typography>
-                  )}
-                  {group.location && (
-                    <Typography variant="body2">
-                      <strong>Location:</strong> {group.location}
-                    </Typography>
-                  )}
-                  <Typography variant="body2">
-                    <strong>Members:</strong> {group.members_count || 0}
-                  </Typography>
-                </Box>
-
-                {canEditGroup(group) && (
-                  <Box display="flex" gap={1}>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleOpenDialog(group)}
-                      color="primary"
-                    >
-                      <Edit />
-                    </IconButton>
-                    {profile?.isAdmin && (
-                      <IconButton
-                        size="small"
-                        onClick={() => handleDelete(group.id)}
-                        color="error"
-                      >
-                        <Delete />
-                      </IconButton>
-                    )}
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-
-      {groups.length === 0 && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6" color="textSecondary">
-            No cell groups found
-          </Typography>
-          {profile?.isAdmin && (
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => handleOpenDialog()}
-              sx={{ mt: 2 }}
-            >
-              Create First Group
-            </Button>
-          )}
-        </Paper>
-      )}
-
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {editingGroup ? 'Edit Cell Group' : 'Add New Cell Group'}
-        </DialogTitle>
-        <form onSubmit={handleSubmit}>
-          <DialogContent>
-            <TextField
-              autoFocus
-              margin="dense"
-              label="Group Name"
-              type="text"
-              fullWidth
-              variant="outlined"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
-            <TextField
-              margin="dense"
-              label="Description"
-              type="text"
-              fullWidth
-              variant="outlined"
-              multiline
-              rows={3}
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            />
-            <TextField
-              margin="dense"
-              label="Meeting Day"
-              type="text"
-              fullWidth
-              variant="outlined"
-              value={formData.meeting_day}
-              onChange={(e) => setFormData({ ...formData, meeting_day: e.target.value })}
-              placeholder="e.g., Tuesday"
-            />
-            <TextField
-              margin="dense"
-              label="Meeting Time"
-              type="text"
-              fullWidth
-              variant="outlined"
-              value={formData.meeting_time}
-              onChange={(e) => setFormData({ ...formData, meeting_time: e.target.value })}
-              placeholder="e.g., 7:00 PM"
-            />
-            <TextField
-              margin="dense"
-              label="Location"
-              type="text"
-              fullWidth
-              variant="outlined"
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-            />
-            <FormControl fullWidth margin="dense">
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={formData.status}
-                label="Status"
-                onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-              >
-                <MenuItem value="active">Active</MenuItem>
-                <MenuItem value="inactive">Inactive</MenuItem>
-              </Select>
-            </FormControl>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseDialog}>Cancel</Button>
-            <Button type="submit" variant="contained">
-              {editingGroup ? 'Update' : 'Create'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
-    </Box>
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
   );
 };
-
-export default CellGroups;
