@@ -167,7 +167,7 @@ const CellGroups = () => {
     setStats(statsData);
   };
 
-  // Load cell groups based on user role - FIXED QUERIES
+  // SIMPLIFIED: Load cell groups based on user role
   const loadCellGroups = async () => {
     try {
       setLoading(true);
@@ -179,16 +179,16 @@ const CellGroups = () => {
       }
 
       console.log('🔍 Loading cell groups for user:', {
+        id: profile.id,
+        name: `${profile.name} ${profile.surname}`,
         role: profile.role,
         isGroupLeader: isGroupLeader,
-        isCellLeader: isCellLeader,
-        is_leader: profile.is_leader,
-        login_username: profile.login_username,
-        cell_group_id: profile.cell_group_id
+        cell_group_id: profile.cell_group_id,
+        assigned_groups: profile.assigned_groups
       });
 
       if (canManageAllGroups) {
-        // Load ALL cell groups for group_leader
+        // Group Leader: Load ALL cell groups
         console.log('👑 Group Leader - loading ALL cell groups');
         const { data, error: queryError } = await supabase
           .from('cell_groups')
@@ -207,18 +207,48 @@ const CellGroups = () => {
           throw new Error(`Error loading cell groups: ${queryError.message}`);
         }
 
-        console.log('📋 Raw data from supabase:', data);
-
         const groupsWithMembers = (data || []).map(group => ({
           ...group,
           members: group.cell_group_members || []
         })) as CellGroup[];
 
-        console.log('📋 All cell groups loaded:', groupsWithMembers.length, groupsWithMembers);
+        console.log('✅ All cell groups loaded:', groupsWithMembers.length);
         setCellGroups(groupsWithMembers);
-      } else if (canManageOwnGroup && profile.cell_group_id) {
-        // Load only the cell leader's own group
-        console.log('👤 Cell Leader - loading own cell group:', profile.cell_group_id);
+      } else {
+        // For Cell Leaders and Regular Members: Load their specific groups
+        let groupsToLoad: string[] = [];
+
+        // If user has assigned_groups, use those
+        if (profile.assigned_groups && profile.assigned_groups.length > 0) {
+          groupsToLoad = profile.assigned_groups;
+          console.log('📋 Loading assigned groups:', groupsToLoad);
+        }
+        // If user has cell_group_id, include that too
+        else if (profile.cell_group_id) {
+          groupsToLoad = [profile.cell_group_id];
+          console.log('📋 Loading cell_group_id:', groupsToLoad);
+        }
+        // If no specific groups assigned, try to find groups via membership
+        else {
+          console.log('🔍 Finding groups via membership for user:', profile.id);
+          const { data: userMemberships, error: membershipError } = await supabase
+            .from('cell_group_members')
+            .select('cell_group_id')
+            .eq('member_id', profile.id);
+
+          if (!membershipError && userMemberships && userMemberships.length > 0) {
+            groupsToLoad = userMemberships.map(m => m.cell_group_id);
+            console.log('✅ Found groups via membership:', groupsToLoad);
+          }
+        }
+
+        if (groupsToLoad.length === 0) {
+          console.log('ℹ️ No specific groups found for user, they may not be in any group');
+          setCellGroups([]);
+          return;
+        }
+
+        // Load the specific groups
         const { data, error: queryError } = await supabase
           .from('cell_groups')
           .select(`
@@ -229,115 +259,27 @@ const CellGroups = () => {
               member:members(id, name, surname, email, phone, status)
             )
           `)
-          .eq('id', profile.cell_group_id)
-          .single();
+          .in('id', groupsToLoad)
+          .order('name');
 
         if (queryError) {
-          console.error('❌ Error loading cell leader group:', queryError);
-          // Try alternative approach - get group by member's cell_group_id
-          const { data: memberData, error: memberError } = await supabase
-            .from('members')
-            .select('cell_group_id')
-            .eq('id', profile.id)
-            .single();
-
-          if (memberError || !memberData?.cell_group_id) {
-            throw new Error('No cell group found for this cell leader');
-          }
-
-          // Try again with the cell_group_id from members table
-          const { data: retryData, error: retryError } = await supabase
-            .from('cell_groups')
-            .select(`
-              *,
-              leader:members!leader_id(id, name, surname, email, phone),
-              cell_group_members(
-                *,
-                member:members(id, name, surname, email, phone, status)
-              )
-            `)
-            .eq('id', memberData.cell_group_id)
-            .single();
-
-          if (retryError) {
-            throw new Error('No cell group found for this cell leader');
-          }
-
-          setCellGroups([{
-            ...retryData,
-            members: retryData.cell_group_members || []
-          } as CellGroup]);
-        } else if (data) {
-          console.log('✅ Cell leader group loaded:', data);
-          setCellGroups([{
-            ...data,
-            members: data.cell_group_members || []
-          } as CellGroup]);
+          console.error('❌ Error loading user cell groups:', queryError);
+          throw new Error(`Error loading your cell groups: ${queryError.message}`);
         }
-      } else {
-        // Load only user's cell group for regular users
-        console.log('👤 Regular user - loading user cell group');
-        
-        // First try to get user's cell group via cell_group_members table
-        const { data: userMembership, error: membershipError } = await supabase
-          .from('cell_group_members')
-          .select(`
-            cell_group_id,
-            cell_groups(
-              *,
-              leader:members!leader_id(id, name, surname, email, phone),
-              cell_group_members(
-                *,
-                member:members(id, name, surname, email, phone, status)
-              )
-            )
-          `)
-          .eq('member_id', profile.id)
-          .single();
 
-        if (!membershipError && userMembership?.cell_groups) {
-          console.log('✅ Found user group via cell_group_members:', userMembership.cell_groups);
-          setCellGroups([{
-            ...userMembership.cell_groups,
-            members: userMembership.cell_groups.cell_group_members || []
-          } as CellGroup]);
-        } else {
-          // Fallback: Try to get cell group via profile.cell_group_id
-          if (profile.cell_group_id) {
-            console.log('🔄 Trying fallback with cell_group_id:', profile.cell_group_id);
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from('cell_groups')
-              .select(`
-                *,
-                leader:members!leader_id(id, name, surname, email, phone),
-                cell_group_members(
-                  *,
-                  member:members(id, name, surname, email, phone, status)
-                )
-              `)
-              .eq('id', profile.cell_group_id)
-              .single();
+        const groupsWithMembers = (data || []).map(group => ({
+          ...group,
+          members: group.cell_group_members || []
+        })) as CellGroup[];
 
-            if (fallbackError) {
-              console.error('❌ Fallback error:', fallbackError);
-              throw new Error('No cell group found for this user');
-            }
-            
-            console.log('✅ Found user group via fallback:', fallbackData);
-            setCellGroups([{
-              ...fallbackData,
-              members: fallbackData.cell_group_members || []
-            } as CellGroup]);
-          } else {
-            throw new Error('No cell group found for this user');
-          }
-        }
+        console.log('✅ User cell groups loaded:', groupsWithMembers.length);
+        setCellGroups(groupsWithMembers);
       }
 
     } catch (error: any) {
       console.error('❌ Error loading cell groups:', error);
       setError(error.message);
-      setCellGroups([]); // Ensure empty array on error
+      setCellGroups([]);
     } finally {
       setLoading(false);
     }
@@ -833,7 +775,7 @@ const CellGroups = () => {
 
   useEffect(() => {
     if (profile) {
-      console.log('🎯 Profile loaded, loading cell groups...');
+      console.log('🎯 Profile loaded in CellGroups, loading cell groups...', profile);
       loadCellGroups();
       loadAllMembers();
     }
