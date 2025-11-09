@@ -16,19 +16,6 @@ interface UserProfile {
   permissions: string[];
   assigned_groups: string[];
   assigned_departments: string[];
-  is_leader: boolean;
-  originalRole: string;
-}
-
-interface GroupMatch {
-  user_id: string;
-  user_name: string;
-  assigned_groups: string[];
-  assigned_group_normalized: string;
-  group_id: string;
-  group_name: string;
-  normalized_name: string;
-  match_type: 'EXACT_MATCH' | 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED' | 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP' | 'WHITESPACE_INSENSITIVE_MATCH' | 'NO_MATCH';
 }
 
 interface AuthContextType {
@@ -38,10 +25,6 @@ interface AuthContextType {
   login: (identifier: string, credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
-  groupMatches: GroupMatch[];
-  fetchGroupMatches: () => Promise<void>;
-  groupMatchesLoading: boolean;
-  groupMatchesLoaded: boolean; // NEW: Track if group matches have been loaded
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -63,28 +46,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [groupMatches, setGroupMatches] = useState<GroupMatch[]>([]);
-  const [groupMatchesLoading, setGroupMatchesLoading] = useState(false);
-  const [groupMatchesLoaded, setGroupMatchesLoaded] = useState(false); // NEW
 
+  // Check for existing session and set up auth listener
   useEffect(() => {
+    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
+          // Fetch user profile and role
           setTimeout(() => {
             fetchUserProfile(session.user.id);
           }, 0);
         } else {
           setProfile(null);
-          setGroupMatches([]);
-          setGroupMatchesLoaded(false); // Reset when logging out
         }
       }
     );
 
+    // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -97,114 +79,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchGroupMatches = async () => {
-    if (!profile) {
-      console.log('❌ No profile available for group matching');
-      setGroupMatchesLoaded(true); // Mark as loaded even if no profile
-      return;
-    }
-
-    try {
-      setGroupMatchesLoading(true);
-      console.log('🔍 Fetching group matches for:', profile.id);
-      
-      const { data, error } = await supabase.rpc('get_group_matches', {
-        p_user_id: profile.id,
-        p_user_name: `${profile.name} ${profile.surname}`.trim(),
-        p_assigned_groups: profile.assigned_groups || []
-      });
-
-      if (error) {
-        console.error('❌ Error fetching group matches via RPC:', error);
-        await fetchGroupMatchesDirect();
-        return;
-      }
-
-      console.log('✅ Group matches fetched:', data);
-      setGroupMatches(data || []);
-      setGroupMatchesLoaded(true); // Mark as loaded after successful fetch
-    } catch (error) {
-      console.error('💥 Error in fetchGroupMatches:', error);
-      await fetchGroupMatchesDirect();
-    } finally {
-      setGroupMatchesLoading(false);
-    }
-  };
-
-  const fetchGroupMatchesDirect = async () => {
-    if (!profile) {
-      setGroupMatchesLoaded(true);
-      return;
-    }
-
-    try {
-      console.log('🔄 Using direct query for group matching');
-      
-      const { data: allGroups, error: groupsError } = await supabase
-        .from('cell_groups')
-        .select('id, name')
-        .order('name');
-
-      if (groupsError) {
-        console.error('❌ Error fetching cell groups:', groupsError);
-        setGroupMatchesLoaded(true);
-        return;
-      }
-
-      const matches: GroupMatch[] = [];
-      const assignedGroups = profile.assigned_groups || [];
-
-      for (const assignedGroup of assignedGroups) {
-        const assignedGroupNormalized = assignedGroup.toLowerCase().trim();
-        
-        for (const group of allGroups || []) {
-          const groupNameNormalized = group.name.toLowerCase().trim();
-          
-          let matchType: GroupMatch['match_type'] = 'NO_MATCH';
-          
-          if (assignedGroupNormalized === groupNameNormalized) {
-            matchType = 'EXACT_MATCH';
-          } else if (groupNameNormalized.includes(assignedGroupNormalized)) {
-            matchType = 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED';
-          } else if (assignedGroupNormalized.includes(groupNameNormalized)) {
-            matchType = 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP';
-          } else if (groupNameNormalized.replace(/\s/g, '') === assignedGroupNormalized.replace(/\s/g, '')) {
-            matchType = 'WHITESPACE_INSENSITIVE_MATCH';
-          }
-
-          matches.push({
-            user_id: profile.id,
-            user_name: `${profile.name} ${profile.surname}`.trim(),
-            assigned_groups: assignedGroups,
-            assigned_group_normalized: assignedGroupNormalized,
-            group_id: group.id,
-            group_name: group.name,
-            normalized_name: groupNameNormalized,
-            match_type: matchType
-          });
-        }
-      }
-
-      console.log('✅ Direct group matches calculated:', matches);
-      setGroupMatches(matches);
-      setGroupMatchesLoaded(true); // Mark as loaded after direct calculation
-    } catch (error) {
-      console.error('💥 Error in direct group matching:', error);
-      setGroupMatchesLoaded(true); // Mark as loaded even on error
-    }
-  };
-
-  useEffect(() => {
-    if (profile && !groupMatchesLoaded) {
-      console.log('🔄 Profile updated, fetching group matches...');
-      fetchGroupMatches();
-    }
-  }, [profile, groupMatchesLoaded]);
-
   const fetchUserProfile = async (userId: string) => {
     try {
       console.log('🔍 Fetching user profile for:', userId);
       
+      // First try to fetch from members table (where your data is stored)
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -213,45 +92,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (memberError) {
         console.error('❌ Error fetching from members table:', memberError);
-        throw memberError;
       }
 
       console.log('📊 Raw member data from database:', memberData);
 
       if (memberData) {
+        // Debug: Check what role value actually comes from database
+        console.log('🎭 Database role value:', memberData.role);
+        console.log('🔑 Database permissions:', memberData.permissions);
+        console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
+
+        // Create profile from member data with ALL required fields
         const isAdmin = memberData.role === 'admin';
         
-        const shouldBeGroupLeader = 
-          memberData.is_leader === true || 
-          memberData.role === 'group_leader' || 
-          memberData.role === 'leader' ||
-          memberData.role === 'department_leader' ||
-          (memberData.assigned_groups && memberData.assigned_groups.length > 0);
-        
+        // FIXED: Better role mapping that handles various database values
         let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
         
         if (isAdmin) {
           primaryRole = 'admin';
-        } else if (shouldBeGroupLeader) {
+        } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
           primaryRole = 'group_leader';
         } else {
           primaryRole = 'member';
         }
 
-        console.log('🎭 Role determination:', {
-          databaseRole: memberData.role,
-          isLeader: memberData.is_leader,
-          assignedGroups: memberData.assigned_groups,
-          shouldBeGroupLeader: shouldBeGroupLeader,
-          finalRole: primaryRole,
-          isAdmin
-        });
-
-        const assignedGroups = Array.isArray(memberData.assigned_groups) 
-          ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
-          : [];
-
-        console.log('✅ Normalized assigned_groups:', assignedGroups);
+        console.log('🎯 Mapped role:', primaryRole);
+        console.log('👑 Is admin:', isAdmin);
         
         const userProfile: UserProfile = {
           id: userId,
@@ -265,23 +131,79 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-          assigned_groups: assignedGroups,
-          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
-          is_leader: memberData.is_leader === true,
-          originalRole: memberData.role
+          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
         };
 
         console.log('✅ Final profile object:', userProfile);
         setProfile(userProfile);
-        setGroupMatchesLoaded(false); // Reset so group matches will be fetched for new profile
         return;
       }
 
-      throw new Error('No user data found in members table');
+      // Fallback to profiles table if members table doesn't have the user
+      console.log('🔄 Trying profiles table as fallback...');
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (profileError) {
+        console.error('❌ Error fetching from profiles table:', profileError);
+      }
+
+      if (profileData) {
+        console.log('📊 Profile data found:', profileData);
+        
+        // Fetch user roles
+        const { data: rolesData, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId);
+
+        if (rolesError) {
+          console.error('❌ Error fetching roles:', rolesError);
+        }
+
+        const roles = rolesData?.map(r => r.role) || [];
+        console.log('🎭 User roles:', roles);
+        
+        const isAdmin = roles.includes('admin');
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        
+        if (isAdmin) {
+          primaryRole = 'admin';
+        } else if (roles.includes('leader' as any)) {
+          primaryRole = 'group_leader';
+        } else {
+          primaryRole = 'member';
+        }
+
+        console.log('🎯 Mapped role from profiles:', primaryRole);
+
+        const userProfile: UserProfile = {
+          id: userId,
+          name: profileData.name || null,
+          surname: profileData.surname || null,
+          email: profileData.email || null,
+          phone: profileData.phone || null,
+          cell_group_id: profileData.cell_group_id || null,
+          role: primaryRole,
+          isAdmin,
+          login_username: null,
+          login_pin: null,
+          permissions: [],
+          assigned_groups: [],
+          assigned_departments: []
+        };
+
+        console.log('✅ Final profile from profiles table:', userProfile);
+        setProfile(userProfile);
+      } else {
+        console.log('❌ No user data found in members or profiles table');
+      }
     } catch (error) {
       console.error('💥 Error fetching user profile:', error);
-      setProfile(null);
-      setGroupMatchesLoaded(true); // Mark as loaded even on error
     }
   };
 
@@ -289,6 +211,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔐 Attempting username/PIN login:', { username, pin });
       
+      // Search for member with matching username and PIN
       const { data: memberData, error } = await supabase
         .from('members')
         .select('*')
@@ -302,7 +225,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Member found:', memberData);
+      console.log('🎭 Database role:', memberData.role);
+      console.log('🔑 Database permissions:', memberData.permissions);
 
+      // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
         id: memberData.id,
         email: memberData.email,
@@ -329,35 +255,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         provider_refresh_token: null
       } as Session;
 
+      // Set the user and session
       setUser(mockUser);
       setSession(mockSession);
 
+      // Create and set the profile with ALL required fields
       const isAdmin = memberData.role === 'admin';
       
-      const shouldBeGroupLeader = 
-        memberData.is_leader === true || 
-        memberData.role === 'group_leader' || 
-        memberData.role === 'leader' ||
-        memberData.role === 'department_leader' ||
-        (memberData.assigned_groups && memberData.assigned_groups.length > 0);
-      
+      // FIXED: Better role mapping
       let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
       
       if (isAdmin) {
         primaryRole = 'admin';
-      } else if (shouldBeGroupLeader) {
+      } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
         primaryRole = 'group_leader';
       } else {
         primaryRole = 'member';
       }
 
       console.log('🎯 Final mapped role for login:', primaryRole);
-      
-      const assignedGroups = Array.isArray(memberData.assigned_groups) 
-        ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
-        : [];
-
-      console.log('✅ Normalized assigned_groups for login:', assignedGroups);
       
       const userProfile: UserProfile = {
         id: memberData.id,
@@ -371,16 +287,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-        assigned_groups: assignedGroups,
-        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
-        is_leader: memberData.is_leader === true,
-        originalRole: memberData.role
+        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
       };
 
       console.log('✅ Final profile for login:', userProfile);
       setProfile(userProfile);
-      setGroupMatchesLoaded(false); // Reset so group matches will be fetched
       
+      // Store in localStorage for persistence
       localStorage.setItem('username_pin_auth', JSON.stringify({
         user: mockUser,
         session: mockSession,
@@ -419,11 +333,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setLoading(true);
 
+      // Check if identifier is email format
       const isEmail = identifier.includes('@');
       
       if (isEmail) {
+        // Email/password login
         return await loginWithEmailPassword(identifier, credential);
       } else {
+        // Username/PIN login
         return await loginWithUsernamePin(identifier, credential);
       }
     } catch (error) {
@@ -436,8 +353,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
+      // Clear username/PIN auth from localStorage
       localStorage.removeItem('username_pin_auth');
       
+      // Only call Supabase logout if it's an email/password session
       if (session?.access_token !== 'username-pin-token') {
         await supabase.auth.signOut();
       }
@@ -445,14 +364,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(null);
       setSession(null);
       setProfile(null);
-      setGroupMatches([]);
-      setGroupMatchesLoaded(false);
       console.log('👋 Logout successful');
     } catch (error) {
       console.error('💥 Logout error:', error);
     }
   };
 
+  // Check for stored username/PIN auth on component mount
   useEffect(() => {
     const checkStoredAuth = () => {
       try {
@@ -463,13 +381,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           const now = Date.now();
           const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
           
+          // If less than 24 hours old, restore the auth
           if (hoursElapsed < 24) {
             setUser(authData.user);
             setSession(authData.session);
             setProfile(authData.profile);
-            setGroupMatchesLoaded(false); // Reset so group matches will be fetched
             console.log('🔄 Restored auth from localStorage');
           } else {
+            // Clear expired auth
             localStorage.removeItem('username_pin_auth');
             console.log('🗑️ Cleared expired auth from localStorage');
           }
@@ -489,11 +408,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading,
-    groupMatches,
-    fetchGroupMatches,
-    groupMatchesLoading,
-    groupMatchesLoaded // NEW: Export the loaded state
+    loading
   };
 
   return (
