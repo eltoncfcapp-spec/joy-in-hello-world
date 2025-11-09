@@ -49,6 +49,7 @@ interface Member {
   assigned_groups?: string[] | null;
   assigned_departments?: string[] | null;
   cell_group_id?: string | null;
+  is_leader?: boolean | null;
 }
 
 // Permission checking utility
@@ -113,42 +114,21 @@ const CellGroups = () => {
       return true;
     }
     
-    // FIXED: Group leaders can only manage their assigned groups - improved matching
-    if (profile.role === 'group_leader' && profile.assigned_groups) {
-      const canManage = profile.assigned_groups.some(assignedGroup => {
-        // Compare group names in a case-insensitive manner
-        const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
-        const groupName = group.name.toLowerCase().trim();
-        
-        // Also check if the assigned group name is contained in the group name or vice versa
-        const canManageGroup = assignedGroupName === groupName || 
-                              groupName.includes(assignedGroupName) || 
-                              assignedGroupName.includes(groupName);
-        
-        console.log(`🔍 Checking group assignment:`, {
-          assignedGroup: assignedGroupName,
-          groupName: groupName,
-          canManage: canManageGroup
-        });
-        
-        return canManageGroup;
-      });
+    // FIXED: Group leaders can only manage groups where they are the leader
+    if (profile.role === 'group_leader') {
+      // Check if user is the leader of this group (from leader_id)
+      if (group.leader_id === profile.id) {
+        return true;
+      }
+
+      // Check if user is marked as leader in cell_group_members
+      const isGroupLeader = group.members?.some(member => 
+        member.member_id === profile.id && member.role === 'leader'
+      );
       
-      console.log(`👑 Group leader can manage group "${group.name}":`, canManage);
-      return canManage;
+      return isGroupLeader;
     }
     
-    // Check if user is the leader of this group (from leader_id)
-    if (group.leader_id === profile.id) {
-      return true;
-    }
-
-    // Check if user is marked as leader in cell_group_members
-    const isGroupLeader = group.members?.some(member => 
-      member.member_id === profile.id && member.role === 'leader'
-    );
-    if (isGroupLeader) return true;
-
     return false;
   };
 
@@ -166,20 +146,19 @@ const CellGroups = () => {
       return true;
     }
     
-    // FIXED: Group leaders can view their assigned groups - improved matching
-    if (profile.role === 'group_leader' && profile.assigned_groups) {
-      const canView = profile.assigned_groups.some(assignedGroup => {
-        const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
-        const groupName = group.name.toLowerCase().trim();
-        
-        const canViewGroup = assignedGroupName === groupName || 
-                           groupName.includes(assignedGroupName) || 
-                           assignedGroupName.includes(groupName);
-        
-        return canViewGroup;
-      });
+    // FIXED: Group leaders can only view groups they lead
+    if (profile.role === 'group_leader') {
+      // Check if user is the leader of this group (from leader_id)
+      if (group.leader_id === profile.id) {
+        return true;
+      }
+
+      // Check if user is marked as leader in cell_group_members
+      const isGroupLeader = group.members?.some(member => 
+        member.member_id === profile.id && member.role === 'leader'
+      );
       
-      return canView;
+      return isGroupLeader;
     }
     
     // Regular members can only view groups they are members of
@@ -196,7 +175,7 @@ const CellGroups = () => {
     return false;
   };
 
-  // FIXED: Improved filtering logic
+  // FIXED: Improved filtering logic - Group leaders only see groups they lead
   const getFilteredCellGroups = () => {
     if (!profile) return [];
 
@@ -212,20 +191,27 @@ const CellGroups = () => {
 
     let userGroups: CellGroup[] = [];
 
-    // FIXED: Improved group leader filtering with better matching
-    if (profile.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
+    // FIXED: Group leaders only see groups they lead (based on leader_id or cell_group_members role)
+    if (profile.role === 'group_leader') {
       userGroups = allCellGroups.filter(group => {
-        const canView = profile.assigned_groups?.some(assignedGroup => {
-          const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
-          const groupName = group.name.toLowerCase().trim();
-          
-          return assignedGroupName === groupName || 
-                 groupName.includes(assignedGroupName) || 
-                 assignedGroupName.includes(groupName);
-        });
+        // Check if user is the leader of this group (from leader_id)
+        if (group.leader_id === profile.id) {
+          return true;
+        }
+
+        // Check if user is marked as leader in cell_group_members
+        const isGroupLeader = group.members?.some(member => 
+          member.member_id === profile.id && member.role === 'leader'
+        );
         
-        console.log(`👀 Group leader can view group "${group.name}":`, canView);
-        return canView;
+        return isGroupLeader;
+      });
+      
+      console.log(`👑 Group leader ${profile.name} can view groups:`, {
+        totalGroups: allCellGroups.length,
+        userGroups: userGroups.length,
+        groupNames: userGroups.map(g => g.name),
+        leaderId: profile.id
       });
     }
 
@@ -363,8 +349,8 @@ const CellGroups = () => {
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
       }
-      // Group leaders with assigned groups
-      else if (profile.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
+      // Group leaders - they always have access to see if they lead any groups
+      else if (profile.role === 'group_leader') {
         userHasAccess = true;
       }
       // Regular members who belong to a cell group
@@ -720,9 +706,9 @@ const CellGroups = () => {
               You are not assigned to any cell group. Please contact an administrator.
             </p>
           )}
-          {profile?.role === 'group_leader' && (!profile?.assigned_groups || profile.assigned_groups.length === 0) && (
+          {profile?.role === 'group_leader' && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-              You don't have any assigned groups to manage. Please contact an administrator.
+              You are not assigned as a leader of any cell groups.
             </p>
           )}
         </div>
@@ -745,7 +731,7 @@ const CellGroups = () => {
                 : canManageAllGroups(profile?.permissions)
                 ? 'Can manage all cell groups and members'
                 : profile?.role === 'group_leader'
-                ? `Managing ${cellGroups.length} assigned group(s)`
+                ? `Managing ${cellGroups.length} group(s) you lead`
                 : `Viewing your cell group - ${profile?.role} access`
               }
             </p>
@@ -754,7 +740,7 @@ const CellGroups = () => {
                 {canManageAllGroups(profile?.permissions)
                   ? 'You have full access to manage all cell groups'
                   : profile?.role === 'group_leader' 
-                  ? 'You can only view and manage cell groups assigned to you'
+                  ? 'You can only view and manage cell groups where you are the leader'
                   : 'You can only view the cell group you belong to'
                 }
               </p>
@@ -897,7 +883,7 @@ const CellGroups = () => {
                   : canManageAllGroups(profile?.permissions)
                   ? 'No cell groups available'
                   : profile?.role === 'group_leader'
-                  ? 'You are not assigned to any cell groups as a leader'
+                  ? 'You are not assigned as a leader of any cell groups'
                   : 'You are not a member of any cell groups'
                 }
               </p>
