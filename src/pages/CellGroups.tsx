@@ -1,7 +1,7 @@
 import { Plus, Users, MapPin, Edit, Save, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../path-to-your-auth-context';
+import { useAuth } from '../path-to-your-auth-context'; // Adjust import path
 
 interface CellGroup {
   id: string;
@@ -12,11 +12,19 @@ interface CellGroup {
   leader: { name: string; surname: string } | null;
 }
 
+interface Member {
+  id: string;
+  name: string;
+  surname: string;
+  is_leader: boolean;
+  role: string;
+}
+
 const CellGroups = () => {
   const { profile, user } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
-  const [members, setMembers] = useState<{ id: string; name: string; surname: string }[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [formData, setFormData] = useState({
     groupName: '',
     leaderId: '',
@@ -39,37 +47,47 @@ const CellGroups = () => {
   }, []);
 
   const fetchCellGroups = async () => {
-    const { data, error } = await supabase
-      .from('cell_groups')
-      .select(`
-        id,
-        name,
-        location,
-        meeting_day,
-        leader_id,
-        leader:members!leader_id(name, surname)
-      `)
-      .order('name');
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          id,
+          name,
+          location,
+          meeting_day,
+          leader_id,
+          leader:members!leader_id(name, surname)
+        `)
+        .order('name');
 
-    if (error) {
-      console.error('Error fetching cell groups:', error);
+      if (error) {
+        console.error('Error fetching cell groups:', error);
+        setError('Failed to fetch cell groups');
+      } else {
+        setCellGroups(data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching cell groups:', err);
       setError('Failed to fetch cell groups');
-    } else {
-      setCellGroups(data || []);
     }
   };
 
   const fetchMembers = async () => {
-    const { data, error } = await supabase
-      .from('members')
-      .select('id, name, surname')
-      .order('name');
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('id, name, surname, is_leader, role')
+        .order('name');
 
-    if (error) {
-      console.error('Error fetching members:', error);
+      if (error) {
+        console.error('Error fetching members:', error);
+        setError('Failed to fetch members');
+      } else {
+        setMembers(data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching members:', err);
       setError('Failed to fetch members');
-    } else {
-      setMembers(data || []);
     }
   };
 
@@ -84,7 +102,8 @@ const CellGroups = () => {
       return;
     }
 
-    const hasPermission = profile?.isAdmin || profile?.role === 'leader';
+    // Use isAdmin and isLeader from the auth context
+    const hasPermission = profile?.isAdmin || profile?.isLeader;
     
     if (!hasPermission) {
       setError('You do not have permission to create cell groups. Only admins and leaders can create cell groups.');
@@ -92,23 +111,28 @@ const CellGroups = () => {
       return;
     }
 
-    const { error: insertError } = await supabase.from('cell_groups').insert({
-      name: formData.groupName,
-      leader_id: formData.leaderId || null,
-      location: formData.location || null,
-      meeting_day: formData.meetingDay || null,
-    });
+    try {
+      const { error: insertError } = await supabase.from('cell_groups').insert({
+        name: formData.groupName,
+        leader_id: formData.leaderId || null,
+        location: formData.location || null,
+        meeting_day: formData.meetingDay || null,
+      });
 
-    if (insertError) {
-      console.error('Error creating cell group:', insertError);
-      setError(`Error creating cell group: ${insertError.message}`);
-    } else {
-      setShowForm(false);
-      setFormData({ groupName: '', leaderId: '', location: '', meetingDay: '' });
-      fetchCellGroups();
+      if (insertError) {
+        console.error('Error creating cell group:', insertError);
+        setError(`Error creating cell group: ${insertError.message}`);
+      } else {
+        setShowForm(false);
+        setFormData({ groupName: '', leaderId: '', location: '', meetingDay: '' });
+        fetchCellGroups();
+      }
+    } catch (err) {
+      console.error('Error creating cell group:', err);
+      setError('Failed to create cell group');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const startEditing = (group: CellGroup) => {
@@ -130,49 +154,63 @@ const CellGroups = () => {
     setLoading(true);
     setError(null);
 
-    const { error: updateError } = await supabase
-      .from('cell_groups')
-      .update({
-        name: editFormData.name,
-        leader_id: editFormData.leader_id || null,
-        location: editFormData.location || null,
-        meeting_day: editFormData.meeting_day || null,
-      })
-      .eq('id', groupId);
+    try {
+      const { error: updateError } = await supabase
+        .from('cell_groups')
+        .update({
+          name: editFormData.name,
+          leader_id: editFormData.leader_id || null,
+          location: editFormData.location || null,
+          meeting_day: editFormData.meeting_day || null,
+        })
+        .eq('id', groupId);
 
-    if (updateError) {
-      console.error('Error updating cell group:', updateError);
-      setError(`Error updating cell group: ${updateError.message}`);
-    } else {
-      setEditingGroup(null);
-      setEditFormData({ name: '', leader_id: '', location: '', meeting_day: '' });
-      fetchCellGroups();
+      if (updateError) {
+        console.error('Error updating cell group:', updateError);
+        setError(`Error updating cell group: ${updateError.message}`);
+      } else {
+        setEditingGroup(null);
+        setEditFormData({ name: '', leader_id: '', location: '', meeting_day: '' });
+        fetchCellGroups();
+      }
+    } catch (err) {
+      console.error('Error updating cell group:', err);
+      setError('Failed to update cell group');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
-  // Check if user can create cell groups
-  const canCreateCellGroup = profile?.isAdmin || profile?.role === 'leader';
+  // Check if user can create cell groups - use isAdmin and isLeader
+  const canCreateCellGroup = profile?.isAdmin || profile?.isLeader;
 
   // Check if user can edit a specific cell group
   const canEditCellGroup = (group: CellGroup) => {
     if (profile?.isAdmin) return true;
-    if (profile?.role === 'leader' && group.leader_id === user?.id) return true;
+    // User is the leader of this cell group and is a leader
+    if (group.leader_id === user?.id && profile?.isLeader) return true;
     return false;
   };
 
-  // Check if user can view cell groups (admins see all, leaders see their groups, members see their assigned group)
+  // Check if user can view cell groups
   const canViewCellGroup = (group: CellGroup) => {
     if (profile?.isAdmin) return true;
-    if (group.leader_id === user?.id) return true;
-    // If you want members to see their assigned cell group, add this check:
-    // if (profile?.cell_group_id === group.id) return true;
+    // User is the leader of this cell group
+    if (group.leader_id === user?.id && profile?.isLeader) return true;
+    // User is a member of this cell group
+    if (profile?.cell_group_id === group.id) return true;
     return false;
   };
 
   // Filter cell groups based on user permissions
-  const visibleCellGroups = cellGroups.filter(group => canViewCellGroup(group));
+  const visibleCellGroups = profile?.isAdmin 
+    ? cellGroups 
+    : cellGroups.filter(group => canViewCellGroup(group));
+
+  // Filter members who are leaders for dropdowns
+  const leaderMembers = members.filter(member => 
+    member.is_leader === true || member.role === 'leader'
+  );
 
   return (
     <div className="animate-fadeIn">
@@ -193,6 +231,12 @@ const CellGroups = () => {
       {error && (
         <div className="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded-lg mb-4">
           {error}
+          <button 
+            onClick={() => setError(null)}
+            className="float-right text-sm underline hover:no-underline"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -202,27 +246,32 @@ const CellGroups = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Group Name</label>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Group Name *
+                </label>
                 <input
                   type="text"
                   value={formData.groupName}
                   onChange={(e) => setFormData({ ...formData, groupName: e.target.value })}
-                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                   required
                   disabled={loading}
+                  placeholder="Enter group name"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Leader</label>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Leader *
+                </label>
                 <select
                   value={formData.leaderId}
                   onChange={(e) => setFormData({ ...formData, leaderId: e.target.value })}
-                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                   required
                   disabled={loading}
                 >
-                  <option value="">Select leader</option>
-                  {members.map((member) => (
+                  <option value="">Select a leader</option>
+                  {leaderMembers.map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.name} {member.surname}
                     </option>
@@ -230,22 +279,27 @@ const CellGroups = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Location</label>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Location *
+                </label>
                 <input
                   type="text"
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                   required
                   disabled={loading}
+                  placeholder="Enter meeting location"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Meeting Day</label>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Meeting Day *
+                </label>
                 <select
                   value={formData.meetingDay}
                   onChange={(e) => setFormData({ ...formData, meetingDay: e.target.value })}
-                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                   required
                   disabled={loading}
                 >
@@ -292,20 +346,22 @@ const CellGroups = () => {
                       type="text"
                       value={editFormData.name}
                       onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-xl font-semibold"
+                      className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-xl font-semibold bg-background"
                       required
                     />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-foreground mb-2">Leader</label>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Leader *
+                        </label>
                         <select
                           value={editFormData.leader_id}
                           onChange={(e) => setEditFormData({ ...editFormData, leader_id: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                           required
                         >
-                          <option value="">Select leader</option>
-                          {members.map((member) => (
+                          <option value="">Select a leader</option>
+                          {leaderMembers.map((member) => (
                             <option key={member.id} value={member.id}>
                               {member.name} {member.surname}
                             </option>
@@ -313,21 +369,25 @@ const CellGroups = () => {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-foreground mb-2">Location</label>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Location *
+                        </label>
                         <input
                           type="text"
                           value={editFormData.location}
                           onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                           required
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-foreground mb-2">Meeting Day</label>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Meeting Day *
+                        </label>
                         <select
                           value={editFormData.meeting_day}
                           onChange={(e) => setEditFormData({ ...editFormData, meeting_day: e.target.value })}
-                          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background"
                           required
                         >
                           <option value="">Select day</option>
@@ -369,14 +429,16 @@ const CellGroups = () => {
                       <button
                         onClick={() => handleEditSubmit(group.id)}
                         disabled={loading}
-                        className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
+                        className="p-2 text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
+                        title="Save changes"
                       >
                         <Save className="h-4 w-4" />
                       </button>
                       <button
                         onClick={cancelEditing}
                         disabled={loading}
-                        className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                        title="Cancel editing"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -387,7 +449,8 @@ const CellGroups = () => {
                       {canEditCellGroup(group) && (
                         <button
                           onClick={() => startEditing(group)}
-                          className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          title="Edit cell group"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
@@ -400,6 +463,12 @@ const CellGroups = () => {
           </div>
         ))}
       </div>
+
+      {visibleCellGroups.length === 0 && !loading && (
+        <div className="text-center py-12 text-muted-foreground">
+          No cell groups found.
+        </div>
+      )}
     </div>
   );
 };
