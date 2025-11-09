@@ -23,11 +23,18 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    const success = await login(identifier, credential);
+    // Determine if this is an email login based on the method selected
+    const isEmailLogin = loginMethod === 'email';
+    
+    console.log('Login attempt:', { identifier, credential, isEmailLogin });
+    
+    const success = await login(identifier, credential, isEmailLogin);
 
     if (success) {
+      console.log('Login successful, redirecting...');
       navigate('/');
     } else {
+      console.log('Login failed');
       setError(`Invalid ${loginMethod === 'email' ? 'email or password' : 'username or PIN'}`);
     }
   };
@@ -36,6 +43,7 @@ export default function Login() {
     setIdentifier(demoIdentifier);
     setCredential(demoCredential);
     setLoginMethod(method);
+    setError('');
   };
 
   const toggleLoginMethod = () => {
@@ -66,6 +74,7 @@ export default function Login() {
                 ? 'bg-white text-blue-600 shadow-sm'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
+            disabled={loading}
           >
             <Mail className="h-4 w-4" />
             Email Login
@@ -78,6 +87,7 @@ export default function Login() {
                 ? 'bg-white text-blue-600 shadow-sm'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
+            disabled={loading}
           >
             <User className="h-4 w-4" />
             Username/PIN
