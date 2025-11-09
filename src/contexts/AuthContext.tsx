@@ -9,13 +9,14 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  role: 'admin' | 'group_leader' | 'member';
+  role: 'admin' | 'group_leader' | 'member' | 'department_leader';
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
   permissions: string[];
   assigned_groups: string[];
   assigned_departments: string[];
+  is_leader: boolean;
 }
 
 interface AuthContextType {
@@ -92,34 +93,38 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (memberError) {
         console.error('❌ Error fetching from members table:', memberError);
+        throw memberError;
       }
 
       console.log('📊 Raw member data from database:', memberData);
 
       if (memberData) {
-        // Debug: Check what role value actually comes from database
-        console.log('🎭 Database role value:', memberData.role);
-        console.log('🔑 Database permissions:', memberData.permissions);
-        console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
-
-        // Create profile from member data with ALL required fields
+        // Enhanced role determination that handles both role field and is_leader field
         const isAdmin = memberData.role === 'admin';
+        const isLeader = memberData.is_leader === true || 
+                        memberData.role === 'group_leader' || 
+                        memberData.role === 'leader' ||
+                        memberData.role === 'department_leader';
         
-        // FIXED: Better role mapping that handles various database values
-        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        let primaryRole: 'admin' | 'group_leader' | 'member' | 'department_leader' = 'member';
         
         if (isAdmin) {
           primaryRole = 'admin';
-        } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
-          primaryRole = 'group_leader';
+        } else if (isLeader) {
+          // Use the actual role from database for leaders
+          primaryRole = (memberData.role as 'group_leader' | 'department_leader') || 'group_leader';
         } else {
           primaryRole = 'member';
         }
 
-        console.log('🎯 Mapped role:', primaryRole);
-        console.log('👑 Is admin:', isAdmin);
-        
-        // FIXED: Ensure assigned_groups is always an array and properly formatted
+        console.log('🎭 Role determination:', {
+          databaseRole: memberData.role,
+          isLeader: memberData.is_leader,
+          finalRole: primaryRole,
+          isAdmin
+        });
+
+        // Normalize assigned_groups
         const assignedGroups = Array.isArray(memberData.assigned_groups) 
           ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
           : [];
@@ -139,7 +144,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           login_pin: memberData.login_pin || null,
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
           assigned_groups: assignedGroups,
-          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+          is_leader: memberData.is_leader === true
         };
 
         console.log('✅ Final profile object:', userProfile);
@@ -147,70 +153,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // Fallback to profiles table if members table doesn't have the user
-      console.log('🔄 Trying profiles table as fallback...');
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (profileError) {
-        console.error('❌ Error fetching from profiles table:', profileError);
-      }
-
-      if (profileData) {
-        console.log('📊 Profile data found:', profileData);
-        
-        // Fetch user roles
-        const { data: rolesData, error: rolesError } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', userId);
-
-        if (rolesError) {
-          console.error('❌ Error fetching roles:', rolesError);
-        }
-
-        const roles = rolesData?.map(r => r.role) || [];
-        console.log('🎭 User roles:', roles);
-        
-        const isAdmin = roles.includes('admin');
-        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
-        
-        if (isAdmin) {
-          primaryRole = 'admin';
-        } else if (roles.includes('leader' as any)) {
-          primaryRole = 'group_leader';
-        } else {
-          primaryRole = 'member';
-        }
-
-        console.log('🎯 Mapped role from profiles:', primaryRole);
-
-        const userProfile: UserProfile = {
-          id: userId,
-          name: profileData.name || null,
-          surname: profileData.surname || null,
-          email: profileData.email || null,
-          phone: profileData.phone || null,
-          cell_group_id: profileData.cell_group_id || null,
-          role: primaryRole,
-          isAdmin,
-          login_username: null,
-          login_pin: null,
-          permissions: [],
-          assigned_groups: [],
-          assigned_departments: []
-        };
-
-        console.log('✅ Final profile from profiles table:', userProfile);
-        setProfile(userProfile);
-      } else {
-        console.log('❌ No user data found in members or profiles table');
-      }
+      throw new Error('No user data found in members table');
     } catch (error) {
       console.error('💥 Error fetching user profile:', error);
+      setProfile(null);
     }
   };
 
@@ -232,8 +178,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Member found:', memberData);
-      console.log('🎭 Database role:', memberData.role);
-      console.log('🔑 Database permissions:', memberData.permissions);
 
       // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
@@ -266,23 +210,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(mockUser);
       setSession(mockSession);
 
-      // Create and set the profile with ALL required fields
+      // Enhanced role determination for login
       const isAdmin = memberData.role === 'admin';
+      const isLeader = memberData.is_leader === true || 
+                      memberData.role === 'group_leader' || 
+                      memberData.role === 'leader' ||
+                      memberData.role === 'department_leader';
       
-      // FIXED: Better role mapping
-      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+      let primaryRole: 'admin' | 'group_leader' | 'member' | 'department_leader' = 'member';
       
       if (isAdmin) {
         primaryRole = 'admin';
-      } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
-        primaryRole = 'group_leader';
+      } else if (isLeader) {
+        primaryRole = (memberData.role as 'group_leader' | 'department_leader') || 'group_leader';
       } else {
         primaryRole = 'member';
       }
 
       console.log('🎯 Final mapped role for login:', primaryRole);
       
-      // FIXED: Ensure assigned_groups is always an array and properly formatted
+      // Normalize assigned_groups
       const assignedGroups = Array.isArray(memberData.assigned_groups) 
         ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
         : [];
@@ -302,7 +249,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login_pin: memberData.login_pin || null,
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
         assigned_groups: assignedGroups,
-        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+        is_leader: memberData.is_leader === true
       };
 
       console.log('✅ Final profile for login:', userProfile);
