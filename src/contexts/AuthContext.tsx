@@ -43,51 +43,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for existing session and set up auth listener
-  useEffect(() => {
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          // Fetch user profile and role
-          await fetchUserProfile(session.user.id);
-        } else {
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    );
-
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
   const fetchUserProfile = async (userId: string) => {
     try {
-      // Fetch profile from profiles table
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (profileError && profileError.code !== 'PGRST116') {
-        console.error('Error fetching profile:', profileError);
-      }
-
       // Fetch user roles from user_roles table
       const { data: rolesData, error: rolesError } = await supabase
         .from('user_roles')
@@ -105,7 +62,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         .eq('id', userId)
         .single();
 
-      if (memberError && memberError.code !== 'PGRST116') {
+      if (memberError) {
         console.error('Error fetching member data:', memberError);
       }
 
@@ -123,14 +80,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         primaryRole = 'leader';
       }
 
-      // Use data from members table if available, otherwise use profiles table
+      // Use data from members table
       const userProfile: UserProfile = {
         id: userId,
-        name: memberData?.name || profileData?.name || null,
-        surname: memberData?.surname || profileData?.surname || null,
-        email: memberData?.email || profileData?.email || null,
-        phone: memberData?.phone || profileData?.phone || null,
-        cell_group_id: memberData?.cell_group_id || profileData?.cell_group_id || null,
+        name: memberData?.name || null,
+        surname: memberData?.surname || null,
+        email: memberData?.email || null,
+        phone: memberData?.phone || null,
+        cell_group_id: memberData?.cell_group_id || null,
         role: primaryRole,
         isAdmin,
         isLeader: isLeaderFromMembers || roles.includes('leader')
@@ -154,6 +111,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // Check for existing session and set up auth listener
+  useEffect(() => {
+    let mounted = true;
+
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return;
+
+        setSession(session);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          await fetchUserProfile(session.user.id);
+        } else {
+          setProfile(null);
+        }
+        setLoading(false);
+      }
+    );
+
+    // Check for existing session
+    const initializeAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!mounted) return;
+
+        setSession(session);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          await fetchUserProfile(session.user.id);
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    initializeAuth();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setLoading(true);
@@ -165,10 +172,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (error) {
         console.error('Login error:', error);
         return false;
-      }
-
-      if (data.session?.user) {
-        await fetchUserProfile(data.session.user.id);
       }
 
       return !!data.session;
@@ -184,9 +187,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setLoading(true);
       await supabase.auth.signOut();
-      setUser(null);
-      setSession(null);
-      setProfile(null);
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
