@@ -4,7 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Events from './pages/Events';
-import Groups from './pages/Groups';
+import CellGroups from './pages/CellGroups'; // Make sure this import is correct
 import Departments from './pages/Departments';
 import Trends from './pages/Trends';
 import Analytics from './pages/Analytics';
@@ -28,7 +28,7 @@ import { useState, useEffect } from 'react';
 // Layout component with responsive sidebar
 const Layout = () => {
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, profile } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -46,7 +46,7 @@ const Layout = () => {
   const navigationItems = [
     { path: '/', icon: Home, label: 'Dashboard' },
     { path: '/members', icon: Users, label: 'Members' },
-    { path: '/groups', icon: Users, label: 'Cell Groups' },
+    { path: '/cell-groups', icon: Users, label: 'Cell Groups' }, // Updated path
     { path: '/departments', icon: Building, label: 'Departments' },
     { path: '/events', icon: Calendar, label: 'Events' },
     { path: '/trends', icon: TrendingUp, label: 'Trends' },
@@ -127,8 +127,24 @@ const Layout = () => {
           })}
         </nav>
 
-        {/* Logout Button */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        {/* User Info & Logout */}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+          {/* User Info */}
+          {profile && (
+            <div className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
+              <div className="font-medium text-gray-900 dark:text-white">
+                {profile.name} {profile.surname}
+              </div>
+              <div className="capitalize">{profile.originalRole || profile.role}</div>
+              {profile.assigned_groups && profile.assigned_groups.length > 0 && (
+                <div className="text-xs mt-1">
+                  Groups: {profile.assigned_groups.join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Logout Button */}
           <button
             onClick={() => {
               closeSidebar();
@@ -172,7 +188,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="members" element={<Members />} />
             <Route path="events" element={<Events />} />
-            <Route path="groups" element={<Groups />} />
+            <Route path="cell-groups" element={<CellGroups />} /> {/* Updated to use CellGroups */}
             <Route path="departments" element={<Departments />} />
             <Route path="trends" element={<Trends />} />
             <Route path="analytics" element={<Analytics />} />
