@@ -78,7 +78,61 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+   // In your AuthProvider component, update the fetchUserProfile function:
 
+const fetchUserProfile = async (userId: string) => {
+  try {
+    // Fetch profile
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    // Fetch user roles from user_roles table
+    const { data: rolesData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId);
+
+    // Fetch member data to check if user is a leader
+    const { data: memberData } = await supabase
+      .from('members')
+      .select('is_leader, role')
+      .eq('id', userId)
+      .single();
+
+    const roles = rolesData?.map(r => r.role) || [];
+    const isAdmin = roles.includes('admin');
+    
+    // Check if user is a leader from members table
+    const isLeaderFromMembers = memberData?.is_leader || memberData?.role === 'leader';
+    
+    // Determine primary role - prioritize admin, then leader from members, then roles from user_roles
+    let primaryRole: 'admin' | 'leader' | 'member' = 'member';
+    if (isAdmin) {
+      primaryRole = 'admin';
+    } else if (isLeaderFromMembers) {
+      primaryRole = 'leader';
+    } else if (roles.includes('leader')) {
+      primaryRole = 'leader';
+    }
+
+    setProfile({
+      id: userId,
+      name: profileData?.name || null,
+      surname: profileData?.surname || null,
+      email: profileData?.email || null,
+      phone: profileData?.phone || null,
+      cell_group_id: profileData?.cell_group_id || null,
+      role: primaryRole,
+      isAdmin,
+      isLeader: isLeaderFromMembers || roles.includes('leader')
+    });
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+  }
+};
   const fetchUserProfile = async (userId: string) => {
     try {
       console.log('🔍 Fetching user profile for:', userId);
