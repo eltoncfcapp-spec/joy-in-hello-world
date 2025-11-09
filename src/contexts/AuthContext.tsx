@@ -41,6 +41,7 @@ interface AuthContextType {
   groupMatches: GroupMatch[];
   fetchGroupMatches: () => Promise<void>;
   groupMatchesLoading: boolean;
+  groupMatchesLoaded: boolean; // NEW: Track if group matches have been loaded
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -64,6 +65,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [groupMatches, setGroupMatches] = useState<GroupMatch[]>([]);
   const [groupMatchesLoading, setGroupMatchesLoading] = useState(false);
+  const [groupMatchesLoaded, setGroupMatchesLoaded] = useState(false); // NEW
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -78,6 +80,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         } else {
           setProfile(null);
           setGroupMatches([]);
+          setGroupMatchesLoaded(false); // Reset when logging out
         }
       }
     );
@@ -97,6 +100,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const fetchGroupMatches = async () => {
     if (!profile) {
       console.log('❌ No profile available for group matching');
+      setGroupMatchesLoaded(true); // Mark as loaded even if no profile
       return;
     }
 
@@ -118,6 +122,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('✅ Group matches fetched:', data);
       setGroupMatches(data || []);
+      setGroupMatchesLoaded(true); // Mark as loaded after successful fetch
     } catch (error) {
       console.error('💥 Error in fetchGroupMatches:', error);
       await fetchGroupMatchesDirect();
@@ -127,7 +132,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const fetchGroupMatchesDirect = async () => {
-    if (!profile) return;
+    if (!profile) {
+      setGroupMatchesLoaded(true);
+      return;
+    }
 
     try {
       console.log('🔄 Using direct query for group matching');
@@ -139,6 +147,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (groupsError) {
         console.error('❌ Error fetching cell groups:', groupsError);
+        setGroupMatchesLoaded(true);
         return;
       }
 
@@ -178,17 +187,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('✅ Direct group matches calculated:', matches);
       setGroupMatches(matches);
+      setGroupMatchesLoaded(true); // Mark as loaded after direct calculation
     } catch (error) {
       console.error('💥 Error in direct group matching:', error);
+      setGroupMatchesLoaded(true); // Mark as loaded even on error
     }
   };
 
   useEffect(() => {
-    if (profile) {
+    if (profile && !groupMatchesLoaded) {
       console.log('🔄 Profile updated, fetching group matches...');
       fetchGroupMatches();
     }
-  }, [profile]);
+  }, [profile, groupMatchesLoaded]);
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -262,6 +273,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         console.log('✅ Final profile object:', userProfile);
         setProfile(userProfile);
+        setGroupMatchesLoaded(false); // Reset so group matches will be fetched for new profile
         return;
       }
 
@@ -269,6 +281,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       console.error('💥 Error fetching user profile:', error);
       setProfile(null);
+      setGroupMatchesLoaded(true); // Mark as loaded even on error
     }
   };
 
@@ -366,6 +379,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('✅ Final profile for login:', userProfile);
       setProfile(userProfile);
+      setGroupMatchesLoaded(false); // Reset so group matches will be fetched
       
       localStorage.setItem('username_pin_auth', JSON.stringify({
         user: mockUser,
@@ -432,6 +446,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setSession(null);
       setProfile(null);
       setGroupMatches([]);
+      setGroupMatchesLoaded(false);
       console.log('👋 Logout successful');
     } catch (error) {
       console.error('💥 Logout error:', error);
@@ -452,6 +467,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setUser(authData.user);
             setSession(authData.session);
             setProfile(authData.profile);
+            setGroupMatchesLoaded(false); // Reset so group matches will be fetched
             console.log('🔄 Restored auth from localStorage');
           } else {
             localStorage.removeItem('username_pin_auth');
@@ -476,7 +492,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading,
     groupMatches,
     fetchGroupMatches,
-    groupMatchesLoading
+    groupMatchesLoading,
+    groupMatchesLoaded // NEW: Export the loaded state
   };
 
   return (
