@@ -62,7 +62,7 @@ const CellGroups = () => {
   const fetchMembers = async () => {
     const { data, error } = await supabase
       .from('members')
-      .select('id, name, surname, is_leader, role')
+      .select('id, name, surname')
       .order('name');
 
     if (error) {
@@ -84,7 +84,6 @@ const CellGroups = () => {
       return;
     }
 
-    // Check permission from both user_roles and members table
     const hasPermission = profile?.isAdmin || profile?.role === 'leader';
     
     if (!hasPermission) {
@@ -159,18 +158,16 @@ const CellGroups = () => {
   // Check if user can edit a specific cell group
   const canEditCellGroup = (group: CellGroup) => {
     if (profile?.isAdmin) return true;
-    // User is the leader of this cell group (checking against members table)
-    if (group.leader_id === user?.id) return true;
+    if (profile?.role === 'leader' && group.leader_id === user?.id) return true;
     return false;
   };
 
-  // Check if user can view cell groups
+  // Check if user can view cell groups (admins see all, leaders see their groups, members see their assigned group)
   const canViewCellGroup = (group: CellGroup) => {
     if (profile?.isAdmin) return true;
-    // User is the leader of this cell group
     if (group.leader_id === user?.id) return true;
-    // User is a member of this cell group
-    if (profile?.cell_group_id === group.id) return true;
+    // If you want members to see their assigned cell group, add this check:
+    // if (profile?.cell_group_id === group.id) return true;
     return false;
   };
 
@@ -225,9 +222,7 @@ const CellGroups = () => {
                   disabled={loading}
                 >
                   <option value="">Select leader</option>
-                  {members
-                    .filter(member => member.is_leader || member.role === 'leader')
-                    .map((member) => (
+                  {members.map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.name} {member.surname}
                     </option>
@@ -310,9 +305,7 @@ const CellGroups = () => {
                           required
                         >
                           <option value="">Select leader</option>
-                          {members
-                            .filter(member => member.is_leader || member.role === 'leader')
-                            .map((member) => (
+                          {members.map((member) => (
                             <option key={member.id} value={member.id}>
                               {member.name} {member.surname}
                             </option>
