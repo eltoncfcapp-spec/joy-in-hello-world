@@ -20,6 +20,18 @@ interface UserProfile {
   originalRole: string; // Keep the original role for reference
 }
 
+// New interface for group matches
+interface GroupMatch {
+  user_id: string;
+  user_name: string;
+  assigned_groups: string[];
+  assigned_group_normalized: string;
+  group_id: string;
+  group_name: string;
+  normalized_name: string;
+  match_type: 'EXACT_MATCH' | 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED' | 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP' | 'WHITESPACE_INSENSITIVE_MATCH' | 'NO_MATCH';
+}
+
 interface AuthContextType {
   user: SupabaseUser | null;
   session: Session | null;
@@ -27,6 +39,10 @@ interface AuthContextType {
   login: (identifier: string, credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
+  // Group matching functionality
+  groupMatches: GroupMatch[];
+  fetchGroupMatches: () => Promise<void>;
+  groupMatchesLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -48,6 +64,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Group matching state
+  const [groupMatches, setGroupMatches] = useState<GroupMatch[]>([]);
+  const [groupMatchesLoading, setGroupMatchesLoading] = useState(false);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -61,6 +81,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }, 0);
         } else {
           setProfile(null);
+          setGroupMatches([]); // Clear matches on logout
         }
       }
     );
@@ -76,6 +97,110 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Group matching function
+  const fetchGroupMatches = async () => {
+    if (!profile) {
+      console.log('❌ No profile available for group matching');
+      return;
+    }
+
+    try {
+      setGroupMatchesLoading(true);
+      console.log('🔍 Fetching group matches for:', profile.id);
+      
+      // Use the RPC function if it exists, otherwise fall back to direct query
+      const { data, error } = await supabase.rpc('get_group_matches', {
+        p_user_id: profile.id,
+        p_user_name: `${profile.name} ${profile.surname}`.trim(),
+        p_assigned_groups: profile.assigned_groups || []
+      });
+
+      if (error) {
+        console.error('❌ Error fetching group matches via RPC:', error);
+        // Fallback to direct query
+        await fetchGroupMatchesDirect();
+        return;
+      }
+
+      console.log('✅ Group matches fetched:', data);
+      setGroupMatches(data || []);
+    } catch (error) {
+      console.error('💥 Error in fetchGroupMatches:', error);
+      // Fallback to direct query
+      await fetchGroupMatchesDirect();
+    } finally {
+      setGroupMatchesLoading(false);
+    }
+  };
+
+  // Fallback direct query for group matching
+  const fetchGroupMatchesDirect = async () => {
+    if (!profile) return;
+
+    try {
+      console.log('🔄 Using direct query for group matching');
+      
+      // Get all cell groups
+      const { data: allGroups, error: groupsError } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
+
+      if (groupsError) {
+        console.error('❌ Error fetching cell groups:', groupsError);
+        return;
+      }
+
+      // Create matches manually
+      const matches: GroupMatch[] = [];
+      const assignedGroups = profile.assigned_groups || [];
+
+      for (const assignedGroup of assignedGroups) {
+        const assignedGroupNormalized = assignedGroup.toLowerCase().trim();
+        
+        for (const group of allGroups || []) {
+          const groupNameNormalized = group.name.toLowerCase().trim();
+          
+          let matchType: GroupMatch['match_type'] = 'NO_MATCH';
+          
+          if (assignedGroupNormalized === groupNameNormalized) {
+            matchType = 'EXACT_MATCH';
+          } else if (groupNameNormalized.includes(assignedGroupNormalized)) {
+            matchType = 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED';
+          } else if (assignedGroupNormalized.includes(groupNameNormalized)) {
+            matchType = 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP';
+          } else if (groupNameNormalized.replace(/\s/g, '') === assignedGroupNormalized.replace(/\s/g, '')) {
+            matchType = 'WHITESPACE_INSENSITIVE_MATCH';
+          }
+
+          matches.push({
+            user_id: profile.id,
+            user_name: `${profile.name} ${profile.surname}`.trim(),
+            assigned_groups: assignedGroups,
+            assigned_group_normalized: assignedGroupNormalized,
+            group_id: group.id,
+            group_name: group.name,
+            normalized_name: groupNameNormalized,
+            match_type: matchType
+          });
+        }
+      }
+
+      console.log('✅ Direct group matches calculated:', matches);
+      setGroupMatches(matches);
+    } catch (error) {
+      console.error('💥 Error in direct group matching:', error);
+    }
+  };
+
+  // Auto-fetch group matches when profile changes
+  useEffect(() => {
+    if (profile) {
+      console.log('🔄 Profile updated, fetching group matches...');
+      fetchGroupMatches();
+    }
+  }, [profile]);
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -324,6 +449,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(null);
       setSession(null);
       setProfile(null);
+      setGroupMatches([]); // Clear group matches on logout
       console.log('👋 Logout successful');
     } catch (error) {
       console.error('💥 Logout error:', error);
@@ -365,7 +491,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading
+    loading,
+    // Group matching functionality
+    groupMatches,
+    fetchGroupMatches,
+    groupMatchesLoading
   };
 
   return (
