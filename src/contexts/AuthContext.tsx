@@ -119,6 +119,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('🎯 Mapped role:', primaryRole);
         console.log('👑 Is admin:', isAdmin);
         
+        // FIXED: Ensure assigned_groups is always an array and properly formatted
+        const assignedGroups = Array.isArray(memberData.assigned_groups) 
+          ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
+          : [];
+
+        console.log('✅ Normalized assigned_groups:', assignedGroups);
+        
         const userProfile: UserProfile = {
           id: userId,
           name: memberData.name || null,
@@ -131,7 +138,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+          assigned_groups: assignedGroups,
           assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
         };
 
@@ -275,6 +282,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('🎯 Final mapped role for login:', primaryRole);
       
+      // FIXED: Ensure assigned_groups is always an array and properly formatted
+      const assignedGroups = Array.isArray(memberData.assigned_groups) 
+        ? memberData.assigned_groups.map(group => group.toString().toLowerCase().trim())
+        : [];
+
+      console.log('✅ Normalized assigned_groups for login:', assignedGroups);
+      
       const userProfile: UserProfile = {
         id: memberData.id,
         name: memberData.name || null,
@@ -287,7 +301,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+        assigned_groups: assignedGroups,
         assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
       };
 
