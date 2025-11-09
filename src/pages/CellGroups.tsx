@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, Mail, Phone } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, Mail, Phone, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -55,13 +55,14 @@ interface Member {
 
 const CellGroups = () => {
   const { profile } = useAuth();
-  const [cellGroup, setCellGroup] = useState<CellGroup | null>(null);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -74,80 +75,128 @@ const CellGroups = () => {
     location: '',
     meeting_day: '',
     meeting_time: '',
+    leader_id: '',
+  });
+
+  const [createFormData, setCreateFormData] = useState({
+    name: '',
+    description: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    leader_id: '',
   });
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Load user's cell group
-  const loadUserCellGroup = async () => {
+  // Check if user is admin and can manage all groups
+  const isAdmin = profile?.role === 'admin' || profile?.isAdmin;
+  const canManageAllGroups = isAdmin;
+
+  // Load ALL cell groups for admin, or user's group for regular users
+  const loadCellGroups = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      if (!profile?.login_username) {
+      if (!profile) {
         setError('User not properly authenticated');
         return;
       }
 
-      console.log('🔍 Loading cell group for user:', profile.login_username);
+      console.log('🔍 Loading cell groups for user:', {
+        role: profile.role,
+        isAdmin: isAdmin,
+        login_username: profile.login_username
+      });
 
-      const { data, error: queryError } = await supabase
-        .from('cell_groups')
-        .select(`
-          *,
-          leader:members!leader_id(id, name, surname, email, phone),
-          cell_group_members(
+      if (canManageAllGroups) {
+        // Load ALL cell groups for admin
+        console.log('👑 Admin user - loading ALL cell groups');
+        const { data, error: queryError } = await supabase
+          .from('cell_groups')
+          .select(`
             *,
-            member:members(id, name, surname, email, phone, status)
-          )
-        `)
-        .eq('members.login_username', profile.login_username)
-        .single();
-
-      if (queryError) {
-        console.error('Error loading cell group:', queryError);
-        
-        // Fallback: Try to get cell group via cell_group_id
-        if (profile.cell_group_id) {
-          const { data: fallbackData, error: fallbackError } = await supabase
-            .from('cell_groups')
-            .select(`
+            leader:members!leader_id(id, name, surname, email, phone),
+            cell_group_members(
               *,
-              leader:members!leader_id(id, name, surname, email, phone),
-              cell_group_members(
-                *,
-                member:members(id, name, surname, email, phone, status)
-              )
-            `)
-            .eq('id', profile.cell_group_id)
-            .single();
+              member:members(id, name, surname, email, phone, status)
+            )
+          `)
+          .order('name');
 
-          if (fallbackError) {
+        if (queryError) {
+          throw new Error(`Error loading cell groups: ${queryError.message}`);
+        }
+
+        const groupsWithMembers = (data || []).map(group => ({
+          ...group,
+          members: group.cell_group_members || []
+        })) as CellGroup[];
+
+        console.log('📋 All cell groups loaded:', groupsWithMembers.length);
+        setCellGroups(groupsWithMembers);
+      } else {
+        // Load only user's cell group for non-admin users
+        console.log('👤 Regular user - loading user cell group');
+        const { data, error: queryError } = await supabase
+          .from('cell_groups')
+          .select(`
+            *,
+            leader:members!leader_id(id, name, surname, email, phone),
+            cell_group_members(
+              *,
+              member:members(id, name, surname, email, phone, status)
+            )
+          `)
+          .eq('members.login_username', profile.login_username)
+          .single();
+
+        if (queryError) {
+          console.error('Error loading user cell group:', queryError);
+          
+          // Fallback: Try to get cell group via cell_group_id
+          if (profile.cell_group_id) {
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from('cell_groups')
+              .select(`
+                *,
+                leader:members!leader_id(id, name, surname, email, phone),
+                cell_group_members(
+                  *,
+                  member:members(id, name, surname, email, phone, status)
+                )
+              `)
+              .eq('id', profile.cell_group_id)
+              .single();
+
+            if (fallbackError) {
+              throw new Error('No cell group found for this user');
+            }
+            setCellGroups([{
+              ...fallbackData,
+              members: fallbackData.cell_group_members || []
+            } as CellGroup]);
+          } else {
             throw new Error('No cell group found for this user');
           }
-          setCellGroup({
-            ...fallbackData,
-            members: fallbackData.cell_group_members || []
-          } as CellGroup);
         } else {
-          throw new Error('No cell group found for this user');
+          setCellGroups([{
+            ...data,
+            members: data.cell_group_members || []
+          } as CellGroup]);
         }
-      } else {
-        setCellGroup({
-          ...data,
-          members: data.cell_group_members || []
-        } as CellGroup);
       }
 
     } catch (error: any) {
-      console.error('Error loading cell group:', error);
+      console.error('Error loading cell groups:', error);
       setError(error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Load all members for adding to group
+  // Load all members for adding to groups
   const loadAllMembers = async () => {
     try {
       const { data, error } = await supabase
@@ -159,14 +208,142 @@ const CellGroups = () => {
       
       setAllMembers(data || []);
       
-      // Filter out members who are already in this cell group
-      if (cellGroup) {
-        const currentMemberIds = new Set(cellGroup.members?.map(m => m.member_id) || []);
+      // Filter available members for the selected group
+      if (selectedGroup) {
+        const currentMemberIds = new Set(selectedGroup.members?.map(m => m.member_id) || []);
         const available = data?.filter(member => !currentMemberIds.has(member.id)) || [];
         setAvailableMembers(available);
       }
     } catch (error) {
       console.error('Error loading members:', error);
+    }
+  };
+
+  // Create new cell group
+  const createCellGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setActionLoading(true);
+      setError(null);
+
+      if (!createFormData.name.trim()) {
+        setError('Cell group name is required');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .insert({
+          name: createFormData.name.trim(),
+          description: createFormData.description.trim() || null,
+          location: createFormData.location.trim() || null,
+          meeting_day: createFormData.meeting_day || null,
+          meeting_time: createFormData.meeting_time || null,
+          leader_id: createFormData.leader_id || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add leader to group members if specified
+      if (createFormData.leader_id && data) {
+        const { error: memberError } = await supabase
+          .from('cell_group_members')
+          .insert({
+            cell_group_id: data.id,
+            member_id: createFormData.leader_id,
+            role: 'leader'
+          });
+
+        if (memberError) {
+          console.error('Error adding leader to group:', memberError);
+        }
+      }
+
+      setSuccess('Cell group created successfully');
+      await loadCellGroups();
+      setShowCreateModal(false);
+      setCreateFormData({
+        name: '',
+        description: '',
+        location: '',
+        meeting_day: '',
+        meeting_time: '',
+        leader_id: '',
+      });
+      
+    } catch (error: any) {
+      console.error('Error creating cell group:', error);
+      setError(`Error creating cell group: ${error.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Update cell group
+  const updateCellGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setActionLoading(true);
+      setError(null);
+
+      if (!selectedGroup) {
+        setError('No cell group selected');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .update({
+          name: editFormData.name.trim(),
+          description: editFormData.description.trim() || null,
+          location: editFormData.location.trim() || null,
+          meeting_day: editFormData.meeting_day || null,
+          meeting_time: editFormData.meeting_time || null,
+          leader_id: editFormData.leader_id || null,
+        })
+        .eq('id', selectedGroup.id);
+
+      if (error) throw error;
+
+      // Update leader in group members if changed
+      if (editFormData.leader_id && selectedGroup.leader_id !== editFormData.leader_id) {
+        // Remove previous leader role
+        if (selectedGroup.leader_id) {
+          await supabase
+            .from('cell_group_members')
+            .update({ role: 'member' })
+            .eq('cell_group_id', selectedGroup.id)
+            .eq('member_id', selectedGroup.leader_id);
+        }
+
+        // Add new leader
+        const { error: memberError } = await supabase
+          .from('cell_group_members')
+          .upsert({
+            cell_group_id: selectedGroup.id,
+            member_id: editFormData.leader_id,
+            role: 'leader'
+          }, {
+            onConflict: 'cell_group_id,member_id'
+          });
+
+        if (memberError) {
+          console.error('Error updating leader:', memberError);
+        }
+      }
+
+      setSuccess('Cell group updated successfully');
+      await loadCellGroups();
+      setShowEditModal(false);
+      setSelectedGroup(null);
+      
+    } catch (error: any) {
+      console.error('Error updating cell group:', error);
+      setError(`Error updating cell group: ${error.message}`);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -176,7 +353,7 @@ const CellGroups = () => {
       setActionLoading(true);
       setError(null);
 
-      if (!cellGroup) {
+      if (!selectedGroup) {
         setError('No cell group selected');
         return;
       }
@@ -184,7 +361,7 @@ const CellGroups = () => {
       const { error } = await supabase
         .from('cell_group_members')
         .insert({
-          cell_group_id: cellGroup.id,
+          cell_group_id: selectedGroup.id,
           member_id: memberId,
           role: 'member'
         });
@@ -194,7 +371,7 @@ const CellGroups = () => {
       // Update member's cell_group_id
       const { error: updateError } = await supabase
         .from('members')
-        .update({ cell_group_id: cellGroup.id })
+        .update({ cell_group_id: selectedGroup.id })
         .eq('id', memberId);
 
       if (updateError) {
@@ -202,7 +379,7 @@ const CellGroups = () => {
       }
 
       setSuccess('Member added to cell group successfully');
-      await loadUserCellGroup();
+      await loadCellGroups();
       await loadAllMembers();
       setShowAddMemberModal(false);
       
@@ -220,7 +397,7 @@ const CellGroups = () => {
       setActionLoading(true);
       setError(null);
 
-      if (!cellGroup) {
+      if (!selectedGroup) {
         setError('No cell group selected');
         return;
       }
@@ -228,7 +405,7 @@ const CellGroups = () => {
       const { error } = await supabase
         .from('cell_group_members')
         .delete()
-        .eq('cell_group_id', cellGroup.id)
+        .eq('cell_group_id', selectedGroup.id)
         .eq('member_id', memberId);
 
       if (error) throw error;
@@ -244,49 +421,12 @@ const CellGroups = () => {
       }
 
       setSuccess('Member removed from cell group successfully');
-      await loadUserCellGroup();
+      await loadCellGroups();
       await loadAllMembers();
       
     } catch (error: any) {
       console.error('Error removing member from group:', error);
       setError(`Error removing member: ${error.message}`);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Update cell group information
-  const updateCellGroup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setActionLoading(true);
-      setError(null);
-
-      if (!cellGroup) {
-        setError('No cell group selected');
-        return;
-      }
-
-      const { error } = await supabase
-        .from('cell_groups')
-        .update({
-          name: editFormData.name.trim(),
-          description: editFormData.description.trim() || null,
-          location: editFormData.location.trim() || null,
-          meeting_day: editFormData.meeting_day || null,
-          meeting_time: editFormData.meeting_time || null,
-        })
-        .eq('id', cellGroup.id);
-
-      if (error) throw error;
-
-      setSuccess('Cell group updated successfully');
-      await loadUserCellGroup();
-      setShowEditModal(false);
-      
-    } catch (error: any) {
-      console.error('Error updating cell group:', error);
-      setError(`Error updating cell group: ${error.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -298,7 +438,7 @@ const CellGroups = () => {
       setActionLoading(true);
       setError(null);
 
-      if (!cellGroup) {
+      if (!selectedGroup) {
         setError('No cell group selected');
         return;
       }
@@ -307,7 +447,7 @@ const CellGroups = () => {
       const { error } = await supabase
         .from('cell_groups')
         .update({ leader_id: memberId })
-        .eq('id', cellGroup.id);
+        .eq('id', selectedGroup.id);
 
       if (error) throw error;
 
@@ -315,7 +455,7 @@ const CellGroups = () => {
       const { error: memberError } = await supabase
         .from('cell_group_members')
         .update({ role: 'leader' })
-        .eq('cell_group_id', cellGroup.id)
+        .eq('cell_group_id', selectedGroup.id)
         .eq('member_id', memberId);
 
       if (memberError) {
@@ -323,7 +463,7 @@ const CellGroups = () => {
       }
 
       setSuccess('Leader assigned successfully');
-      await loadUserCellGroup();
+      await loadCellGroups();
       
     } catch (error: any) {
       console.error('Error setting leader:', error);
@@ -333,18 +473,58 @@ const CellGroups = () => {
     }
   };
 
-  // Initialize edit form with current data
-  const initializeEditForm = () => {
-    if (cellGroup) {
-      setEditFormData({
-        name: cellGroup.name || '',
-        description: cellGroup.description || '',
-        location: cellGroup.location || '',
-        meeting_day: cellGroup.meeting_day || '',
-        meeting_time: cellGroup.meeting_time || '',
-      });
+  // Delete cell group
+  const deleteCellGroup = async (groupId: string) => {
+    try {
+      setActionLoading(true);
+      setError(null);
+
+      if (!confirm('Are you sure you want to delete this cell group? This action cannot be undone.')) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .delete()
+        .eq('id', groupId);
+
+      if (error) throw error;
+
+      setSuccess('Cell group deleted successfully');
+      await loadCellGroups();
+      
+    } catch (error: any) {
+      console.error('Error deleting cell group:', error);
+      setError(`Error deleting cell group: ${error.message}`);
+    } finally {
+      setActionLoading(false);
     }
+  };
+
+  // Initialize edit form with current data
+  const initializeEditForm = (group: CellGroup) => {
+    setSelectedGroup(group);
+    setEditFormData({
+      name: group.name || '',
+      description: group.description || '',
+      location: group.location || '',
+      meeting_day: group.meeting_day || '',
+      meeting_time: group.meeting_time || '',
+      leader_id: group.leader_id || '',
+    });
     setShowEditModal(true);
+  };
+
+  // Open add member modal
+  const openAddMemberModal = (group: CellGroup) => {
+    setSelectedGroup(group);
+    setShowAddMemberModal(true);
+  };
+
+  // Open members modal
+  const openMembersModal = (group: CellGroup) => {
+    setSelectedGroup(group);
+    setShowMembersModal(true);
   };
 
   // Filter available members based on search
@@ -355,15 +535,16 @@ const CellGroups = () => {
 
   useEffect(() => {
     if (profile) {
-      loadUserCellGroup();
+      loadCellGroups();
+      loadAllMembers();
     }
   }, [profile]);
 
   useEffect(() => {
-    if (cellGroup) {
+    if (selectedGroup) {
       loadAllMembers();
     }
-  }, [cellGroup]);
+  }, [selectedGroup]);
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -382,24 +563,8 @@ const CellGroups = () => {
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading your cell group...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (error && !cellGroup) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="h-8 w-8 text-red-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">No Cell Group Found</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">{error}</p>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            You are not assigned to any cell group. Please contact an administrator.
+          <p className="text-gray-600 dark:text-gray-400">
+            {canManageAllGroups ? 'Loading all cell groups...' : 'Loading your cell group...'}
           </p>
         </div>
       </div>
@@ -408,18 +573,33 @@ const CellGroups = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-            My Cell Group
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            {cellGroup?.leader ? 
-              `Led by ${cellGroup.leader.name} ${cellGroup.leader.surname}` : 
-              'No leader assigned'
-            }
-          </p>
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              Cell Groups
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              {canManageAllGroups 
+                ? `Full administrative access - managing ${cellGroups.length} cell groups` 
+                : `Viewing your cell group - ${profile?.role} access`
+              }
+            </p>
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-2">
+            {canManageAllGroups && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium"
+              >
+                <Plus className="h-5 w-5" />
+                Create Cell Group
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Messages */}
@@ -451,147 +631,247 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Cell Group Card */}
-        {cellGroup && (
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-              <div className="flex-1">
-                <div className="flex items-center gap-4 mb-2">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {cellGroup.name}
-                  </h2>
-                  <div className="flex items-center gap-2 bg-green-100 dark:bg-green-900 px-3 py-1 rounded-full">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    <span className="text-green-800 dark:text-green-200 text-sm font-medium">
-                      {cellGroup.status || 'Active'}
+        {/* Cell Groups Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {cellGroups.map((group) => (
+            <div key={group.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
+              {/* Group Header */}
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                      {group.name}
+                    </h3>
+                    <div className="flex items-center gap-2 bg-green-100 dark:bg-green-900 px-2 py-1 rounded">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-green-800 dark:text-green-200 text-xs font-medium">
+                        {group.status || 'Active'}
+                      </span>
+                    </div>
+                  </div>
+                  {group.description && (
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">
+                      {group.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Group Details */}
+              <div className="space-y-3 mb-4">
+                {group.location && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <MapPin className="h-4 w-4" />
+                    <span>{group.location}</span>
+                  </div>
+                )}
+                
+                {(group.meeting_day || group.meeting_time) && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <Calendar className="h-4 w-4" />
+                    <span>
+                      {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
                     </span>
                   </div>
+                )}
+                
+                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <Users className="h-4 w-4" />
+                  <span>{group.members?.length || 0} members</span>
                 </div>
-                {cellGroup.description && (
-                  <p className="text-gray-600 dark:text-gray-400 mb-3">
-                    {cellGroup.description}
-                  </p>
+
+                {group.leader && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <User className="h-4 w-4" />
+                    <span>Leader: {group.leader.name} {group.leader.surname}</span>
+                  </div>
                 )}
               </div>
-              
+
               {/* Action Buttons */}
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 pt-4 border-t dark:border-gray-700">
                 <button
-                  onClick={() => setShowMembersModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  onClick={() => openMembersModal(group)}
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  <Users className="h-4 w-4" />
-                  View Members ({cellGroup.members?.length || 0})
+                  <Eye className="h-3 w-3" />
+                  View Members
                 </button>
-                {profile?.is_leader && (
+                
+                {canManageAllGroups && (
                   <>
                     <button
-                      onClick={initializeEditForm}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      onClick={() => initializeEditForm(group)}
+                      className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
                     >
-                      <Edit className="h-4 w-4" />
-                      Edit Group
+                      <Edit className="h-3 w-3" />
+                      Edit
                     </button>
                     <button
-                      onClick={() => setShowAddMemberModal(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                      onClick={() => openAddMemberModal(group)}
+                      className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
                     >
-                      <Plus className="h-4 w-4" />
+                      <Plus className="h-3 w-3" />
                       Add Member
+                    </button>
+                    <button
+                      onClick={() => deleteCellGroup(group.id)}
+                      disabled={actionLoading}
+                      className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Delete
                     </button>
                   </>
                 )}
               </div>
             </div>
+          ))}
+        </div>
 
-            {/* Group Details Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              {/* Location */}
-              {cellGroup.location && (
-                <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <MapPin className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                  <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Location</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{cellGroup.location}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Meeting Day */}
-              {cellGroup.meeting_day && (
-                <div className="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                  <Calendar className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                  <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Meeting Day</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{cellGroup.meeting_day}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Meeting Time */}
-              {cellGroup.meeting_time && (
-                <div className="flex items-center gap-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                  <Users className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-                  <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Meeting Time</p>
-                    <p className="font-medium text-gray-900 dark:text-white">{cellGroup.meeting_time}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Member Count */}
-              <div className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <User className="h-5 w-5 text-green-600 dark:text-green-400" />
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Members</p>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {cellGroup.current_member_count || cellGroup.members?.length || 0}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Leader Info */}
-            {cellGroup.leader && (
-              <div className="border-t dark:border-gray-700 pt-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Group Leader</h3>
-                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">
-                      {cellGroup.leader.name?.[0]}{cellGroup.leader.surname?.[0]}
-                    </span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900 dark:text-white">
-                      {cellGroup.leader.name} {cellGroup.leader.surname}
-                    </p>
-                    <div className="flex flex-wrap gap-4 mt-1">
-                      {cellGroup.leader.email && (
-                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
-                          <Mail className="h-3 w-3" />
-                          {cellGroup.leader.email}
-                        </div>
-                      )}
-                      {cellGroup.leader.phone && (
-                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
-                          <Phone className="h-3 w-3" />
-                          {cellGroup.leader.phone}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 bg-blue-100 dark:bg-blue-800 px-2 py-1 rounded">
-                    <Shield className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                    <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">Leader</span>
-                  </div>
-                </div>
-              </div>
+        {/* Empty State */}
+        {cellGroups.length === 0 && !loading && (
+          <div className="text-center py-12">
+            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Cell Groups Found</h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              {canManageAllGroups 
+                ? "Get started by creating your first cell group." 
+                : "You are not assigned to any cell group yet."
+              }
+            </p>
+            {canManageAllGroups && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium mx-auto"
+              >
+                <Plus className="h-5 w-5" />
+                Create Your First Cell Group
+              </button>
             )}
           </div>
         )}
 
-        {/* Edit Group Modal */}
-        {showEditModal && cellGroup && (
+        {/* Create Group Modal */}
+        {showCreateModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Create Cell Group</h3>
+                <button onClick={() => setShowCreateModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              <form onSubmit={createCellGroup} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Group Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={createFormData.name}
+                    onChange={(e) => setCreateFormData({...createFormData, name: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={createFormData.description}
+                    onChange={(e) => setCreateFormData({...createFormData, description: e.target.value})}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Location
+                  </label>
+                  <input
+                    type="text"
+                    value={createFormData.location}
+                    onChange={(e) => setCreateFormData({...createFormData, location: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Meeting Day
+                    </label>
+                    <select
+                      value={createFormData.meeting_day}
+                      onChange={(e) => setCreateFormData({...createFormData, meeting_day: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="">Select day</option>
+                      {daysOfWeek.map(day => (
+                        <option key={day} value={day}>{day}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Meeting Time
+                    </label>
+                    <input
+                      type="time"
+                      value={createFormData.meeting_time}
+                      onChange={(e) => setCreateFormData({...createFormData, meeting_time: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Leader (Optional)
+                  </label>
+                  <select
+                    value={createFormData.leader_id}
+                    onChange={(e) => setCreateFormData({...createFormData, leader_id: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">Select leader</option>
+                    {allMembers.map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={actionLoading}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {actionLoading ? 'Creating...' : 'Create Group'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Group Modal - Similar to create but for editing */}
+        {showEditModal && selectedGroup && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
               <div className="flex items-center justify-between mb-4">
@@ -669,6 +949,24 @@ const CellGroups = () => {
                   </div>
                 </div>
                 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Leader
+                  </label>
+                  <select
+                    value={editFormData.leader_id}
+                    onChange={(e) => setEditFormData({...editFormData, leader_id: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">Select leader</option>
+                    {allMembers.map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
                 <div className="flex gap-3 pt-4">
                   <button
                     type="button"
@@ -690,12 +988,14 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Add Member Modal */}
-        {showAddMemberModal && cellGroup && (
+        {/* Add Member Modal - Same as before but updated for the new structure */}
+        {showAddMemberModal && selectedGroup && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Add Member to Group</h3>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Add Member to {selectedGroup.name}
+                </h3>
                 <button onClick={() => setShowAddMemberModal(false)} className="text-gray-500 hover:text-gray-700">
                   <X className="h-5 w-5" />
                 </button>
@@ -758,13 +1058,13 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Members Modal */}
-        {showMembersModal && cellGroup && (
+        {/* Members Modal - Same as before but updated for the new structure */}
+        {showMembersModal && selectedGroup && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-4xl">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Group Members ({cellGroup.members?.length || 0})
+                  {selectedGroup.name} - Members ({selectedGroup.members?.length || 0})
                 </h3>
                 <button onClick={() => setShowMembersModal(false)} className="text-gray-500 hover:text-gray-700">
                   <X className="h-5 w-5" />
@@ -773,13 +1073,13 @@ const CellGroups = () => {
               
               {/* Members List */}
               <div className="space-y-3">
-                {cellGroup.members?.length === 0 ? (
+                {selectedGroup.members?.length === 0 ? (
                   <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                     <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>No members in this group yet</p>
                   </div>
                 ) : (
-                  cellGroup.members?.map(member => (
+                  selectedGroup.members?.map(member => (
                     <div
                       key={member.member_id}
                       className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg"
@@ -829,7 +1129,7 @@ const CellGroups = () => {
                       </div>
                       
                       {/* Member Actions */}
-                      {profile?.is_leader && member.role !== 'leader' && (
+                      {canManageAllGroups && member.role !== 'leader' && (
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setAsLeader(member.member_id)}
