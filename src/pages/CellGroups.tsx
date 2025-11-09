@@ -1,7 +1,7 @@
 import { Plus, Users, MapPin, Edit, Save, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../path-to-your-auth-context'; // Adjust import path
+import { useAuth } from '../contexts/AuthContext'; // Adjust import path
 
 interface CellGroup {
   id: string;
@@ -18,6 +18,7 @@ interface Member {
   surname: string;
   is_leader: boolean;
   role: string;
+  cell_group_id: string | null;
 }
 
 const CellGroups = () => {
@@ -44,11 +45,11 @@ const CellGroups = () => {
   useEffect(() => {
     fetchCellGroups();
     fetchMembers();
-  }, []);
+  }, [profile?.id]); // Refetch when profile changes
 
   const fetchCellGroups = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('cell_groups')
         .select(`
           id,
@@ -60,10 +61,33 @@ const CellGroups = () => {
         `)
         .order('name');
 
+      // Apply RLS filtering based on user role
+      if (profile?.isAdmin) {
+        // Admins can see all groups - no additional filter needed
+        console.log('Fetching all cell groups for admin');
+      } else if (profile?.isLeader) {
+        // Leaders can see groups they lead
+        console.log('Fetching groups for leader:', user?.id);
+        query = query.or(`leader_id.eq.${user?.id}`);
+      } else {
+        // Regular members can only see their assigned group
+        console.log('Fetching assigned group for member:', profile?.cell_group_id);
+        if (profile?.cell_group_id) {
+          query = query.eq('id', profile.cell_group_id);
+        } else {
+          // If member has no assigned group, return empty array
+          setCellGroups([]);
+          return;
+        }
+      }
+
+      const { data, error } = await query;
+
       if (error) {
         console.error('Error fetching cell groups:', error);
         setError('Failed to fetch cell groups');
       } else {
+        console.log('Fetched cell groups:', data?.length);
         setCellGroups(data || []);
       }
     } catch (err) {
@@ -74,9 +98,15 @@ const CellGroups = () => {
 
   const fetchMembers = async () => {
     try {
+      // Only fetch members if user has permission to create/edit groups
+      if (!profile?.isAdmin && !profile?.isLeader) {
+        setMembers([]);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('members')
-        .select('id, name, surname, is_leader, role')
+        .select('id, name, surname, is_leader, role, cell_group_id')
         .order('name');
 
       if (error) {
@@ -126,6 +156,7 @@ const CellGroups = () => {
         setShowForm(false);
         setFormData({ groupName: '', leaderId: '', location: '', meetingDay: '' });
         fetchCellGroups();
+        fetchMembers(); // Refresh members list as new leader might be assigned
       }
     } catch (err) {
       console.error('Error creating cell group:', err);
@@ -172,6 +203,7 @@ const CellGroups = () => {
         setEditingGroup(null);
         setEditFormData({ name: '', leader_id: '', location: '', meeting_day: '' });
         fetchCellGroups();
+        fetchMembers(); // Refresh members list in case leader changed
       }
     } catch (err) {
       console.error('Error updating cell group:', err);
@@ -192,7 +224,7 @@ const CellGroups = () => {
     return false;
   };
 
-  // Check if user can view cell groups
+  // Check if user can view cell groups (for UI display logic)
   const canViewCellGroup = (group: CellGroup) => {
     if (profile?.isAdmin) return true;
     // User is the leader of this cell group
@@ -202,20 +234,41 @@ const CellGroups = () => {
     return false;
   };
 
-  // Filter cell groups based on user permissions
-  const visibleCellGroups = profile?.isAdmin 
-    ? cellGroups 
-    : cellGroups.filter(group => canViewCellGroup(group));
-
-  // Filter members who are leaders for dropdowns
+  // Filter members who are leaders for dropdowns (only show available leaders)
   const leaderMembers = members.filter(member => 
-    member.is_leader === true || member.role === 'leader'
+    (member.is_leader === true || member.role === 'leader') && 
+    (!member.cell_group_id || member.cell_group_id === editingGroup) // Show leaders without groups or leaders of current group being edited
   );
+
+  // Get current user's display info
+  const getUserDisplayInfo = () => {
+    if (!profile) return null;
+    
+    if (profile.isAdmin) {
+      return { type: 'Administrator', canSeeAll: true };
+    } else if (profile.isLeader) {
+      return { type: 'Group Leader', canSeeAll: false };
+    } else {
+      return { type: 'Member', canSeeAll: false };
+    }
+  };
+
+  const userInfo = getUserDisplayInfo();
 
   return (
     <div className="animate-fadeIn">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-foreground">Cell Groups</h1>
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Cell Groups</h1>
+          {userInfo && (
+            <p className="text-sm text-muted-foreground mt-1">
+              Logged in as: {profile?.name} {profile?.surname} ({userInfo.type})
+              {profile?.cell_group_id && !profile?.isAdmin && (
+                <span> • Assigned to: {cellGroups.find(g => g.id === profile.cell_group_id)?.name || 'Loading...'}</span>
+              )}
+            </p>
+          )}
+        </div>
         {canCreateCellGroup && (
           <button
             onClick={() => setShowForm(!showForm)}
@@ -274,9 +327,15 @@ const CellGroups = () => {
                   {leaderMembers.map((member) => (
                     <option key={member.id} value={member.id}>
                       {member.name} {member.surname}
+                      {member.cell_group_id && ' (Already leading another group)'}
                     </option>
                   ))}
                 </select>
+                {leaderMembers.length === 0 && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    No available leaders found. Make sure members are marked as leaders first.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">
@@ -335,8 +394,20 @@ const CellGroups = () => {
         </div>
       )}
 
+      {/* Access Information */}
+      {!profile?.isAdmin && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-blue-800">
+            <strong>Access Level:</strong> {userInfo?.type === 'Member' 
+              ? 'You can only view your assigned cell group' 
+              : 'You can view and manage groups you lead'
+            }
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-4">
-        {visibleCellGroups.map((group) => (
+        {cellGroups.map((group) => (
           <div key={group.id} className="bg-card border border-border rounded-xl p-6 hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start">
               <div className="flex-1">
@@ -364,6 +435,7 @@ const CellGroups = () => {
                           {leaderMembers.map((member) => (
                             <option key={member.id} value={member.id}>
                               {member.name} {member.surname}
+                              {member.cell_group_id && member.cell_group_id !== group.id && ' (Already leading another group)'}
                             </option>
                           ))}
                         </select>
@@ -464,9 +536,18 @@ const CellGroups = () => {
         ))}
       </div>
 
-      {visibleCellGroups.length === 0 && !loading && (
+      {cellGroups.length === 0 && !loading && (
         <div className="text-center py-12 text-muted-foreground">
-          No cell groups found.
+          <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+          <h3 className="text-lg font-medium text-foreground mb-2">No Cell Groups Found</h3>
+          <p>
+            {profile?.isAdmin 
+              ? 'No cell groups have been created yet.' 
+              : profile?.isLeader
+              ? 'You are not currently assigned as a leader of any cell groups.'
+              : 'You are not currently assigned to any cell group.'
+            }
+          </p>
         </div>
       )}
     </div>
