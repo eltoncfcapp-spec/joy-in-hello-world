@@ -107,16 +107,19 @@ const CellGroups = () => {
   // Stats state
   const [stats, setStats] = useState<StatCard[]>([]);
 
-  // Check if user is group_leader and can manage all groups
+  // Check user roles and permissions
   const isGroupLeader = profile?.role === 'group_leader' || profile?.is_leader === true;
+  const isCellLeader = profile?.role === 'cell_leader';
   const canManageAllGroups = isGroupLeader;
+  const canManageOwnGroup = isCellLeader;
 
-  // Calculate stats
+  // Calculate stats based on visible groups
   const calculateStats = () => {
-    const totalGroups = cellGroups.length;
-    const totalMembers = cellGroups.reduce((sum, group) => sum + (group.members?.length || 0), 0);
-    const groupsWithLeaders = cellGroups.filter(group => group.leader_id).length;
-    const activeGroups = cellGroups.filter(group => group.status === 'active' || !group.status).length;
+    const visibleGroups = cellGroups;
+    const totalGroups = visibleGroups.length;
+    const totalMembers = visibleGroups.reduce((sum, group) => sum + (group.members?.length || 0), 0);
+    const groupsWithLeaders = visibleGroups.filter(group => group.leader_id).length;
+    const activeGroups = visibleGroups.filter(group => group.status === 'active' || !group.status).length;
 
     const statsData: StatCard[] = [
       { 
@@ -164,7 +167,7 @@ const CellGroups = () => {
     setStats(statsData);
   };
 
-  // Load ALL cell groups for group_leader, or user's group for regular users
+  // Load cell groups based on user role
   const loadCellGroups = async () => {
     try {
       setLoading(true);
@@ -178,8 +181,10 @@ const CellGroups = () => {
       console.log('🔍 Loading cell groups for user:', {
         role: profile.role,
         isGroupLeader: isGroupLeader,
+        isCellLeader: isCellLeader,
         is_leader: profile.is_leader,
-        login_username: profile.login_username
+        login_username: profile.login_username,
+        cell_group_id: profile.cell_group_id
       });
 
       if (canManageAllGroups) {
@@ -208,8 +213,35 @@ const CellGroups = () => {
 
         console.log('📋 All cell groups loaded:', groupsWithMembers.length);
         setCellGroups(groupsWithMembers);
+      } else if (canManageOwnGroup && profile.cell_group_id) {
+        // Load only the cell leader's own group
+        console.log('👤 Cell Leader - loading own cell group:', profile.cell_group_id);
+        const { data, error: queryError } = await supabase
+          .from('cell_groups')
+          .select(`
+            *,
+            leader:members!leader_id(id, name, surname, email, phone),
+            cell_group_members(
+              *,
+              member:members(id, name, surname, email, phone, status)
+            )
+          `)
+          .eq('id', profile.cell_group_id)
+          .single();
+
+        if (queryError) {
+          console.error('Error loading cell leader group:', queryError);
+          throw new Error('No cell group found for this cell leader');
+        }
+
+        if (data) {
+          setCellGroups([{
+            ...data,
+            members: data.cell_group_members || []
+          } as CellGroup]);
+        }
       } else {
-        // Load only user's cell group for non-leader users
+        // Load only user's cell group for regular users
         console.log('👤 Regular user - loading user cell group');
         const { data, error: queryError } = await supabase
           .from('cell_groups')
@@ -291,12 +323,17 @@ const CellGroups = () => {
     }
   };
 
-  // Create new cell group
+  // Create new cell group - only for group leaders
   const createCellGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setActionLoading(true);
       setError(null);
+
+      if (!canManageAllGroups) {
+        setError('You do not have permission to create cell groups');
+        return;
+      }
 
       if (!createFormData.name.trim()) {
         setError('Cell group name is required');
@@ -363,7 +400,7 @@ const CellGroups = () => {
     }
   };
 
-  // Update cell group
+  // Update cell group - with permission check
   const updateCellGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -372,6 +409,17 @@ const CellGroups = () => {
 
       if (!selectedGroup) {
         setError('No cell group selected');
+        return;
+      }
+
+      // Check permissions
+      if (canManageOwnGroup && selectedGroup.id !== profile?.cell_group_id) {
+        setError('You can only edit your own cell group');
+        return;
+      }
+
+      if (!canManageAllGroups && !canManageOwnGroup) {
+        setError('You do not have permission to edit cell groups');
         return;
       }
 
@@ -439,7 +487,7 @@ const CellGroups = () => {
     }
   };
 
-  // Add member to cell group
+  // Add member to cell group - with permission check
   const addMemberToGroup = async (memberId: string) => {
     try {
       setActionLoading(true);
@@ -447,6 +495,17 @@ const CellGroups = () => {
 
       if (!selectedGroup) {
         setError('No cell group selected');
+        return;
+      }
+
+      // Check permissions
+      if (canManageOwnGroup && selectedGroup.id !== profile?.cell_group_id) {
+        setError('You can only add members to your own cell group');
+        return;
+      }
+
+      if (!canManageAllGroups && !canManageOwnGroup) {
+        setError('You do not have permission to add members');
         return;
       }
 
@@ -483,7 +542,7 @@ const CellGroups = () => {
     }
   };
 
-  // Remove member from cell group
+  // Remove member from cell group - with permission check
   const removeMemberFromGroup = async (memberId: string) => {
     try {
       setActionLoading(true);
@@ -491,6 +550,17 @@ const CellGroups = () => {
 
       if (!selectedGroup) {
         setError('No cell group selected');
+        return;
+      }
+
+      // Check permissions
+      if (canManageOwnGroup && selectedGroup.id !== profile?.cell_group_id) {
+        setError('You can only remove members from your own cell group');
+        return;
+      }
+
+      if (!canManageAllGroups && !canManageOwnGroup) {
+        setError('You do not have permission to remove members');
         return;
       }
 
@@ -524,7 +594,7 @@ const CellGroups = () => {
     }
   };
 
-  // Set as leader
+  // Set as leader - with permission check
   const setAsLeader = async (memberId: string) => {
     try {
       setActionLoading(true);
@@ -532,6 +602,17 @@ const CellGroups = () => {
 
       if (!selectedGroup) {
         setError('No cell group selected');
+        return;
+      }
+
+      // Check permissions
+      if (canManageOwnGroup && selectedGroup.id !== profile?.cell_group_id) {
+        setError('You can only assign leaders in your own cell group');
+        return;
+      }
+
+      if (!canManageAllGroups && !canManageOwnGroup) {
+        setError('You do not have permission to assign leaders');
         return;
       }
 
@@ -575,11 +656,16 @@ const CellGroups = () => {
     }
   };
 
-  // Delete cell group
+  // Delete cell group - only for group leaders
   const deleteCellGroup = async (groupId: string) => {
     try {
       setActionLoading(true);
       setError(null);
+
+      if (!canManageAllGroups) {
+        setError('Only group leaders can delete cell groups');
+        return;
+      }
 
       if (!confirm('Are you sure you want to delete this cell group? This action cannot be undone.')) {
         return;
@@ -614,8 +700,19 @@ const CellGroups = () => {
     }
   };
 
-  // Initialize edit form with current data
+  // Initialize edit form with current data - with permission check
   const initializeEditForm = (group: CellGroup) => {
+    // Check permissions
+    if (canManageOwnGroup && group.id !== profile?.cell_group_id) {
+      setError('You can only edit your own cell group');
+      return;
+    }
+
+    if (!canManageAllGroups && !canManageOwnGroup) {
+      setError('You do not have permission to edit cell groups');
+      return;
+    }
+
     setSelectedGroup(group);
     setEditFormData({
       name: group.name || '',
@@ -628,8 +725,19 @@ const CellGroups = () => {
     setShowEditModal(true);
   };
 
-  // Open add member modal
+  // Open add member modal - with permission check
   const openAddMemberModal = (group: CellGroup) => {
+    // Check permissions
+    if (canManageOwnGroup && group.id !== profile?.cell_group_id) {
+      setError('You can only add members to your own cell group');
+      return;
+    }
+
+    if (!canManageAllGroups && !canManageOwnGroup) {
+      setError('You do not have permission to add members');
+      return;
+    }
+
     setSelectedGroup(group);
     setShowAddMemberModal(true);
   };
@@ -653,6 +761,11 @@ const CellGroups = () => {
     `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
     member.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Check if user can manage a specific group
+  const canManageGroup = (groupId: string) => {
+    return canManageAllGroups || (canManageOwnGroup && groupId === profile?.cell_group_id);
+  };
 
   useEffect(() => {
     if (profile) {
@@ -710,12 +823,19 @@ const CellGroups = () => {
             <p className="text-gray-600 dark:text-gray-400">
               {canManageAllGroups 
                 ? `Group Leader access - managing ${cellGroups.length} cell groups` 
+                : canManageOwnGroup
+                ? `Cell Leader access - managing your cell group`
                 : `Viewing your cell group - ${profile?.role} access`
               }
             </p>
             {canManageAllGroups && (
               <p className="text-sm text-green-600 dark:text-green-400 mt-1">
                 You have full access to manage all cell groups and members
+              </p>
+            )}
+            {canManageOwnGroup && (
+              <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                You can manage members and events in your own cell group
               </p>
             )}
           </div>
@@ -897,7 +1017,7 @@ const CellGroups = () => {
                         View Members
                       </button>
                       
-                      {canManageAllGroups && (
+                      {canManageGroup(group.id) && (
                         <>
                           <button
                             onClick={() => initializeEditForm(group)}
@@ -913,15 +1033,17 @@ const CellGroups = () => {
                             <Plus className="h-3 w-3" />
                             Add Member
                           </button>
-                          <button
-                            onClick={() => deleteCellGroup(group.id)}
-                            disabled={actionLoading}
-                            className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors flex-1 justify-center disabled:opacity-50"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            Delete
-                          </button>
                         </>
+                      )}
+                      {canManageAllGroups && (
+                        <button
+                          onClick={() => deleteCellGroup(group.id)}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors flex-1 justify-center disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1285,7 +1407,7 @@ const CellGroups = () => {
                   <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                     <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>No members in this group yet</p>
-                    {canManageAllGroups && (
+                    {canManageGroup(selectedGroup.id) && (
                       <button
                         onClick={() => openAddMemberModal(selectedGroup)}
                         className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -1346,7 +1468,7 @@ const CellGroups = () => {
                         </div>
                         
                         {/* Member Actions */}
-                        {canManageAllGroups && member.role !== 'leader' && (
+                        {canManageGroup(selectedGroup.id) && member.role !== 'leader' && (
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => setAsLeader(member.member_id)}
