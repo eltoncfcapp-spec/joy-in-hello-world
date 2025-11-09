@@ -1,313 +1,397 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+// =====================================================
+// HOW TO QUERY MEMBERS WITH PROPER PERMISSIONS
+// Using Database Functions (works with mock sessions)
+// =====================================================
+
 import { supabase } from '../integrations/supabase/client';
-import { User as SupabaseUser, Session } from '@supabase/supabase-js';
+import { useAuth } from '../contexts/AuthContext';
+import React from 'react';
 
-interface UserProfile {
-  id: string;
-  name: string | null;
-  surname: string | null;
-  email: string | null;
-  phone: string | null;
-  cell_group_id: string | null;
-  role: 'admin' | 'leader' | 'member';
-  isAdmin: boolean;
-  isLeader: boolean;
-  login_username: string | null;
-}
+// =====================================================
+// 1. Fetch members using permission-aware function
+// =====================================================
+export const fetchMembers = async (userId: string) => {
+  // Use the database function that automatically filters based on permissions
+  const { data, error } = await supabase
+    .rpc('get_accessible_members', { requesting_user_id: userId });
 
-interface AuthContextType {
-  user: SupabaseUser | null;
-  session: Session | null;
-  profile: UserProfile | null;
-  login: (identifier: string, password: string, isEmailLogin?: boolean) => Promise<boolean>;
-  logout: () => Promise<void>;
-  loading: boolean;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  if (error) {
+    console.error('Error fetching members:', error);
+    return [];
   }
-  return context;
+
+  return data || [];
 };
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
+// =====================================================
+// 2. Check if user can edit a member
+// =====================================================
+export const canEditMemberDB = async (
+  requestingUserId: string,
+  targetMemberId: string
+): Promise<boolean> => {
+  const { data, error } = await supabase
+    .rpc('can_edit_member', {
+      requesting_user_id: requestingUserId,
+      target_member_id: targetMemberId
+    });
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<SupabaseUser | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  if (error) {
+    console.error('Error checking edit permission:', error);
+    return false;
+  }
 
-  const fetchUserProfile = async (userId: string) => {
+  return data === true;
+};
+
+// =====================================================
+// 3. Update a member using safe function
+// =====================================================
+export const updateMember = async (
+  requestingUserId: string,
+  targetMemberId: string,
+  updates: {
+    name?: string;
+    surname?: string;
+    email?: string;
+    phone?: string;
+    cell_group_id?: string;
+    is_leader?: boolean;
+  }
+) => {
+  const { data, error } = await supabase
+    .rpc('update_member_safe', {
+      requesting_user_id: requestingUserId,
+      target_member_id: targetMemberId,
+      new_name: updates.name || null,
+      new_surname: updates.surname || null,
+      new_email: updates.email || null,
+      new_phone: updates.phone || null,
+      new_cell_group_id: updates.cell_group_id || null,
+      new_is_leader: updates.is_leader !== undefined ? updates.is_leader : null
+    });
+
+  if (error) {
+    console.error('Error updating member:', error);
+    throw new Error(error.message || 'Failed to update member');
+  }
+
+  return data;
+};
+
+// =====================================================
+// 4. Alternative: Direct query with client-side filtering
+// =====================================================
+export const fetchMembersClient = async (profile: any) => {
+  let query = supabase.from('members').select('*');
+
+  // If not admin, filter by cell group
+  if (!profile.isAdmin && profile.isLeader && profile.led_cell_groups.length > 0) {
+    query = query.in('cell_group_id', profile.led_cell_groups);
+  } else if (!profile.isAdmin && !profile.isLeader) {
+    // Regular member can only see themselves
+    query = query.eq('id', profile.id);
+  }
+
+  const { data, error } = await query.order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching members:', error);
+    return [];
+  }
+
+  return data || [];
+};
+
+// =====================================================
+// 5. React Hook for fetching members
+// =====================================================
+export const useMembers = () => {
+  const { profile } = useAuth();
+  const [members, setMembers] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const loadMembers = React.useCallback(async () => {
+    if (!profile?.id) return;
+
     try {
-      // Fetch user roles from user_roles table
-      const { data: rolesData, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId);
+      setLoading(true);
+      // Use database function for permission-aware query
+      const data = await fetchMembers(profile.id);
+      setMembers(data);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load members');
+      console.error('Error loading members:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [profile?.id]);
 
-      if (rolesError) {
-        console.error('Error fetching user roles:', rolesError);
-      }
+  React.useEffect(() => {
+    if (profile) {
+      loadMembers();
+    }
+  }, [profile, loadMembers]);
 
-      // Fetch member data - this is where user profile data comes from
-      const { data: memberData, error: memberError } = await supabase
-        .from('members')
-        .select('*')
-        .eq('id', userId)
-        .single();
+  return { members, loading, error, refetch: loadMembers };
+};
 
-      if (memberError) {
-        console.error('Error fetching member data:', memberError);
-        // If member not found, user might be an admin without a member record
-        const { data: authUser } = await supabase.auth.getUser();
-        
-        setProfile({
-          id: userId,
-          name: authUser.user?.user_metadata?.name || null,
-          surname: authUser.user?.user_metadata?.surname || null,
-          email: authUser.user?.email || null,
-          phone: null,
-          cell_group_id: null,
-          role: 'member',
-          isAdmin: false,
-          isLeader: false,
-          login_username: null
-        });
+// =====================================================
+// 6. React Hook for cell group members
+// =====================================================
+export const useCellGroupMembers = (cellGroupId?: string) => {
+  const { profile } = useAuth();
+  const [members, setMembers] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const loadMembers = async () => {
+      if (!cellGroupId || !profile) {
+        setMembers([]);
+        setLoading(false);
         return;
       }
 
-      const roles = rolesData?.map(r => r.role) || [];
-      const isAdmin = roles.includes('admin');
-      
-      // Check if user is a leader from members table
-      const isLeaderFromMembers = memberData?.is_leader === true || memberData?.role === 'leader';
-      
-      // Determine primary role - prioritize admin, then leader
-      let primaryRole: 'admin' | 'leader' | 'member' = 'member';
-      if (isAdmin) {
-        primaryRole = 'admin';
-      } else if (isLeaderFromMembers || roles.includes('leader')) {
-        primaryRole = 'leader';
+      // Verify leader has access to this cell group
+      if (profile.isLeader && !profile.isAdmin) {
+        if (!profile.led_cell_groups.includes(cellGroupId)) {
+          setError('You do not have access to this cell group');
+          setLoading(false);
+          return;
+        }
       }
 
-      // Create profile from member data
-      const userProfile: UserProfile = {
-        id: userId,
-        name: memberData?.name || null,
-        surname: memberData?.surname || null,
-        email: memberData?.email || null,
-        phone: memberData?.phone || null,
-        cell_group_id: memberData?.cell_group_id || null,
-        role: primaryRole,
-        isAdmin,
-        isLeader: isLeaderFromMembers || roles.includes('leader'),
-        login_username: memberData?.login_username || null
-      };
-
-      setProfile(userProfile);
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      setProfile({
-        id: userId,
-        name: null,
-        surname: null,
-        email: null,
-        phone: null,
-        cell_group_id: null,
-        role: 'member',
-        isAdmin: false,
-        isLeader: false,
-        login_username: null
-      });
-    }
-  };
-
-  // Universal login function that returns boolean for compatibility
-  const login = async (identifier: string, password: string, isEmailLogin: boolean = false): Promise<boolean> => {
-    try {
-      setLoading(true);
-      
-      if (isEmailLogin) {
-        // Email/Password authentication
-        console.log('Attempting email login:', identifier);
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: identifier.trim(),
-          password: password
-        });
-
-        if (error) {
-          console.error('Email login error:', error);
-          return false;
-        }
-
-        if (data.session && data.user) {
-          console.log('Email login successful');
-          setSession(data.session);
-          setUser(data.user);
-          await fetchUserProfile(data.user.id);
-          return true;
-        }
-      } else {
-        // Username/PIN authentication
-        console.log('Attempting username/PIN login:', identifier);
-        const { data: memberData, error: memberError } = await supabase
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
           .from('members')
           .select('*')
-          .eq('login_username', identifier.trim().toLowerCase())
-          .eq('login_pin', password)
-          .single();
+          .eq('cell_group_id', cellGroupId)
+          .order('name', { ascending: true });
 
-        if (memberError || !memberData) {
-          console.error('Username/PIN login error:', memberError);
-          return false;
-        }
+        if (error) throw error;
 
-        console.log('Member found:', memberData);
-
-        // Try email login first if member has email
-        if (memberData.email) {
-          try {
-            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-              email: memberData.email,
-              password: password
-            });
-
-            if (!authError && authData.session) {
-              console.log('Member email login successful');
-              setSession(authData.session);
-              setUser(authData.user);
-              await fetchUserProfile(memberData.id);
-              return true;
-            }
-          } catch (emailError) {
-            console.log('Member email login failed, using mock session');
-          }
-        }
-
-        // Fallback: Create mock session
-        const mockUser: SupabaseUser = {
-          id: memberData.id,
-          email: memberData.email || '',
-          app_metadata: {},
-          user_metadata: {},
-          aud: 'authenticated',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        const mockSession: Session = {
-          access_token: 'mock-token-' + memberData.id,
-          token_type: 'bearer',
-          expires_in: 3600,
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          refresh_token: 'mock-refresh-' + memberData.id,
-          user: mockUser,
-        };
-
-        console.log('Creating mock session for member');
-        setSession(mockSession);
-        setUser(mockUser);
-        await fetchUserProfile(memberData.id);
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Login error:', error);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      setLoading(true);
-      if (session?.access_token?.startsWith('mock-token-')) {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-      } else {
-        await supabase.auth.signOut();
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Check for existing session and set up auth listener
-  useEffect(() => {
-    let mounted = true;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (!mounted) return;
-
-        if (event === 'SIGNED_IN' && session) {
-          setSession(session);
-          setUser(session.user);
-          await fetchUserProfile(session.user.id);
-        } else if (event === 'SIGNED_OUT') {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        }
-        
+        setMembers(data || []);
+        setError(null);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load cell group members');
+        console.error('Error loading cell group members:', err);
+      } finally {
         setLoading(false);
       }
-    );
+    };
 
-    const initializeAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!mounted) return;
+    loadMembers();
+  }, [cellGroupId, profile]);
 
-        if (session) {
-          setSession(session);
-          setUser(session.user);
-          await fetchUserProfile(session.user.id);
-        }
-      } catch (error) {
-        console.error('Error initializing auth:', error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+  return { members, loading, error };
+};
+
+// =====================================================
+// 7. Example Component: Member List
+// =====================================================
+export const MemberListComponent: React.FC = () => {
+  const { profile, canViewMember, canEditMember } = useAuth();
+  const { members, loading, error, refetch } = useMembers();
+
+  if (loading) return <div className="p-4">Loading members...</div>;
+  if (error) return <div className="p-4 text-red-600">Error: {error}</div>;
+
+  return (
+    <div className="p-6">
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold mb-2">
+          {profile?.isAdmin && 'All Members'}
+          {profile?.isLeader && !profile.isAdmin && 'My Cell Group Members'}
+          {!profile?.isAdmin && !profile?.isLeader && 'My Profile'}
+        </h2>
+        
+        {profile?.isLeader && !profile?.isAdmin && (
+          <p className="text-sm text-gray-600">
+            You are leading {profile.led_cell_groups.length} cell group(s) with {members.length} member(s)
+          </p>
+        )}
+
+        <button 
+          onClick={refetch}
+          className="mt-2 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {members.length === 0 ? (
+          <p className="text-gray-500">No members found</p>
+        ) : (
+          members.map(member => (
+            <div key={member.id} className="p-4 border rounded-lg shadow-sm bg-white">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-lg">
+                    {member.name} {member.surname}
+                    {member.is_leader && (
+                      <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                        Leader
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-sm text-gray-600">{member.email || 'No email'}</p>
+                  <p className="text-sm text-gray-500">{member.phone || 'No phone'}</p>
+                  {member.cell_group_id && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Cell Group ID: {member.cell_group_id}
+                    </p>
+                  )}
+                </div>
+                
+                <div className="flex gap-2">
+                  {canViewMember(member.id) && (
+                    <button className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
+                      View
+                    </button>
+                  )}
+                  {canEditMember(member.id) && (
+                    <button className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm">
+                      Edit
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+// =====================================================
+// 8. Example: Edit Member Form
+// =====================================================
+export const EditMemberForm: React.FC<{ 
+  memberId: string;
+  onSuccess?: () => void;
+}> = ({ memberId, onSuccess }) => {
+  const { profile, canEditMember } = useAuth();
+  const [loading, setLoading] = React.useState(false);
+  const [formData, setFormData] = React.useState({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
+  });
+
+  // Load member data
+  React.useEffect(() => {
+    const loadMember = async () => {
+      const { data } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', memberId)
+        .single();
+      
+      if (data) {
+        setFormData({
+          name: data.name || '',
+          surname: data.surname || '',
+          email: data.email || '',
+          phone: data.phone || '',
+        });
       }
     };
+    loadMember();
+  }, [memberId]);
 
-    initializeAuth();
+  if (!canEditMember(memberId)) {
+    return (
+      <div className="p-4 bg-red-50 border border-red-200 rounded">
+        <p className="text-red-700">You do not have permission to edit this member</p>
+      </div>
+    );
+  }
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!profile?.id) return;
 
-  const value = {
-    user,
-    session,
-    profile,
-    login,
-    logout,
-    loading
+    try {
+      setLoading(true);
+      await updateMember(profile.id, memberId, formData);
+      alert('Member updated successfully!');
+      onSuccess?.();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+    <form onSubmit={handleSubmit} className="space-y-4 p-6 bg-white rounded-lg shadow">
+      <h3 className="text-xl font-bold mb-4">Edit Member</h3>
+
+      <div>
+        <label className="block text-sm font-medium mb-1">Name</label>
+        <input
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+          required
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium mb-1">Surname</label>
+        <input
+          type="text"
+          value={formData.surname}
+          onChange={(e) => setFormData({ ...formData, surname: e.target.value })}
+          className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+          required
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium mb-1">Email</label>
+        <input
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium mb-1">Phone</label>
+        <input
+          type="tel"
+          value={formData.phone}
+          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+          className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      {profile?.isLeader && !profile?.isAdmin && (
+        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded">
+          <p className="text-sm text-yellow-800">
+            ⚠️ As a cell group leader, you cannot change cell group assignments or leadership status.
+          </p>
+        </div>
+      )}
+      
+      <button 
+        type="submit"
+        disabled={loading}
+        className="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+      >
+        {loading ? 'Saving...' : 'Save Changes'}
+      </button>
+    </form>
   );
 };
