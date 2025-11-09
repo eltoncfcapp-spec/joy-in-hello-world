@@ -89,11 +89,11 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Check if user is admin and can manage all groups
-  const isAdmin = profile?.role === 'admin' || profile?.isAdmin;
-  const canManageAllGroups = isAdmin;
+  // Check if user is group_leader and can manage all groups
+  const isGroupLeader = profile?.role === 'group_leader' || profile?.is_leader === true;
+  const canManageAllGroups = isGroupLeader;
 
-  // Load ALL cell groups for admin, or user's group for regular users
+  // Load ALL cell groups for group_leader, or user's group for regular users
   const loadCellGroups = async () => {
     try {
       setLoading(true);
@@ -106,13 +106,14 @@ const CellGroups = () => {
 
       console.log('🔍 Loading cell groups for user:', {
         role: profile.role,
-        isAdmin: isAdmin,
+        isGroupLeader: isGroupLeader,
+        is_leader: profile.is_leader,
         login_username: profile.login_username
       });
 
       if (canManageAllGroups) {
-        // Load ALL cell groups for admin
-        console.log('👑 Admin user - loading ALL cell groups');
+        // Load ALL cell groups for group_leader
+        console.log('👑 Group Leader - loading ALL cell groups');
         const { data, error: queryError } = await supabase
           .from('cell_groups')
           .select(`
@@ -137,7 +138,7 @@ const CellGroups = () => {
         console.log('📋 All cell groups loaded:', groupsWithMembers.length);
         setCellGroups(groupsWithMembers);
       } else {
-        // Load only user's cell group for non-admin users
+        // Load only user's cell group for non-leader users
         console.log('👤 Regular user - loading user cell group');
         const { data, error: queryError } = await supabase
           .from('cell_groups')
@@ -259,6 +260,16 @@ const CellGroups = () => {
         if (memberError) {
           console.error('Error adding leader to group:', memberError);
         }
+
+        // Also update the member's cell_group_id
+        const { error: updateError } = await supabase
+          .from('members')
+          .update({ cell_group_id: data.id })
+          .eq('id', createFormData.leader_id);
+
+        if (updateError) {
+          console.error('Error updating leader cell_group_id:', updateError);
+        }
       }
 
       setSuccess('Cell group created successfully');
@@ -331,6 +342,16 @@ const CellGroups = () => {
 
         if (memberError) {
           console.error('Error updating leader:', memberError);
+        }
+
+        // Update new leader's cell_group_id
+        const { error: updateError } = await supabase
+          .from('members')
+          .update({ cell_group_id: selectedGroup.id })
+          .eq('id', editFormData.leader_id);
+
+        if (updateError) {
+          console.error('Error updating leader cell_group_id:', updateError);
         }
       }
 
@@ -462,6 +483,16 @@ const CellGroups = () => {
         console.error('Error updating member role:', memberError);
       }
 
+      // Update member's cell_group_id
+      const { error: updateError } = await supabase
+        .from('members')
+        .update({ cell_group_id: selectedGroup.id })
+        .eq('id', memberId);
+
+      if (updateError) {
+        console.error('Error updating leader cell_group_id:', updateError);
+      }
+
       setSuccess('Leader assigned successfully');
       await loadCellGroups();
       
@@ -483,6 +514,17 @@ const CellGroups = () => {
         return;
       }
 
+      // First, remove all members from the group
+      const { error: membersError } = await supabase
+        .from('cell_group_members')
+        .delete()
+        .eq('cell_group_id', groupId);
+
+      if (membersError) {
+        console.error('Error removing group members:', membersError);
+      }
+
+      // Then delete the cell group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -582,10 +624,15 @@ const CellGroups = () => {
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
               {canManageAllGroups 
-                ? `Full administrative access - managing ${cellGroups.length} cell groups` 
+                ? `Group Leader access - managing ${cellGroups.length} cell groups` 
                 : `Viewing your cell group - ${profile?.role} access`
               }
             </p>
+            {canManageAllGroups && (
+              <p className="text-sm text-green-600 dark:text-green-400 mt-1">
+                You have full access to manage all cell groups and members
+              </p>
+            )}
           </div>
           
           {/* Action Buttons */}
@@ -634,7 +681,7 @@ const CellGroups = () => {
         {/* Cell Groups Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {cellGroups.map((group) => (
-            <div key={group.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
+            <div key={group.id} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 hover:shadow-xl transition-shadow duration-200">
               {/* Group Header */}
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
@@ -650,7 +697,7 @@ const CellGroups = () => {
                     </div>
                   </div>
                   {group.description && (
-                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3 line-clamp-2">
                       {group.description}
                     </p>
                   )}
@@ -661,29 +708,29 @@ const CellGroups = () => {
               <div className="space-y-3 mb-4">
                 {group.location && (
                   <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <MapPin className="h-4 w-4" />
-                    <span>{group.location}</span>
+                    <MapPin className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{group.location}</span>
                   </div>
                 )}
                 
                 {(group.meeting_day || group.meeting_time) && (
                   <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <Calendar className="h-4 w-4" />
-                    <span>
+                    <Calendar className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">
                       {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
                     </span>
                   </div>
                 )}
                 
                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                  <Users className="h-4 w-4" />
+                  <Users className="h-4 w-4 flex-shrink-0" />
                   <span>{group.members?.length || 0} members</span>
                 </div>
 
                 {group.leader && (
                   <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <User className="h-4 w-4" />
-                    <span>Leader: {group.leader.name} {group.leader.surname}</span>
+                    <User className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">Leader: {group.leader.name} {group.leader.surname}</span>
                   </div>
                 )}
               </div>
@@ -692,7 +739,7 @@ const CellGroups = () => {
               <div className="flex flex-wrap gap-2 pt-4 border-t dark:border-gray-700">
                 <button
                   onClick={() => openMembersModal(group)}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex-1 justify-center"
                 >
                   <Eye className="h-3 w-3" />
                   View Members
@@ -702,14 +749,14 @@ const CellGroups = () => {
                   <>
                     <button
                       onClick={() => initializeEditForm(group)}
-                      className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex-1 justify-center"
                     >
                       <Edit className="h-3 w-3" />
                       Edit
                     </button>
                     <button
                       onClick={() => openAddMemberModal(group)}
-                      className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors flex-1 justify-center"
                     >
                       <Plus className="h-3 w-3" />
                       Add Member
@@ -717,7 +764,7 @@ const CellGroups = () => {
                     <button
                       onClick={() => deleteCellGroup(group.id)}
                       disabled={actionLoading}
-                      className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                      className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors flex-1 justify-center disabled:opacity-50"
                     >
                       <Trash2 className="h-3 w-3" />
                       Delete
@@ -755,7 +802,7 @@ const CellGroups = () => {
         {/* Create Group Modal */}
         {showCreateModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">Create Cell Group</h3>
                 <button onClick={() => setShowCreateModal(false)} className="text-gray-500 hover:text-gray-700">
@@ -774,6 +821,7 @@ const CellGroups = () => {
                     value={createFormData.name}
                     onChange={(e) => setCreateFormData({...createFormData, name: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="Enter group name"
                   />
                 </div>
                 
@@ -786,6 +834,7 @@ const CellGroups = () => {
                     onChange={(e) => setCreateFormData({...createFormData, description: e.target.value})}
                     rows={3}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="Enter group description (optional)"
                   />
                 </div>
                 
@@ -798,6 +847,7 @@ const CellGroups = () => {
                     value={createFormData.location}
                     onChange={(e) => setCreateFormData({...createFormData, location: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="Enter meeting location (optional)"
                   />
                 </div>
                 
@@ -843,7 +893,7 @@ const CellGroups = () => {
                     <option value="">Select leader</option>
                     {allMembers.map(member => (
                       <option key={member.id} value={member.id}>
-                        {member.name} {member.surname}
+                        {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
                       </option>
                     ))}
                   </select>
@@ -870,10 +920,10 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Edit Group Modal - Similar to create but for editing */}
+        {/* Edit Group Modal */}
         {showEditModal && selectedGroup && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">Edit Cell Group</h3>
                 <button onClick={() => setShowEditModal(false)} className="text-gray-500 hover:text-gray-700">
@@ -961,7 +1011,7 @@ const CellGroups = () => {
                     <option value="">Select leader</option>
                     {allMembers.map(member => (
                       <option key={member.id} value={member.id}>
-                        {member.name} {member.surname}
+                        {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
                       </option>
                     ))}
                   </select>
@@ -988,10 +1038,10 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Add Member Modal - Same as before but updated for the new structure */}
+        {/* Add Member Modal */}
         {showAddMemberModal && selectedGroup && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                   Add Member to {selectedGroup.name}
@@ -1016,18 +1066,21 @@ const CellGroups = () => {
               </div>
               
               {/* Available Members List */}
-              <div className="max-h-96 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto">
                 {filteredAvailableMembers.length === 0 ? (
                   <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                     <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>No available members found</p>
+                    {searchTerm && (
+                      <p className="text-sm mt-2">Try adjusting your search terms</p>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {filteredAvailableMembers.map(member => (
                       <div
                         key={member.id}
-                        className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+                        className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
@@ -1058,10 +1111,10 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Members Modal - Same as before but updated for the new structure */}
+        {/* Members Modal */}
         {showMembersModal && selectedGroup && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-4xl">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                   {selectedGroup.name} - Members ({selectedGroup.members?.length || 0})
@@ -1072,83 +1125,93 @@ const CellGroups = () => {
               </div>
               
               {/* Members List */}
-              <div className="space-y-3">
+              <div className="flex-1 overflow-y-auto">
                 {selectedGroup.members?.length === 0 ? (
                   <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                     <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>No members in this group yet</p>
+                    {canManageAllGroups && (
+                      <button
+                        onClick={() => openAddMemberModal(selectedGroup)}
+                        className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Add Members
+                      </button>
+                    )}
                   </div>
                 ) : (
-                  selectedGroup.members?.map(member => (
-                    <div
-                      key={member.member_id}
-                      className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg"
-                    >
-                      <div className="flex items-center gap-3 flex-1">
-                        <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-                          <span className="text-white font-bold text-sm">
-                            {member.member?.name?.[0]}{member.member?.surname?.[0]}
-                          </span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <p className="font-medium text-gray-900 dark:text-white">
-                              {member.member?.name} {member.member?.surname}
-                            </p>
-                            {member.role === 'leader' && (
-                              <div className="flex items-center gap-1 bg-blue-100 dark:bg-blue-800 px-2 py-1 rounded">
-                                <Shield className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                                <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">Leader</span>
-                              </div>
-                            )}
+                  <div className="space-y-3">
+                    {selectedGroup.members?.map(member => (
+                      <div
+                        key={member.member_id}
+                        className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3 flex-1">
+                          <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                            <span className="text-white font-bold text-sm">
+                              {member.member?.name?.[0]}{member.member?.surname?.[0]}
+                            </span>
                           </div>
-                          <div className="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-gray-400">
-                            {member.member?.email && (
-                              <div className="flex items-center gap-1">
-                                <Mail className="h-3 w-3" />
-                                {member.member.email}
-                              </div>
-                            )}
-                            {member.member?.phone && (
-                              <div className="flex items-center gap-1">
-                                <Phone className="h-3 w-3" />
-                                {member.member.phone}
-                              </div>
-                            )}
-                            {member.member?.status && (
-                              <div className={`px-2 py-1 rounded text-xs ${
-                                member.member.status === 'active' 
-                                  ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200'
-                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
-                              }`}>
-                                {member.member.status}
-                              </div>
-                            )}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="font-medium text-gray-900 dark:text-white">
+                                {member.member?.name} {member.member?.surname}
+                              </p>
+                              {member.role === 'leader' && (
+                                <div className="flex items-center gap-1 bg-blue-100 dark:bg-blue-800 px-2 py-1 rounded">
+                                  <Shield className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                                  <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">Leader</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-gray-400">
+                              {member.member?.email && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="h-3 w-3" />
+                                  {member.member.email}
+                                </div>
+                              )}
+                              {member.member?.phone && (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3" />
+                                  {member.member.phone}
+                                </div>
+                              )}
+                              {member.member?.status && (
+                                <div className={`px-2 py-1 rounded text-xs ${
+                                  member.member.status === 'active' 
+                                    ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200'
+                                    : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                                }`}>
+                                  {member.member.status}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        
+                        {/* Member Actions */}
+                        {canManageAllGroups && member.role !== 'leader' && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setAsLeader(member.member_id)}
+                              disabled={actionLoading}
+                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors disabled:opacity-50"
+                            >
+                              Make Leader
+                            </button>
+                            <button
+                              onClick={() => removeMemberFromGroup(member.member_id)}
+                              disabled={actionLoading}
+                              className="p-1 text-red-600 hover:text-red-700 transition-colors disabled:opacity-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      
-                      {/* Member Actions */}
-                      {canManageAllGroups && member.role !== 'leader' && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setAsLeader(member.member_id)}
-                            disabled={actionLoading}
-                            className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors disabled:opacity-50"
-                          >
-                            Make Leader
-                          </button>
-                          <button
-                            onClick={() => removeMemberFromGroup(member.member_id)}
-                            disabled={actionLoading}
-                            className="p-1 text-red-600 hover:text-red-700 transition-colors disabled:opacity-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
