@@ -13,6 +13,9 @@ interface UserProfile {
   isAdmin: boolean;
   isLeader: boolean;
   login_username: string | null;
+  led_cell_groups: string[];
+  can_view_all_members: boolean;
+  can_edit_all_members: boolean;
 }
 
 interface AuthContextType {
@@ -22,6 +25,8 @@ interface AuthContextType {
   login: (identifier: string, password: string, isEmailLogin?: boolean) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
+  canViewMember: (memberId: string) => boolean;
+  canEditMember: (memberId: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -56,7 +61,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.error('Error fetching user roles:', rolesError);
       }
 
-      // Fetch member data - this is where user profile data comes from
+      // Fetch member data
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -65,7 +70,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (memberError) {
         console.error('Error fetching member data:', memberError);
-        // If member not found, user might be an admin without a member record
         const { data: authUser } = await supabase.auth.getUser();
         
         setProfile({
@@ -78,7 +82,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           role: 'member',
           isAdmin: false,
           isLeader: false,
-          login_username: null
+          login_username: null,
+          led_cell_groups: [],
+          can_view_all_members: false,
+          can_edit_all_members: false,
         });
         return;
       }
@@ -86,8 +93,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const roles = rolesData?.map(r => r.role) || [];
       const isAdmin = roles.includes('admin');
       
-      // Check if user is a leader from members table
+      // Check if user is a leader
       const isLeaderFromMembers = memberData?.is_leader === true || memberData?.role === 'leader';
+      
+      // Simplified led_cell_groups logic - only use their own cell_group_id if they're a leader
+      let ledCellGroups: string[] = [];
+      if (isLeaderFromMembers && memberData?.cell_group_id) {
+        ledCellGroups = [memberData.cell_group_id];
+      }
       
       // Determine primary role - prioritize admin, then leader
       let primaryRole: 'admin' | 'leader' | 'member' = 'member';
@@ -108,8 +121,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         role: primaryRole,
         isAdmin,
         isLeader: isLeaderFromMembers || roles.includes('leader'),
-        login_username: memberData?.login_username || null
+        login_username: memberData?.login_username || null,
+        led_cell_groups: ledCellGroups,
+        can_view_all_members: isAdmin,
+        can_edit_all_members: isAdmin,
       };
+
+      console.log('User profile loaded:', {
+        id: userId,
+        name: userProfile.name,
+        role: userProfile.role,
+        isAdmin: userProfile.isAdmin,
+        isLeader: userProfile.isLeader,
+        cell_group_id: userProfile.cell_group_id,
+        led_cell_groups: userProfile.led_cell_groups
+      });
 
       setProfile(userProfile);
     } catch (error) {
@@ -124,18 +150,49 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         role: 'member',
         isAdmin: false,
         isLeader: false,
-        login_username: null
+        login_username: null,
+        led_cell_groups: [],
+        can_view_all_members: false,
+        can_edit_all_members: false,
       });
     }
   };
 
-  // Universal login function that returns boolean for compatibility
+  // Check if current user can view a specific member
+  const canViewMember = (memberId: string): boolean => {
+    if (!profile) return false;
+    
+    // Admins can view everyone
+    if (profile.isAdmin) return true;
+    
+    // Users can view themselves
+    if (profile.id === memberId) return true;
+    
+    // Leaders can view members in their cell groups
+    // For now, leaders can view any member until we implement proper cell group member checking
+    return profile.isLeader;
+  };
+
+  // Check if current user can edit a specific member
+  const canEditMember = (memberId: string): boolean => {
+    if (!profile) return false;
+    
+    // Admins can edit everyone
+    if (profile.isAdmin) return true;
+    
+    // Users can edit themselves (limited fields)
+    if (profile.id === memberId) return true;
+    
+    // Leaders can edit members in their cell groups
+    // For now, leaders can edit any member until we implement proper cell group member checking
+    return profile.isLeader;
+  };
+
   const login = async (identifier: string, password: string, isEmailLogin: boolean = false): Promise<boolean> => {
     try {
       setLoading(true);
       
       if (isEmailLogin) {
-        // Email/Password authentication
         console.log('Attempting email login:', identifier);
         const { data, error } = await supabase.auth.signInWithPassword({
           email: identifier.trim(),
@@ -155,7 +212,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           return true;
         }
       } else {
-        // Username/PIN authentication
         console.log('Attempting username/PIN login:', identifier);
         const { data: memberData, error: memberError } = await supabase
           .from('members')
@@ -171,7 +227,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         console.log('Member found:', memberData);
 
-        // Try email login first if member has email
         if (memberData.email) {
           try {
             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -191,7 +246,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
         }
 
-        // Fallback: Create mock session
         const mockUser: SupabaseUser = {
           id: memberData.id,
           email: memberData.email || '',
@@ -247,7 +301,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Check for existing session and set up auth listener
   useEffect(() => {
     let mounted = true;
 
@@ -302,7 +355,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading
+    loading,
+    canViewMember,
+    canEditMember,
   };
 
   return (
