@@ -52,25 +52,20 @@ interface Member {
   is_leader?: boolean | null;
 }
 
-// Permission checking utility
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
-// Check if user is admin or pastor
 const isAdminOrPastor = (role: string): boolean => {
   return role === 'admin' || role === 'pastor';
 };
 
-// Check if user can manage all groups (has manage_groups permission)
 const canManageAllGroups = (permissions: string[] = []): boolean => {
   return hasPermission(permissions, 'manage_groups');
 };
 
-// Enhanced leader check
 const isUserLeader = (profile: any): boolean => {
-  return profile?.role === 'group_leader' || 
-         profile?.is_leader === true;
+  return profile?.role === 'group_leader' || profile?.is_leader === true;
 };
 
 const CellGroups = () => {
@@ -100,18 +95,15 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Enhanced group matching helper function - specifically for cell_groups
   const getCellGroupMatchesForUser = () => {
     if (!profile || !groupMatches || groupMatches.length === 0) return [];
     
-    // Filter matches to only include cell_groups and valid match types
     const cellGroupMatches = groupMatches.filter(match => 
       (match.match_type === 'EXACT_MATCH' || 
        match.match_type === 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED' ||
        match.match_type === 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP' ||
        match.match_type === 'WHITESPACE_INSENSITIVE_MATCH') &&
-      // Ensure we're only dealing with cell groups from the cell_groups table
-      match.group_id // This should be the cell_group id
+      match.group_id
     );
     
     console.log('🔍 Cell Group Matches for user:', cellGroupMatches.map(m => ({
@@ -124,13 +116,11 @@ const CellGroups = () => {
     return cellGroupMatches;
   };
 
-  // Check if user can create cell groups (only Admin)
   const canCreateGroups = () => {
     if (!profile) return false;
     return isAdminOrPastor(profile.role);
   };
 
-  // Enhanced group management permission check with cell group matching integration
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -144,23 +134,19 @@ const CellGroups = () => {
       cellGroupMatches: getCellGroupMatchesForUser().length
     });
     
-    // Admin and Pastor can manage all groups
     if (isAdminOrPastor(profile.role)) {
       console.log('✅ Admin/Pastor can manage all cell groups');
       return true;
     }
     
-    // Users with manage_groups permission can manage all groups
     if (canManageAllGroups(profile.permissions)) {
       console.log('✅ User has manage_groups permission - can manage all cell groups');
       return true;
     }
     
-    // Enhanced leader check with cell group matching
     if (isUserLeader(profile)) {
       const userCellGroupMatches = getCellGroupMatchesForUser();
       
-      // Check if this specific cell group matches any of the user's assigned groups
       const canManage = userCellGroupMatches.some(match => {
         const groupMatch = match.group_id === group.id;
         
@@ -178,7 +164,6 @@ const CellGroups = () => {
       
       if (canManage) return true;
       
-      // Fallback to original assigned_groups matching if no cell group matches found
       if (profile.assigned_groups && profile.assigned_groups.length > 0) {
         const fallbackMatch = profile.assigned_groups.some(assignedGroup => {
           const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
@@ -203,13 +188,11 @@ const CellGroups = () => {
       }
     }
     
-    // Check if user is the leader of this cell group (from leader_id)
     if (group.leader_id === profile.id) {
       console.log('✅ User is the leader of this cell group (leader_id match)');
       return true;
     }
 
-    // Check if user is marked as leader in cell_group_members
     const isGroupLeader = group.members?.some(member => 
       member.member_id === profile.id && member.role === 'leader'
     );
@@ -222,25 +205,20 @@ const CellGroups = () => {
     return false;
   };
 
-  // Enhanced cell group view permission check with group matching
   const canViewGroup = (group: CellGroup) => {
     if (!profile) return false;
     
-    // Admin and Pastor can view all cell groups
     if (isAdminOrPastor(profile.role)) {
       return true;
     }
     
-    // Users with view_groups or manage_groups permission can view all cell groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
       return true;
     }
     
-    // Enhanced leader view check with cell group matching
     if (isUserLeader(profile)) {
       const userCellGroupMatches = getCellGroupMatchesForUser();
       
-      // Check if this cell group matches any of the user's assigned groups
       const canView = userCellGroupMatches.some(match => match.group_id === group.id);
       
       if (canView) {
@@ -248,7 +226,6 @@ const CellGroups = () => {
         return true;
       }
       
-      // Fallback to original assigned_groups matching
       if (profile.assigned_groups && profile.assigned_groups.length > 0) {
         return profile.assigned_groups.some(assignedGroup => {
           const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
@@ -262,7 +239,6 @@ const CellGroups = () => {
       }
     }
     
-    // Regular members can only view cell groups they are members of
     if (profile.role === 'member' && !profile.is_leader) {
       const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
       const isMemberByCellGroupId = profile.cell_group_id === group.id;
@@ -273,7 +249,6 @@ const CellGroups = () => {
     return false;
   };
 
-  // Enhanced filtering logic with cell group matching integration
   const getFilteredCellGroups = () => {
     if (!profile) return [];
 
@@ -286,13 +261,11 @@ const CellGroups = () => {
       cellGroupMatches: getCellGroupMatchesForUser().length
     });
 
-    // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
       console.log('👑 Admin/Pastor - showing all cell groups');
       return allCellGroups;
     }
 
-    // Users with view_groups or manage_groups permission can see all cell groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
       console.log('🔑 User has view/manage permission - showing all cell groups');
       return allCellGroups;
@@ -300,7 +273,6 @@ const CellGroups = () => {
 
     let userCellGroups: CellGroup[] = [];
 
-    // Enhanced leader filtering with cell group matching
     if (isUserLeader(profile)) {
       const userCellGroupMatches = getCellGroupMatchesForUser();
       
@@ -312,7 +284,6 @@ const CellGroups = () => {
       })));
 
       if (userCellGroupMatches.length > 0) {
-        // Use cell group matches for filtering
         userCellGroups = allCellGroups.filter(cellGroup => {
           const canView = userCellGroupMatches.some(match => match.group_id === cellGroup.id);
           
@@ -325,7 +296,6 @@ const CellGroups = () => {
           return canView;
         });
       } else {
-        // Fallback to assigned_groups filtering for cell groups
         console.log('🔄 No cell group matches found, using assigned_groups fallback for cell groups');
         userCellGroups = allCellGroups.filter(cellGroup => {
           const canView = profile.assigned_groups?.some(assignedGroup => {
@@ -353,7 +323,6 @@ const CellGroups = () => {
       }
     }
 
-    // Regular members (non-leaders) can see cell groups they are members of
     if (profile.role === 'member' && !profile.is_leader) {
       console.log('👤 Regular member filtering for cell groups');
       const memberGroups = allCellGroups.filter(cellGroup => {
@@ -371,7 +340,6 @@ const CellGroups = () => {
       userCellGroups = [...userCellGroups, ...memberGroups];
     }
 
-    // Remove duplicates
     const uniqueCellGroups = userCellGroups.filter((cellGroup, index, self) => 
       index === self.findIndex(g => g.id === cellGroup.id)
     );
@@ -482,7 +450,6 @@ const CellGroups = () => {
     }
   };
 
-  // Check permissions and load data
   useEffect(() => {
     const checkAccessAndLoadData = async () => {
       if (!profile) {
@@ -503,17 +470,14 @@ const CellGroups = () => {
 
       let userHasAccess = false;
 
-      // Admin and Pastor always have access to cell groups
       if (isAdminOrPastor(profile.role)) {
         userHasAccess = true;
         console.log('✅ Admin/Pastor - has access to cell groups');
       }
-      // Users with view_groups or manage_groups permission
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
         console.log('✅ Has view_groups/manage_groups permission - has access to cell groups');
       }
-      // Leaders with assigned groups or cell group matches
       else if (isUserLeader(profile) && (
         (profile.assigned_groups && profile.assigned_groups.length > 0) || 
         (getCellGroupMatchesForUser().length > 0)
@@ -521,7 +485,6 @@ const CellGroups = () => {
         userHasAccess = true;
         console.log('✅ Leader with assigned groups or cell group matches - has access to cell groups');
       }
-      // Regular members who belong to a cell group
       else if (profile.role === 'member' && profile.cell_group_id) {
         userHasAccess = true;
         console.log('✅ Member with cell_group_id - has access to cell groups');
@@ -541,7 +504,6 @@ const CellGroups = () => {
     checkAccessAndLoadData();
   }, [profile, groupMatches]);
 
-  // Update filtered cell groups when allCellGroups or profile changes
   useEffect(() => {
     if (allCellGroups.length > 0 && profile) {
       console.log('🔄 Updating filtered cell groups...');
@@ -550,11 +512,9 @@ const CellGroups = () => {
     }
   }, [allCellGroups, profile, groupMatches]);
 
-  // Rest of the component remains the same...
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check permission - only admin/pastor can create groups
     if (!canCreateGroups()) {
       setError('You do not have permission to create cell groups. Only administrators can create new cell groups.');
       return;
@@ -583,7 +543,6 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      // If leader was assigned, add them to cell_group_members as leader
       if (formData.leader_id && data && data[0]) {
         const { error: memberError } = await supabase
           .from('cell_group_members')
@@ -641,9 +600,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      // Update leader in cell_group_members if changed
       if (formData.leader_id && selectedGroup.leader_id !== formData.leader_id) {
-        // Remove previous leader role
         if (selectedGroup.leader_id) {
           await supabase
             .from('cell_group_members')
@@ -652,7 +609,6 @@ const CellGroups = () => {
             .eq('member_id', selectedGroup.leader_id);
         }
 
-        // Add new leader role
         const { error: memberError } = await supabase
           .from('cell_group_members')
           .upsert({
@@ -702,7 +658,6 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      // First delete related records in cell_group_members
       const { error: membersError } = await supabase
         .from('cell_group_members')
         .delete()
@@ -710,7 +665,6 @@ const CellGroups = () => {
 
       if (membersError) throw membersError;
 
-      // Then delete the cell group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -737,7 +691,6 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      // Add members to cell_group_members table
       const membersToAdd = memberIds.map(memberId => ({
         cell_group_id: groupId,
         member_id: memberId,
@@ -847,7 +800,6 @@ const CellGroups = () => {
      member.email?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Show loading while checking permissions
   if (initialLoad) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -859,7 +811,6 @@ const CellGroups = () => {
     );
   }
 
-  // Show access denied if user doesn't have permission to access cell groups
   if (hasAccess === false) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -892,7 +843,6 @@ const CellGroups = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -941,7 +891,6 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Create Cell Group Form */}
         {showForm && canCreateGroups() && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Cell Group</h2>
@@ -1037,7 +986,6 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Cell Groups List */}
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {loading && cellGroups.length === 0 ? (
             <div className="col-span-full text-center py-12">
@@ -1163,7 +1111,6 @@ const CellGroups = () => {
           )}
         </div>
 
-        {/* Edit Cell Group Modal */}
         {showEditForm && selectedGroup && canManageGroup(selectedGroup) && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1265,7 +1212,6 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Members Management Modal */}
         {showMembersModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -1285,7 +1231,6 @@ const CellGroups = () => {
                 </button>
               </div>
 
-              {/* Add Members Section - Only show if user can manage cell group */}
               {canManageGroup(selectedGroup) && (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 mb-6">
                   <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Cell Group</h4>
@@ -1302,7 +1247,6 @@ const CellGroups = () => {
                       />
                     </div>
 
-                    {/* Available Members */}
                     {availableMembers.length === 0 ? (
                       <div className="text-center py-4 text-gray-500 dark:text-gray-400">
                         {searchTerm ? 'No members found matching your search' : 'No available members to add'}
@@ -1368,7 +1312,6 @@ const CellGroups = () => {
                 </div>
               )}
 
-              {/* Current Members */}
               <div>
                 <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                   Current Members {!canManageGroup(selectedGroup) && '(Read Only)'}
@@ -1412,7 +1355,6 @@ const CellGroups = () => {
                             {groupMember.role}
                           </span>
                           
-                          {/* Only show management controls if user can manage the cell group */}
                           {canManageGroup(selectedGroup) && (
                             <>
                               <select
