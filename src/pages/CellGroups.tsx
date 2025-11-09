@@ -100,16 +100,28 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Enhanced group matching helper function
-  const getGroupMatchesForUser = () => {
+  // Enhanced group matching helper function - specifically for cell_groups
+  const getCellGroupMatchesForUser = () => {
     if (!profile || !groupMatches || groupMatches.length === 0) return [];
     
-    return groupMatches.filter(match => 
-      match.match_type === 'EXACT_MATCH' || 
-      match.match_type === 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED' ||
-      match.match_type === 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP' ||
-      match.match_type === 'WHITESPACE_INSENSITIVE_MATCH'
+    // Filter matches to only include cell_groups and valid match types
+    const cellGroupMatches = groupMatches.filter(match => 
+      (match.match_type === 'EXACT_MATCH' || 
+       match.match_type === 'PARTIAL_MATCH_GROUP_CONTAINS_ASSIGNED' ||
+       match.match_type === 'PARTIAL_MATCH_ASSIGNED_CONTAINS_GROUP' ||
+       match.match_type === 'WHITESPACE_INSENSITIVE_MATCH') &&
+      // Ensure we're only dealing with cell groups from the cell_groups table
+      match.group_id // This should be the cell_group id
     );
+    
+    console.log('🔍 Cell Group Matches for user:', cellGroupMatches.map(m => ({
+      groupId: m.group_id,
+      groupName: m.group_name,
+      matchType: m.match_type,
+      assignedGroup: m.assigned_group_normalized
+    })));
+    
+    return cellGroupMatches;
   };
 
   // Check if user can create cell groups (only Admin)
@@ -118,45 +130,46 @@ const CellGroups = () => {
     return isAdminOrPastor(profile.role);
   };
 
-  // Enhanced group management permission check with group matching integration
+  // Enhanced group management permission check with cell group matching integration
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
-    console.log('🔍 Checking manage permissions for group:', group.name, {
+    console.log('🔍 Checking manage permissions for cell group:', group.name, {
       userRole: profile.role,
       originalRole: profile.originalRole,
       isLeader: profile.is_leader,
       assignedGroups: profile.assigned_groups,
       groupLeaderId: group.leader_id,
       userId: profile.id,
-      groupMatches: getGroupMatchesForUser().length
+      cellGroupMatches: getCellGroupMatchesForUser().length
     });
     
     // Admin and Pastor can manage all groups
     if (isAdminOrPastor(profile.role)) {
-      console.log('✅ Admin/Pastor can manage all groups');
+      console.log('✅ Admin/Pastor can manage all cell groups');
       return true;
     }
     
     // Users with manage_groups permission can manage all groups
     if (canManageAllGroups(profile.permissions)) {
-      console.log('✅ User has manage_groups permission');
+      console.log('✅ User has manage_groups permission - can manage all cell groups');
       return true;
     }
     
-    // Enhanced leader check with group matching
+    // Enhanced leader check with cell group matching
     if (isUserLeader(profile)) {
-      const userGroupMatches = getGroupMatchesForUser();
+      const userCellGroupMatches = getCellGroupMatchesForUser();
       
-      // Check if this group matches any of the user's assigned groups
-      const canManage = userGroupMatches.some(match => {
+      // Check if this specific cell group matches any of the user's assigned groups
+      const canManage = userCellGroupMatches.some(match => {
         const groupMatch = match.group_id === group.id;
         
         if (groupMatch) {
-          console.log(`✅ Leader can manage group "${group.name}" via group match:`, {
+          console.log(`✅ Leader can manage cell group "${group.name}" via cell group match:`, {
             matchType: match.match_type,
             assignedGroup: match.assigned_group_normalized,
-            groupName: match.group_name
+            cellGroupName: match.group_name,
+            cellGroupId: match.group_id
           });
         }
         
@@ -165,34 +178,34 @@ const CellGroups = () => {
       
       if (canManage) return true;
       
-      // Fallback to original assigned_groups matching if no group matches found
+      // Fallback to original assigned_groups matching if no cell group matches found
       if (profile.assigned_groups && profile.assigned_groups.length > 0) {
         const fallbackMatch = profile.assigned_groups.some(assignedGroup => {
           const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
-          const groupName = group.name.toLowerCase().trim();
+          const cellGroupName = group.name.toLowerCase().trim();
           
-          const canManageGroup = assignedGroupName === groupName || 
-                                groupName.includes(assignedGroupName) || 
-                                assignedGroupName.includes(groupName) ||
-                                groupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
+          const canManageCellGroup = assignedGroupName === cellGroupName || 
+                                cellGroupName.includes(assignedGroupName) || 
+                                assignedGroupName.includes(cellGroupName) ||
+                                cellGroupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
           
-          if (canManageGroup) {
-            console.log(`✅ Leader can manage group "${group.name}" via fallback matching:`, {
+          if (canManageCellGroup) {
+            console.log(`✅ Leader can manage cell group "${group.name}" via fallback matching:`, {
               assignedGroup: assignedGroupName,
-              groupName: groupName
+              cellGroupName: cellGroupName
             });
           }
           
-          return canManageGroup;
+          return canManageCellGroup;
         });
         
         if (fallbackMatch) return true;
       }
     }
     
-    // Check if user is the leader of this group (from leader_id)
+    // Check if user is the leader of this cell group (from leader_id)
     if (group.leader_id === profile.id) {
-      console.log('✅ User is the leader of this group (leader_id match)');
+      console.log('✅ User is the leader of this cell group (leader_id match)');
       return true;
     }
 
@@ -201,52 +214,55 @@ const CellGroups = () => {
       member.member_id === profile.id && member.role === 'leader'
     );
     if (isGroupLeader) {
-      console.log('✅ User is leader in cell_group_members');
+      console.log('✅ User is leader in cell_group_members for this cell group');
       return true;
     }
 
-    console.log('❌ User cannot manage this group');
+    console.log('❌ User cannot manage this cell group');
     return false;
   };
 
-  // Enhanced group view permission check with group matching
+  // Enhanced cell group view permission check with group matching
   const canViewGroup = (group: CellGroup) => {
     if (!profile) return false;
     
-    // Admin and Pastor can view all groups
+    // Admin and Pastor can view all cell groups
     if (isAdminOrPastor(profile.role)) {
       return true;
     }
     
-    // Users with view_groups or manage_groups permission can view all groups
+    // Users with view_groups or manage_groups permission can view all cell groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
       return true;
     }
     
-    // Enhanced leader view check with group matching
+    // Enhanced leader view check with cell group matching
     if (isUserLeader(profile)) {
-      const userGroupMatches = getGroupMatchesForUser();
+      const userCellGroupMatches = getCellGroupMatchesForUser();
       
-      // Check if this group matches any of the user's assigned groups
-      const canView = userGroupMatches.some(match => match.group_id === group.id);
+      // Check if this cell group matches any of the user's assigned groups
+      const canView = userCellGroupMatches.some(match => match.group_id === group.id);
       
-      if (canView) return true;
+      if (canView) {
+        console.log(`✅ Leader can view cell group "${group.name}" via cell group match`);
+        return true;
+      }
       
       // Fallback to original assigned_groups matching
       if (profile.assigned_groups && profile.assigned_groups.length > 0) {
         return profile.assigned_groups.some(assignedGroup => {
           const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
-          const groupName = group.name.toLowerCase().trim();
+          const cellGroupName = group.name.toLowerCase().trim();
           
-          return assignedGroupName === groupName || 
-                 groupName.includes(assignedGroupName) || 
-                 assignedGroupName.includes(groupName) ||
-                 groupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
+          return assignedGroupName === cellGroupName || 
+                 cellGroupName.includes(assignedGroupName) || 
+                 assignedGroupName.includes(cellGroupName) ||
+                 cellGroupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
         });
       }
     }
     
-    // Regular members can only view groups they are members of
+    // Regular members can only view cell groups they are members of
     if (profile.role === 'member' && !profile.is_leader) {
       const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
       const isMemberByCellGroupId = profile.cell_group_id === group.id;
@@ -257,7 +273,7 @@ const CellGroups = () => {
     return false;
   };
 
-  // Enhanced filtering logic with group matching integration
+  // Enhanced filtering logic with cell group matching integration
   const getFilteredCellGroups = () => {
     if (!profile) return [];
 
@@ -267,68 +283,69 @@ const CellGroups = () => {
       is_leader: profile.is_leader,
       assigned_groups: profile.assigned_groups,
       permissions: profile.permissions,
-      groupMatches: groupMatches?.length || 0,
-      exactMatches: getGroupMatchesForUser().length
+      cellGroupMatches: getCellGroupMatchesForUser().length
     });
 
     // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
-      console.log('👑 Admin/Pastor - showing all groups');
+      console.log('👑 Admin/Pastor - showing all cell groups');
       return allCellGroups;
     }
 
-    // Users with view_groups or manage_groups permission can see all groups
+    // Users with view_groups or manage_groups permission can see all cell groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
-      console.log('🔑 User has view/manage permission - showing all groups');
+      console.log('🔑 User has view/manage permission - showing all cell groups');
       return allCellGroups;
     }
 
-    let userGroups: CellGroup[] = [];
+    let userCellGroups: CellGroup[] = [];
 
-    // Enhanced leader filtering with group matching
+    // Enhanced leader filtering with cell group matching
     if (isUserLeader(profile)) {
-      const userGroupMatches = getGroupMatchesForUser();
+      const userCellGroupMatches = getCellGroupMatchesForUser();
       
-      console.log('👨‍💼 Leader with group matches:', userGroupMatches.map(m => ({
-        groupId: m.group_id,
-        groupName: m.group_name,
+      console.log('👨‍💼 Leader with cell group matches:', userCellGroupMatches.map(m => ({
+        cellGroupId: m.group_id,
+        cellGroupName: m.group_name,
         matchType: m.match_type,
         assignedGroup: m.assigned_group_normalized
       })));
 
-      if (userGroupMatches.length > 0) {
-        // Use group matches for filtering
-        userGroups = allCellGroups.filter(group => {
-          const canView = userGroupMatches.some(match => match.group_id === group.id);
+      if (userCellGroupMatches.length > 0) {
+        // Use cell group matches for filtering
+        userCellGroups = allCellGroups.filter(cellGroup => {
+          const canView = userCellGroupMatches.some(match => match.group_id === cellGroup.id);
           
           if (canView) {
-            console.log(`✅ Leader can view group "${group.name}" via group match`);
+            console.log(`✅ Leader can view cell group "${cellGroup.name}" via cell group match`);
+          } else {
+            console.log(`❌ Leader cannot view cell group "${cellGroup.name}" - no cell group match`);
           }
           
           return canView;
         });
       } else {
-        // Fallback to assigned_groups filtering
-        console.log('🔄 No group matches found, using assigned_groups fallback');
-        userGroups = allCellGroups.filter(group => {
+        // Fallback to assigned_groups filtering for cell groups
+        console.log('🔄 No cell group matches found, using assigned_groups fallback for cell groups');
+        userCellGroups = allCellGroups.filter(cellGroup => {
           const canView = profile.assigned_groups?.some(assignedGroup => {
             const assignedGroupName = assignedGroup.toString().toLowerCase().trim();
-            const groupName = group.name.toLowerCase().trim();
+            const cellGroupName = cellGroup.name.toLowerCase().trim();
             
-            const match = assignedGroupName === groupName || 
-                         groupName.includes(assignedGroupName) || 
-                         assignedGroupName.includes(groupName) ||
-                         groupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
+            const match = assignedGroupName === cellGroupName || 
+                         cellGroupName.includes(assignedGroupName) || 
+                         assignedGroupName.includes(cellGroupName) ||
+                         cellGroupName.replace(/\s+/g, '') === assignedGroupName.replace(/\s+/g, '');
             
             if (match) {
-              console.log(`✅ Leader can view group "${group.name}" - matches assigned group "${assignedGroup}"`);
+              console.log(`✅ Leader can view cell group "${cellGroup.name}" - matches assigned group "${assignedGroup}"`);
             }
             
             return match;
           });
           
           if (!canView) {
-            console.log(`❌ Leader cannot view group "${group.name}" - no matching assigned group`);
+            console.log(`❌ Leader cannot view cell group "${cellGroup.name}" - no matching assigned group`);
           }
           
           return canView;
@@ -336,40 +353,40 @@ const CellGroups = () => {
       }
     }
 
-    // Regular members (non-leaders) can see groups they are members of
+    // Regular members (non-leaders) can see cell groups they are members of
     if (profile.role === 'member' && !profile.is_leader) {
-      console.log('👤 Regular member filtering');
-      const memberGroups = allCellGroups.filter(group => {
-        const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-        const isMemberByCellGroupId = profile.cell_group_id === group.id;
+      console.log('👤 Regular member filtering for cell groups');
+      const memberGroups = allCellGroups.filter(cellGroup => {
+        const isMemberOfGroup = cellGroup.members?.some(member => member.member_id === profile.id);
+        const isMemberByCellGroupId = profile.cell_group_id === cellGroup.id;
         
         const canView = isMemberOfGroup || isMemberByCellGroupId;
         
         if (canView) {
-          console.log(`✅ Member can view group "${group.name}" - is member`);
+          console.log(`✅ Member can view cell group "${cellGroup.name}" - is member`);
         }
         
         return canView;
       });
-      userGroups = [...userGroups, ...memberGroups];
+      userCellGroups = [...userCellGroups, ...memberGroups];
     }
 
     // Remove duplicates
-    const uniqueGroups = userGroups.filter((group, index, self) => 
-      index === self.findIndex(g => g.id === group.id)
+    const uniqueCellGroups = userCellGroups.filter((cellGroup, index, self) => 
+      index === self.findIndex(g => g.id === cellGroup.id)
     );
 
-    console.log(`📊 Final filtered groups:`, {
-      allGroups: allCellGroups.length,
-      filteredGroups: uniqueGroups.length,
-      userGroups: uniqueGroups.map(g => ({ id: g.id, name: g.name })),
+    console.log(`📊 Final filtered cell groups:`, {
+      allCellGroups: allCellGroups.length,
+      filteredCellGroups: uniqueCellGroups.length,
+      userCellGroups: uniqueCellGroups.map(g => ({ id: g.id, name: g.name })),
       userRole: profile.role,
       originalRole: profile.originalRole,
       isLeader: profile.is_leader,
-      groupMatchesUsed: userGroupMatches.length
+      cellGroupMatchesUsed: getCellGroupMatchesForUser().length
     });
 
-    return uniqueGroups;
+    return uniqueCellGroups;
   };
 
   const loadData = async () => {
@@ -392,7 +409,7 @@ const CellGroups = () => {
 
   const fetchCellGroups = async () => {
     try {
-      console.log('📡 Fetching cell groups...');
+      console.log('📡 Fetching cell groups from database...');
       const { data, error } = await supabase
         .from('cell_groups')
         .select(`
@@ -409,7 +426,12 @@ const CellGroups = () => {
       
       const cellGroupsData = data || [];
       
-      console.log('📋 All cell groups from database:', cellGroupsData.map(g => ({ id: g.id, name: g.name, leader_id: g.leader_id })));
+      console.log('📋 All cell groups from database:', cellGroupsData.map(g => ({ 
+        id: g.id, 
+        name: g.name, 
+        leader_id: g.leader_id,
+        members_count: g.cell_group_members?.length || 0 
+      })));
       
       const mappedGroups = cellGroupsData.map(group => ({
         ...group,
@@ -469,40 +491,40 @@ const CellGroups = () => {
         return;
       }
 
-      console.log('🔐 Checking access for user:', {
+      console.log('🔐 Checking access for user to cell groups:', {
         id: profile.id,
         role: profile.role,
         originalRole: profile.originalRole,
         is_leader: profile.is_leader,
         assigned_groups: profile.assigned_groups,
         permissions: profile.permissions,
-        groupMatches: groupMatches?.length || 0
+        cellGroupMatches: getCellGroupMatchesForUser().length
       });
 
       let userHasAccess = false;
 
-      // Admin and Pastor always have access
+      // Admin and Pastor always have access to cell groups
       if (isAdminOrPastor(profile.role)) {
         userHasAccess = true;
-        console.log('✅ Admin/Pastor - has access');
+        console.log('✅ Admin/Pastor - has access to cell groups');
       }
       // Users with view_groups or manage_groups permission
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
-        console.log('✅ Has view_groups/manage_groups permission - has access');
+        console.log('✅ Has view_groups/manage_groups permission - has access to cell groups');
       }
-      // Leaders with assigned groups or group matches
+      // Leaders with assigned groups or cell group matches
       else if (isUserLeader(profile) && (
         (profile.assigned_groups && profile.assigned_groups.length > 0) || 
-        (groupMatches && groupMatches.length > 0)
+        (getCellGroupMatchesForUser().length > 0)
       )) {
         userHasAccess = true;
-        console.log('✅ Leader with assigned groups or group matches - has access');
+        console.log('✅ Leader with assigned groups or cell group matches - has access to cell groups');
       }
       // Regular members who belong to a cell group
       else if (profile.role === 'member' && profile.cell_group_id) {
         userHasAccess = true;
-        console.log('✅ Member with cell_group_id - has access');
+        console.log('✅ Member with cell_group_id - has access to cell groups');
       } else {
         console.log('❌ User does not have access to cell groups');
       }
@@ -528,6 +550,7 @@ const CellGroups = () => {
     }
   }, [allCellGroups, profile, groupMatches]);
 
+  // Rest of the component remains the same...
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -858,7 +881,7 @@ const CellGroups = () => {
           )}
           {isUserLeader(profile) && (!profile?.assigned_groups || profile.assigned_groups.length === 0) && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-              You are a leader but don't have any assigned groups to manage. Please contact an administrator.
+              You are a leader but don't have any assigned cell groups to manage. Please contact an administrator.
             </p>
           )}
         </div>
@@ -881,7 +904,7 @@ const CellGroups = () => {
                 : canManageAllGroups(profile?.permissions)
                 ? 'Can manage all cell groups and members'
                 : isUserLeader(profile)
-                ? `Managing ${cellGroups.length} assigned group(s) as ${profile?.originalRole || profile?.role}`
+                ? `Managing ${cellGroups.length} assigned cell group(s) as ${profile?.originalRole || profile?.role}`
                 : `Viewing your cell group - ${profile?.originalRole || profile?.role} access`
               }
             </p>
@@ -890,7 +913,7 @@ const CellGroups = () => {
                 {canManageAllGroups(profile?.permissions)
                   ? 'You have full access to manage all cell groups'
                   : isUserLeader(profile)
-                  ? `You can only view and manage assigned groups: ${profile?.assigned_groups?.join(', ') || 'None'}`
+                  ? `You can only view and manage assigned cell groups: ${profile?.assigned_groups?.join(', ') || 'None'}`
                   : 'You can only view the cell group you belong to'
                 }
               </p>
@@ -925,7 +948,7 @@ const CellGroups = () => {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Name *</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cell Group Name *</label>
                   <input
                     type="text"
                     value={formData.name}
@@ -978,7 +1001,7 @@ const CellGroups = () => {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader (Optional)</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cell Group Leader (Optional)</label>
                   <select
                     value={formData.leader_id}
                     onChange={(e) => setFormData({ ...formData, leader_id: e.target.value })}
@@ -1119,14 +1142,14 @@ const CellGroups = () => {
                           <button
                             onClick={() => openEditForm(group)}
                             className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                            title="Edit group"
+                            title="Edit cell group"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleDeleteGroup(group.id)}
                             className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title="Delete group"
+                            title="Delete cell group"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -1156,7 +1179,7 @@ const CellGroups = () => {
               <form onSubmit={handleUpdateGroup} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Name *</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cell Group Name *</label>
                     <input
                       type="text"
                       value={formData.name}
@@ -1206,7 +1229,7 @@ const CellGroups = () => {
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cell Group Leader</label>
                     <select
                       value={formData.leader_id}
                       onChange={(e) => setFormData({ ...formData, leader_id: e.target.value })}
@@ -1262,10 +1285,10 @@ const CellGroups = () => {
                 </button>
               </div>
 
-              {/* Add Members Section - Only show if user can manage group */}
+              {/* Add Members Section - Only show if user can manage cell group */}
               {canManageGroup(selectedGroup) && (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 mb-6">
-                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Group</h4>
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Cell Group</h4>
                   
                   <div className="space-y-4">
                     <div className="relative">
@@ -1354,10 +1377,10 @@ const CellGroups = () => {
                 {!selectedGroup.members || selectedGroup.members.length === 0 ? (
                   <div className="text-center py-8">
                     <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 dark:text-gray-400">No members in this group yet</p>
+                    <p className="text-gray-600 dark:text-gray-400">No members in this cell group yet</p>
                     {canManageGroup(selectedGroup) && (
                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                        Use the search above to add members to this group
+                        Use the search above to add members to this cell group
                       </p>
                     )}
                   </div>
@@ -1389,7 +1412,7 @@ const CellGroups = () => {
                             {groupMember.role}
                           </span>
                           
-                          {/* Only show management controls if user can manage the group */}
+                          {/* Only show management controls if user can manage the cell group */}
                           {canManageGroup(selectedGroup) && (
                             <>
                               <select
@@ -1404,7 +1427,7 @@ const CellGroups = () => {
                               <button
                                 onClick={() => handleRemoveMemberFromGroup(groupMember.id)}
                                 className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                title="Remove from group"
+                                title="Remove from cell group"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
