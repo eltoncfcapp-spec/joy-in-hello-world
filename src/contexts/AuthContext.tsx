@@ -13,9 +13,6 @@ interface UserProfile {
   isAdmin: boolean;
   isLeader: boolean;
   login_username: string | null;
-  led_cell_groups: string[];
-  can_view_all_members: boolean;
-  can_edit_all_members: boolean;
 }
 
 interface AuthContextType {
@@ -25,8 +22,6 @@ interface AuthContextType {
   login: (identifier: string, password: string, isEmailLogin?: boolean) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
-  canViewMember: (memberId: string) => boolean;
-  canEditMember: (memberId: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -61,7 +56,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.error('Error fetching user roles:', rolesError);
       }
 
-      // Fetch member data
+      // Fetch member data - this is where user profile data comes from
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -70,6 +65,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (memberError) {
         console.error('Error fetching member data:', memberError);
+        // If member not found, user might be an admin without a member record
         const { data: authUser } = await supabase.auth.getUser();
         
         setProfile({
@@ -82,10 +78,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           role: 'member',
           isAdmin: false,
           isLeader: false,
-          login_username: null,
-          led_cell_groups: [],
-          can_view_all_members: false,
-          can_edit_all_members: false,
+          login_username: null
         });
         return;
       }
@@ -93,14 +86,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const roles = rolesData?.map(r => r.role) || [];
       const isAdmin = roles.includes('admin');
       
-      // Check if user is a leader
+      // Check if user is a leader from members table
       const isLeaderFromMembers = memberData?.is_leader === true || memberData?.role === 'leader';
-      
-      // Get cell groups this user leads - only if they are marked as a leader
-      let ledCellGroups: string[] = [];
-      if (isLeaderFromMembers && memberData?.cell_group_id) {
-        ledCellGroups = [memberData.cell_group_id];
-      }
       
       // Determine primary role - prioritize admin, then leader
       let primaryRole: 'admin' | 'leader' | 'member' = 'member';
@@ -121,10 +108,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         role: primaryRole,
         isAdmin,
         isLeader: isLeaderFromMembers || roles.includes('leader'),
-        login_username: memberData?.login_username || null,
-        led_cell_groups: ledCellGroups,
-        can_view_all_members: isAdmin,
-        can_edit_all_members: isAdmin,
+        login_username: memberData?.login_username || null
       };
 
       setProfile(userProfile);
@@ -140,47 +124,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         role: 'member',
         isAdmin: false,
         isLeader: false,
-        login_username: null,
-        led_cell_groups: [],
-        can_view_all_members: false,
-        can_edit_all_members: false,
+        login_username: null
       });
     }
   };
 
-  // Check if current user can view a specific member
-  const canViewMember = (memberId: string): boolean => {
-    if (!profile) return false;
-    
-    // Admins can view everyone
-    if (profile.isAdmin) return true;
-    
-    // Users can view themselves
-    if (profile.id === memberId) return true;
-    
-    // Leaders can view members in their cell groups
-    return profile.isLeader && profile.led_cell_groups.length > 0;
-  };
-
-  // Check if current user can edit a specific member
-  const canEditMember = (memberId: string): boolean => {
-    if (!profile) return false;
-    
-    // Admins can edit everyone
-    if (profile.isAdmin) return true;
-    
-    // Users can edit themselves (limited fields)
-    if (profile.id === memberId) return true;
-    
-    // Leaders can edit members in their cell groups
-    return profile.isLeader && profile.led_cell_groups.length > 0;
-  };
-
+  // Universal login function that returns boolean for compatibility
   const login = async (identifier: string, password: string, isEmailLogin: boolean = false): Promise<boolean> => {
     try {
       setLoading(true);
       
       if (isEmailLogin) {
+        // Email/Password authentication
         console.log('Attempting email login:', identifier);
         const { data, error } = await supabase.auth.signInWithPassword({
           email: identifier.trim(),
@@ -200,6 +155,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           return true;
         }
       } else {
+        // Username/PIN authentication
         console.log('Attempting username/PIN login:', identifier);
         const { data: memberData, error: memberError } = await supabase
           .from('members')
@@ -215,6 +171,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         console.log('Member found:', memberData);
 
+        // Try email login first if member has email
         if (memberData.email) {
           try {
             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -234,6 +191,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
         }
 
+        // Fallback: Create mock session
         const mockUser: SupabaseUser = {
           id: memberData.id,
           email: memberData.email || '',
@@ -289,6 +247,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // Check for existing session and set up auth listener
   useEffect(() => {
     let mounted = true;
 
@@ -343,9 +302,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading,
-    canViewMember,
-    canEditMember,
+    loading
   };
 
   return (
