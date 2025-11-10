@@ -232,15 +232,19 @@ const cloudService = {
           updated_at: new Date().toISOString()
         })
         .eq('id', groupId)
-        .select()
+        .select('login_username')
         .single();
 
       if (error) {
         console.error('Supabase error updating cell group:', error);
         throw error;
       }
+
+      if (!data) {
+        throw new Error('No data returned from cell group update');
+      }
       
-      return { username };
+      return { username: data.login_username };
     } catch (error) {
       console.error('Error generating cell group credentials:', error);
       throw error;
@@ -249,12 +253,17 @@ const cloudService = {
 
   async updateCellGroup(groupId: string, updates: Partial<CellGroup>): Promise<CellGroup> {
     try {
+      const updateData: any = {
+        ...updates,
+        updated_at: new Date().toISOString()
+      };
+
+      // Remove id from updates if present to avoid conflicts
+      delete updateData.id;
+
       const { data, error } = await supabase
         .from('cell_groups')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', groupId)
         .select()
         .single();
@@ -262,6 +271,10 @@ const cloudService = {
       if (error) {
         console.error('Supabase error updating cell group:', error);
         throw error;
+      }
+
+      if (!data) {
+        throw new Error('No data returned from cell group update');
       }
 
       return data;
