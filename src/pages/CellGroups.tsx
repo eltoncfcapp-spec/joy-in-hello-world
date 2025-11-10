@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, IdCard } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -68,6 +68,12 @@ const CellGroups = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [userGroupInfo, setUserGroupInfo] = useState<{
+    loginId: string;
+    groupName: string;
+    groupId: string;
+    queryUsed: string;
+  } | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -216,6 +222,15 @@ const CellGroups = () => {
       const userCellGroup = await fetchUserCellGroupByUsername(profile.login_username);
       if (userCellGroup) {
         userGroups = [userCellGroup];
+        
+        // Set user group info for display
+        setUserGroupInfo({
+          loginId: profile.login_username,
+          groupName: userCellGroup.name,
+          groupId: userCellGroup.id,
+          queryUsed: `SELECT * FROM cell_groups WHERE id = (SELECT cell_group_id FROM members WHERE login_username = '${profile.login_username}')`
+        });
+        
         console.log('✅ Found cell group via username query:', userCellGroup.name);
       } else {
         console.log('❌ No cell group found via username query');
@@ -726,21 +741,6 @@ const CellGroups = () => {
                 : `Viewing your cell group${cellGroups.length > 0 ? `: ${cellGroups[0].name}` : ''}`
               }
             </p>
-            {profile?.login_username && (
-              <p className="text-sm text-green-600 dark:text-green-400 mt-1">
-                ✅ Using username query: {profile.login_username}
-              </p>
-            )}
-            {!isAdminOrPastor(profile?.role || '') && (
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                {canManageAllGroups(profile?.permissions)
-                  ? 'You have full access to manage all cell groups'
-                  : profile?.role === 'group_leader' 
-                  ? 'You can only view and manage your assigned cell group'
-                  : 'You can only view the cell group you belong to'
-                }
-              </p>
-            )}
           </div>
           {canCreateGroups() && (
             <button
@@ -752,6 +752,100 @@ const CellGroups = () => {
             </button>
           )}
         </div>
+
+        {/* User Login ID and Group Information */}
+        {!isAdminOrPastor(profile?.role || '') && profile?.login_username && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-6 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <IdCard className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                User & Group Information
+              </h3>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                    Login ID
+                  </label>
+                  <div className="px-3 py-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-lg">
+                    <code className="text-blue-900 dark:text-blue-100 font-mono text-sm">
+                      {profile.login_username}
+                    </code>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                    User Role
+                  </label>
+                  <div className="px-3 py-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-lg">
+                    <span className="text-blue-900 dark:text-blue-100 font-medium capitalize">
+                      {profile.role}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {userGroupInfo ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Assigned Group
+                      </label>
+                      <div className="px-3 py-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-lg">
+                        <span className="text-blue-900 dark:text-blue-100 font-medium">
+                          {userGroupInfo.groupName}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        Group ID
+                      </label>
+                      <div className="px-3 py-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-lg">
+                        <code className="text-blue-900 dark:text-blue-100 font-mono text-sm">
+                          {userGroupInfo.groupId}
+                        </code>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                      Assigned Group
+                    </label>
+                    <div className="px-3 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                      <span className="text-yellow-800 dark:text-yellow-200">
+                        No group assigned
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* SQL Query Display */}
+            {userGroupInfo && (
+              <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-700">
+                <label className="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">
+                  Database Query Used
+                </label>
+                <div className="px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg">
+                  <code className="text-green-400 font-mono text-xs whitespace-pre-wrap break-all">
+                    {userGroupInfo.queryUsed}
+                  </code>
+                </div>
+                <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                  This query was executed to find your assigned cell group
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
