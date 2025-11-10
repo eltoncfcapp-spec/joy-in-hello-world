@@ -80,6 +80,9 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+  // Get user's full name
+  const userFullName = profile ? `${profile.name || ''} ${profile.surname || ''}`.trim() : 'User';
+
   // Check if user can create cell groups (only Admin)
   const canCreateGroups = () => {
     if (!profile) return false;
@@ -133,6 +136,38 @@ const CellGroups = () => {
     }
     
     return false;
+  };
+
+  // NEW: Fetch cell groups based on logged-in user's name and surname
+  const fetchCellGroupsForUser = async () => {
+    try {
+      if (!profile?.name || !profile?.surname) {
+        console.log('No user profile name/surname available');
+        return [];
+      }
+
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          *,
+          leader:members!leader_id(id, name, surname, email, phone)
+        `)
+        .eq('status', 'active')
+        .eq('members.name', profile.name)
+        .eq('members.surname', profile.surname)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching cell groups for user:', error);
+        throw error;
+      }
+
+      console.log(`Fetched ${data?.length || 0} cell groups for user: ${profile.name} ${profile.surname}`);
+      return data as CellGroup[] || [];
+    } catch (error) {
+      console.error('Error in fetchCellGroupsForUser:', error);
+      return [];
+    }
   };
 
   // FIXED: Use pre-fetched cell group data from AuthContext
@@ -197,8 +232,11 @@ const CellGroups = () => {
           fetchMembers()
         ]);
       } else {
-        // For group leaders and members, we already have the data from AuthContext
-        // Just fetch members for member management
+        // For group leaders and members, fetch cell groups based on their name and surname
+        const userCellGroups = await fetchCellGroupsForUser();
+        setAllCellGroups(userCellGroups);
+        
+        // Also fetch members for member management
         await fetchMembers();
         
         // Refresh the user's cell group data to ensure it's current
