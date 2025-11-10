@@ -18,7 +18,9 @@ import {
   Eye,
   Search,
   Key,
-  RefreshCw
+  RefreshCw,
+  Crown,
+  User
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -48,6 +50,16 @@ interface Member {
 interface CellGroup {
   id: string;
   name: string;
+  description: string | null;
+  leader_id: string | null;
+  location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  current_member_count: number;
+  status: string;
+  login_username: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface Event {
@@ -89,6 +101,15 @@ interface AbsentMember {
   consecutiveAbsences: number;
 }
 
+interface UserCellGroupInfo {
+  groupName: string | null;
+  leaderName: string | null;
+  leaderSurname: string | null;
+  meetingDay: string | null;
+  meetingTime: string | null;
+  location: string | null;
+}
+
 // Permission checking utility
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
@@ -101,7 +122,8 @@ const Dashboard = () => {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
-    activity: true
+    activity: true,
+    userInfo: true
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -114,6 +136,7 @@ const Dashboard = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
+  const [userCellGroupInfo, setUserCellGroupInfo] = useState<UserCellGroupInfo | null>(null);
 
   // Form states
   const [newMember, setNewMember] = useState({
@@ -135,6 +158,52 @@ const Dashboard = () => {
   // Check if current user has admin access
   const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
   const currentUserPermissions = profile?.permissions || [];
+
+  // Load user's cell group information
+  const loadUserCellGroupInfo = async () => {
+    if (!profile?.cell_group_id) {
+      setUserCellGroupInfo(null);
+      return;
+    }
+
+    try {
+      // Get the user's cell group details and leader information
+      const { data: userGroupInfo, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          name,
+          description,
+          leader_id,
+          location,
+          meeting_day,
+          meeting_time,
+          members!cell_groups_leader_id_fkey (
+            name,
+            surname
+          )
+        `)
+        .eq('id', profile.cell_group_id)
+        .single();
+
+      if (error) {
+        console.error('Error fetching user cell group info:', error);
+        return;
+      }
+
+      if (userGroupInfo) {
+        setUserCellGroupInfo({
+          groupName: userGroupInfo.name,
+          leaderName: userGroupInfo.members?.name || null,
+          leaderSurname: userGroupInfo.members?.surname || null,
+          meetingDay: userGroupInfo.meeting_day,
+          meetingTime: userGroupInfo.meeting_time,
+          location: userGroupInfo.location
+        });
+      }
+    } catch (error) {
+      console.error('Error loading user cell group info:', error);
+    }
+  };
 
   // Filter data based on user permissions
   const getFilteredMembers = () => {
@@ -205,7 +274,7 @@ const Dashboard = () => {
       // Load cell groups
       const { data: cellGroupsData, error: cellGroupsError } = await supabase
         .from('cell_groups')
-        .select('id, name')
+        .select('*')
         .order('name');
 
       if (cellGroupsError) throw cellGroupsError;
@@ -220,6 +289,9 @@ const Dashboard = () => {
 
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
+
+      // Load user's cell group information
+      await loadUserCellGroupInfo();
 
       // Calculate stats with filtered data
       const filteredMembers = getFilteredMembers();
@@ -624,6 +696,88 @@ const Dashboard = () => {
               <X className="h-4 w-4" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* User Cell Group Information */}
+      {userCellGroupInfo && (
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6 hover:shadow-lg transition-all duration-300">
+          <button 
+            onClick={() => toggleSection('userInfo')}
+            className="w-full flex justify-between items-center hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+          >
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">My Cell Group</h2>
+            {expandedSections.userInfo ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+          </button>
+          
+          {expandedSections.userInfo && (
+            <div className="pt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* User Information */}
+                <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-4">
+                  <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    <User className="h-5 w-5 text-blue-600" />
+                    Your Information
+                  </h3>
+                  <div className="space-y-2">
+                    <p className="text-gray-700">
+                      <span className="font-medium">Name:</span> {profile?.name} {profile?.surname}
+                    </p>
+                    <p className="text-gray-700">
+                      <span className="font-medium">Role:</span> {profile?.role || 'Member'}
+                    </p>
+                    <p className="text-gray-700">
+                      <span className="font-medium">Email:</span> {profile?.email || 'Not provided'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Cell Group Information */}
+                <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4">
+                  <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    <Users className="h-5 w-5 text-green-600" />
+                    Cell Group Details
+                  </h3>
+                  <div className="space-y-2">
+                    <p className="text-gray-700">
+                      <span className="font-medium">Group:</span> {userCellGroupInfo.groupName}
+                    </p>
+                    {userCellGroupInfo.leaderName && (
+                      <p className="text-gray-700">
+                        <span className="font-medium">Leader:</span> {userCellGroupInfo.leaderName} {userCellGroupInfo.leaderSurname}
+                      </p>
+                    )}
+                    {userCellGroupInfo.meetingDay && userCellGroupInfo.meetingTime && (
+                      <p className="text-gray-700">
+                        <span className="font-medium">Meets:</span> {userCellGroupInfo.meetingDay} at {userCellGroupInfo.meetingTime}
+                      </p>
+                    )}
+                    {userCellGroupInfo.location && (
+                      <p className="text-gray-700">
+                        <span className="font-medium">Location:</span> {userCellGroupInfo.location}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="mt-4 flex gap-3">
+                {userCellGroupInfo.meetingDay && (
+                  <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium">
+                    <Calendar className="h-4 w-4" />
+                    Next {userCellGroupInfo.meetingDay} Meeting
+                  </button>
+                )}
+                {userCellGroupInfo.leaderName && (
+                  <button className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium">
+                    <Crown className="h-4 w-4" />
+                    Contact Leader
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
