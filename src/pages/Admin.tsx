@@ -30,6 +30,21 @@ interface Group {
   type: 'cell_group' | 'department';
 }
 
+interface CellGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  leader_id: string | null;
+  location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  current_member_count: number;
+  status: string;
+  login_username: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Cloud service functions using Supabase
 const cloudService = {
   async getMembers(): Promise<Member[]> {
@@ -100,6 +115,25 @@ const cloudService = {
       return [...cellGroups, ...departments];
     } catch (error) {
       console.error('Error fetching groups:', error);
+      throw error;
+    }
+  },
+
+  async getCellGroups(): Promise<CellGroup[]> {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .order('name');
+
+      if (error) {
+        console.error('Supabase error fetching cell groups:', error);
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching cell groups:', error);
       throw error;
     }
   },
@@ -185,6 +219,58 @@ const cloudService = {
     }
   },
 
+  async generateCellGroupCredentials(groupId: string): Promise<{ username: string }> {
+    try {
+      const username = `group${Date.now()}`;
+      
+      console.log('Generating credentials for cell group:', groupId, { username });
+
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .update({
+          login_username: username,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', groupId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Supabase error updating cell group:', error);
+        throw error;
+      }
+      
+      return { username };
+    } catch (error) {
+      console.error('Error generating cell group credentials:', error);
+      throw error;
+    }
+  },
+
+  async updateCellGroup(groupId: string, updates: Partial<CellGroup>): Promise<CellGroup> {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', groupId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Supabase error updating cell group:', error);
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error updating cell group:', error);
+      throw error;
+    }
+  },
+
   async getCellGroupNameById(groupId: string): Promise<string | null> {
     try {
       const { data, error } = await supabase
@@ -222,11 +308,15 @@ const Admin = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [selectedUser, setSelectedUser] = useState<Member | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
   const [generatedCredentials, setGeneratedCredentials] = useState<{username: string; pin: string} | null>(null);
+  const [showGroupCredentials, setShowGroupCredentials] = useState(false);
+  const [generatedGroupCredentials, setGeneratedGroupCredentials] = useState<{username: string} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
@@ -252,6 +342,22 @@ const Admin = () => {
     can_view_own_data: false,
     login_username: '',
     login_pin: ''
+  });
+
+  const [groupFormData, setGroupFormData] = useState<{
+    name: string;
+    description: string;
+    location: string;
+    meeting_day: string;
+    meeting_time: string;
+    login_username: string;
+  }>({
+    name: '',
+    description: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    login_username: ''
   });
 
   // Check permissions and load data
@@ -292,14 +398,20 @@ const Admin = () => {
     setError(null);
     try {
       console.log('Loading admin data...');
-      const [membersData, groupsData] = await Promise.all([
+      const [membersData, groupsData, cellGroupsData] = await Promise.all([
         cloudService.getMembers(),
-        cloudService.getGroups()
+        cloudService.getGroups(),
+        cloudService.getCellGroups()
       ]);
       
-      console.log('Data loaded:', { members: membersData.length, groups: groupsData.length });
+      console.log('Data loaded:', { 
+        members: membersData.length, 
+        groups: groupsData.length,
+        cellGroups: cellGroupsData.length 
+      });
       setMembers(membersData);
       setGroups(groupsData);
+      setCellGroups(cellGroupsData);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
       setError(errorMessage);
@@ -417,6 +529,37 @@ const Admin = () => {
     }
   };
 
+  const handleGenerateGroupCredentials = async (group: CellGroup) => {
+    if (!isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'manage_groups')) {
+      setError('You do not have permission to generate group credentials');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const credentials = await cloudService.generateCellGroupCredentials(group.id);
+      
+      setGroupFormData(prev => ({
+        ...prev,
+        login_username: credentials.username
+      }));
+      
+      setGeneratedGroupCredentials(credentials);
+      setShowGroupCredentials(true);
+      
+      // Refresh groups data
+      const groupsData = await cloudService.getCellGroups();
+      setCellGroups(groupsData);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to generate group credentials';
+      setError(errorMessage);
+      console.error('Error generating group credentials:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCopyCredentials = () => {
     if (generatedCredentials) {
       const text = `Username: ${generatedCredentials.username}\nPIN: ${generatedCredentials.pin}`;
@@ -425,7 +568,15 @@ const Admin = () => {
     }
   };
 
-  const openModal = (modalType: string, user?: Member) => {
+  const handleCopyGroupCredentials = () => {
+    if (generatedGroupCredentials) {
+      const text = `Group Username: ${generatedGroupCredentials.username}`;
+      navigator.clipboard.writeText(text);
+      alert('Group credentials copied to clipboard!');
+    }
+  };
+
+  const openModal = (modalType: string, user?: Member, group?: CellGroup) => {
     if (modalType === 'users' && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'view_members')) {
       setError('You do not have permission to view user management');
       return;
@@ -433,6 +584,11 @@ const Admin = () => {
     
     if (user && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to edit users');
+      return;
+    }
+
+    if (group && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'manage_groups')) {
+      setError('You do not have permission to manage groups');
       return;
     }
     
@@ -455,11 +611,26 @@ const Admin = () => {
       setShowCredentials(false);
       setGeneratedCredentials(null);
     }
+
+    if (group) {
+      setSelectedGroup(group);
+      setGroupFormData({
+        name: group.name || '',
+        description: group.description || '',
+        location: group.location || '',
+        meeting_day: group.meeting_day || '',
+        meeting_time: group.meeting_time || '',
+        login_username: group.login_username || ''
+      });
+      setShowGroupCredentials(false);
+      setGeneratedGroupCredentials(null);
+    }
   };
 
   const closeModal = () => {
     setActiveModal(null);
     setSelectedUser(null);
+    setSelectedGroup(null);
     setUserFormData({
       role: 'member',
       permissions: [],
@@ -471,8 +642,18 @@ const Admin = () => {
       login_username: '',
       login_pin: ''
     });
+    setGroupFormData({
+      name: '',
+      description: '',
+      location: '',
+      meeting_day: '',
+      meeting_time: '',
+      login_username: ''
+    });
     setShowCredentials(false);
+    setShowGroupCredentials(false);
     setGeneratedCredentials(null);
+    setGeneratedGroupCredentials(null);
     setError(null);
   };
 
@@ -513,6 +694,42 @@ const Admin = () => {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update user';
       setError(errorMessage);
       console.error('Error updating user:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGroupUpdate = async () => {
+    if (!selectedGroup) return;
+
+    if (!isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'manage_groups')) {
+      setError('You do not have permission to update groups');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await cloudService.updateCellGroup(selectedGroup.id, {
+        name: groupFormData.name,
+        description: groupFormData.description,
+        location: groupFormData.location,
+        meeting_day: groupFormData.meeting_day,
+        meeting_time: groupFormData.meeting_time,
+        login_username: groupFormData.login_username
+      });
+
+      // Refresh groups data
+      const groupsData = await cloudService.getCellGroups();
+      setCellGroups(groupsData);
+      
+      alert('Group updated successfully!');
+      closeModal();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update group';
+      setError(errorMessage);
+      console.error('Error updating group:', err);
     } finally {
       setLoading(false);
     }
@@ -596,20 +813,6 @@ const Admin = () => {
       return filtered;
     }
 
-    // Group Leader: Only see members in their assigned groups
-    if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
-      filtered = filtered.filter(member => {
-        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
-          return true;
-        }
-        if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
-          return true;
-        }
-        return false;
-      });
-      return filtered;
-    }
-
     // Regular Member: Only see members from their own cell group
     if (profile?.role === 'member' && currentUserCellGroup) {
       filtered = filtered.filter(member => 
@@ -628,7 +831,7 @@ const Admin = () => {
   };
 
   const filteredMembers = getFilteredMembers();
-  const cellGroups = groups.filter(g => g.type === 'cell_group');
+  const cellGroupsList = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
 
   const Modal = ({ children, title }: { children: React.ReactNode; title: string }) => (
@@ -750,6 +953,73 @@ const Admin = () => {
             );
           })}
         </div>
+
+        {/* Group Management Section */}
+        {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'manage_groups')) && (
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Cell Group Management</h2>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading groups...</p>
+              </div>
+            ) : cellGroups.length === 0 ? (
+              <div className="text-center py-8">
+                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No cell groups found</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {cellGroups.map((group) => (
+                  <div
+                    key={group.id}
+                    className="flex flex-col justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-2">
+                        {group.name}
+                      </h4>
+                      <p className="text-sm text-gray-500 mb-2">{group.description}</p>
+                      <p className="text-xs text-gray-500">
+                        {group.meeting_day} at {group.meeting_time}
+                      </p>
+                      <p className="text-xs text-gray-500">{group.location}</p>
+                      <p className="text-xs text-gray-500">
+                        Members: {group.current_member_count || 0}
+                      </p>
+                      {group.login_username && (
+                        <p className="text-xs text-blue-600 mt-2">
+                          <Key className="h-3 w-3 inline mr-1" />
+                          Login: {group.login_username}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        onClick={() => openModal('groupDetails', undefined, group)}
+                        className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
+                      >
+                        Manage
+                      </button>
+                      {!group.login_username && (
+                        <button
+                          onClick={() => handleGenerateGroupCredentials(group)}
+                          disabled={loading}
+                          className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
+                        >
+                          <Key className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* User Management Section */}
         {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'view_members')) && (
@@ -893,6 +1163,12 @@ const Admin = () => {
                   <span className="text-gray-600">Users with Login</span>
                   <span className="text-gray-900 font-semibold">
                     {members.filter(m => m.login_username).length}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Groups with Login</span>
+                  <span className="text-gray-900 font-semibold">
+                    {cellGroups.filter(g => g.login_username).length}
                   </span>
                 </div>
               </div>
@@ -1108,7 +1384,7 @@ const Admin = () => {
                         Assigned Cell Groups
                       </label>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {cellGroups.map(group => (
+                        {cellGroupsList.map(group => (
                           <label
                             key={group.id}
                             className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
@@ -1190,6 +1466,170 @@ const Admin = () => {
                   className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
                 >
                   {loading ? 'Updating...' : 'Update User'}
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Group Details Modal */}
+        {activeModal === 'groupDetails' && selectedGroup && (isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'manage_groups')) && (
+          <Modal title={`Manage Group - ${selectedGroup.name}`}>
+            <div className="space-y-6">
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                  <p className="text-red-700 font-medium">{error}</p>
+                </div>
+              )}
+
+              <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
+                    {selectedGroup.name.charAt(0)}
+                  </div>
+                  <div>
+                    <h4 className="text-xl font-bold text-gray-900">
+                      {selectedGroup.name}
+                    </h4>
+                    <p className="text-gray-600">{selectedGroup.description}</p>
+                    <p className="text-sm text-gray-500">
+                      {selectedGroup.meeting_day} at {selectedGroup.meeting_time} • {selectedGroup.location}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      Members: {selectedGroup.current_member_count || 0} • Status: {selectedGroup.status}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Group Name
+                  </label>
+                  <input
+                    type="text"
+                    value={groupFormData.name}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, name: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Location
+                  </label>
+                  <input
+                    type="text"
+                    value={groupFormData.location}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, location: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  value={groupFormData.description}
+                  onChange={(e) => setGroupFormData(prev => ({...prev, description: e.target.value}))}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Meeting Day
+                  </label>
+                  <input
+                    type="text"
+                    value={groupFormData.meeting_day}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, meeting_day: e.target.value}))}
+                    placeholder="e.g., Monday, Tuesday"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Meeting Time
+                  </label>
+                  <input
+                    type="text"
+                    value={groupFormData.meeting_time}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, meeting_time: e.target.value}))}
+                    placeholder="e.g., 18:00, 7:00 PM"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Group Login Credentials
+                </label>
+                
+                {!selectedGroup.login_username && (
+                  <button
+                    onClick={() => handleGenerateGroupCredentials(selectedGroup)}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    {loading ? 'Generating...' : 'Generate Group Login Credentials'}
+                  </button>
+                )}
+                
+                {showGroupCredentials && generatedGroupCredentials && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-green-900">Generated Group Credentials</span>
+                      <button
+                        onClick={handleCopyGroupCredentials}
+                        className="flex items-center gap-1 text-green-700 hover:text-green-900"
+                      >
+                        <Copy className="h-4 w-4" />
+                        <span className="text-xs">Copy</span>
+                      </button>
+                    </div>
+                    <div>
+                      <span className="text-xs text-green-700">Group Username:</span>
+                      <p className="font-mono font-semibold text-green-900">{generatedGroupCredentials.username}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Group Username
+                  </label>
+                  <input
+                    type="text"
+                    value={groupFormData.login_username}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, login_username: e.target.value}))}
+                    placeholder="Group login username"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleGroupUpdate}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+                >
+                  {loading ? 'Updating...' : 'Update Group'}
                 </button>
                 <button
                   onClick={closeModal}
