@@ -35,152 +35,35 @@ const Dashboard = () => {
   // Get user's full name
   const userFullName = profile ? `${profile.name || ''} ${profile.surname || ''}`.trim() : 'User';
 
-  // FIXED: Use raw SQL query to match exactly what works in Supabase
+  // FIXED: Simple and reliable approach
   const fetchUserCellGroups = async () => {
     try {
-      if (!profile?.name || !profile?.surname) {
-        console.log('No user profile name/surname available');
+      if (!profile?.id) {
+        console.log('No user profile ID available');
         return [];
       }
 
-      console.log(`Executing SQL query for user: ${profile.name} ${profile.surname}`);
-
-      // Use raw SQL query since the Supabase query builder isn't working
-      const { data, error } = await supabase.rpc('get_user_cell_groups', {
-        p_leader_name: profile.name,
-        p_leader_surname: profile.surname
+      console.log('🔍 Fetching cell groups for user ID:', profile.id);
+      console.log('👤 User details:', { 
+        name: profile.name, 
+        surname: profile.surname, 
+        id: profile.id 
       });
 
-      if (error) {
-        console.error('Error with RPC call, trying direct SQL...', error);
-        return await fetchUserCellGroupsDirectSQL();
-      }
-
-      console.log(`Found ${data?.length || 0} cell groups via RPC`);
-      return data || [];
-
-    } catch (error) {
-      console.error('Error fetching user cell groups:', error);
-      return await fetchUserCellGroupsDirectSQL();
-    }
-  };
-
-  // Alternative: Direct SQL query using Supabase's SQL feature
-  const fetchUserCellGroupsDirectSQL = async () => {
-    try {
-      const query = `
-        SELECT
-          cg.id AS group_id,
-          cg.name AS group_name,
-          cg.location,
-          cg.meeting_day,
-          cg.meeting_time,
-          cg.status,
-          m.name AS leader_name,
-          m.surname AS leader_surname
-        FROM public.cell_groups cg
-        JOIN public.members m
-          ON cg.leader_id = m.id
-        WHERE
-          cg.status = 'active'
-          AND LOWER(m.name) = LOWER('${profile?.name}')
-          AND LOWER(m.surname) = LOWER('${profile?.surname}')
-        ORDER BY cg.name
-      `;
-
-      console.log('Executing direct SQL query:', query);
-
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .select(`
-          id,
-          name,
-          location,
-          meeting_day,
-          meeting_time,
-          status,
-          leader_id
-        `)
-        .eq('status', 'active')
-        .order('name');
-
-      if (error) {
-        console.error('Error with direct query:', error);
-        return [];
-      }
-
-      // Manually join with members table
-      const userGroups: UserCellGroupQueryResult[] = [];
-
-      for (const group of data || []) {
-        if (group.leader_id) {
-          const { data: leaderData } = await supabase
-            .from('members')
-            .select('name, surname')
-            .eq('id', group.leader_id)
-            .single();
-
-          if (leaderData && 
-              leaderData.name?.toLowerCase() === profile?.name?.toLowerCase() &&
-              leaderData.surname?.toLowerCase() === profile?.surname?.toLowerCase()) {
-            
-            userGroups.push({
-              group_id: group.id,
-              group_name: group.name,
-              location: group.location,
-              meeting_day: group.meeting_day,
-              meeting_time: group.meeting_time,
-              status: group.status || 'active',
-              leader_name: leaderData.name || '',
-              leader_surname: leaderData.surname || ''
-            });
-          }
-        }
-      }
-
-      console.log(`Manual join found ${userGroups.length} cell groups`);
-      return userGroups;
-
-    } catch (error) {
-      console.error('Error in direct SQL approach:', error);
-      return [];
-    }
-  };
-
-  // SIMPLE APPROACH: Let's try the most basic query first
-  const fetchUserCellGroupsSimple = async () => {
-    try {
-      console.log('Trying simple approach...');
-      
-      // First, let's find the user's member record to get their ID
-      const { data: userMember, error: userError } = await supabase
-        .from('members')
-        .select('id')
-        .eq('name', profile?.name)
-        .eq('surname', profile?.surname)
-        .single();
-
-      if (userError || !userMember) {
-        console.error('Could not find user in members table:', userError);
-        return [];
-      }
-
-      console.log('Found user member ID:', userMember.id);
-
-      // Now find cell groups where this user is the leader
+      // METHOD 1: Direct query using the user's ID as leader_id
       const { data: cellGroups, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
-        .eq('leader_id', userMember.id)
+        .eq('leader_id', profile.id)
         .eq('status', 'active')
         .order('name');
 
       if (groupsError) {
-        console.error('Error fetching cell groups:', groupsError);
+        console.error('❌ Error fetching cell groups:', groupsError);
         return [];
       }
 
-      console.log('Found cell groups:', cellGroups);
+      console.log('✅ Found cell groups directly:', cellGroups);
 
       // Transform to the expected format
       const userGroups: UserCellGroupQueryResult[] = (cellGroups || []).map(group => ({
@@ -190,14 +73,15 @@ const Dashboard = () => {
         meeting_day: group.meeting_day,
         meeting_time: group.meeting_time,
         status: group.status || 'active',
-        leader_name: profile?.name || '',
-        leader_surname: profile?.surname || ''
+        leader_name: profile.name || '',
+        leader_surname: profile.surname || ''
       }));
 
+      console.log('📊 Transformed user groups:', userGroups);
       return userGroups;
 
     } catch (error) {
-      console.error('Error in simple approach:', error);
+      console.error('💥 Error in fetchUserCellGroups:', error);
       return [];
     }
   };
@@ -207,24 +91,26 @@ const Dashboard = () => {
     try {
       setLoading(true);
       setError(null);
+      console.log('🔄 Starting data load...');
 
-      // Try the simple approach first
-      const userGroups = await fetchUserCellGroupsSimple();
+      const userGroups = await fetchUserCellGroups();
+      console.log('🎉 Final results to display:', userGroups);
       setUserCellGroups(userGroups);
 
     } catch (error) {
-      console.error('Error loading dashboard data:', error);
-      setError('Failed to load dashboard data');
+      console.error('💥 Error loading dashboard data:', error);
+      setError('Failed to load dashboard data. Check console for details.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (profile?.name && profile?.surname) {
+    if (profile?.id) {
+      console.log('🏁 Profile loaded, starting data fetch...');
       loadDashboardData();
     }
-  }, [profile?.name, profile?.surname]);
+  }, [profile?.id]);
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
@@ -255,20 +141,15 @@ const Dashboard = () => {
           <p className="text-foreground/60">
             Welcome to your church management dashboard
           </p>
-          {profile && (
-            <p className="text-sm text-gray-500 mt-1">
-              Role: {profile.role} | ID: {profile.id}
-            </p>
-          )}
         </div>
         <div className="flex items-center gap-4">
           <button
             onClick={loadDashboardData}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Refreshing...' : 'Refresh'}
+            {loading ? 'Refreshing...' : 'Refresh Data'}
           </button>
           <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
             {profile?.name?.charAt(0)}{profile?.surname?.charAt(0) || 'U'}
@@ -288,14 +169,76 @@ const Dashboard = () => {
       )}
 
       {/* Debug Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-        <h3 className="font-semibold text-blue-800 mb-2">User Information:</h3>
-        <div className="text-blue-700 text-sm space-y-1">
-          <p><strong>Name:</strong> {profile?.name} {profile?.surname}</p>
-          <p><strong>Role:</strong> {profile?.role}</p>
-          <p><strong>User ID:</strong> {profile?.id}</p>
-          <p><strong>Expected Results:</strong> Should show 2 cell groups (test2 and test3)</p>
+      <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+        <h3 className="font-semibold text-green-800 mb-3">User Information:</h3>
+        <div className="text-green-700 text-sm space-y-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p><strong>Name:</strong> {profile?.name} {profile?.surname}</p>
+              <p><strong>Role:</strong> {profile?.role}</p>
+              <p><strong>User ID:</strong> {profile?.id}</p>
+            </div>
+            <div>
+              <p><strong>Expected Results:</strong> 2 cell groups</p>
+              <p><strong>Actual Results:</strong> {userCellGroups.length} cell groups</p>
+              <p><strong>Query Method:</strong> Direct leader_id lookup</p>
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Expected Results Section */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-6">
+        <h3 className="text-xl font-bold text-yellow-800 mb-4">Expected Results from SQL Query</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left text-yellow-900">
+            <thead className="text-xs text-yellow-800 uppercase bg-yellow-100">
+              <tr>
+                <th className="px-4 py-3">Group ID</th>
+                <th className="px-4 py-3">Group Name</th>
+                <th className="px-4 py-3">Location</th>
+                <th className="px-4 py-3">Meeting Day</th>
+                <th className="px-4 py-3">Meeting Time</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Leader Name</th>
+                <th className="px-4 py-3">Leader Surname</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="bg-yellow-50/50 border-b border-yellow-200">
+                <td className="px-4 py-3 font-mono text-xs">cc79b895-b7f1-4e0d-ad8b-92afef368404</td>
+                <td className="px-4 py-3 font-medium">test3</td>
+                <td className="px-4 py-3">test3</td>
+                <td className="px-4 py-3">Saturday</td>
+                <td className="px-4 py-3">19:20</td>
+                <td className="px-4 py-3">
+                  <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                    active
+                  </span>
+                </td>
+                <td className="px-4 py-3">Elton</td>
+                <td className="px-4 py-3">Niati</td>
+              </tr>
+              <tr className="bg-yellow-50/50 border-b border-yellow-200">
+                <td className="px-4 py-3 font-mono text-xs">1a90c0b8-3613-4e45-ba5b-d9871e3f915c</td>
+                <td className="px-4 py-3 font-medium">test2</td>
+                <td className="px-4 py-3">t</td>
+                <td className="px-4 py-3">Sunday</td>
+                <td className="px-4 py-3">08:52</td>
+                <td className="px-4 py-3">
+                  <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                    active
+                  </span>
+                </td>
+                <td className="px-4 py-3">Elton</td>
+                <td className="px-4 py-3">Niati</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-yellow-700 text-sm mt-3">
+          <strong>Note:</strong> These are the expected results that should appear below when the query works correctly.
+        </p>
       </div>
 
       {/* User's Cell Groups Section */}
@@ -304,7 +247,9 @@ const Dashboard = () => {
           onClick={() => toggleSection('userGroups')}
           className="w-full flex justify-between items-center hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
         >
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">My Cell Groups (SQL Query Results)</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+            My Cell Groups ({userCellGroups.length} found)
+          </h2>
           {expandedSections.userGroups ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
         </button>
         
@@ -312,44 +257,40 @@ const Dashboard = () => {
           <div className="pt-4">
             {/* SQL Query Display */}
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-6">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">SQL Query Being Executed:</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Current Query Being Executed:</h3>
               <code className="bg-gray-100 dark:bg-gray-600 p-3 rounded text-sm block overflow-x-auto">
-                {`SELECT
-  cg.id AS group_id,
-  cg.name AS group_name,
-  cg.location,
-  cg.meeting_day,
-  cg.meeting_time,
-  cg.status,
-  m.name AS leader_name,
-  m.surname AS leader_surname
-FROM public.cell_groups cg
-JOIN public.members m
-  ON cg.leader_id = m.id
-WHERE
-  cg.status = 'active'
-  AND LOWER(m.name) = LOWER('${profile?.name}')
-  AND LOWER(m.surname) = LOWER('${profile?.surname}');`}
+                {`const { data: cellGroups, error } = await supabase
+  .from('cell_groups')
+  .select('*')
+  .eq('leader_id', '${profile?.id}')
+  .eq('status', 'active')
+  .order('name');`}
               </code>
+              <p className="text-gray-600 dark:text-gray-400 text-sm mt-2">
+                This query searches for cell groups where your user ID ({profile?.id}) is the leader_id.
+              </p>
             </div>
 
             {/* Results */}
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-white mb-4">
-                Query Results ({userCellGroups.length} cell groups found)
+                Actual Query Results
               </h3>
 
               {userCellGroups.length === 0 ? (
                 <div className="text-center py-8">
                   <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                   <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">No Cell Groups Found</h4>
-                  <p className="text-gray-500 dark:text-gray-500">
+                  <p className="text-gray-500 dark:text-gray-500 mb-4">
                     No active cell groups found where you are the designated leader.
                   </p>
-                  <div className="mt-4 text-sm text-gray-400 space-y-1">
-                    <p><strong>Current User:</strong> {profile?.name} {profile?.surname}</p>
-                    <p><strong>Expected:</strong> 2 cell groups (test2, test3)</p>
-                    <p>Check the browser console for detailed error messages.</p>
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 max-w-md mx-auto">
+                    <h5 className="font-semibold text-orange-800 mb-2">Troubleshooting:</h5>
+                    <ul className="text-orange-700 text-sm text-left space-y-1">
+                      <li>• Check if your user ID matches the leader_id in cell_groups table</li>
+                      <li>• Verify the cell groups have status = 'active'</li>
+                      <li>• Check browser console for detailed error messages</li>
+                    </ul>
                   </div>
                 </div>
               ) : (
