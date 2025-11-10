@@ -9,43 +9,6 @@ import {
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
-// Types
-interface Member {
-  id: string;
-  name: string;
-  surname: string;
-  email: string | null;
-  phone: string | null;
-  cell_group_id: string | null;
-  invited_by: string | null;
-  created_at: string | null;
-  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  role?: string | null;
-  permissions?: string[] | null;
-  assigned_groups?: string[] | null;
-  assigned_departments?: string[] | null;
-  can_add_members?: boolean | null;
-  can_edit_members?: boolean | null;
-  can_view_own_data?: boolean | null;
-  login_username?: string | null;
-  login_pin?: string | null;
-}
-
-interface CellGroup {
-  id: string;
-  name: string;
-  description: string | null;
-  leader_id: string | null;
-  location: string | null;
-  meeting_day: string | null;
-  meeting_time: string | null;
-  current_member_count: number;
-  status: string;
-  login_username: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 // NEW: Interface for the SQL query result
 interface UserCellGroupQueryResult {
   group_id: string;
@@ -61,18 +24,18 @@ interface UserCellGroupQueryResult {
 const Dashboard = () => {
   const { profile } = useAuth();
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
-    userGroups: true // NEW: Added section for user's cell groups
+    userGroups: true
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // NEW: State for the SQL query results
+  // State for the SQL query results
   const [userCellGroups, setUserCellGroups] = useState<UserCellGroupQueryResult[]>([]);
 
   // Get user's full name
   const userFullName = profile ? `${profile.name || ''} ${profile.surname || ''}`.trim() : 'User';
 
-  // NEW: Execute the exact SQL query using Supabase
+  // FIXED: Execute the exact SQL query using Supabase
   const fetchUserCellGroups = async () => {
     try {
       if (!profile?.name || !profile?.surname) {
@@ -82,7 +45,7 @@ const Dashboard = () => {
 
       console.log(`Executing SQL query for user: ${profile.name} ${profile.surname}`);
 
-      // Use Supabase's query builder to create the exact JOIN query
+      // FIXED: Use the correct Supabase query syntax
       const { data, error } = await supabase
         .from('cell_groups')
         .select(`
@@ -92,19 +55,19 @@ const Dashboard = () => {
           meeting_day,
           meeting_time,
           status,
-          leader:members!leader_id(
-            name,
-            surname
-          )
+          leader:leader_id(name, surname)
         `)
         .eq('status', 'active')
-        .eq('members.name', profile.name)
-        .eq('members.surname', profile.surname)
+        .eq('leader.name', profile.name)
+        .eq('leader.surname', profile.surname)
         .order('name');
 
       if (error) {
         console.error('Error executing SQL query:', error);
-        throw error;
+        
+        // Alternative approach if the above doesn't work
+        console.log('Trying alternative query approach...');
+        return await fetchUserCellGroupsAlternative();
       }
 
       // Transform the data to match the SQL query result structure
@@ -129,13 +92,84 @@ const Dashboard = () => {
     }
   };
 
-  // Load dashboard data from Supabase
+  // Alternative approach if the main query fails
+  const fetchUserCellGroupsAlternative = async () => {
+    try {
+      console.log('Using alternative query approach...');
+      
+      // First get the user's member ID
+      const { data: memberData, error: memberError } = await supabase
+        .from('members')
+        .select('id')
+        .eq('name', profile?.name)
+        .eq('surname', profile?.surname)
+        .single();
+
+      if (memberError || !memberData) {
+        console.error('Error finding member:', memberError);
+        return [];
+      }
+
+      // Then get cell groups where this member is the leader
+      const { data: cellGroupsData, error: groupsError } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('leader_id', memberData.id)
+        .eq('status', 'active')
+        .order('name');
+
+      if (groupsError) {
+        console.error('Error fetching cell groups:', groupsError);
+        return [];
+      }
+
+      // Get leader details for each group
+      const userGroups: UserCellGroupQueryResult[] = [];
+      
+      for (const group of cellGroupsData || []) {
+        let leaderName = '';
+        let leaderSurname = '';
+
+        if (group.leader_id) {
+          const { data: leaderData } = await supabase
+            .from('members')
+            .select('name, surname')
+            .eq('id', group.leader_id)
+            .single();
+
+          if (leaderData) {
+            leaderName = leaderData.name || '';
+            leaderSurname = leaderData.surname || '';
+          }
+        }
+
+        userGroups.push({
+          group_id: group.id,
+          group_name: group.name,
+          location: group.location,
+          meeting_day: group.meeting_day,
+          meeting_time: group.meeting_time,
+          status: group.status || 'active',
+          leader_name: leaderName,
+          leader_surname: leaderSurname
+        });
+      }
+
+      console.log(`Alternative query found ${userGroups.length} cell groups`);
+      return userGroups;
+    } catch (error) {
+      console.error('Error in alternative query:', error);
+      return [];
+    }
+  };
+
+  // Load dashboard data
   const loadDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // NEW: Load user's cell groups using the SQL query
+      // Load user's cell groups using the SQL query
       const userGroups = await fetchUserCellGroups();
       setUserCellGroups(userGroups);
 
@@ -149,7 +183,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [profile?.name, profile?.surname]); // Reload when name/surname changes
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
@@ -180,6 +214,11 @@ const Dashboard = () => {
           <p className="text-foreground/60">
             Welcome to your church management dashboard
           </p>
+          {profile && (
+            <p className="text-sm text-gray-500 mt-1">
+              Role: {profile.role} | ID: {profile.id}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <button
@@ -207,7 +246,17 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* NEW: User's Cell Groups Section */}
+      {/* Debug Info */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+        <h3 className="font-semibold text-yellow-800 mb-2">Debug Information:</h3>
+        <p className="text-yellow-700 text-sm">
+          User: {profile?.name} {profile?.surname} | 
+          Role: {profile?.role} | 
+          ID: {profile?.id}
+        </p>
+      </div>
+
+      {/* User's Cell Groups Section */}
       <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6 hover:shadow-lg transition-all duration-300">
         <button 
           onClick={() => toggleSection('userGroups')}
@@ -255,6 +304,10 @@ WHERE
                   <p className="text-gray-500 dark:text-gray-500">
                     No active cell groups found where you are the designated leader.
                   </p>
+                  <div className="mt-4 text-sm text-gray-400">
+                    <p>User: {profile?.name} {profile?.surname}</p>
+                    <p>This means you are not listed as a leader in any active cell groups.</p>
+                  </div>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
