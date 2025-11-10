@@ -155,6 +155,9 @@ const Dashboard = () => {
     topic: ''
   });
 
+  // Get user's full name
+  const userFullName = profile ? `${profile.name || ''} ${profile.surname || ''}`.trim() : 'User';
+
   // Check if current user has admin access
   const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
   const currentUserPermissions = profile?.permissions || [];
@@ -659,7 +662,7 @@ const Dashboard = () => {
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-            Dashboard
+            Welcome, {userFullName}
           </h1>
           <p className="text-foreground/60">
             {currentUserIsAdmin 
