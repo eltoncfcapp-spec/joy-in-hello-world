@@ -139,6 +139,13 @@ const CellGroups = () => {
   const getFilteredCellGroups = () => {
     if (!profile) return [];
 
+    console.log('🔍 Getting filtered cell groups for user:', {
+      role: profile.role,
+      hasUserCellGroup: !!profile.userCellGroup,
+      userCellGroup: profile.userCellGroup,
+      login_username: profile.login_username
+    });
+
     // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
       return allCellGroups;
@@ -151,30 +158,23 @@ const CellGroups = () => {
 
     let userGroups: CellGroup[] = [];
 
-    // FIXED: Use pre-fetched userCellGroup from AuthContext for group leaders
-    if (profile.role === 'group_leader') {
-      if (profile.userCellGroup) {
-        userGroups = [profile.userCellGroup];
-        console.log('👑 Using pre-fetched cell group for leader:', profile.userCellGroup);
-      } else {
-        // Fallback: filter from allCellGroups
+    // FIXED: Use pre-fetched userCellGroup from AuthContext for group leaders and members
+    if (profile.userCellGroup) {
+      userGroups = [profile.userCellGroup];
+      console.log('✅ Using pre-fetched cell group from AuthContext:', profile.userCellGroup);
+    } else {
+      // Fallback: filter from allCellGroups if pre-fetched data is not available
+      if (profile.role === 'group_leader') {
         userGroups = allCellGroups.filter(group => group.leader_id === profile.id);
-      }
-    }
-
-    // FIXED: Use pre-fetched userCellGroup from AuthContext for regular members
-    if (profile.role === 'member') {
-      if (profile.userCellGroup) {
-        userGroups = [profile.userCellGroup];
-        console.log('👤 Using pre-fetched cell group for member:', profile.userCellGroup);
-      } else {
-        // Fallback: filter from allCellGroups
+        console.log('🔄 Fallback: Filtering groups for leader from allCellGroups');
+      } else if (profile.role === 'member') {
         userGroups = allCellGroups.filter(group => profile.cell_group_id === group.id);
+        console.log('🔄 Fallback: Filtering groups for member from allCellGroups');
       }
     }
 
-    console.log(`📊 Filtered groups for ${profile.role}:`, {
-      allGroups: allCellGroups.length,
+    console.log(`📊 Final filtered groups for ${profile.role}:`, {
+      totalGroups: allCellGroups.length,
       filteredGroups: userGroups.length,
       userGroups: userGroups.map(g => g.name),
       hasPreFetchedData: !!profile.userCellGroup
@@ -188,21 +188,29 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
+      console.log('🚀 Loading data for user:', {
+        role: profile?.role,
+        hasPreFetchedCellGroup: !!profile?.userCellGroup,
+        login_username: profile?.login_username
+      });
+
       // For admin/pastor/users with permissions, load all groups
       if (isAdminOrPastor(profile?.role || '') || 
           hasPermission(profile?.permissions, 'view_groups') || 
           canManageAllGroups(profile?.permissions)) {
+        console.log('👑 Loading all groups for admin/pastor');
         await Promise.all([
           fetchCellGroups(),
           fetchMembers()
         ]);
       } else {
-        // For group leaders and members, we already have the data from AuthContext
-        // Just fetch members for member management
-        await fetchMembers();
+        // For group leaders and members, we use the pre-fetched data from AuthContext
+        console.log('👤 Using pre-fetched data for group leader/member');
+        await fetchMembers(); // Still need members for management
         
-        // Refresh the user's cell group data to ensure it's current
-        if (profile) {
+        // If we don't have pre-fetched data, try to refresh it
+        if (profile && !profile.userCellGroup) {
+          console.log('🔄 No pre-fetched data found, refreshing...');
           await refreshUserCellGroup();
         }
       }
@@ -278,6 +286,12 @@ const CellGroups = () => {
         return;
       }
 
+      console.log('🔐 Checking access for user:', {
+        role: profile.role,
+        hasUserCellGroup: !!profile.userCellGroup,
+        login_username: profile.login_username
+      });
+
       // Determine access based on role and permissions
       let userHasAccess = false;
 
@@ -289,11 +303,11 @@ const CellGroups = () => {
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
       }
-      // Group leaders who have a cell group
+      // Group leaders who have a cell group (either pre-fetched or via cell_group_id)
       else if (profile.role === 'group_leader' && (profile.userCellGroup || profile.cell_group_id)) {
         userHasAccess = true;
       }
-      // Regular members who belong to a cell group
+      // Regular members who belong to a cell group (either pre-fetched or via cell_group_id)
       else if (profile.role === 'member' && (profile.userCellGroup || profile.cell_group_id)) {
         userHasAccess = true;
       }
@@ -654,6 +668,11 @@ const CellGroups = () => {
                 : `Viewing your cell group${profile?.userCellGroup ? `: ${profile.userCellGroup.name}` : ''}`
               }
             </p>
+            {profile?.userCellGroup && (
+              <p className="text-sm text-green-600 dark:text-green-400 mt-1">
+                ✅ Cell group data pre-loaded from user login
+              </p>
+            )}
             {!isAdminOrPastor(profile?.role || '') && (
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {canManageAllGroups(profile?.permissions)
@@ -909,8 +928,7 @@ const CellGroups = () => {
             })
           )}
         </div>
-
-        {/* Edit Cell Group Modal */}
+      {/* Edit Cell Group Modal */}
         {showEditForm && selectedGroup && canManageGroup(selectedGroup) && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
