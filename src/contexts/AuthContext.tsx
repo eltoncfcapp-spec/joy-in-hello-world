@@ -16,6 +16,8 @@ interface UserProfile {
   permissions: string[];
   assigned_groups: string[];
   assigned_departments: string[];
+  // ADD THIS: Store the user's cell group data
+  userCellGroup?: any | null;
 }
 
 interface AuthContextType {
@@ -25,6 +27,8 @@ interface AuthContextType {
   login: (identifier: string, credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
+  // ADD THIS: Function to refresh cell group data
+  refreshUserCellGroup: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -47,16 +51,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ADD THIS: Function to fetch user's cell group using the exact query you provided
+  const fetchUserCellGroup = async (username: string) => {
+    try {
+      console.log('🔍 Fetching user cell group for username:', username);
+      
+      if (!username) {
+        console.log('❌ No username provided for cell group query');
+        return null;
+      }
+
+      // Use the exact query you provided
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', 
+          supabase
+            .from('members')
+            .select('cell_group_id')
+            .eq('login_username', username)
+        )
+        .single();
+
+      if (error) {
+        console.error('❌ Error fetching cell group:', error);
+        return null;
+      }
+
+      console.log('✅ Found cell group via username query:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ Error in fetchUserCellGroup:', error);
+      return null;
+    }
+  };
+
+  // ADD THIS: Function to refresh cell group data
+  const refreshUserCellGroup = async () => {
+    if (profile?.login_username) {
+      const cellGroupData = await fetchUserCellGroup(profile.login_username);
+      if (cellGroupData) {
+        setProfile(prev => prev ? { ...prev, userCellGroup: cellGroupData } : null);
+        console.log('🔄 Refreshed user cell group data');
+      }
+    }
+  };
+
   // Check for existing session and set up auth listener
   useEffect(() => {
-    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Fetch user profile and role
           setTimeout(() => {
             fetchUserProfile(session.user.id);
           }, 0);
@@ -66,7 +114,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     );
 
-    // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -83,7 +130,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔍 Fetching user profile for:', userId);
       
-      // First try to fetch from members table (where your data is stored)
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -97,15 +143,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('📊 Raw member data from database:', memberData);
 
       if (memberData) {
-        // Debug: Check what role value actually comes from database
-        console.log('🎭 Database role value:', memberData.role);
-        console.log('🔑 Database permissions:', memberData.permissions);
-        console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
-
-        // Create profile from member data with ALL required fields
         const isAdmin = memberData.role === 'admin';
         
-        // FIXED: Better role mapping that handles various database values
         let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
         
         if (isAdmin) {
@@ -117,8 +156,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
 
         console.log('🎯 Mapped role:', primaryRole);
-        console.log('👑 Is admin:', isAdmin);
         
+        // ADD THIS: Fetch user's cell group data using their login_username
+        const userCellGroup = await fetchUserCellGroup(memberData.login_username || '');
+
         const userProfile: UserProfile = {
           id: userId,
           name: memberData.name || null,
@@ -132,10 +173,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           login_pin: memberData.login_pin || null,
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
           assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
-          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+          userCellGroup // ADD THIS: Store the cell group data
         };
 
-        console.log('✅ Final profile object:', userProfile);
+        console.log('✅ Final profile object with cell group:', userProfile);
         setProfile(userProfile);
         return;
       }
@@ -155,7 +197,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (profileData) {
         console.log('📊 Profile data found:', profileData);
         
-        // Fetch user roles
         const { data: rolesData, error: rolesError } = await supabase
           .from('user_roles')
           .select('role')
@@ -179,7 +220,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           primaryRole = 'member';
         }
 
-        console.log('🎯 Mapped role from profiles:', primaryRole);
+        // For profile table users, we might not have login_username, so use a different approach
+        const userCellGroup = profileData.cell_group_id ? await supabase
+          .from('cell_groups')
+          .select('*')
+          .eq('id', profileData.cell_group_id)
+          .single() : null;
 
         const userProfile: UserProfile = {
           id: userId,
@@ -190,14 +236,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           cell_group_id: profileData.cell_group_id || null,
           role: primaryRole,
           isAdmin,
-          login_username: null,
+          login_username: null, // Profile table might not have login_username
           login_pin: null,
           permissions: [],
           assigned_groups: [],
-          assigned_departments: []
+          assigned_departments: [],
+          userCellGroup: userCellGroup?.data || null
         };
 
-        console.log('✅ Final profile from profiles table:', userProfile);
+        console.log('✅ Final profile from profiles table with cell group:', userProfile);
         setProfile(userProfile);
       } else {
         console.log('❌ No user data found in members or profiles table');
@@ -211,7 +258,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔐 Attempting username/PIN login:', { username, pin });
       
-      // Search for member with matching username and PIN
       const { data: memberData, error } = await supabase
         .from('members')
         .select('*')
@@ -225,10 +271,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Member found:', memberData);
-      console.log('🎭 Database role:', memberData.role);
-      console.log('🔑 Database permissions:', memberData.permissions);
 
-      // Create a mock session and user for username/PIN login
+      // ADD THIS: Fetch user's cell group data during login using the username
+      const userCellGroup = await fetchUserCellGroup(username);
+
       const mockUser: SupabaseUser = {
         id: memberData.id,
         email: memberData.email,
@@ -255,14 +301,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         provider_refresh_token: null
       } as Session;
 
-      // Set the user and session
       setUser(mockUser);
       setSession(mockSession);
 
-      // Create and set the profile with ALL required fields
       const isAdmin = memberData.role === 'admin';
       
-      // FIXED: Better role mapping
       let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
       
       if (isAdmin) {
@@ -288,13 +331,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login_pin: memberData.login_pin || null,
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
         assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
-        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
+        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+        userCellGroup // ADD THIS: Store the cell group data
       };
 
-      console.log('✅ Final profile for login:', userProfile);
+      console.log('✅ Final profile for login with cell group:', userProfile);
       setProfile(userProfile);
       
-      // Store in localStorage for persistence
       localStorage.setItem('username_pin_auth', JSON.stringify({
         user: mockUser,
         session: mockSession,
@@ -408,7 +451,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading
+    loading,
+    refreshUserCellGroup // ADD THIS: Export the refresh function
   };
 
   return (
