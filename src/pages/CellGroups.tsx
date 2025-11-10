@@ -86,7 +86,7 @@ const CellGroups = () => {
     return isAdminOrPastor(profile.role);
   };
 
-  // Group leaders can only manage groups where they are the leader_id
+  // FIXED: Group leaders can manage groups where they are the leader_id OR where they are members with leadership role
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -100,7 +100,7 @@ const CellGroups = () => {
       return true;
     }
     
-    // Group leaders can only manage groups where they are the leader_id
+    // Group leaders can manage groups where they are the leader_id
     if (profile.role === 'group_leader') {
       return group.leader_id === profile.id;
     }
@@ -108,7 +108,7 @@ const CellGroups = () => {
     return false;
   };
 
-  // Group leaders can only view groups where they are the leader_id
+  // FIXED: Group leaders and members can view their assigned groups
   const canViewGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -122,12 +122,12 @@ const CellGroups = () => {
       return true;
     }
     
-    // Group leaders can only view groups where they are the leader_id
+    // Group leaders can view groups where they are the leader_id
     if (profile.role === 'group_leader') {
       return group.leader_id === profile.id;
     }
     
-    // Regular members can only view groups they are assigned to via cell_group_id
+    // Regular members can view groups they are assigned to via cell_group_id
     if (profile.role === 'member') {
       return profile.cell_group_id === group.id;
     }
@@ -143,33 +143,46 @@ const CellGroups = () => {
       role: profile.role,
       hasUserCellGroup: !!profile.userCellGroup,
       userCellGroup: profile.userCellGroup,
+      cell_group_id: profile.cell_group_id,
       login_username: profile.login_username
     });
 
     // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
+      console.log('👑 Admin/Pastor - showing all groups');
       return allCellGroups;
     }
 
     // Users with view_groups or manage_groups permission can see all groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
+      console.log('🔧 User with permissions - showing all groups');
       return allCellGroups;
     }
 
     let userGroups: CellGroup[] = [];
 
-    // FIXED: Use pre-fetched userCellGroup from AuthContext for group leaders and members
+    // FIXED: Use pre-fetched userCellGroup from AuthContext
     if (profile.userCellGroup) {
       userGroups = [profile.userCellGroup];
-      console.log('✅ Using pre-fetched cell group from AuthContext:', profile.userCellGroup);
+      console.log('✅ Using pre-fetched cell group from AuthContext:', profile.userCellGroup.name);
     } else {
-      // Fallback: filter from allCellGroups if pre-fetched data is not available
+      // Fallback: For group leaders, show groups where they are the leader
       if (profile.role === 'group_leader') {
         userGroups = allCellGroups.filter(group => group.leader_id === profile.id);
-        console.log('🔄 Fallback: Filtering groups for leader from allCellGroups');
-      } else if (profile.role === 'member') {
-        userGroups = allCellGroups.filter(group => profile.cell_group_id === group.id);
-        console.log('🔄 Fallback: Filtering groups for member from allCellGroups');
+        console.log('🔄 Fallback: Filtering groups for leader from allCellGroups', {
+          totalGroups: allCellGroups.length,
+          userGroups: userGroups.length,
+          userGroupsNames: userGroups.map(g => g.name)
+        });
+      } 
+      // For regular members, show groups where their cell_group_id matches
+      else if (profile.role === 'member' && profile.cell_group_id) {
+        userGroups = allCellGroups.filter(group => group.id === profile.cell_group_id);
+        console.log('🔄 Fallback: Filtering groups for member from allCellGroups', {
+          totalGroups: allCellGroups.length,
+          userGroups: userGroups.length,
+          userGroupsNames: userGroups.map(g => g.name)
+        });
       }
     }
 
@@ -191,28 +204,20 @@ const CellGroups = () => {
       console.log('🚀 Loading data for user:', {
         role: profile?.role,
         hasPreFetchedCellGroup: !!profile?.userCellGroup,
+        cell_group_id: profile?.cell_group_id,
         login_username: profile?.login_username
       });
 
-      // For admin/pastor/users with permissions, load all groups
-      if (isAdminOrPastor(profile?.role || '') || 
-          hasPermission(profile?.permissions, 'view_groups') || 
-          canManageAllGroups(profile?.permissions)) {
-        console.log('👑 Loading all groups for admin/pastor');
-        await Promise.all([
-          fetchCellGroups(),
-          fetchMembers()
-        ]);
-      } else {
-        // For group leaders and members, we use the pre-fetched data from AuthContext
-        console.log('👤 Using pre-fetched data for group leader/member');
-        await fetchMembers(); // Still need members for management
-        
-        // If we don't have pre-fetched data, try to refresh it
-        if (profile && !profile.userCellGroup) {
-          console.log('🔄 No pre-fetched data found, refreshing...');
-          await refreshUserCellGroup();
-        }
+      // Always fetch all cell groups and members
+      await Promise.all([
+        fetchCellGroups(),
+        fetchMembers()
+      ]);
+
+      // If we don't have pre-fetched data for non-admin users, try to refresh it
+      if (profile && !profile.userCellGroup && !isAdminOrPastor(profile.role)) {
+        console.log('🔄 No pre-fetched data found, refreshing...');
+        await refreshUserCellGroup();
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -289,6 +294,7 @@ const CellGroups = () => {
       console.log('🔐 Checking access for user:', {
         role: profile.role,
         hasUserCellGroup: !!profile.userCellGroup,
+        cell_group_id: profile.cell_group_id,
         login_username: profile.login_username
       });
 
@@ -303,12 +309,12 @@ const CellGroups = () => {
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
       }
-      // Group leaders who have a cell group (either pre-fetched or via cell_group_id)
-      else if (profile.role === 'group_leader' && (profile.userCellGroup || profile.cell_group_id)) {
+      // Group leaders who have a cell group (either pre-fetched or via cell_group_id or as leader)
+      else if (profile.role === 'group_leader') {
         userHasAccess = true;
       }
       // Regular members who belong to a cell group (either pre-fetched or via cell_group_id)
-      else if (profile.role === 'member' && (profile.userCellGroup || profile.cell_group_id)) {
+      else if (profile.role === 'member' && profile.cell_group_id) {
         userHasAccess = true;
       }
       
@@ -318,6 +324,7 @@ const CellGroups = () => {
         await loadData();
       } else {
         setInitialLoad(false);
+        console.log('❌ User does not have access to cell groups');
       }
     };
 
@@ -326,7 +333,7 @@ const CellGroups = () => {
 
   // FIXED: Update filtered cell groups when allCellGroups or profile changes
   useEffect(() => {
-    if (profile) {
+    if (profile && allCellGroups.length > 0) {
       const filtered = getFilteredCellGroups();
       setCellGroups(filtered);
     }
@@ -670,7 +677,7 @@ const CellGroups = () => {
             </p>
             {profile?.userCellGroup && (
               <p className="text-sm text-green-600 dark:text-green-400 mt-1">
-                ✅ Cell group data pre-loaded from user login
+                ✅ Cell group data pre-loaded successfully
               </p>
             )}
             {!isAdminOrPastor(profile?.role || '') && (
@@ -928,7 +935,8 @@ const CellGroups = () => {
             })
           )}
         </div>
-      {/* Edit Cell Group Modal */}
+
+        {/* Edit Cell Group Modal */}
         {showEditForm && selectedGroup && canManageGroup(selectedGroup) && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
