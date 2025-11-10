@@ -166,6 +166,76 @@ const cloudService = {
     }
   },
 
+  async updateUserRole(memberId: string, newRole: string, email: string | null): Promise<void> {
+    try {
+      console.log('Updating user_roles table for member:', memberId, 'with role:', newRole);
+
+      // First, get the auth user ID by email
+      if (!email) {
+        throw new Error('User email is required to update user_roles table');
+      }
+
+      // Get the auth user ID from the members table or auth.users
+      const { data: memberData, error: memberError } = await supabase
+        .from('members')
+        .select('id, email')
+        .eq('id', memberId)
+        .single();
+
+      if (memberError) {
+        console.error('Error fetching member:', memberError);
+        throw new Error(`Failed to fetch member: ${memberError.message}`);
+      }
+
+      // Get the auth user ID from auth.users by email
+      const { data: authUsers, error: authError } = await supabase
+        .from('auth.users')
+        .select('id')
+        .eq('email', email)
+        .single();
+
+      if (authError) {
+        console.error('Error fetching auth user:', authError);
+        // If we can't find the auth user, we'll skip updating user_roles table
+        console.warn('Could not find auth user for email:', email, 'Skipping user_roles update.');
+        return;
+      }
+
+      const authUserId = authUsers.id;
+
+      // First, delete any existing roles for this user
+      const { error: deleteError } = await supabase
+        .from('user_roles')
+        .delete()
+        .eq('user_id', authUserId);
+
+      if (deleteError) {
+        console.error('Error deleting existing roles:', deleteError);
+        throw new Error(`Failed to delete existing roles: ${deleteError.message}`);
+      }
+
+      // Insert the new role
+      const { error: insertError } = await supabase
+        .from('user_roles')
+        .insert({
+          user_id: authUserId,
+          role: newRole as any, // Cast to app_role type
+          created_at: new Date().toISOString()
+        });
+
+      if (insertError) {
+        console.error('Error inserting new role:', insertError);
+        throw new Error(`Failed to insert new role: ${insertError.message}`);
+      }
+
+      console.log('Successfully updated user_roles table for user:', authUserId, 'with role:', newRole);
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      // Don't throw the error here - we want the member update to proceed even if user_roles update fails
+      console.warn('User roles table update failed, but member update will continue');
+    }
+  },
+
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
       const username = `user${Date.now()}`;
@@ -491,6 +561,7 @@ const Admin = () => {
       console.log('Starting user update for:', selectedUser.id);
       console.log('Update data:', userFormData);
 
+      // Update the member in the members table
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
         role: userFormData.role,
         permissions: userFormData.permissions,
@@ -502,6 +573,11 @@ const Admin = () => {
         login_username: userFormData.login_username,
         login_pin: userFormData.login_pin
       });
+
+      // Also update the user_roles table
+      if (userFormData.role && selectedUser.email) {
+        await cloudService.updateUserRole(selectedUser.id, userFormData.role, selectedUser.email);
+      }
 
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id ? updatedMember : m
@@ -589,20 +665,6 @@ const Admin = () => {
         }
         // Also check assigned_groups array
         if (member.assigned_groups && member.assigned_groups.some(group => profile.assigned_groups.includes(group))) {
-          return true;
-        }
-        return false;
-      });
-      return filtered;
-    }
-
-    // Group Leader: Only see members in their assigned groups
-    if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
-      filtered = filtered.filter(member => {
-        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
-          return true;
-        }
-        if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
           return true;
         }
         return false;
