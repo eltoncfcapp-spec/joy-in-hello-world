@@ -138,7 +138,7 @@ const CellGroups = () => {
     return false;
   };
 
-  // NEW: Fetch cell groups using the exact SQL query structure
+  // NEW: Manual JOIN implementation to match the exact SQL query
   const fetchCellGroupsForUser = async () => {
     try {
       if (!profile?.name || !profile?.surname) {
@@ -146,64 +146,56 @@ const CellGroups = () => {
         return [];
       }
 
-      // Use the exact SQL query structure with JOIN and WHERE conditions
-      const { data, error } = await supabase
+      // Step 1: Fetch all active cell groups
+      const { data: cellGroupsData, error: cellGroupsError } = await supabase
         .from('cell_groups')
-        .select(`
-          id,
-          name,
-          location,
-          meeting_day,
-          meeting_time,
-          status,
-          leader_id,
-          description,
-          created_at,
-          updated_at,
-          current_member_count,
-          leader:members!leader_id(id, name, surname, email, phone)
-        `)
+        .select('*')
         .eq('status', 'active')
-        .eq('members.name', profile.name)
-        .eq('members.surname', profile.surname)
         .order('name');
 
-      if (error) {
-        console.error('Error fetching cell groups for user:', error);
-        throw error;
-      }
+      if (cellGroupsError) throw cellGroupsError;
 
-      console.log(`Fetched ${data?.length || 0} cell groups for user: ${profile.name} ${profile.surname}`);
-      return data as CellGroup[] || [];
+      // Step 2: Fetch all members
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (membersError) throw membersError;
+
+      // Step 3: Manual JOIN - Filter cell groups where leader matches logged-in user
+      const userCellGroups = cellGroupsData
+        .filter(cellGroup => {
+          // Find the leader member for this cell group
+          const leader = membersData.find(member => 
+            member.id === cellGroup.leader_id &&
+            member.name.toLowerCase() === profile.name.toLowerCase() &&
+            member.surname.toLowerCase() === profile.surname.toLowerCase()
+          );
+          return leader !== undefined; // Only include groups where leader matches
+        })
+        .map(cellGroup => {
+          // Add leader information to the cell group
+          const leader = membersData.find(member => member.id === cellGroup.leader_id);
+          return {
+            ...cellGroup,
+            leader: leader ? {
+              id: leader.id,
+              name: leader.name,
+              surname: leader.surname,
+              email: leader.email,
+              phone: leader.phone
+            } : null
+          };
+        });
+
+      console.log(`Fetched ${userCellGroups.length} cell groups for user: ${profile.name} ${profile.surname}`);
+      console.log('User cell groups:', userCellGroups.map(g => g.name));
+
+      return userCellGroups as CellGroup[];
     } catch (error) {
       console.error('Error in fetchCellGroupsForUser:', error);
       return [];
-    }
-  };
-
-  // ALTERNATIVE: Using raw SQL query for more complex joins
-  const fetchCellGroupsForUserRaw = async () => {
-    try {
-      if (!profile?.name || !profile?.surname) {
-        console.log('No user profile name/surname available');
-        return [];
-      }
-
-      const { data, error } = await supabase.rpc('get_user_cell_groups', {
-        user_name: profile.name.toLowerCase(),
-        user_surname: profile.surname.toLowerCase()
-      });
-
-      if (error) {
-        console.error('Error fetching cell groups with raw query:', error);
-        // Fallback to the standard query
-        return await fetchCellGroupsForUser();
-      }
-
-      return data as CellGroup[] || [];
-    } catch (error) {
-      console.error('Error in fetchCellGroupsForUserRaw:', error);
-      return await fetchCellGroupsForUser();
     }
   };
 
@@ -269,7 +261,7 @@ const CellGroups = () => {
           fetchMembers()
         ]);
       } else {
-        // For group leaders and members, fetch cell groups based on their name and surname using the exact query
+        // For group leaders and members, fetch cell groups using manual JOIN
         const userCellGroups = await fetchCellGroupsForUser();
         setAllCellGroups(userCellGroups);
         
