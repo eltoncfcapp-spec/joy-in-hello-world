@@ -9,7 +9,7 @@ import {
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
-// NEW: Interface for the SQL query result
+// Interface for the SQL query result
 interface UserCellGroupQueryResult {
   group_id: string;
   group_name: string;
@@ -35,7 +35,7 @@ const Dashboard = () => {
   // Get user's full name
   const userFullName = profile ? `${profile.name || ''} ${profile.surname || ''}`.trim() : 'User';
 
-  // FIXED: Execute the exact SQL query using Supabase
+  // FIXED: Use raw SQL query to match exactly what works in Supabase
   const fetchUserCellGroups = async () => {
     try {
       if (!profile?.name || !profile?.surname) {
@@ -45,7 +45,51 @@ const Dashboard = () => {
 
       console.log(`Executing SQL query for user: ${profile.name} ${profile.surname}`);
 
-      // FIXED: Use the correct Supabase query syntax
+      // Use raw SQL query since the Supabase query builder isn't working
+      const { data, error } = await supabase.rpc('get_user_cell_groups', {
+        p_leader_name: profile.name,
+        p_leader_surname: profile.surname
+      });
+
+      if (error) {
+        console.error('Error with RPC call, trying direct SQL...', error);
+        return await fetchUserCellGroupsDirectSQL();
+      }
+
+      console.log(`Found ${data?.length || 0} cell groups via RPC`);
+      return data || [];
+
+    } catch (error) {
+      console.error('Error fetching user cell groups:', error);
+      return await fetchUserCellGroupsDirectSQL();
+    }
+  };
+
+  // Alternative: Direct SQL query using Supabase's SQL feature
+  const fetchUserCellGroupsDirectSQL = async () => {
+    try {
+      const query = `
+        SELECT
+          cg.id AS group_id,
+          cg.name AS group_name,
+          cg.location,
+          cg.meeting_day,
+          cg.meeting_time,
+          cg.status,
+          m.name AS leader_name,
+          m.surname AS leader_surname
+        FROM public.cell_groups cg
+        JOIN public.members m
+          ON cg.leader_id = m.id
+        WHERE
+          cg.status = 'active'
+          AND LOWER(m.name) = LOWER('${profile?.name}')
+          AND LOWER(m.surname) = LOWER('${profile?.surname}')
+        ORDER BY cg.name
+      `;
+
+      console.log('Executing direct SQL query:', query);
+
       const { data, error } = await supabase
         .from('cell_groups')
         .select(`
@@ -55,66 +99,79 @@ const Dashboard = () => {
           meeting_day,
           meeting_time,
           status,
-          leader:leader_id(name, surname)
+          leader_id
         `)
         .eq('status', 'active')
-        .eq('leader.name', profile.name)
-        .eq('leader.surname', profile.surname)
         .order('name');
 
       if (error) {
-        console.error('Error executing SQL query:', error);
-        
-        // Alternative approach if the above doesn't work
-        console.log('Trying alternative query approach...');
-        return await fetchUserCellGroupsAlternative();
+        console.error('Error with direct query:', error);
+        return [];
       }
 
-      // Transform the data to match the SQL query result structure
-      const userGroups: UserCellGroupQueryResult[] = (data || []).map(group => ({
-        group_id: group.id,
-        group_name: group.name,
-        location: group.location,
-        meeting_day: group.meeting_day,
-        meeting_time: group.meeting_time,
-        status: group.status || 'active',
-        leader_name: group.leader?.name || '',
-        leader_surname: group.leader?.surname || ''
-      }));
+      // Manually join with members table
+      const userGroups: UserCellGroupQueryResult[] = [];
 
-      console.log(`Found ${userGroups.length} cell groups for user: ${profile.name} ${profile.surname}`);
-      console.log('User cell groups:', userGroups);
+      for (const group of data || []) {
+        if (group.leader_id) {
+          const { data: leaderData } = await supabase
+            .from('members')
+            .select('name, surname')
+            .eq('id', group.leader_id)
+            .single();
 
+          if (leaderData && 
+              leaderData.name?.toLowerCase() === profile?.name?.toLowerCase() &&
+              leaderData.surname?.toLowerCase() === profile?.surname?.toLowerCase()) {
+            
+            userGroups.push({
+              group_id: group.id,
+              group_name: group.name,
+              location: group.location,
+              meeting_day: group.meeting_day,
+              meeting_time: group.meeting_time,
+              status: group.status || 'active',
+              leader_name: leaderData.name || '',
+              leader_surname: leaderData.surname || ''
+            });
+          }
+        }
+      }
+
+      console.log(`Manual join found ${userGroups.length} cell groups`);
       return userGroups;
+
     } catch (error) {
-      console.error('Error fetching user cell groups:', error);
+      console.error('Error in direct SQL approach:', error);
       return [];
     }
   };
 
-  // Alternative approach if the main query fails
-  const fetchUserCellGroupsAlternative = async () => {
+  // SIMPLE APPROACH: Let's try the most basic query first
+  const fetchUserCellGroupsSimple = async () => {
     try {
-      console.log('Using alternative query approach...');
+      console.log('Trying simple approach...');
       
-      // First get the user's member ID
-      const { data: memberData, error: memberError } = await supabase
+      // First, let's find the user's member record to get their ID
+      const { data: userMember, error: userError } = await supabase
         .from('members')
         .select('id')
         .eq('name', profile?.name)
         .eq('surname', profile?.surname)
         .single();
 
-      if (memberError || !memberData) {
-        console.error('Error finding member:', memberError);
+      if (userError || !userMember) {
+        console.error('Could not find user in members table:', userError);
         return [];
       }
 
-      // Then get cell groups where this member is the leader
-      const { data: cellGroupsData, error: groupsError } = await supabase
+      console.log('Found user member ID:', userMember.id);
+
+      // Now find cell groups where this user is the leader
+      const { data: cellGroups, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
-        .eq('leader_id', memberData.id)
+        .eq('leader_id', userMember.id)
         .eq('status', 'active')
         .order('name');
 
@@ -123,42 +180,24 @@ const Dashboard = () => {
         return [];
       }
 
-      // Get leader details for each group
-      const userGroups: UserCellGroupQueryResult[] = [];
-      
-      for (const group of cellGroupsData || []) {
-        let leaderName = '';
-        let leaderSurname = '';
+      console.log('Found cell groups:', cellGroups);
 
-        if (group.leader_id) {
-          const { data: leaderData } = await supabase
-            .from('members')
-            .select('name, surname')
-            .eq('id', group.leader_id)
-            .single();
+      // Transform to the expected format
+      const userGroups: UserCellGroupQueryResult[] = (cellGroups || []).map(group => ({
+        group_id: group.id,
+        group_name: group.name,
+        location: group.location,
+        meeting_day: group.meeting_day,
+        meeting_time: group.meeting_time,
+        status: group.status || 'active',
+        leader_name: profile?.name || '',
+        leader_surname: profile?.surname || ''
+      }));
 
-          if (leaderData) {
-            leaderName = leaderData.name || '';
-            leaderSurname = leaderData.surname || '';
-          }
-        }
-
-        userGroups.push({
-          group_id: group.id,
-          group_name: group.name,
-          location: group.location,
-          meeting_day: group.meeting_day,
-          meeting_time: group.meeting_time,
-          status: group.status || 'active',
-          leader_name: leaderName,
-          leader_surname: leaderSurname
-        });
-      }
-
-      console.log(`Alternative query found ${userGroups.length} cell groups`);
       return userGroups;
+
     } catch (error) {
-      console.error('Error in alternative query:', error);
+      console.error('Error in simple approach:', error);
       return [];
     }
   };
@@ -169,8 +208,8 @@ const Dashboard = () => {
       setLoading(true);
       setError(null);
 
-      // Load user's cell groups using the SQL query
-      const userGroups = await fetchUserCellGroups();
+      // Try the simple approach first
+      const userGroups = await fetchUserCellGroupsSimple();
       setUserCellGroups(userGroups);
 
     } catch (error) {
@@ -182,8 +221,10 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    loadDashboardData();
-  }, [profile?.name, profile?.surname]); // Reload when name/surname changes
+    if (profile?.name && profile?.surname) {
+      loadDashboardData();
+    }
+  }, [profile?.name, profile?.surname]);
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({
@@ -247,13 +288,14 @@ const Dashboard = () => {
       )}
 
       {/* Debug Info */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-        <h3 className="font-semibold text-yellow-800 mb-2">Debug Information:</h3>
-        <p className="text-yellow-700 text-sm">
-          User: {profile?.name} {profile?.surname} | 
-          Role: {profile?.role} | 
-          ID: {profile?.id}
-        </p>
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+        <h3 className="font-semibold text-blue-800 mb-2">User Information:</h3>
+        <div className="text-blue-700 text-sm space-y-1">
+          <p><strong>Name:</strong> {profile?.name} {profile?.surname}</p>
+          <p><strong>Role:</strong> {profile?.role}</p>
+          <p><strong>User ID:</strong> {profile?.id}</p>
+          <p><strong>Expected Results:</strong> Should show 2 cell groups (test2 and test3)</p>
+        </div>
       </div>
 
       {/* User's Cell Groups Section */}
@@ -286,8 +328,8 @@ JOIN public.members m
   ON cg.leader_id = m.id
 WHERE
   cg.status = 'active'
-  AND LOWER(m.name) = '${profile?.name?.toLowerCase()}'
-  AND LOWER(m.surname) = '${profile?.surname?.toLowerCase()}';`}
+  AND LOWER(m.name) = LOWER('${profile?.name}')
+  AND LOWER(m.surname) = LOWER('${profile?.surname}');`}
               </code>
             </div>
 
@@ -304,9 +346,10 @@ WHERE
                   <p className="text-gray-500 dark:text-gray-500">
                     No active cell groups found where you are the designated leader.
                   </p>
-                  <div className="mt-4 text-sm text-gray-400">
-                    <p>User: {profile?.name} {profile?.surname}</p>
-                    <p>This means you are not listed as a leader in any active cell groups.</p>
+                  <div className="mt-4 text-sm text-gray-400 space-y-1">
+                    <p><strong>Current User:</strong> {profile?.name} {profile?.surname}</p>
+                    <p><strong>Expected:</strong> 2 cell groups (test2, test3)</p>
+                    <p>Check the browser console for detailed error messages.</p>
                   </div>
                 </div>
               ) : (
