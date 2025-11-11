@@ -162,6 +162,7 @@ const cloudService = {
     try {
       console.log('Updating member:', memberId, updates);
 
+      // Handle empty string for UUID fields - convert to null
       const updateData: any = {
         name: updates.name,
         surname: updates.surname,
@@ -176,7 +177,7 @@ const cloudService = {
         can_view_own_data: Boolean(updates.can_view_own_data),
         login_username: updates.login_username || null,
         login_pin: updates.login_pin || null,
-        cell_group_id: updates.cell_group_id,
+        cell_group_id: updates.cell_group_id === '' ? null : updates.cell_group_id,
         status: updates.status,
         updated_at: new Date().toISOString()
       };
@@ -1656,9 +1657,12 @@ const Admin = () => {
                     type="text"
                     value={userFormData.cell_group_id}
                     onChange={(e) => setUserFormData(prev => ({...prev, cell_group_id: e.target.value}))}
-                    placeholder="Enter cell group ID"
+                    placeholder="Enter cell group ID (leave empty for none)"
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  <p className="text-xs text-gray-500">
+                    Leave empty if the user doesn't belong to any cell group
+                  </p>
                 </div>
 
                 <div className="space-y-4">
