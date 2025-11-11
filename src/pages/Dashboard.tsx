@@ -120,7 +120,6 @@ interface UserCellGroupQueryResult {
   status: string;
   leader_name: string;
   leader_surname: string;
-  leader_id: string;
 }
 
 // Permission checking utility
@@ -179,124 +178,115 @@ const Dashboard = () => {
   const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
   const currentUserPermissions = profile?.permissions || [];
 
-  // Check if user is a group leader (based on role)
+  // Check if user is a group leader
   const isGroupLeader = profile?.role === 'group_leader' || profile?.role === 'leader';
 
-  // Execute the SQL query using Supabase - UPDATED to check group_leader role
+  // Execute the SQL query using Supabase - FIXED for assigned_groups
   const fetchUserCellGroups = async () => {
     try {
-      console.log('🔍 Checking user role:', profile?.role);
-      console.log('👤 User is group leader:', isGroupLeader);
+      console.log('🔍 User role:', profile?.role);
+      console.log('👑 Is admin:', currentUserIsAdmin);
+      console.log('👥 Is group leader:', isGroupLeader);
+      console.log('📋 Assigned groups:', profile?.assigned_groups);
 
-      // If user is not a group leader, return empty array
-      if (!isGroupLeader) {
-        console.log('❌ User is not a group leader, skipping cell group fetch');
-        return [];
-      }
+      if (currentUserIsAdmin) {
+        // Admins see ALL active groups
+        console.log('🔄 Fetching ALL groups for admin...');
+        const { data: allGroups, error: allError } = await supabase
+          .from('cell_groups')
+          .select(`
+            *,
+            leader:leader_id(name, surname)
+          `)
+          .eq('status', 'active')
+          .order('name');
 
-      if (!profile?.id) {
-        console.log('No user profile ID available');
-        return [];
-      }
+        if (allError) {
+          console.error('Error fetching all groups for admin:', allError);
+          return [];
+        }
 
-      console.log(`Executing SQL query for group leader: ${profile.name} ${profile.surname}`);
-
-      // Get ALL active cell groups first
-      const { data: allCellGroups, error: allGroupsError } = await supabase
-        .from('cell_groups')
-        .select('*')
-        .eq('status', 'active')
-        .order('name');
-
-      if (allGroupsError) {
-        console.error('Error fetching all cell groups:', allGroupsError);
-        return [];
-      }
-
-      console.log('📋 All active cell groups:', allCellGroups);
-
-      // For group leaders, show ALL active cell groups (not just the ones they lead)
-      // This allows group leaders to see all groups in the church
-      const userGroups: UserCellGroupQueryResult[] = (allCellGroups || []).map(group => {
-        // Try to get leader information for each group
-        return {
+        const userGroups: UserCellGroupQueryResult[] = (allGroups || []).map(group => ({
           group_id: group.id,
           group_name: group.name,
           location: group.location,
           meeting_day: group.meeting_day,
           meeting_time: group.meeting_time,
           status: group.status || 'active',
-          leader_name: 'Loading...', // We'll update this below
-          leader_surname: '',
-          leader_id: group.leader_id || ''
-        };
-      });
+          leader_name: group.leader?.name || 'Unknown',
+          leader_surname: group.leader?.surname || ''
+        }));
 
-      // Fetch leader details for each group
-      const groupsWithLeaders = await Promise.all(
-        userGroups.map(async (group) => {
-          if (group.leader_id) {
-            const { data: leaderData } = await supabase
-              .from('members')
-              .select('name, surname')
-              .eq('id', group.leader_id)
-              .single();
+        console.log(`✅ Admin sees ${userGroups.length} groups`);
+        return userGroups;
 
-            if (leaderData) {
-              return {
-                ...group,
-                leader_name: leaderData.name || 'Unknown',
-                leader_surname: leaderData.surname || ''
-              };
-            }
-          }
-          return group;
-        })
-      );
+      } else if (isGroupLeader && profile?.assigned_groups && profile.assigned_groups.length > 0) {
+        // Group leaders see ONLY their assigned groups
+        console.log('🔄 Fetching assigned groups for group leader...');
+        const { data: assignedGroups, error: assignedError } = await supabase
+          .from('cell_groups')
+          .select(`
+            *,
+            leader:leader_id(name, surname)
+          `)
+          .eq('status', 'active')
+          .in('id', profile.assigned_groups)
+          .order('name');
 
-      console.log(`✅ Found ${groupsWithLeaders.length} cell groups for group leader view`);
-      return groupsWithLeaders;
+        if (assignedError) {
+          console.error('Error fetching assigned groups:', assignedError);
+          return [];
+        }
+
+        const userGroups: UserCellGroupQueryResult[] = (assignedGroups || []).map(group => ({
+          group_id: group.id,
+          group_name: group.name,
+          location: group.location,
+          meeting_day: group.meeting_day,
+          meeting_time: group.meeting_time,
+          status: group.status || 'active',
+          leader_name: group.leader?.name || 'Unknown',
+          leader_surname: group.leader?.surname || ''
+        }));
+
+        console.log(`✅ Group leader sees ${userGroups.length} assigned groups`);
+        return userGroups;
+
+      } else {
+        // Regular members see groups where they are the leader
+        console.log('🔄 Fetching groups where user is leader...');
+        const { data: leaderGroups, error: leaderError } = await supabase
+          .from('cell_groups')
+          .select(`
+            *,
+            leader:leader_id(name, surname)
+          `)
+          .eq('status', 'active')
+          .eq('leader_id', profile?.id)
+          .order('name');
+
+        if (leaderError) {
+          console.error('Error fetching leader groups:', leaderError);
+          return [];
+        }
+
+        const userGroups: UserCellGroupQueryResult[] = (leaderGroups || []).map(group => ({
+          group_id: group.id,
+          group_name: group.name,
+          location: group.location,
+          meeting_day: group.meeting_day,
+          meeting_time: group.meeting_time,
+          status: group.status || 'active',
+          leader_name: group.leader?.name || 'Unknown',
+          leader_surname: group.leader?.surname || ''
+        }));
+
+        console.log(`✅ Regular member sees ${userGroups.length} groups as leader`);
+        return userGroups;
+      }
 
     } catch (error) {
       console.error('Error fetching user cell groups:', error);
-      return [];
-    }
-  };
-
-  // Alternative method: Get groups where user is specifically the leader
-  const fetchGroupsWhereUserIsLeader = async () => {
-    try {
-      if (!profile?.id) return [];
-
-      const { data: leaderGroups, error } = await supabase
-        .from('cell_groups')
-        .select('*')
-        .eq('leader_id', profile.id)
-        .eq('status', 'active')
-        .order('name');
-
-      if (error) {
-        console.error('Error fetching groups where user is leader:', error);
-        return [];
-      }
-
-      const userGroups: UserCellGroupQueryResult[] = (leaderGroups || []).map(group => ({
-        group_id: group.id,
-        group_name: group.name,
-        location: group.location,
-        meeting_day: group.meeting_day,
-        meeting_time: group.meeting_time,
-        status: group.status || 'active',
-        leader_name: profile.name || '',
-        leader_surname: profile.surname || '',
-        leader_id: group.leader_id || ''
-      }));
-
-      console.log(`👑 Groups where user is direct leader: ${userGroups.length}`);
-      return userGroups;
-
-    } catch (error) {
-      console.error('Error in fetchGroupsWhereUserIsLeader:', error);
       return [];
     }
   };
@@ -428,23 +418,8 @@ const Dashboard = () => {
       // Load user's cell group information
       await loadUserCellGroupInfo();
 
-      // Load user's cell groups based on their role
-      let userGroups: UserCellGroupQueryResult[] = [];
-      
-      if (isGroupLeader) {
-        console.log('🔄 Fetching cell groups for group leader...');
-        // Group leaders can see ALL active cell groups
-        userGroups = await fetchUserCellGroups();
-      } else if (currentUserIsAdmin) {
-        console.log('🔄 Fetching all cell groups for admin...');
-        // Admins can see all groups
-        userGroups = await fetchUserCellGroups();
-      } else {
-        console.log('🔄 User is regular member, showing limited groups...');
-        // Regular members only see groups they lead
-        userGroups = await fetchGroupsWhereUserIsLeader();
-      }
-
+      // Load user's cell groups based on permissions
+      const userGroups = await fetchUserCellGroups();
       setUserCellGroups(userGroups);
 
       // Calculate stats with filtered data
@@ -822,6 +797,11 @@ const Dashboard = () => {
             }`}>
               {currentUserIsAdmin ? 'Administrator' : isGroupLeader ? 'Group Leader' : (profile?.role || 'Member')}
             </span>
+            {isGroupLeader && profile?.assigned_groups && (
+              <span className="text-xs text-gray-500">
+                {profile.assigned_groups.length} assigned groups
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -850,14 +830,19 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* User's Cell Groups Section - UPDATED for group_leader role */}
+      {/* User's Cell Groups Section - FIXED for assigned_groups */}
       <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6 hover:shadow-lg transition-all duration-300">
         <button 
           onClick={() => toggleSection('userGroups')}
           className="w-full flex justify-between items-center hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
         >
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-            {isGroupLeader ? 'All Cell Groups (Group Leader View)' : 'My Cell Groups'}
+            {currentUserIsAdmin 
+              ? 'All Cell Groups' 
+              : isGroupLeader 
+                ? 'My Assigned Cell Groups' 
+                : 'My Cell Groups'
+            }
           </h2>
           {expandedSections.userGroups ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
         </button>
@@ -867,34 +852,37 @@ const Dashboard = () => {
             {/* SQL Query Display */}
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-6">
               <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
-                {isGroupLeader ? 'Group Leader Access' : 'SQL Query Being Executed:'}
+                {currentUserIsAdmin 
+                  ? 'Admin View - All Groups' 
+                  : isGroupLeader 
+                    ? 'Group Leader View - Assigned Groups Only'
+                    : 'Member View - Groups You Lead'
+                }
               </h3>
               <code className="bg-gray-100 dark:bg-gray-600 p-3 rounded text-sm block overflow-x-auto">
-                {isGroupLeader 
-                  ? `// Group leaders can view ALL active cell groups
+                {currentUserIsAdmin 
+                  ? `// Admin sees all active groups
 SELECT * FROM cell_groups 
 WHERE status = 'active' 
 ORDER BY name;`
-                  : `SELECT
-  cg.id AS group_id,
-  cg.name AS group_name,
-  cg.location,
-  cg.meeting_day,
-  cg.meeting_time,
-  cg.status,
-  m.name AS leader_name,
-  m.surname AS leader_surname
-FROM public.cell_groups cg
-JOIN public.members m
-  ON cg.leader_id = m.id
-WHERE
-  cg.status = 'active'
-  AND m.id = '${profile?.id}';`}
+                  : isGroupLeader 
+                    ? `// Group leader sees only assigned groups
+SELECT * FROM cell_groups 
+WHERE status = 'active' 
+AND id IN (${profile?.assigned_groups?.map(id => `'${id}'`).join(', ') || 'none'})
+ORDER BY name;`
+                    : `// Regular member sees groups they lead
+SELECT * FROM cell_groups 
+WHERE status = 'active' 
+AND leader_id = '${profile?.id}'
+ORDER BY name;`}
               </code>
               <p className="text-gray-600 dark:text-gray-400 text-sm mt-2">
-                {isGroupLeader 
-                  ? 'As a Group Leader, you have access to view all active cell groups in the church.'
-                  : 'This query shows cell groups where you are the designated leader.'
+                {currentUserIsAdmin 
+                  ? 'As an administrator, you can view all active cell groups.'
+                  : isGroupLeader 
+                    ? `As a Group Leader, you can only view the ${profile?.assigned_groups?.length || 0} cell groups assigned to you.`
+                    : 'You can view cell groups where you are the designated leader.'
                 }
               </p>
             </div>
@@ -902,19 +890,31 @@ WHERE
             {/* Results */}
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-white mb-4">
-                {isGroupLeader ? 'All Active Cell Groups' : 'My Cell Groups'} ({userCellGroups.length} found)
+                {currentUserIsAdmin 
+                  ? 'All Active Cell Groups' 
+                  : isGroupLeader 
+                    ? 'My Assigned Cell Groups'
+                    : 'Cell Groups I Lead'
+                } ({userCellGroups.length} found)
               </h3>
 
               {userCellGroups.length === 0 ? (
                 <div className="text-center py-8">
                   <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                   <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                    {isGroupLeader ? 'No Active Cell Groups' : 'No Cell Groups Found'}
+                    {currentUserIsAdmin 
+                      ? 'No Active Cell Groups' 
+                      : isGroupLeader 
+                        ? 'No Assigned Cell Groups'
+                        : 'No Cell Groups Found'
+                    }
                   </h4>
                   <p className="text-gray-500 dark:text-gray-500">
-                    {isGroupLeader 
+                    {currentUserIsAdmin 
                       ? 'There are no active cell groups in the system.'
-                      : 'No active cell groups found where you are the designated leader.'
+                      : isGroupLeader 
+                        ? 'You have not been assigned to any cell groups.'
+                        : 'No cell groups found where you are the designated leader.'
                     }
                   </p>
                 </div>
@@ -931,7 +931,6 @@ WHERE
                         <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3">Leader Name</th>
                         <th className="px-4 py-3">Leader Surname</th>
-                        {isGroupLeader && <th className="px-4 py-3">Leader ID</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -953,9 +952,6 @@ WHERE
                           </td>
                           <td className="px-4 py-3">{group.leader_name}</td>
                           <td className="px-4 py-3">{group.leader_surname}</td>
-                          {isGroupLeader && (
-                            <td className="px-4 py-3 font-mono text-xs">{group.leader_id}</td>
-                          )}
                         </tr>
                       ))}
                     </tbody>
