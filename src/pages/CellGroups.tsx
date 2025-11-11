@@ -27,7 +27,20 @@ interface Member {
   phone: string | null;
 }
 
-// Permission checking utility
+// Interface for the SQL query result - matching Dashboard
+interface UserCellGroupQueryResult {
+  group_id: string;
+  group_name: string;
+  location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  status: string;
+  leader_name: string;
+  leader_surname: string;
+  leader_id: string;
+}
+
+// Permission checking utility - matching Dashboard
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
@@ -35,116 +48,127 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
 const CellGroups = () => {
   const { profile } = useAuth();
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [userCellGroups, setUserCellGroups] = useState<UserCellGroupQueryResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check user permissions
+  // Check user permissions - matching Dashboard
   const currentUserIsAdmin = profile?.isAdmin || (profile?.permissions && hasPermission(profile.permissions, 'admin_access'));
   const currentUserPermissions = profile?.permissions || [];
 
-  // Fetch cell groups based on user role
-  const fetchCellGroups = async () => {
+  // Execute the EXACT same SQL query as Dashboard - matching the Dashboard implementation
+  const fetchUserCellGroups = async () => {
     try {
       if (!profile?.id) {
         console.log('No user profile ID available');
         return [];
       }
 
-      console.log(`Fetching cell groups for user: ${profile.name} ${profile.surname}, Role: ${profile.role}, Admin: ${currentUserIsAdmin}`);
+      console.log(`Executing SQL query for user ID: ${profile.id}, Role: ${profile.role}, Admin: ${currentUserIsAdmin}`);
 
-      let cellGroupsData: CellGroup[] = [];
+      let userGroups: UserCellGroupQueryResult[] = [];
 
       if (currentUserIsAdmin) {
-        // Admin can see all active cell groups
-        const { data, error: cellGroupsError } = await supabase
+        // Admin: Get all active cell groups
+        const { data: cellGroupsData, error: groupsError } = await supabase
           .from('cell_groups')
-          .select('*')
+          .select(`
+            id,
+            name,
+            location,
+            meeting_day,
+            meeting_time,
+            status,
+            leader_id,
+            members!cell_groups_leader_id_fkey (
+              name,
+              surname
+            )
+          `)
           .eq('status', 'active')
           .order('name');
 
-        if (cellGroupsError) throw cellGroupsError;
-        cellGroupsData = data || [];
-      } else if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
-        // Leader can see only their assigned groups
-        const { data, error: cellGroupsError } = await supabase
-          .from('cell_groups')
-          .select('*')
-          .eq('status', 'active')
-          .in('id', profile.assigned_groups)
-          .order('name');
-
-        if (cellGroupsError) throw cellGroupsError;
-        cellGroupsData = data || [];
-      } else {
-        // Regular member - show groups where they are the leader
-        const { data, error: cellGroupsError } = await supabase
-          .from('cell_groups')
-          .select('*')
-          .eq('status', 'active')
-          .eq('leader_id', profile.id)
-          .order('name');
-
-        if (cellGroupsError) throw cellGroupsError;
-        cellGroupsData = data || [];
-      }
-
-      console.log('Fetched cell groups:', cellGroupsData);
-
-      // If no cell groups found for regular member, check if they are a member of any group
-      if (cellGroupsData.length === 0 && !currentUserIsAdmin && (!profile?.assigned_groups || profile.assigned_groups.length === 0)) {
-        // Check if user is a member of any cell group
-        const { data: memberData, error: memberError } = await supabase
-          .from('members')
-          .select('cell_group_id')
-          .eq('id', profile.id)
-          .single();
-
-        if (!memberError && memberData?.cell_group_id) {
-          const { data: memberGroups, error: memberGroupsError } = await supabase
-            .from('cell_groups')
-            .select('*')
-            .eq('id', memberData.cell_group_id)
-            .eq('status', 'active');
-
-          if (!memberGroupsError && memberGroups) {
-            cellGroupsData = memberGroups;
-          }
+        if (groupsError) {
+          console.error('Error fetching cell groups:', groupsError);
+          return [];
         }
+
+        userGroups = (cellGroupsData || []).map(group => ({
+          group_id: group.id,
+          group_name: group.name,
+          location: group.location,
+          meeting_day: group.meeting_day,
+          meeting_time: group.meeting_time,
+          status: group.status || 'active',
+          leader_name: group.members?.name || '',
+          leader_surname: group.members?.surname || '',
+          leader_id: group.leader_id || ''
+        }));
+      } else {
+        // Non-admin users (Cell Group Leaders): ONLY get groups where they are the leader
+        const { data: cellGroupsData, error: groupsError } = await supabase
+          .from('cell_groups')
+          .select(`
+            id,
+            name,
+            location,
+            meeting_day,
+            meeting_time,
+            status,
+            leader_id,
+            members!cell_groups_leader_id_fkey (
+              name,
+              surname
+            )
+          `)
+          .eq('leader_id', profile.id)
+          .eq('status', 'active')
+          .order('name');
+
+        if (groupsError) {
+          console.error('Error fetching cell groups:', groupsError);
+          return [];
+        }
+
+        userGroups = (cellGroupsData || []).map(group => ({
+          group_id: group.id,
+          group_name: group.name,
+          location: group.location,
+          meeting_day: group.meeting_day,
+          meeting_time: group.meeting_time,
+          status: group.status || 'active',
+          leader_name: group.members?.name || '',
+          leader_surname: group.members?.surname || '',
+          leader_id: group.leader_id || ''
+        }));
       }
 
-      // Fetch all members to get leader information
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select('*')
-        .order('name');
-
-      if (membersError) throw membersError;
-
-      console.log('Fetched members:', membersData);
-
-      // Add leader information to cell groups
-      const cellGroupsWithLeaders = cellGroupsData.map(cellGroup => {
-        const leader = membersData?.find(member => member.id === cellGroup.leader_id);
-        return {
-          ...cellGroup,
-          leader: leader ? {
-            id: leader.id,
-            name: leader.name,
-            surname: leader.surname,
-            email: leader.email,
-            phone: leader.phone
-          } : null
-        };
-      });
-
-      console.log(`Fetched ${cellGroupsWithLeaders.length} cell groups for user`);
-      console.log('User cell groups:', cellGroupsWithLeaders);
-
-      return cellGroupsWithLeaders as CellGroup[];
+      console.log(`Found ${userGroups.length} cell groups for user: ${profile.name} ${profile.surname}`);
+      return userGroups;
     } catch (error) {
-      console.error('Error in fetchCellGroups:', error);
-      throw error;
+      console.error('Error fetching user cell groups:', error);
+      return [];
     }
+  };
+
+  // Convert query results to CellGroup format for display
+  const convertToCellGroupFormat = (queryResults: UserCellGroupQueryResult[]): CellGroup[] => {
+    return queryResults.map(result => ({
+      id: result.group_id,
+      name: result.group_name,
+      location: result.location,
+      meeting_day: result.meeting_day,
+      meeting_time: result.meeting_time,
+      leader_id: result.leader_id,
+      status: result.status,
+      leader: {
+        id: result.leader_id,
+        name: result.leader_name,
+        surname: result.leader_surname,
+        email: null,
+        phone: null
+      }
+    }));
   };
 
   const loadData = async () => {
@@ -152,8 +176,12 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
-      const userCellGroups = await fetchCellGroups();
-      setCellGroups(userCellGroups);
+      const queryResults = await fetchUserCellGroups();
+      setUserCellGroups(queryResults);
+      
+      // Convert to CellGroup format for the table display
+      const formattedCellGroups = convertToCellGroupFormat(queryResults);
+      setCellGroups(formattedCellGroups);
       
     } catch (error: any) {
       console.error('Error loading data:', error);
@@ -172,26 +200,22 @@ const CellGroups = () => {
   // Get appropriate header text based on user role
   const getHeaderText = () => {
     if (currentUserIsAdmin) {
-      return "All Cell Groups";
-    } else if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
-      return `My Managed Cell Groups`;
+      return "All Cell Groups (Admin View)";
     } else {
-      return `My Cell Groups`;
+      return "My Cell Groups";
     }
   };
 
   // Get appropriate description based on user role
   const getDescription = () => {
     if (currentUserIsAdmin) {
-      return "Showing all active cell groups (Admin View)";
-    } else if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
-      return "Showing cell groups you are assigned to manage";
+      return "Showing all active cell groups - Administrative Access";
     } else {
-      return "Showing cell groups where you are the leader or member";
+      return "Showing cell groups where you are the designated leader";
     }
   };
 
-  // Generate appropriate SQL query based on user role
+  // Generate appropriate SQL query based on user role - EXACTLY matching Dashboard
   const getSqlQuery = () => {
     if (currentUserIsAdmin) {
       return `SELECT
@@ -202,27 +226,12 @@ const CellGroups = () => {
   cg.meeting_time,
   cg.status,
   m.name AS leader_name,
-  m.surname AS leader_surname
+  m.surname AS leader_surname,
+  cg.leader_id
 FROM public.cell_groups cg
 JOIN public.members m
   ON cg.leader_id = m.id
 WHERE cg.status = 'active';`;
-    } else if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
-      return `SELECT
-  cg.id AS group_id,
-  cg.name AS group_name,
-  cg.location,
-  cg.meeting_day,
-  cg.meeting_time,
-  cg.status,
-  m.name AS leader_name,
-  m.surname AS leader_surname
-FROM public.cell_groups cg
-JOIN public.members m
-  ON cg.leader_id = m.id
-WHERE
-  cg.status = 'active'
-  AND cg.id IN (${profile.assigned_groups.map(id => `'${id}'`).join(', ')});`;
     } else {
       return `SELECT
   cg.id AS group_id,
@@ -232,15 +241,14 @@ WHERE
   cg.meeting_time,
   cg.status,
   m.name AS leader_name,
-  m.surname AS leader_surname
+  m.surname AS leader_surname,
+  cg.leader_id
 FROM public.cell_groups cg
 JOIN public.members m
   ON cg.leader_id = m.id
 WHERE
   cg.status = 'active'
-  AND (cg.leader_id = '${profile?.id}' OR cg.id IN (
-    SELECT cell_group_id FROM members WHERE id = '${profile?.id}'
-  ));`;
+  AND cg.leader_id = '${profile?.id}';`;
     }
   };
 
@@ -301,13 +309,13 @@ WHERE
           </code>
         </div>
 
-        {/* Results */}
-        <div className="bg-white rounded-lg p-6 shadow-sm border">
+        {/* Results - Show both formats for clarity */}
+        <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Query Results ({cellGroups.length} cell groups found)
+            Query Results ({userCellGroups.length} cell groups found)
           </h2>
 
-          {cellGroups.length === 0 ? (
+          {userCellGroups.length === 0 ? (
             <div className="text-center py-8">
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <div className="text-gray-400 text-2xl">∅</div>
@@ -316,7 +324,7 @@ WHERE
               <p className="text-gray-500">
                 {currentUserIsAdmin 
                   ? "No active cell groups found in the system."
-                  : "No cell groups found for your account."
+                  : "No active cell groups found where you are the designated leader."
                 }
               </p>
             </div>
@@ -333,14 +341,14 @@ WHERE
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Leader Name</th>
                     <th className="px-4 py-3">Leader Surname</th>
-                    {currentUserIsAdmin && <th className="px-4 py-3">Leader ID</th>}
+                    <th className="px-4 py-3">Leader ID</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {cellGroups.map((group) => (
-                    <tr key={group.id} className="bg-white border-b hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs">{group.id}</td>
-                      <td className="px-4 py-3 font-medium">{group.name}</td>
+                  {userCellGroups.map((group) => (
+                    <tr key={group.group_id} className="bg-white border-b hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono text-xs">{group.group_id}</td>
+                      <td className="px-4 py-3 font-medium">{group.group_name}</td>
                       <td className="px-4 py-3">{group.location || 'N/A'}</td>
                       <td className="px-4 py-3">{group.meeting_day || 'N/A'}</td>
                       <td className="px-4 py-3">{group.meeting_time || 'N/A'}</td>
@@ -350,14 +358,12 @@ WHERE
                             ? 'bg-green-100 text-green-800' 
                             : 'bg-gray-100 text-gray-800'
                         }`}>
-                          {group.status || 'unknown'}
+                          {group.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3">{group.leader?.name || 'N/A'}</td>
-                      <td className="px-4 py-3">{group.leader?.surname || 'N/A'}</td>
-                      {currentUserIsAdmin && (
-                        <td className="px-4 py-3 font-mono text-xs">{group.leader_id || 'N/A'}</td>
-                      )}
+                      <td className="px-4 py-3">{group.leader_name}</td>
+                      <td className="px-4 py-3">{group.leader_surname}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{group.leader_id}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -366,12 +372,21 @@ WHERE
           )}
         </div>
 
-        {/* Raw Data Display */}
-        <div className="bg-white rounded-lg p-6 mt-6 shadow-sm border">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Raw Data</h2>
-          <pre className="bg-gray-100 p-4 rounded text-sm overflow-x-auto">
-            {JSON.stringify(cellGroups, null, 2)}
-          </pre>
+        {/* Raw Data Display - Show both formats */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-lg p-6 shadow-sm border">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Raw Query Results</h2>
+            <pre className="bg-gray-100 p-4 rounded text-sm overflow-x-auto max-h-96">
+              {JSON.stringify(userCellGroups, null, 2)}
+            </pre>
+          </div>
+
+          <div className="bg-white rounded-lg p-6 shadow-sm border">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Formatted Cell Groups</h2>
+            <pre className="bg-gray-100 p-4 rounded text-sm overflow-x-auto max-h-96">
+              {JSON.stringify(cellGroups, null, 2)}
+            </pre>
+          </div>
         </div>
       </div>
     </div>
