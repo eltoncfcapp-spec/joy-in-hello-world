@@ -405,6 +405,67 @@ const cloudService = {
       console.error('Error removing user from group:', error);
       throw error;
     }
+  },
+
+  // NEW FUNCTION: Update cell group leader
+  async updateCellGroupLeader(groupId: string | null, leaderId: string | null): Promise<void> {
+    try {
+      if (groupId) {
+        // Update the cell group to set the leader
+        const { error } = await supabase
+          .from('cell_groups')
+          .update({
+            leader_id: leaderId,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', groupId);
+
+        if (error) {
+          console.error('Error updating cell group leader:', error);
+          throw error;
+        }
+        console.log(`Updated cell group ${groupId} leader to ${leaderId}`);
+      }
+    } catch (error) {
+      console.error('Error updating cell group leader:', error);
+      throw error;
+    }
+  },
+
+  // NEW FUNCTION: Remove user as leader from old cell group
+  async removeUserAsLeaderFromOldGroup(userId: string): Promise<void> {
+    try {
+      // Find all cell groups where this user is the leader
+      const { data: groups, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .eq('leader_id', userId);
+
+      if (error) {
+        console.error('Error finding groups where user is leader:', error);
+        throw error;
+      }
+
+      // Remove user as leader from all groups
+      for (const group of groups || []) {
+        const { error: updateError } = await supabase
+          .from('cell_groups')
+          .update({
+            leader_id: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', group.id);
+
+        if (updateError) {
+          console.error(`Error removing user as leader from group ${group.name}:`, updateError);
+          throw updateError;
+        }
+        console.log(`Removed user ${userId} as leader from group ${group.name}`);
+      }
+    } catch (error) {
+      console.error('Error removing user as leader from old groups:', error);
+      throw error;
+    }
   }
 };
 
@@ -485,6 +546,7 @@ const Admin = () => {
     meeting_time: string;
     login_username: string;
     status: string;
+    leader_id: string;
   }>({
     name: '',
     description: '',
@@ -492,7 +554,8 @@ const Admin = () => {
     meeting_day: '',
     meeting_time: '',
     login_username: '',
-    status: 'active'
+    status: 'active',
+    leader_id: ''
   });
 
   // Check permissions and load data
@@ -811,7 +874,8 @@ const Admin = () => {
         meeting_day: group.meeting_day || '',
         meeting_time: group.meeting_time || '',
         login_username: group.login_username || '',
-        status: group.status || 'active'
+        status: group.status || 'active',
+        leader_id: group.leader_id || ''
       });
       setShowGroupCredentials(false);
       setGeneratedGroupCredentials(null);
@@ -846,7 +910,8 @@ const Admin = () => {
       meeting_day: '',
       meeting_time: '',
       login_username: '',
-      status: 'active'
+      status: 'active',
+      leader_id: ''
     });
     setShowCredentials(false);
     setShowGroupCredentials(false);
@@ -870,6 +935,25 @@ const Admin = () => {
       console.log('Starting user update for:', selectedUser.id);
       console.log('Update data:', userFormData);
 
+      const oldCellGroupId = selectedUser.cell_group_id;
+      const newCellGroupId = userFormData.cell_group_id === '' ? null : userFormData.cell_group_id;
+
+      // If user is a group leader and their cell group is changing, update the cell group leader
+      if (userFormData.role === 'group_leader' && oldCellGroupId !== newCellGroupId) {
+        console.log('User is a group leader and cell group is changing, updating cell group leaders...');
+        
+        // Remove user as leader from old cell group
+        if (oldCellGroupId) {
+          await cloudService.updateCellGroupLeader(oldCellGroupId, null);
+        }
+        
+        // Set user as leader for new cell group
+        if (newCellGroupId) {
+          await cloudService.updateCellGroupLeader(newCellGroupId, selectedUser.id);
+        }
+      }
+
+      // Update the user
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
         name: userFormData.name,
         surname: userFormData.surname,
@@ -884,7 +968,7 @@ const Admin = () => {
         can_view_own_data: userFormData.can_view_own_data,
         login_username: userFormData.login_username,
         login_pin: userFormData.login_pin,
-        cell_group_id: userFormData.cell_group_id,
+        cell_group_id: newCellGroupId,
         status: userFormData.status
       });
 
@@ -892,6 +976,11 @@ const Admin = () => {
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id ? updatedMember : m
       ));
+
+      // Refresh cell groups to reflect leader changes
+      const cellGroupsData = await cloudService.getCellGroups();
+      setCellGroups(cellGroupsData);
+      setActiveCellGroups(cellGroupsData.filter(group => group.status === 'active'));
       
       alert('User updated successfully!');
       closeModal();
@@ -923,7 +1012,8 @@ const Admin = () => {
         meeting_day: groupFormData.meeting_day,
         meeting_time: groupFormData.meeting_time,
         login_username: groupFormData.login_username,
-        status: groupFormData.status
+        status: groupFormData.status,
+        leader_id: groupFormData.leader_id === '' ? null : groupFormData.leader_id
       });
 
       // Replace the existing group data with the updated one
@@ -1205,8 +1295,13 @@ const Admin = () => {
                       <p className="text-xs text-gray-500">
                         Members: {group.current_member_count || 0}
                       </p>
+                      {group.leader_id && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Leader: {members.find(m => m.id === group.leader_id)?.name} {members.find(m => m.id === group.leader_id)?.surname}
+                        </p>
+                      )}
                       {group.login_username && (
-                        <p className="text-xs text-blue-600 mt-2">
+                        <p className="text-xs text-blue-600 mt-1">
                           <Key className="h-3 w-3 inline mr-1" />
                           Group Login: {group.login_username}
                         </p>
@@ -1299,7 +1394,7 @@ const Admin = () => {
                         </p>
                         {member.cell_group_id && (
                           <p className="text-xs text-gray-500">
-                            Cell Group ID: {member.cell_group_id}
+                            Cell Group: {cellGroups.find(g => g.id === member.cell_group_id)?.name || member.cell_group_id}
                           </p>
                         )}
                         {member.login_username && (
@@ -1469,6 +1564,11 @@ const Admin = () => {
                           <p className="text-sm text-gray-500">
                             {member.email} • {roles.find(r => r.value === member.role)?.label || member.role || 'member'}
                           </p>
+                          {member.cell_group_id && (
+                            <p className="text-xs text-gray-500">
+                              Cell Group: {cellGroups.find(g => g.id === member.cell_group_id)?.name || member.cell_group_id}
+                            </p>
+                          )}
                           {member.assigned_groups && member.assigned_groups.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1">
                               {member.assigned_groups.map((group, index) => (
@@ -1525,7 +1625,9 @@ const Admin = () => {
                     <p className="text-gray-600">{selectedUser.email}</p>
                     <p className="text-sm text-gray-500">{selectedUser.phone}</p>
                     {selectedUser.cell_group_id && (
-                      <p className="text-sm text-gray-500">Cell Group ID: {selectedUser.cell_group_id}</p>
+                      <p className="text-sm text-gray-500">
+                        Current Cell Group: {cellGroups.find(g => g.id === selectedUser.cell_group_id)?.name || selectedUser.cell_group_id}
+                      </p>
                     )}
                     {selectedUser.assigned_groups && selectedUser.assigned_groups.length > 0 && (
                       <div className="mt-2">
@@ -1651,17 +1753,24 @@ const Admin = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700">
-                    Cell Group ID
+                    Cell Group
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={userFormData.cell_group_id}
                     onChange={(e) => setUserFormData(prev => ({...prev, cell_group_id: e.target.value}))}
-                    placeholder="Enter cell group ID (leave empty for none)"
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  >
+                    <option value="">No Cell Group</option>
+                    {cellGroups.map(group => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-xs text-gray-500">
-                    Leave empty if the user doesn't belong to any cell group
+                    {userFormData.role === 'group_leader' 
+                      ? 'Setting a cell group will automatically assign this user as the leader of that group'
+                      : 'Select the cell group this user belongs to'}
                   </p>
                 </div>
 
@@ -1936,6 +2045,11 @@ const Admin = () => {
                     <p className="text-sm text-gray-500">
                       Members: {selectedGroup.current_member_count || 0} • Status: {selectedGroup.status}
                     </p>
+                    {selectedGroup.leader_id && (
+                      <p className="text-sm text-blue-600">
+                        Leader: {members.find(m => m.id === selectedGroup.leader_id)?.name} {members.find(m => m.id === selectedGroup.leader_id)?.surname}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2022,41 +2136,62 @@ const Admin = () => {
                   </select>
                 </div>
 
-                <div className="space-y-4">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Group Login Credentials
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Group Leader
                   </label>
-                  
-                  {!selectedGroup.login_username && (
-                    <button
-                      onClick={() => handleGenerateGroupCredentials(selectedGroup)}
-                      disabled={loading}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                      {loading ? 'Generating...' : 'Generate Group Login Credentials'}
-                    </button>
-                  )}
-                  
-                  {showGroupCredentials && generatedGroupCredentials && (
-                    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-green-900">Generated Group Credentials</span>
-                        <button
-                          onClick={handleCopyGroupCredentials}
-                          className="flex items-center gap-1 text-green-700 hover:text-green-900"
-                        >
-                          <Copy className="h-4 w-4" />
-                          <span className="text-xs">Copy</span>
-                        </button>
-                      </div>
-                      <div>
-                        <span className="text-xs text-green-700">Group Username:</span>
-                        <p className="font-mono font-semibold text-green-900">{generatedGroupCredentials.username}</p>
-                      </div>
-                    </div>
-                  )}
+                  <select
+                    value={groupFormData.leader_id}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, leader_id: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">No Leader</option>
+                    {members
+                      .filter(member => member.role === 'group_leader' || member.role === 'pastor' || member.role === 'admin')
+                      .map(member => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} {member.surname} ({member.role})
+                        </option>
+                      ))
+                    }
+                  </select>
                 </div>
+              </div>
+
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Group Login Credentials
+                </label>
+                
+                {!selectedGroup.login_username && (
+                  <button
+                    onClick={() => handleGenerateGroupCredentials(selectedGroup)}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    {loading ? 'Generating...' : 'Generate Group Login Credentials'}
+                  </button>
+                )}
+                
+                {showGroupCredentials && generatedGroupCredentials && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-green-900">Generated Group Credentials</span>
+                      <button
+                        onClick={handleCopyGroupCredentials}
+                        className="flex items-center gap-1 text-green-700 hover:text-green-900"
+                      >
+                        <Copy className="h-4 w-4" />
+                        <span className="text-xs">Copy</span>
+                      </button>
+                    </div>
+                    <div>
+                      <span className="text-xs text-green-700">Group Username:</span>
+                      <p className="font-mono font-semibold text-green-900">{generatedGroupCredentials.username}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
