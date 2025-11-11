@@ -20,6 +20,7 @@ const CellGroups = () => {
   const [userCellGroups, setUserCellGroups] = useState<UserCellGroupQueryResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // Execute the EXACT SQL query from your example
   const fetchUserCellGroups = async () => {
@@ -31,8 +32,7 @@ const CellGroups = () => {
 
       console.log(`Executing SQL query for user ID: ${profile.id}, Name: ${profile.name}`);
 
-      // For ALL users (including cell group admins), ONLY show their own groups
-      // Using the EXACT SQL query structure from your example
+      // For ALL users, ONLY show their own groups using the EXACT SQL query structure
       const { data, error: queryError } = await supabase
         .from('cell_groups')
         .select(`
@@ -54,9 +54,9 @@ const CellGroups = () => {
         .order('name');
 
       if (queryError) {
-        console.error('Error fetching cell groups:', queryError);
+        console.error('Error with JOIN query:', queryError);
         
-        // If the JOIN query fails, try a simpler approach
+        // Fallback: try a simpler approach if JOIN fails
         const { data: fallbackData, error: fallbackError } = await supabase
           .from('cell_groups')
           .select('*')
@@ -66,7 +66,7 @@ const CellGroups = () => {
 
         if (fallbackError) {
           console.error('Error with fallback query:', fallbackError);
-          return [];
+          throw new Error(`Failed to fetch cell groups: ${fallbackError.message}`);
         }
 
         const fallbackGroups: UserCellGroupQueryResult[] = (fallbackData || []).map(group => ({
@@ -107,7 +107,7 @@ const CellGroups = () => {
       return userGroups;
     } catch (error) {
       console.error('Error fetching user cell groups:', error);
-      return [];
+      throw error;
     }
   };
 
@@ -115,16 +115,19 @@ const CellGroups = () => {
     try {
       setLoading(true);
       setError(null);
+      setDataLoaded(false);
       
       console.log('Starting data load...');
       const queryResults = await fetchUserCellGroups();
       console.log('Query results:', queryResults);
       
       setUserCellGroups(queryResults);
+      setDataLoaded(true);
       
     } catch (error: any) {
       console.error('Error loading data:', error);
       setError(`Failed to load cell groups data: ${error.message}`);
+      setDataLoaded(false);
     } finally {
       setLoading(false);
     }
@@ -138,6 +141,8 @@ const CellGroups = () => {
 
   // Generate the EXACT SQL query from your example
   const getSqlQuery = () => {
+    if (!profile?.id) return '';
+    
     return `SELECT 
   cg.id AS group_id, 
   cg.name AS group_name, 
@@ -150,20 +155,23 @@ const CellGroups = () => {
 FROM public.cell_groups cg 
 JOIN public.members m ON cg.leader_id = m.id 
 WHERE cg.status = 'active' 
-  AND m.id = '${profile?.id}';`;
+  AND m.id = '${profile.id}';`;
   };
 
+  // Show loading state while query is executing
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading cell groups...</p>
+          <p className="text-sm text-gray-500 mt-2">Executing SQL query...</p>
         </div>
       </div>
     );
   }
 
+  // Show error state if query failed
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
@@ -179,6 +187,18 @@ WHERE cg.status = 'active'
           >
             Retry
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Only show page content after data is loaded
+  if (!dataLoaded) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Preparing data...</p>
         </div>
       </div>
     );
@@ -289,7 +309,7 @@ WHERE cg.status = 'active'
           )}
         </div>
 
-        {/* Debug Information */}
+        {/* Query Information */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <h3 className="text-lg font-semibold text-blue-800 mb-2">Query Information</h3>
           <div className="text-sm text-blue-700">
@@ -297,6 +317,7 @@ WHERE cg.status = 'active'
             <p><strong>Current User Name:</strong> {profile?.name} {profile?.surname}</p>
             <p><strong>Groups Found:</strong> {userCellGroups.length}</p>
             <p><strong>Query Type:</strong> User-Specific Groups Only (JOIN with member ID filter)</p>
+            <p><strong>Data Loaded:</strong> {dataLoaded ? 'Yes' : 'No'}</p>
           </div>
         </div>
 
