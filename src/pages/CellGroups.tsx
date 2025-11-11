@@ -22,80 +22,68 @@ const CellGroups = () => {
   const [error, setError] = useState<string | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Execute the EXACT SQL query from your example
+  // Execute the EXACT SQL query with name and surname filter
   const fetchUserCellGroups = async () => {
     try {
-      if (!profile?.id) {
-        console.log('No user profile ID available');
+      if (!profile?.id || !profile?.name || !profile?.surname) {
+        console.log('No user profile name/surname available');
         return [];
       }
 
-      console.log(`Executing SQL query for user ID: ${profile.id}, Name: ${profile.name}`);
+      console.log(`Executing SQL query for user: ${profile.name} ${profile.surname}, ID: ${profile.id}`);
 
-      // For ALL users, ONLY show their own groups using the EXACT SQL query structure
-      const { data, error: queryError } = await supabase
+      // Method 1: Direct SQL query using rpc if available, or manual JOIN with name/surname filter
+      const { data: cellGroupsData, error: cellGroupsError } = await supabase
         .from('cell_groups')
-        .select(`
-          id,
-          name,
-          location,
-          meeting_day,
-          meeting_time,
-          status,
-          leader_id,
-          members!cell_groups_leader_id_fkey (
-            id,
-            name,
-            surname
-          )
-        `)
+        .select('*')
         .eq('status', 'active')
-        .eq('members.id', profile.id)  // CRITICAL: Only groups where current user is the leader
         .order('name');
 
-      if (queryError) {
-        console.error('Error with JOIN query:', queryError);
-        
-        // Fallback: try a simpler approach if JOIN fails
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from('cell_groups')
-          .select('*')
-          .eq('leader_id', profile.id)
-          .eq('status', 'active')
-          .order('name');
-
-        if (fallbackError) {
-          console.error('Error with fallback query:', fallbackError);
-          throw new Error(`Failed to fetch cell groups: ${fallbackError.message}`);
-        }
-
-        const fallbackGroups: UserCellGroupQueryResult[] = (fallbackData || []).map(group => ({
-          group_id: group.id,
-          group_name: group.name,
-          location: group.location,
-          meeting_day: group.meeting_day,
-          meeting_time: group.meeting_time,
-          status: group.status || 'active',
-          leader_name: profile.name || '',
-          leader_surname: profile.surname || '',
-          leader_id: group.leader_id || ''
-        }));
-
-        console.log(`Found ${fallbackGroups.length} cell groups using fallback query`);
-        return fallbackGroups;
+      if (cellGroupsError) {
+        console.error('Error fetching cell groups:', cellGroupsError);
+        throw new Error(`Failed to fetch cell groups: ${cellGroupsError.message}`);
       }
 
-      const userGroups: UserCellGroupQueryResult[] = (data || []).map(group => ({
-        group_id: group.id,
-        group_name: group.name,
-        location: group.location,
-        meeting_day: group.meeting_day,
-        meeting_time: group.meeting_time,
-        status: group.status || 'active',
-        leader_name: group.members?.name || profile.name || '',
-        leader_surname: group.members?.surname || profile.surname || '',
-        leader_id: group.leader_id || ''
-      }));
+      // Get all members to filter by name and surname
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+        throw new Error(`Failed to fetch members: ${membersError.message}`);
+      }
+
+      console.log('Fetched cell groups:', cellGroupsData);
+      console.log('Fetched members:', membersData);
+
+      // Manual JOIN implementation to match the exact SQL query with name/surname filter
+      const userGroups: UserCellGroupQueryResult[] = [];
+
+      cellGroupsData.forEach(cellGroup => {
+        // Find the leader member for this cell group
+        const leader = membersData.find(member => 
+          member.id === cellGroup.leader_id &&
+          member.name?.toLowerCase() === profile.name?.toLowerCase() &&
+          member.surname?.toLowerCase() === profile.surname?.toLowerCase()
+        );
+
+        // Only include groups where leader matches the current user's name and surname
+        if (leader) {
+          userGroups.push({
+            group_id: cellGroup.id,
+            group_name: cellGroup.name,
+            location: cellGroup.location,
+            meeting_day: cellGroup.meeting_day,
+            meeting_time: cellGroup.meeting_time,
+            status: cellGroup.status || 'active',
+            leader_name: leader.name,
+            leader_surname: leader.surname,
+            leader_id: cellGroup.leader_id || ''
+          });
+        }
+      });
 
       console.log(`Found ${userGroups.length} cell groups for user: ${profile.name} ${profile.surname}`);
       
@@ -139,9 +127,9 @@ const CellGroups = () => {
     }
   }, [profile]);
 
-  // Generate the EXACT SQL query from your example
+  // Generate the EXACT SQL query with name and surname filter
   const getSqlQuery = () => {
-    if (!profile?.id) return '';
+    if (!profile?.name || !profile?.surname) return '';
     
     return `SELECT 
   cg.id AS group_id, 
@@ -155,7 +143,8 @@ const CellGroups = () => {
 FROM public.cell_groups cg 
 JOIN public.members m ON cg.leader_id = m.id 
 WHERE cg.status = 'active' 
-  AND m.id = '${profile.id}';`;
+  AND LOWER(m.name) = '${profile.name?.toLowerCase()}'
+  AND LOWER(m.surname) = '${profile.surname?.toLowerCase()}';`;
   };
 
   // Show loading state while query is executing
@@ -165,7 +154,7 @@ WHERE cg.status = 'active'
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading cell groups...</p>
-          <p className="text-sm text-gray-500 mt-2">Executing SQL query...</p>
+          <p className="text-sm text-gray-500 mt-2">Executing SQL query with name/surname filter...</p>
         </div>
       </div>
     );
@@ -216,7 +205,7 @@ WHERE cg.status = 'active'
             Showing cell groups where you are the designated leader
           </p>
           <div className="mt-2 text-sm text-gray-500">
-            User ID: {profile?.id} | Name: {profile?.name} {profile?.surname}
+            User: {profile?.name} {profile?.surname} | ID: {profile?.id}
           </div>
         </div>
 
@@ -241,7 +230,7 @@ WHERE cg.status = 'active'
               </div>
               <h3 className="text-xl font-semibold text-gray-600 mb-2">No Cell Groups Found</h3>
               <p className="text-gray-500">
-                No active cell groups found where you are the designated leader.
+                No active cell groups found where you ({profile?.name} {profile?.surname}) are the designated leader.
               </p>
             </div>
           ) : (
@@ -313,11 +302,10 @@ WHERE cg.status = 'active'
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <h3 className="text-lg font-semibold text-blue-800 mb-2">Query Information</h3>
           <div className="text-sm text-blue-700">
-            <p><strong>Current User ID:</strong> {profile?.id}</p>
-            <p><strong>Current User Name:</strong> {profile?.name} {profile?.surname}</p>
+            <p><strong>Current User:</strong> {profile?.name} {profile?.surname}</p>
+            <p><strong>User ID:</strong> {profile?.id}</p>
             <p><strong>Groups Found:</strong> {userCellGroups.length}</p>
-            <p><strong>Query Type:</strong> User-Specific Groups Only (JOIN with member ID filter)</p>
-            <p><strong>Data Loaded:</strong> {dataLoaded ? 'Yes' : 'No'}</p>
+            <p><strong>Filter Applied:</strong> WHERE LOWER(m.name) = '{profile?.name?.toLowerCase()}' AND LOWER(m.surname) = '{profile?.surname?.toLowerCase()}'</p>
           </div>
         </div>
 
