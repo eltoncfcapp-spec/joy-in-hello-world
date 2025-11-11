@@ -1,4 +1,4 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle } from 'lucide-react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle } from 'lucide-react'; 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -163,6 +163,10 @@ const cloudService = {
       console.log('Updating member:', memberId, updates);
 
       const updateData: any = {
+        name: updates.name,
+        surname: updates.surname,
+        email: updates.email,
+        phone: updates.phone,
         role: updates.role,
         permissions: updates.permissions || [],
         assigned_groups: updates.assigned_groups || [],
@@ -172,6 +176,8 @@ const cloudService = {
         can_view_own_data: Boolean(updates.can_view_own_data),
         login_username: updates.login_username || null,
         login_pin: updates.login_pin || null,
+        cell_group_id: updates.cell_group_id,
+        status: updates.status,
         updated_at: new Date().toISOString()
       };
 
@@ -437,6 +443,10 @@ const Admin = () => {
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
+    name: string;
+    surname: string;
+    email: string;
+    phone: string;
     role: string;
     permissions: string[];
     assigned_groups: string[];
@@ -446,7 +456,13 @@ const Admin = () => {
     can_view_own_data: boolean;
     login_username: string;
     login_pin: string;
+    cell_group_id: string;
+    status: string;
   }>({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
     role: 'member',
     permissions: [],
     assigned_groups: [],
@@ -455,7 +471,9 @@ const Admin = () => {
     can_edit_members: false,
     can_view_own_data: false,
     login_username: '',
-    login_pin: ''
+    login_pin: '',
+    cell_group_id: '',
+    status: 'active'
   });
 
   const [groupFormData, setGroupFormData] = useState<{
@@ -465,13 +483,15 @@ const Admin = () => {
     meeting_day: string;
     meeting_time: string;
     login_username: string;
+    status: string;
   }>({
     name: '',
     description: '',
     location: '',
     meeting_day: '',
     meeting_time: '',
-    login_username: ''
+    login_username: '',
+    status: 'active'
   });
 
   // Check permissions and load data
@@ -761,6 +781,10 @@ const Admin = () => {
     if (user) {
       setSelectedUser(user);
       setUserFormData({
+        name: user.name || '',
+        surname: user.surname || '',
+        email: user.email || '',
+        phone: user.phone || '',
         role: user.role || 'member',
         permissions: user.permissions || [],
         assigned_groups: user.assigned_groups || [],
@@ -769,7 +793,9 @@ const Admin = () => {
         can_edit_members: user.can_edit_members || false,
         can_view_own_data: user.can_view_own_data || false,
         login_username: user.login_username || '',
-        login_pin: user.login_pin || ''
+        login_pin: user.login_pin || '',
+        cell_group_id: user.cell_group_id || '',
+        status: user.status || 'active'
       });
       setShowCredentials(false);
       setGeneratedCredentials(null);
@@ -783,7 +809,8 @@ const Admin = () => {
         location: group.location || '',
         meeting_day: group.meeting_day || '',
         meeting_time: group.meeting_time || '',
-        login_username: group.login_username || ''
+        login_username: group.login_username || '',
+        status: group.status || 'active'
       });
       setShowGroupCredentials(false);
       setGeneratedGroupCredentials(null);
@@ -795,6 +822,10 @@ const Admin = () => {
     setSelectedUser(null);
     setSelectedGroup(null);
     setUserFormData({
+      name: '',
+      surname: '',
+      email: '',
+      phone: '',
       role: 'member',
       permissions: [],
       assigned_groups: [],
@@ -803,7 +834,9 @@ const Admin = () => {
       can_edit_members: false,
       can_view_own_data: false,
       login_username: '',
-      login_pin: ''
+      login_pin: '',
+      cell_group_id: '',
+      status: 'active'
     });
     setGroupFormData({
       name: '',
@@ -811,7 +844,8 @@ const Admin = () => {
       location: '',
       meeting_day: '',
       meeting_time: '',
-      login_username: ''
+      login_username: '',
+      status: 'active'
     });
     setShowCredentials(false);
     setShowGroupCredentials(false);
@@ -836,6 +870,10 @@ const Admin = () => {
       console.log('Update data:', userFormData);
 
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
+        name: userFormData.name,
+        surname: userFormData.surname,
+        email: userFormData.email,
+        phone: userFormData.phone,
         role: userFormData.role,
         permissions: userFormData.permissions,
         assigned_groups: userFormData.assigned_groups,
@@ -844,9 +882,12 @@ const Admin = () => {
         can_edit_members: userFormData.can_edit_members,
         can_view_own_data: userFormData.can_view_own_data,
         login_username: userFormData.login_username,
-        login_pin: userFormData.login_pin
+        login_pin: userFormData.login_pin,
+        cell_group_id: userFormData.cell_group_id,
+        status: userFormData.status
       });
 
+      // Replace the existing member data with the updated one
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id ? updatedMember : m
       ));
@@ -874,18 +915,25 @@ const Admin = () => {
     setError(null);
     
     try {
-      await cloudService.updateCellGroup(selectedGroup.id, {
+      const updatedGroup = await cloudService.updateCellGroup(selectedGroup.id, {
         name: groupFormData.name,
         description: groupFormData.description,
         location: groupFormData.location,
         meeting_day: groupFormData.meeting_day,
         meeting_time: groupFormData.meeting_time,
-        login_username: groupFormData.login_username
+        login_username: groupFormData.login_username,
+        status: groupFormData.status
       });
 
-      // Refresh groups data
-      const groupsData = await cloudService.getCellGroups();
-      setCellGroups(groupsData);
+      // Replace the existing group data with the updated one
+      setCellGroups(prev => prev.map(g => 
+        g.id === selectedGroup.id ? updatedGroup : g
+      ));
+
+      // Also update active cell groups if needed
+      setActiveCellGroups(prev => prev.map(g => 
+        g.id === selectedGroup.id ? updatedGroup : g
+      ));
       
       alert('Group updated successfully!');
       closeModal();
@@ -1506,6 +1554,58 @@ const Admin = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.name}
+                    onChange={(e) => setUserFormData(prev => ({...prev, name: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Surname
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.surname}
+                    onChange={(e) => setUserFormData(prev => ({...prev, surname: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={userFormData.email}
+                    onChange={(e) => setUserFormData(prev => ({...prev, email: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.phone}
+                    onChange={(e) => setUserFormData(prev => ({...prev, phone: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
                     User Role
                   </label>
                   <select
@@ -1529,6 +1629,36 @@ const Admin = () => {
                   <p className="text-sm text-gray-500">
                     {roles.find(r => r.value === userFormData.role)?.description}
                   </p>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Status
+                  </label>
+                  <select
+                    value={userFormData.status}
+                    onChange={(e) => setUserFormData(prev => ({...prev, status: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Cell Group ID
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.cell_group_id}
+                    onChange={(e) => setUserFormData(prev => ({...prev, cell_group_id: e.target.value}))}
+                    placeholder="Enter cell group ID"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
 
                 <div className="space-y-4">
@@ -1568,6 +1698,34 @@ const Admin = () => {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Login Username
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.login_username}
+                    onChange={(e) => setUserFormData(prev => ({...prev, login_username: e.target.value}))}
+                    placeholder="Manual username input"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Login PIN
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.login_pin}
+                    onChange={(e) => setUserFormData(prev => ({...prev, login_pin: e.target.value}))}
+                    placeholder="Manual PIN input"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
 
@@ -1844,53 +2002,70 @@ const Admin = () => {
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <label className="block text-sm font-medium text-gray-700">
-                  Group Login Credentials
-                </label>
-                
-                {!selectedGroup.login_username && (
-                  <button
-                    onClick={() => handleGenerateGroupCredentials(selectedGroup)}
-                    disabled={loading}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                    {loading ? 'Generating...' : 'Generate Group Login Credentials'}
-                  </button>
-                )}
-                
-                {showGroupCredentials && generatedGroupCredentials && (
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-green-900">Generated Group Credentials</span>
-                      <button
-                        onClick={handleCopyGroupCredentials}
-                        className="flex items-center gap-1 text-green-700 hover:text-green-900"
-                      >
-                        <Copy className="h-4 w-4" />
-                        <span className="text-xs">Copy</span>
-                      </button>
-                    </div>
-                    <div>
-                      <span className="text-xs text-green-700">Group Username:</span>
-                      <p className="font-mono font-semibold text-green-900">{generatedGroupCredentials.username}</p>
-                    </div>
-                  </div>
-                )}
-
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Group Username
+                    Status
                   </label>
-                  <input
-                    type="text"
-                    value={groupFormData.login_username}
-                    onChange={(e) => setGroupFormData(prev => ({...prev, login_username: e.target.value}))}
-                    placeholder="Group login username"
+                  <select
+                    value={groupFormData.status}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, status: e.target.value}))}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="archived">Archived</option>
+                  </select>
                 </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Group Login Credentials
+                  </label>
+                  
+                  {!selectedGroup.login_username && (
+                    <button
+                      onClick={() => handleGenerateGroupCredentials(selectedGroup)}
+                      disabled={loading}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                      {loading ? 'Generating...' : 'Generate Group Login Credentials'}
+                    </button>
+                  )}
+                  
+                  {showGroupCredentials && generatedGroupCredentials && (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-green-900">Generated Group Credentials</span>
+                        <button
+                          onClick={handleCopyGroupCredentials}
+                          className="flex items-center gap-1 text-green-700 hover:text-green-900"
+                        >
+                          <Copy className="h-4 w-4" />
+                          <span className="text-xs">Copy</span>
+                        </button>
+                      </div>
+                      <div>
+                        <span className="text-xs text-green-700">Group Username:</span>
+                        <p className="font-mono font-semibold text-green-900">{generatedGroupCredentials.username}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Group Username
+                </label>
+                <input
+                  type="text"
+                  value={groupFormData.login_username}
+                  onChange={(e) => setGroupFormData(prev => ({...prev, login_username: e.target.value}))}
+                  placeholder="Group login username"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               <div className="flex gap-3 pt-4">
