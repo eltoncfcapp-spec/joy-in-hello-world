@@ -414,5 +414,4 @@ const CellGroups = () => {
     </div>
   );
 };
-
 export default Groups;
