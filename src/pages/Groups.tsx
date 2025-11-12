@@ -15,7 +15,8 @@ import {
   Edit,
   Trash2,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -50,12 +51,11 @@ interface GroupDetails extends UserCellGroupQueryResult {
   description?: string | null;
 }
 
-const CellGroups = () => {
+const Groups = () => {
   const { profile } = useAuth();
   const [userCellGroups, setUserCellGroups] = useState<GroupDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dataLoaded, setDataLoaded] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<GroupDetails | null>(null);
   const [showGroupDetail, setShowGroupDetail] = useState(false);
@@ -199,7 +199,6 @@ const CellGroups = () => {
     try {
       setLoading(true);
       setError(null);
-      setDataLoaded(false);
       
       console.log('Starting data load...');
       const queryResults = await fetchUserCellGroups();
@@ -209,12 +208,10 @@ const CellGroups = () => {
       const groupsWithCounts = await fetchMemberCounts(queryResults);
       
       setUserCellGroups(groupsWithCounts);
-      setDataLoaded(true);
       
     } catch (error: any) {
       console.error('Error loading data:', error);
       setError(`Failed to load cell groups data: ${error.message}`);
-      setDataLoaded(false);
     } finally {
       setLoading(false);
     }
@@ -293,7 +290,7 @@ WHERE cg.status = 'active'
   }
 
   // Show error state if query failed
-  if (error && !dataLoaded) {
+  if (error && !userCellGroups.length) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
         <div className="text-center max-w-md">
@@ -534,7 +531,7 @@ WHERE cg.status = 'active'
                   onClick={closeGroupDetail}
                   className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
-                  <span className="text-2xl">×</span>
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
@@ -680,4 +677,5 @@ WHERE cg.status = 'active'
     </div>
   );
 };
+
 export default Groups;
