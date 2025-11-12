@@ -1,7 +1,7 @@
-import { Plus, Users, MapPin } from 'lucide-react';
+import { Plus, Users, MapPin, FileText, UserPlus, Calendar, BarChart3, Settings, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../contexts/AuthContext'; // Import your auth context
+import { useAuth } from '../contexts/AuthContext';
 
 interface CellGroup {
   id: string;
@@ -10,10 +10,11 @@ interface CellGroup {
   meeting_day: string | null;
   leader_id: string | null;
   leader: { name: string; surname: string } | null;
+  member_count?: number;
 }
 
 const CellGroups = () => {
-  const { profile } = useAuth(); // Get user profile for permissions
+  const { profile } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [members, setMembers] = useState<{ id: string; name: string; surname: string }[]>([]);
@@ -24,10 +25,18 @@ const CellGroups = () => {
     meetingDay: '',
   });
   const [loading, setLoading] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
 
   // Check if user has permission to create cell groups
   const canCreateCellGroups = profile?.isAdmin || profile?.role === 'admin' || 
                             profile?.permissions?.includes('manage_groups');
+
+  // Check if user can manage specific group (admin or group leader of that group)
+  const canManageGroup = (groupId: string) => {
+    return profile?.isAdmin || 
+           profile?.role === 'admin' || 
+           profile?.userCellGroup?.id === groupId;
+  };
 
   useEffect(() => {
     fetchCellGroups();
@@ -37,7 +46,6 @@ const CellGroups = () => {
   const fetchCellGroups = async () => {
     setLoading(true);
     try {
-      // Corrected query - using proper relationship
       const { data, error } = await supabase
         .from('cell_groups')
         .select(`
@@ -45,15 +53,20 @@ const CellGroups = () => {
           leader:members!cell_groups_leader_id_fkey(
             name, 
             surname
-          )
+          ),
+          members:members(count)
         `)
         .order('name');
 
       if (error) {
         console.error('Error fetching cell groups:', error);
       } else {
-        console.log('Fetched cell groups:', data);
-        setCellGroups(data || []);
+        // Transform data to include member count
+        const groupsWithCount = data?.map(group => ({
+          ...group,
+          member_count: group.members?.[0]?.count || 0
+        })) || [];
+        setCellGroups(groupsWithCount);
       }
     } catch (error) {
       console.error('Error in fetchCellGroups:', error);
@@ -64,7 +77,6 @@ const CellGroups = () => {
 
   const fetchMembers = async () => {
     try {
-      // Only fetch members if user has permission to create groups
       if (!canCreateCellGroups) return;
 
       const { data, error } = await supabase
@@ -85,7 +97,6 @@ const CellGroups = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Double-check permissions before submitting
     if (!canCreateCellGroups) {
       alert('You do not have permission to create cell groups');
       return;
@@ -111,7 +122,7 @@ const CellGroups = () => {
         console.log('Created cell group:', data);
         setShowForm(false);
         setFormData({ groupName: '', leaderId: '', location: '', meetingDay: '' });
-        fetchCellGroups(); // Refresh the list
+        fetchCellGroups();
       }
     } catch (error) {
       console.error('Error in handleSubmit:', error);
@@ -121,7 +132,101 @@ const CellGroups = () => {
     }
   };
 
-  // If you want to show a loading state
+  // Action handlers
+  const handleAddReport = (group: CellGroup) => {
+    setSelectedGroup(group);
+    alert(`Navigate to report creation for ${group.name}`);
+    // You can implement navigation or open a modal here
+  };
+
+  const handleAddMembers = (group: CellGroup) => {
+    setSelectedGroup(group);
+    alert(`Navigate to add members for ${group.name}`);
+    // You can implement navigation or open a modal here
+  };
+
+  const handleCreateEvent = (group: CellGroup) => {
+    setSelectedGroup(group);
+    alert(`Navigate to event creation for ${group.name}`);
+    // You can implement navigation or open a modal here
+  };
+
+  const handleViewAnalytics = (group: CellGroup) => {
+    setSelectedGroup(group);
+    alert(`Navigate to analytics for ${group.name}`);
+    // You can implement navigation or open a modal here
+  };
+
+  const handleManageGroup = (group: CellGroup) => {
+    setSelectedGroup(group);
+    alert(`Navigate to manage ${group.name}`);
+    // You can implement navigation or open a modal here
+  };
+
+  const handleViewDetails = (group: CellGroup) => {
+    setSelectedGroup(group);
+    alert(`Navigate to details for ${group.name}`);
+    // You can implement navigation or open a modal here
+  };
+
+  // Action cards configuration
+  const actionCards = [
+    {
+      id: 'report',
+      title: 'Add Report',
+      description: 'Submit meeting minutes and attendance',
+      icon: FileText,
+      color: 'bg-blue-500',
+      action: handleAddReport,
+      permission: (group: CellGroup) => canManageGroup(group.id)
+    },
+    {
+      id: 'members',
+      title: 'Add Members',
+      description: 'Manage group members',
+      icon: UserPlus,
+      color: 'bg-green-500',
+      action: handleAddMembers,
+      permission: (group: CellGroup) => canManageGroup(group.id)
+    },
+    {
+      id: 'event',
+      title: 'Create Event',
+      description: 'Schedule new events',
+      icon: Calendar,
+      color: 'bg-purple-500',
+      action: handleCreateEvent,
+      permission: (group: CellGroup) => canManageGroup(group.id)
+    },
+    {
+      id: 'analytics',
+      title: 'View Analytics',
+      description: 'See group statistics',
+      icon: BarChart3,
+      color: 'bg-orange-500',
+      action: handleViewAnalytics,
+      permission: (group: CellGroup) => canManageGroup(group.id) || profile?.role === 'admin'
+    },
+    {
+      id: 'manage',
+      title: 'Manage Group',
+      description: 'Edit group settings',
+      icon: Settings,
+      color: 'bg-gray-500',
+      action: handleManageGroup,
+      permission: (group: CellGroup) => canManageGroup(group.id)
+    },
+    {
+      id: 'view',
+      title: 'View Details',
+      description: 'See complete information',
+      icon: Eye,
+      color: 'bg-indigo-500',
+      action: handleViewDetails,
+      permission: () => true // Everyone can view details
+    }
+  ];
+
   if (loading && cellGroups.length === 0) {
     return (
       <div className="animate-fadeIn">
@@ -242,7 +347,7 @@ const CellGroups = () => {
         </div>
       )}
 
-      <div className="grid gap-4">
+      <div className="grid gap-6">
         {cellGroups.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             No cell groups found.
@@ -250,7 +355,7 @@ const CellGroups = () => {
         ) : (
           cellGroups.map((group) => (
             <div key={group.id} className="bg-card border border-border rounded-xl p-6 hover:shadow-md transition-shadow">
-              <div className="flex justify-between items-start">
+              <div className="flex justify-between items-start mb-4">
                 <div className="flex-1">
                   <h3 className="text-xl font-semibold text-foreground mb-2">{group.name}</h3>
                   <div className="space-y-2">
@@ -266,13 +371,41 @@ const CellGroups = () => {
                         <span>{group.location}</span>
                       </div>
                     )}
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Users className="h-4 w-4" />
+                      <span>Members: {group.member_count || 0}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm text-muted-foreground mt-2">
+                  <div className="text-sm text-muted-foreground mb-2">
                     {group.meeting_day || 'No meeting day set'}
                   </div>
                 </div>
+              </div>
+
+              {/* Action Cards Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4 pt-4 border-t border-border">
+                {actionCards.map((card) => {
+                  if (!card.permission(group)) return null;
+                  
+                  const IconComponent = card.icon;
+                  return (
+                    <button
+                      key={card.id}
+                      onClick={() => card.action(group)}
+                      className="flex flex-col items-center p-3 bg-accent rounded-lg hover:bg-accent/80 transition-colors group"
+                      title={card.description}
+                    >
+                      <div className={`p-2 rounded-full ${card.color} text-white mb-2 group-hover:scale-110 transition-transform`}>
+                        <IconComponent className="h-4 w-4" />
+                      </div>
+                      <span className="text-xs font-medium text-foreground text-center leading-tight">
+                        {card.title}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))
@@ -281,4 +414,5 @@ const CellGroups = () => {
     </div>
   );
 };
+
 export default Groups;
