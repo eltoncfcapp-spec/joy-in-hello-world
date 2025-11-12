@@ -14,31 +14,82 @@ export type Database = {
   }
   public: {
     Tables: {
+      attendance: {
+        Row: {
+          arrival_time: string | null
+          created_at: string | null
+          id: string
+          meeting_id: string | null
+          member_id: string | null
+          notes: string | null
+          status: string
+        }
+        Insert: {
+          arrival_time?: string | null
+          created_at?: string | null
+          id?: string
+          meeting_id?: string | null
+          member_id?: string | null
+          notes?: string | null
+          status: string
+        }
+        Update: {
+          arrival_time?: string | null
+          created_at?: string | null
+          id?: string
+          meeting_id?: string | null
+          member_id?: string | null
+          notes?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cell_groups: {
         Row: {
           created_at: string | null
+          description: string | null
           id: string
           leader_id: string | null
           location: string | null
           meeting_day: string | null
+          meeting_time: string | null
           name: string
           updated_at: string | null
         }
         Insert: {
           created_at?: string | null
+          description?: string | null
           id?: string
           leader_id?: string | null
           location?: string | null
           meeting_day?: string | null
+          meeting_time?: string | null
           name: string
           updated_at?: string | null
         }
         Update: {
           created_at?: string | null
+          description?: string | null
           id?: string
           leader_id?: string | null
           location?: string | null
           meeting_day?: string | null
+          meeting_time?: string | null
           name?: string
           updated_at?: string | null
         }
@@ -52,8 +103,229 @@ export type Database = {
           },
         ]
       }
+      department_attendance: {
+        Row: {
+          arrival_time: string | null
+          created_at: string | null
+          id: string
+          meeting_id: string | null
+          member_id: string | null
+          notes: string | null
+          status: string | null
+        }
+        Insert: {
+          arrival_time?: string | null
+          created_at?: string | null
+          id?: string
+          meeting_id?: string | null
+          member_id?: string | null
+          notes?: string | null
+          status?: string | null
+        }
+        Update: {
+          arrival_time?: string | null
+          created_at?: string | null
+          id?: string
+          meeting_id?: string | null
+          member_id?: string | null
+          notes?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "department_attendance_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "department_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_attendance_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      department_meetings: {
+        Row: {
+          created_at: string | null
+          department_id: string | null
+          id: string
+          location: string
+          meeting_date: string
+          meeting_time: string
+          notes: string | null
+          status: string | null
+          topic: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          department_id?: string | null
+          id?: string
+          location: string
+          meeting_date: string
+          meeting_time: string
+          notes?: string | null
+          status?: string | null
+          topic?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          department_id?: string | null
+          id?: string
+          location?: string
+          meeting_date?: string
+          meeting_time?: string
+          notes?: string | null
+          status?: string | null
+          topic?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "department_meetings_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      department_members: {
+        Row: {
+          assigned_at: string | null
+          department_id: string | null
+          id: string
+          member_id: string | null
+          role: string | null
+        }
+        Insert: {
+          assigned_at?: string | null
+          department_id?: string | null
+          id?: string
+          member_id?: string | null
+          role?: string | null
+        }
+        Update: {
+          assigned_at?: string | null
+          department_id?: string | null
+          id?: string
+          member_id?: string | null
+          role?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "department_members_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      department_reports: {
+        Row: {
+          action_items: string | null
+          created_at: string | null
+          created_by: string | null
+          decisions_made: string | null
+          id: string
+          meeting_id: string | null
+          next_meeting_date: string | null
+          report_text: string | null
+        }
+        Insert: {
+          action_items?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          decisions_made?: string | null
+          id?: string
+          meeting_id?: string | null
+          next_meeting_date?: string | null
+          report_text?: string | null
+        }
+        Update: {
+          action_items?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          decisions_made?: string | null
+          id?: string
+          meeting_id?: string | null
+          next_meeting_date?: string | null
+          report_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "department_reports_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_reports_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "department_meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      departments: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: string
+          leader_id: string | null
+          location: string | null
+          meeting_day: string | null
+          meeting_time: string | null
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          leader_id?: string | null
+          location?: string | null
+          meeting_day?: string | null
+          meeting_time?: string | null
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          leader_id?: string | null
+          location?: string | null
+          meeting_day?: string | null
+          meeting_time?: string | null
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "departments_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_attendees: {
         Row: {
+          attendance_status: string | null
           attended_at: string | null
           cell_group_id: string | null
           event_id: string
@@ -67,6 +339,7 @@ export type Database = {
           surname: string | null
         }
         Insert: {
+          attendance_status?: string | null
           attended_at?: string | null
           cell_group_id?: string | null
           event_id: string
@@ -80,6 +353,7 @@ export type Database = {
           surname?: string | null
         }
         Update: {
+          attendance_status?: string | null
           attended_at?: string | null
           cell_group_id?: string | null
           event_id?: string
@@ -125,39 +399,154 @@ export type Database = {
       }
       events: {
         Row: {
+          completed_at: string | null
           created_at: string | null
           event_date: string
           event_time: string
           id: string
+          is_completed: boolean | null
+          is_whole_church: boolean | null
           location: string | null
           name: string
+          target_departments: string[] | null
+          target_groups: string[] | null
           topic: string | null
           updated_at: string | null
         }
         Insert: {
+          completed_at?: string | null
           created_at?: string | null
           event_date: string
           event_time: string
           id?: string
+          is_completed?: boolean | null
+          is_whole_church?: boolean | null
           location?: string | null
           name: string
+          target_departments?: string[] | null
+          target_groups?: string[] | null
           topic?: string | null
           updated_at?: string | null
         }
         Update: {
+          completed_at?: string | null
           created_at?: string | null
           event_date?: string
           event_time?: string
           id?: string
+          is_completed?: boolean | null
+          is_whole_church?: boolean | null
           location?: string | null
           name?: string
+          target_departments?: string[] | null
+          target_groups?: string[] | null
           topic?: string | null
           updated_at?: string | null
         }
         Relationships: []
       }
+      meeting_reports: {
+        Row: {
+          action_items: string | null
+          created_at: string | null
+          created_by: string | null
+          decisions_made: string | null
+          id: string
+          meeting_id: string | null
+          next_meeting_date: string | null
+          report_text: string
+        }
+        Insert: {
+          action_items?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          decisions_made?: string | null
+          id?: string
+          meeting_id?: string | null
+          next_meeting_date?: string | null
+          report_text: string
+        }
+        Update: {
+          action_items?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          decisions_made?: string | null
+          id?: string
+          meeting_id?: string | null
+          next_meeting_date?: string | null
+          report_text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_reports_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_reports_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meetings: {
+        Row: {
+          created_at: string | null
+          group_id: string | null
+          id: string
+          location: string | null
+          meeting_date: string
+          meeting_time: string | null
+          notes: string | null
+          status: string | null
+          topic: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          group_id?: string | null
+          id?: string
+          location?: string | null
+          meeting_date: string
+          meeting_time?: string | null
+          notes?: string | null
+          status?: string | null
+          topic?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          group_id?: string | null
+          id?: string
+          location?: string | null
+          meeting_date?: string
+          meeting_time?: string | null
+          notes?: string | null
+          status?: string | null
+          topic?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meetings_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "cell_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       members: {
         Row: {
+          assigned_departments: string[] | null
+          assigned_groups: string[] | null
+          can_add_members: boolean | null
+          can_edit_members: boolean | null
+          can_view_own_data: boolean | null
           cell_group_id: string | null
           created_at: string | null
           email: string | null
@@ -167,17 +556,26 @@ export type Database = {
           invited_by: string | null
           is_leader: boolean | null
           is_permanent_member: boolean | null
+          login_pin: string | null
+          login_username: string | null
           ministry_group_id: string | null
           name: string
           not_attending_reason: string | null
           permanent_member_date: string | null
+          permissions: string[] | null
           phone: string | null
+          role: string | null
           status: Database["public"]["Enums"]["member_status"] | null
           status_date: string | null
           surname: string
           updated_at: string | null
         }
         Insert: {
+          assigned_departments?: string[] | null
+          assigned_groups?: string[] | null
+          can_add_members?: boolean | null
+          can_edit_members?: boolean | null
+          can_view_own_data?: boolean | null
           cell_group_id?: string | null
           created_at?: string | null
           email?: string | null
@@ -187,17 +585,26 @@ export type Database = {
           invited_by?: string | null
           is_leader?: boolean | null
           is_permanent_member?: boolean | null
+          login_pin?: string | null
+          login_username?: string | null
           ministry_group_id?: string | null
           name: string
           not_attending_reason?: string | null
           permanent_member_date?: string | null
+          permissions?: string[] | null
           phone?: string | null
+          role?: string | null
           status?: Database["public"]["Enums"]["member_status"] | null
           status_date?: string | null
           surname: string
           updated_at?: string | null
         }
         Update: {
+          assigned_departments?: string[] | null
+          assigned_groups?: string[] | null
+          can_add_members?: boolean | null
+          can_edit_members?: boolean | null
+          can_view_own_data?: boolean | null
           cell_group_id?: string | null
           created_at?: string | null
           email?: string | null
@@ -207,11 +614,15 @@ export type Database = {
           invited_by?: string | null
           is_leader?: boolean | null
           is_permanent_member?: boolean | null
+          login_pin?: string | null
+          login_username?: string | null
           ministry_group_id?: string | null
           name?: string
           not_attending_reason?: string | null
           permanent_member_date?: string | null
+          permissions?: string[] | null
           phone?: string | null
+          role?: string | null
           status?: Database["public"]["Enums"]["member_status"] | null
           status_date?: string | null
           surname?: string
@@ -255,14 +666,84 @@ export type Database = {
         }
         Relationships: []
       }
+      profiles: {
+        Row: {
+          cell_group_id: string | null
+          created_at: string | null
+          email: string | null
+          id: string
+          name: string | null
+          phone: string | null
+          surname: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          cell_group_id?: string | null
+          created_at?: string | null
+          email?: string | null
+          id: string
+          name?: string | null
+          phone?: string | null
+          surname?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          cell_group_id?: string | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          name?: string | null
+          phone?: string | null
+          surname?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_cell_group_id_fkey"
+            columns: ["cell_group_id"]
+            isOneToOne: false
+            referencedRelation: "cell_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
+      app_role: "admin" | "leader" | "member"
       gender_type: "male" | "female"
       member_status: "newcomer" | "signed_member" | "not_attending"
     }
@@ -392,6 +873,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["admin", "leader", "member"],
       gender_type: ["male", "female"],
       member_status: ["newcomer", "signed_member", "not_attending"],
     },

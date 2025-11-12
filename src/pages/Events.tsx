@@ -116,7 +116,7 @@ const Events = () => {
       setLoading(true);
       setError(null);
       
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('events')
         .select('*')
         .order('event_date', { ascending: true });
@@ -125,7 +125,7 @@ const Events = () => {
         throw error;
       }
 
-      const eventsWithDefaults = (data || []).map(event => ({
+      const eventsWithDefaults = (data || []).map((event: any) => ({
         ...event,
         is_whole_church: event.is_whole_church ?? true,
         target_groups: event.target_groups ?? null,
@@ -136,7 +136,7 @@ const Events = () => {
 
       setEvents(eventsWithDefaults);
       
-      eventsWithDefaults.forEach(event => {
+      eventsWithDefaults.forEach((event: any) => {
         fetchEventAttendees(event.id);
       });
     } catch (error: any) {
@@ -151,7 +151,7 @@ const Events = () => {
     try {
       setError(null);
       
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('members')
         .select(`
           id,
@@ -180,7 +180,7 @@ const Events = () => {
 
   const fetchCellGroups = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('cell_groups')
         .select('id, name')
         .order('name');
@@ -198,7 +198,7 @@ const Events = () => {
 
   const fetchMinistryGroups = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('ministry_groups')
         .select('id, name')
         .order('name');
@@ -216,7 +216,7 @@ const Events = () => {
 
   const fetchEventAttendees = async (eventId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('event_attendees')
         .select(`
           *,
@@ -335,12 +335,12 @@ const Events = () => {
         await markMembersAsAbsent(eventId, absentMemberIds);
       }
 
-      const { error } = await supabase
+      const { error } = await db
         .from('events')
         .update({
           is_completed: true,
           completed_at: new Date().toISOString()
-        })
+        } as any)
         .eq('id', eventId);
 
       if (error) {
@@ -383,7 +383,7 @@ const Events = () => {
         target_departments: !eventFormData.isWholeChurch && eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null,
       };
 
-      const { error } = await supabase.from('events').insert([eventData]);
+      const { error } = await db.from('events').insert([eventData]);
 
       if (error) {
         throw error;
@@ -452,7 +452,7 @@ const Events = () => {
         invited_by_id: attendeeFormData.invitedById || null
       };
 
-      const { error } = await supabase.from('event_attendees').insert([attendeeData]);
+      const { error } = await db.from('event_attendees').insert([attendeeData]);
 
       if (error) {
         throw error;
