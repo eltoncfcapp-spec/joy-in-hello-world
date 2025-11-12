@@ -13,7 +13,7 @@ interface CellGroup {
   member_count?: number;
 }
 
-const CellGroups = () => {
+const Groups = () => {
   const { profile } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
@@ -46,28 +46,42 @@ const CellGroups = () => {
   const fetchCellGroups = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select(`
           *,
           leader:members!cell_groups_leader_id_fkey(
             name, 
             surname
-          ),
-          members:members(count)
+          )
         `)
         .order('name');
 
-      if (error) {
-        console.error('Error fetching cell groups:', error);
-      } else {
-        // Transform data to include member count
-        const groupsWithCount = data?.map(group => ({
-          ...group,
-          member_count: group.members?.[0]?.count || 0
-        })) || [];
-        setCellGroups(groupsWithCount);
+      if (groupsError) {
+        console.error('Error fetching cell groups:', groupsError);
+        return;
       }
+
+      // Fetch member counts for each group
+      const groupsWithCounts = await Promise.all(
+        (groupsData || []).map(async (group) => {
+          const { count, error: countError } = await supabase
+            .from('members')
+            .select('*', { count: 'exact', head: true })
+            .eq('cell_group_id', group.id);
+
+          if (countError) {
+            console.error('Error counting members:', countError);
+          }
+
+          return {
+            ...group,
+            member_count: count || 0
+          };
+        })
+      );
+
+      setCellGroups(groupsWithCounts);
     } catch (error) {
       console.error('Error in fetchCellGroups:', error);
     } finally {
@@ -135,97 +149,101 @@ const CellGroups = () => {
   // Action handlers
   const handleAddReport = (group: CellGroup) => {
     setSelectedGroup(group);
-    alert(`Navigate to report creation for ${group.name}`);
+    alert(`Add Report for ${group.name}\n\nThis would open a form to:\n- Record meeting minutes\n- Mark attendance (present/absent)\n- Add meeting themes\n- Submit reports`);
     // You can implement navigation or open a modal here
   };
 
   const handleAddMembers = (group: CellGroup) => {
     setSelectedGroup(group);
-    alert(`Navigate to add members for ${group.name}`);
+    alert(`Add Members to ${group.name}\n\nThis would open a form to:\n- Add new members to this group\n- Assign existing members\n- Set member roles and permissions`);
     // You can implement navigation or open a modal here
   };
 
   const handleCreateEvent = (group: CellGroup) => {
     setSelectedGroup(group);
-    alert(`Navigate to event creation for ${group.name}`);
+    alert(`Create Event for ${group.name}\n\nThis would open a form to:\n- Schedule new events\n- Set event details\n- Invite members\n- Manage event calendar`);
     // You can implement navigation or open a modal here
   };
 
   const handleViewAnalytics = (group: CellGroup) => {
     setSelectedGroup(group);
-    alert(`Navigate to analytics for ${group.name}`);
+    alert(`View Analytics for ${group.name}\n\nThis would show:\n- Attendance statistics\n- Growth metrics\n- Member engagement\n- Meeting frequency`);
     // You can implement navigation or open a modal here
   };
 
   const handleManageGroup = (group: CellGroup) => {
     setSelectedGroup(group);
-    alert(`Navigate to manage ${group.name}`);
+    alert(`Manage ${group.name}\n\nThis would open group settings to:\n- Edit group information\n- Change leader\n- Update meeting details\n- Configure permissions`);
     // You can implement navigation or open a modal here
   };
 
   const handleViewDetails = (group: CellGroup) => {
     setSelectedGroup(group);
-    alert(`Navigate to details for ${group.name}`);
+    alert(`View Details for ${group.name}\n\nThis would show:\n- Complete group information\n- Member list\n- Meeting history\n- Recent activities`);
     // You can implement navigation or open a modal here
   };
 
-  // Action cards configuration
-  const actionCards = [
-    {
-      id: 'report',
-      title: 'Add Report',
-      description: 'Submit meeting minutes and attendance',
-      icon: FileText,
-      color: 'bg-blue-500',
-      action: handleAddReport,
-      permission: (group: CellGroup) => canManageGroup(group.id)
-    },
-    {
-      id: 'members',
-      title: 'Add Members',
-      description: 'Manage group members',
-      icon: UserPlus,
-      color: 'bg-green-500',
-      action: handleAddMembers,
-      permission: (group: CellGroup) => canManageGroup(group.id)
-    },
-    {
-      id: 'event',
-      title: 'Create Event',
-      description: 'Schedule new events',
-      icon: Calendar,
-      color: 'bg-purple-500',
-      action: handleCreateEvent,
-      permission: (group: CellGroup) => canManageGroup(group.id)
-    },
-    {
-      id: 'analytics',
-      title: 'View Analytics',
-      description: 'See group statistics',
-      icon: BarChart3,
-      color: 'bg-orange-500',
-      action: handleViewAnalytics,
-      permission: (group: CellGroup) => canManageGroup(group.id) || profile?.role === 'admin'
-    },
-    {
-      id: 'manage',
-      title: 'Manage Group',
-      description: 'Edit group settings',
-      icon: Settings,
-      color: 'bg-gray-500',
-      action: handleManageGroup,
-      permission: (group: CellGroup) => canManageGroup(group.id)
-    },
-    {
-      id: 'view',
-      title: 'View Details',
-      description: 'See complete information',
-      icon: Eye,
-      color: 'bg-indigo-500',
-      action: handleViewDetails,
-      permission: () => true // Everyone can view details
-    }
-  ];
+  // Action cards configuration - FIXED to ensure they show
+  const getActionCards = (group: CellGroup) => {
+    const cards = [
+      {
+        id: 'report',
+        title: 'Add Report',
+        description: 'Submit meeting minutes and attendance',
+        icon: FileText,
+        color: 'bg-blue-500',
+        action: handleAddReport,
+        show: canManageGroup(group.id) // Only group leaders and admins
+      },
+      {
+        id: 'members',
+        title: 'Add Members',
+        description: 'Manage group members',
+        icon: UserPlus,
+        color: 'bg-green-500',
+        action: handleAddMembers,
+        show: canManageGroup(group.id) // Only group leaders and admins
+      },
+      {
+        id: 'event',
+        title: 'Create Event',
+        description: 'Schedule new events',
+        icon: Calendar,
+        color: 'bg-purple-500',
+        action: handleCreateEvent,
+        show: canManageGroup(group.id) // Only group leaders and admins
+      },
+      {
+        id: 'analytics',
+        title: 'View Analytics',
+        description: 'See group statistics',
+        icon: BarChart3,
+        color: 'bg-orange-500',
+        action: handleViewAnalytics,
+        show: canManageGroup(group.id) || profile?.isAdmin // Group leaders and admins
+      },
+      {
+        id: 'manage',
+        title: 'Manage Group',
+        description: 'Edit group settings',
+        icon: Settings,
+        color: 'bg-gray-500',
+        action: handleManageGroup,
+        show: canManageGroup(group.id) // Only group leaders and admins
+      },
+      {
+        id: 'view',
+        title: 'View Details',
+        description: 'See complete information',
+        icon: Eye,
+        color: 'bg-indigo-500',
+        action: handleViewDetails,
+        show: true // Everyone can view details
+      }
+    ];
+
+    return cards.filter(card => card.show);
+  };
 
   if (loading && cellGroups.length === 0) {
     return (
@@ -353,65 +371,76 @@ const CellGroups = () => {
             No cell groups found.
           </div>
         ) : (
-          cellGroups.map((group) => (
-            <div key={group.id} className="bg-card border border-border rounded-xl p-6 hover:shadow-md transition-shadow">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex-1">
-                  <h3 className="text-xl font-semibold text-foreground mb-2">{group.name}</h3>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Users className="h-4 w-4" />
-                      <span>
-                        Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'No leader assigned'}
-                      </span>
-                    </div>
-                    {group.location && (
+          cellGroups.map((group) => {
+            const availableActions = getActionCards(group);
+            
+            return (
+              <div key={group.id} className="bg-card border border-border rounded-xl p-6 hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex-1">
+                    <h3 className="text-xl font-semibold text-foreground mb-2">{group.name}</h3>
+                    <div className="space-y-2">
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <MapPin className="h-4 w-4" />
-                        <span>{group.location}</span>
+                        <Users className="h-4 w-4" />
+                        <span>
+                          Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'No leader assigned'}
+                        </span>
                       </div>
-                    )}
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Users className="h-4 w-4" />
-                      <span>Members: {group.member_count || 0}</span>
+                      {group.location && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <MapPin className="h-4 w-4" />
+                          <span>{group.location}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Users className="h-4 w-4" />
+                        <span>Members: {group.member_count || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm text-muted-foreground mb-2">
+                      {group.meeting_day || 'No meeting day set'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {canManageGroup(group.id) ? 'You can manage this group' : 'View only'}
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm text-muted-foreground mb-2">
-                    {group.meeting_day || 'No meeting day set'}
-                  </div>
-                </div>
-              </div>
 
-              {/* Action Cards Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4 pt-4 border-t border-border">
-                {actionCards.map((card) => {
-                  if (!card.permission(group)) return null;
-                  
-                  const IconComponent = card.icon;
-                  return (
-                    <button
-                      key={card.id}
-                      onClick={() => card.action(group)}
-                      className="flex flex-col items-center p-3 bg-accent rounded-lg hover:bg-accent/80 transition-colors group"
-                      title={card.description}
-                    >
-                      <div className={`p-2 rounded-full ${card.color} text-white mb-2 group-hover:scale-110 transition-transform`}>
-                        <IconComponent className="h-4 w-4" />
-                      </div>
-                      <span className="text-xs font-medium text-foreground text-center leading-tight">
-                        {card.title}
-                      </span>
-                    </button>
-                  );
-                })}
+                {/* Action Cards Grid */}
+                {availableActions.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <h4 className="text-sm font-medium text-foreground mb-3">Quick Actions</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {availableActions.map((card) => {
+                        const IconComponent = card.icon;
+                        return (
+                          <button
+                            key={card.id}
+                            onClick={() => card.action(group)}
+                            className="flex flex-col items-center p-3 bg-accent rounded-lg hover:bg-accent/80 transition-colors group"
+                            title={card.description}
+                          >
+                            <div className={`p-2 rounded-full ${card.color} text-white mb-2 group-hover:scale-110 transition-transform`}>
+                              <IconComponent className="h-4 w-4" />
+                            </div>
+                            <span className="text-xs font-medium text-foreground text-center leading-tight">
+                              {card.title}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
   );
 };
+
 export default Groups;
