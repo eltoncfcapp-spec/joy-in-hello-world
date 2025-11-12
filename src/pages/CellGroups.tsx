@@ -66,14 +66,84 @@ const CellGroups = () => {
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
 
-  // Check if user is admin
+  // Check user roles
   const isAdmin = profile?.isAdmin || profile?.role === 'admin';
+  const isGroupLeader = profile?.role === 'group_leader' || profile?.role === 'leader';
 
-  // Fetch all cell groups for admin, or user's groups for regular users
+  // Manual JOIN implementation to match the exact SQL query from the top code
+  const fetchCellGroupsForUser = async () => {
+    try {
+      if (!profile?.name || !profile?.surname) {
+        console.log('No user profile name/surname available');
+        return [];
+      }
+
+      console.log(`Fetching cell groups for user: ${profile.name} ${profile.surname}`);
+
+      // Step 1: Fetch all active cell groups
+      const { data: cellGroupsData, error: cellGroupsError } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('status', 'active')
+        .order('name');
+
+      if (cellGroupsError) throw cellGroupsError;
+
+      console.log('Fetched cell groups:', cellGroupsData);
+
+      // Step 2: Fetch all members
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (membersError) throw membersError;
+
+      console.log('Fetched members:', membersData);
+
+      // Step 3: Manual JOIN - Filter cell groups where leader matches logged-in user
+      const userCellGroups = cellGroupsData
+        .filter(cellGroup => {
+          // Find the leader member for this cell group
+          const leader = membersData.find(member => 
+            member.id === cellGroup.leader_id &&
+            member.name?.toLowerCase() === profile.name?.toLowerCase() &&
+            member.surname?.toLowerCase() === profile.surname?.toLowerCase()
+          );
+          return leader !== undefined; // Only include groups where leader matches
+        })
+        .map(cellGroup => {
+          // Add leader information to the cell group
+          const leader = membersData.find(member => member.id === cellGroup.leader_id);
+          return {
+            ...cellGroup,
+            leader: leader ? {
+              id: leader.id,
+              name: leader.name,
+              surname: leader.surname,
+              email: leader.email,
+              phone: leader.phone
+            } : null
+          };
+        });
+
+      console.log(`Fetched ${userCellGroups.length} cell groups for user: ${profile.name} ${profile.surname}`);
+      console.log('User cell groups:', userCellGroups);
+
+      return userCellGroups as CellGroup[];
+    } catch (error) {
+      console.error('Error in fetchCellGroupsForUser:', error);
+      throw error;
+    }
+  };
+
+  // Fetch cell groups based on user role
   const fetchCellGroups = async () => {
     try {
       setLoading(true);
       setError(null);
+
+      let userCellGroups: CellGroup[] = [];
 
       if (isAdmin) {
         // Admin can see all cell groups
@@ -108,29 +178,14 @@ const CellGroups = () => {
           })
         );
 
-        setCellGroups(groupsWithCounts);
+        userCellGroups = groupsWithCounts;
       } else {
-        // Regular users only see groups where they are the leader or a member
-        const { data: userGroups, error: userGroupsError } = await supabase
-          .from('cell_groups')
-          .select(`
-            *,
-            leader:members!cell_groups_leader_id_fkey (
-              id,
-              name,
-              surname,
-              email,
-              phone
-            )
-          `)
-          .or(`leader_id.eq.${profile?.id},members.cell_group_id.eq.${profile?.cell_group_id}`)
-          .order('name');
-
-        if (userGroupsError) throw userGroupsError;
-
+        // Regular users only see groups where they are the designated leader (using the exact SQL query logic)
+        userCellGroups = await fetchCellGroupsForUser();
+        
         // Get member counts for each group
         const groupsWithCounts = await Promise.all(
-          (userGroups || []).map(async (group) => {
+          userCellGroups.map(async (group) => {
             const { count, error: countError } = await supabase
               .from('members')
               .select('*', { count: 'exact', head: true })
@@ -143,17 +198,21 @@ const CellGroups = () => {
           })
         );
 
-        setCellGroups(groupsWithCounts);
+        userCellGroups = groupsWithCounts;
       }
 
-      // Fetch all members for the edit modal
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select('*')
-        .order('name');
+      setCellGroups(userCellGroups);
 
-      if (membersError) throw membersError;
-      setAllMembers(membersData || []);
+      // Fetch all members for the edit modal (admin only)
+      if (isAdmin) {
+        const { data: membersData, error: membersError } = await supabase
+          .from('members')
+          .select('*')
+          .order('name');
+
+        if (membersError) throw membersError;
+        setAllMembers(membersData || []);
+      }
 
     } catch (error: any) {
       console.error('Error loading data:', error);
@@ -180,6 +239,12 @@ const CellGroups = () => {
     }
   };
 
+  // Check if user can edit a specific group
+  const canEditGroup = (group: CellGroup) => {
+    if (isAdmin) return true;
+    return false;
+  };
+
   // Handle viewing group details
   const handleViewGroupDetails = async (group: CellGroup) => {
     try {
@@ -193,8 +258,10 @@ const CellGroups = () => {
     }
   };
 
-  // Handle editing group
+  // Handle editing group (admin only)
   const handleEditGroup = async (group: CellGroup) => {
+    if (!canEditGroup(group)) return;
+    
     setEditingGroup(group);
     
     // Get current group members
@@ -210,10 +277,10 @@ const CellGroups = () => {
     setShowEditModal(true);
   };
 
-  // Save group edits
+  // Save group edits (admin only)
   const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingGroup) return;
+    if (!editingGroup || !canEditGroup(editingGroup)) return;
 
     try {
       const { error } = await supabase
@@ -241,9 +308,9 @@ const CellGroups = () => {
     }
   };
 
-  // Add member to group
+  // Add member to group (admin only)
   const handleAddMemberToGroup = async (memberId: string) => {
-    if (!editingGroup) return;
+    if (!editingGroup || !canEditGroup(editingGroup)) return;
 
     try {
       const { error } = await supabase
@@ -268,9 +335,9 @@ const CellGroups = () => {
     }
   };
 
-  // Remove member from group
+  // Remove member from group (admin only)
   const handleRemoveMemberFromGroup = async (memberId: string) => {
-    if (!editingGroup) return;
+    if (!editingGroup || !canEditGroup(editingGroup)) return;
 
     try {
       const { error } = await supabase
@@ -315,6 +382,12 @@ const CellGroups = () => {
     return `${group.meeting_day || 'Day not set'} at ${group.meeting_time || 'Time not set'}`;
   };
 
+  // Get role description
+  const getRoleDescription = () => {
+    if (isAdmin) return 'Administrative View - Full Access';
+    return 'Showing cell groups where you are the designated leader';
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -353,13 +426,10 @@ const CellGroups = () => {
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Cell Groups
+              Cell Groups for {profile?.name} {profile?.surname}
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              {isAdmin 
-                ? 'All cell groups - Administrative View' 
-                : 'Your cell groups - Member View'
-              }
+              {getRoleDescription()}
             </p>
             <div className="mt-2 text-sm text-gray-500 dark:text-gray-500">
               User: {profile?.name} {profile?.surname} | Role: {profile?.role} {isAdmin && '(Admin)'}
@@ -435,7 +505,7 @@ const CellGroups = () => {
                 <div>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Your Role</p>
                   <p className="text-lg font-bold text-gray-900 dark:text-white">
-                    {isAdmin ? 'Administrator' : 'Member'}
+                    {isAdmin ? 'Administrator' : 'Group Leader'}
                   </p>
                 </div>
               </div>
@@ -467,7 +537,7 @@ const CellGroups = () => {
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-              {isAdmin ? 'All Cell Groups' : 'Your Cell Groups'} ({cellGroups.length} groups)
+              {isAdmin ? 'All Cell Groups' : 'Your Cell Groups'} ({cellGroups.length} groups found)
             </h2>
           </div>
 
@@ -475,12 +545,12 @@ const CellGroups = () => {
             <div className="text-center py-12">
               <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                {isAdmin ? 'No Cell Groups Found' : 'No Cell Groups Assigned'}
+                {isAdmin ? 'No Cell Groups Found' : 'No Cell Groups Found'}
               </h3>
               <p className="text-gray-500 dark:text-gray-500 max-w-md mx-auto">
                 {isAdmin 
                   ? 'There are no cell groups in the system yet.' 
-                  : 'You are not assigned to any cell groups yet.'
+                  : 'No active cell groups found where you are the designated leader.'
                 }
               </p>
             </div>
@@ -518,7 +588,7 @@ const CellGroups = () => {
                       >
                         <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
                       </button>
-                      {isAdmin && (
+                      {canEditGroup(group) && (
                         <button 
                           onClick={() => handleEditGroup(group)}
                           className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -894,4 +964,4 @@ const CellGroups = () => {
   );
 };
 
-export default Groups;
+export default CellGroups;
