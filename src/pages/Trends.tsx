@@ -1,9 +1,6 @@
-import { TrendingUp, TrendingDown, Users, UserCheck, UserX } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Calendar, UserCheck, UserX } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-
-// Type-safe wrapper for trends-related queries
-const db = supabase as any;
 
 interface TrendData {
   label: string;
@@ -43,20 +40,20 @@ const Trends = () => {
     try {
       setLoading(true);
       
-      const { data: members, error: membersError } = await db
+      const { data: members, error: membersError } = await supabase
         .from('members')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (membersError) throw membersError;
 
-      const { data: groups, error: groupsError } = await db
+      const { data: groups, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*');
 
       if (groupsError) throw groupsError;
 
-      const { data: meetings, error: meetingsError } = await db
+      const { data: meetings, error: meetingsError } = await supabase
         .from('meetings')
         .select('*, attendance(*)')
         .gte('meeting_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
@@ -66,13 +63,13 @@ const Trends = () => {
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
       
-      const newThisMonth = members?.filter((member: any) => {
-        const memberDate = member.created_at ? new Date(member.created_at) : null;
-        return memberDate && memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
+      const newThisMonth = members?.filter(member => {
+        const memberDate = new Date(member.created_at);
+        return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
       }).length || 0;
 
-      const permanentMembers = members?.filter((member: any) => member.is_permanent_member).length || 0;
-      const newcomers = members?.filter((member: any) => member.status === 'newcomer').length || 0;
+      const permanentMembers = members?.filter(member => member.is_permanent_member).length || 0;
+      const newcomers = members?.filter(member => member.status === 'newcomer').length || 0;
 
       setMemberStats({
         total: members?.length || 0,
@@ -115,7 +112,7 @@ const Trends = () => {
       setTrends(calculatedTrends);
 
       const totalMeetings = meetings?.length || 1;
-      const totalAttendance = meetings?.reduce((acc: any, meeting: any) => 
+      const totalAttendance = meetings?.reduce((acc, meeting) => 
         acc + (meeting.attendance?.filter((a: any) => a.status === 'present').length || 0), 0) || 0;
       
       const avgAttendance = Math.round((totalAttendance / (totalMeetings * (members?.length || 1))) * 100);
