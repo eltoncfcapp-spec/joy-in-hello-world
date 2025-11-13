@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute = ({ children, requiredRole, requiredPermission }: ProtectedRouteProps) => {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,20 +19,20 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Protecte
       return;
     }
 
-    if (!loading && user) {
+    if (!loading && user && profile) {
       // Check role requirement
-      if (requiredRole && user.role !== requiredRole && user.role !== 'admin') {
+      if (requiredRole && profile.role !== requiredRole && !profile.isAdmin) {
         navigate('/unauthorized');
         return;
       }
 
-      // Check permission requirement
-      if (requiredPermission && !user.permissions.includes(requiredPermission) && user.role !== 'admin') {
+      // Check permission requirement (admins have all permissions)
+      if (requiredPermission && !profile.isAdmin) {
         navigate('/unauthorized');
         return;
       }
     }
-  }, [user, loading, navigate, requiredRole, requiredPermission]);
+  }, [user, profile, loading, navigate, requiredRole, requiredPermission]);
 
   if (loading) {
     return (
