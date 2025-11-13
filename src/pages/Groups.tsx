@@ -133,7 +133,8 @@ const Groups = () => {
       const userHasAccess = isAdmin || 
         canViewGroups ||
         (profile.assigned_groups && profile.assigned_groups.length > 0) ||
-        profile.role === 'group_leader';
+        profile.role === 'group_leader' ||
+        profile.is_leader;
 
       setHasAccess(userHasAccess);
 
@@ -166,10 +167,11 @@ const Groups = () => {
     }
   };
 
-  // Fetch groups with proper filtering based on permissions
+  // Fixed fetchGroups function with proper leader filtering
   const fetchGroups = async () => {
     try {
       console.log('Fetching groups for profile:', profile);
+      console.log('User role:', profile?.role, 'Is leader:', profile?.is_leader, 'Leader ID:', profile?.id);
       
       let query = supabase
         .from('cell_groups')
@@ -190,9 +192,9 @@ const Groups = () => {
           console.log('Filtering by assigned groups:', profile.assigned_groups);
           query = query.in('id', profile.assigned_groups);
         } 
-        // If user is a group leader, show groups they lead
+        // If user is a group leader (check both role and is_leader flag), show groups they lead
         else if (profile?.role === 'group_leader' || profile?.is_leader) {
-          console.log('Filtering by leader_id:', profile.id);
+          console.log('Filtering by leader_id for user:', profile.id);
           query = query.eq('leader_id', profile.id);
         }
         // If user is just a member, show their cell group
@@ -201,6 +203,7 @@ const Groups = () => {
           query = query.eq('id', profile.cell_group_id);
         } else {
           // User has no groups assigned
+          console.log('No groups assigned to user');
           setAllGroups([]);
           setGroups([]);
           return;
@@ -250,6 +253,18 @@ const Groups = () => {
         } else if (profile?.cell_group_id) {
           // Show only members from user's cell group
           query = query.eq('cell_group_id', profile.cell_group_id);
+        } else if (profile?.role === 'group_leader' || profile?.is_leader) {
+          // For group leaders, show members from their groups
+          const { data: leaderGroups } = await supabase
+            .from('cell_groups')
+            .select('id')
+            .eq('leader_id', profile.id)
+            .eq('status', 'active');
+
+          if (leaderGroups && leaderGroups.length > 0) {
+            const groupIds = leaderGroups.map(group => group.id);
+            query = query.in('cell_group_id', groupIds);
+          }
         }
       }
 
@@ -746,6 +761,7 @@ const Groups = () => {
             {profile?.assigned_groups && profile.assigned_groups.length > 0 && (
               <span> • Assigned to {profile.assigned_groups.length} group(s)</span>
             )}
+            {profile?.is_leader && <span> • Group Leader</span>}
           </p>
         </div>
       </div>
@@ -766,6 +782,7 @@ const Groups = () => {
                 ? 'Manage all church groups, meetings, and member assignments' 
                 : `View and manage your assigned groups - ${profile?.role} access`
               }
+              {(profile?.role === 'group_leader' || profile?.is_leader) && ' • Group Leader'}
             </p>
           </div>
           {canManageGroups && (
