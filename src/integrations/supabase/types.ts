@@ -564,7 +564,6 @@ export type Database = {
           permanent_member_date: string | null
           permissions: string[] | null
           phone: string | null
-          role: string | null
           status: Database["public"]["Enums"]["member_status"] | null
           status_date: string | null
           surname: string
@@ -593,7 +592,6 @@ export type Database = {
           permanent_member_date?: string | null
           permissions?: string[] | null
           phone?: string | null
-          role?: string | null
           status?: Database["public"]["Enums"]["member_status"] | null
           status_date?: string | null
           surname: string
@@ -622,7 +620,6 @@ export type Database = {
           permanent_member_date?: string | null
           permissions?: string[] | null
           phone?: string | null
-          role?: string | null
           status?: Database["public"]["Enums"]["member_status"] | null
           status_date?: string | null
           surname?: string
