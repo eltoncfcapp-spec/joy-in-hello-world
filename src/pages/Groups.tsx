@@ -28,6 +28,10 @@ interface Member {
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
+  role?: string | null;
+  permissions?: string[] | null;
+  assigned_groups?: string[] | null;
+  assigned_departments?: string[] | null;
 }
 
 interface Meeting {
@@ -51,6 +55,11 @@ interface Attendance {
   notes: string;
   member?: Member;
 }
+
+// Permission utility functions
+const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
+  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
+};
 
 const Groups = () => {
   const { profile } = useAuth();
@@ -105,6 +114,12 @@ const Groups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+  // Permission checking for current user
+  const currentUserPermissions = profile?.permissions || [];
+  const isAdmin = profile?.isAdmin || hasPermission(currentUserPermissions, 'admin_access');
+  const canManageGroups = isAdmin || hasPermission(currentUserPermissions, 'manage_groups');
+  const canViewGroups = isAdmin || hasPermission(currentUserPermissions, 'view_groups') || canManageGroups;
+
   // Check permissions and load data
   useEffect(() => {
     const checkAccessAndLoadData = async () => {
@@ -115,11 +130,10 @@ const Groups = () => {
       }
 
       // Check if user has access to groups
-      const userHasAccess = profile.isAdmin || 
-        (profile.permissions && profile.permissions.includes('manage_groups')) ||
-        profile.role === 'group_leader' ||
+      const userHasAccess = isAdmin || 
+        canViewGroups ||
         (profile.assigned_groups && profile.assigned_groups.length > 0) ||
-        profile.id; // Allow access if user has an ID (might be a member)
+        profile.role === 'group_leader';
 
       setHasAccess(userHasAccess);
 
@@ -152,7 +166,7 @@ const Groups = () => {
     }
   };
 
-  // Fetch groups with proper filtering
+  // Fetch groups with proper filtering based on permissions
   const fetchGroups = async () => {
     try {
       console.log('Fetching groups for profile:', profile);
@@ -169,105 +183,30 @@ const Groups = () => {
         `)
         .eq('status', 'active');
 
-      // Apply filtering based on user role
-      if (profile) {
-        if (profile.isAdmin || profile.role === 'admin') {
-          // Admin can see all groups - no additional filter needed
-          console.log('Admin user - loading all groups');
-        } else if (profile.assigned_groups && profile.assigned_groups.length > 0) {
-          // Group leaders can see only their assigned groups
-          console.log('Group leader - loading assigned groups:', profile.assigned_groups);
+      // Apply filtering based on user role and permissions
+      if (!isAdmin) {
+        // If user has assigned groups, filter to only those groups
+        if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+          console.log('Filtering by assigned groups:', profile.assigned_groups);
           query = query.in('id', profile.assigned_groups);
-        } else if (profile.id) {
-          // For regular users or group leaders by leader_id, show groups where they are the leader
-          console.log('Checking groups where user is leader or member');
-          
-          // First, try to get groups where user is the leader
-          const { data: leaderGroups, error: leaderError } = await supabase
-            .from('cell_groups')
-            .select(`
-              *,
-              leader:members!cell_groups_leader_id_fkey(
-                id,
-                name,
-                surname
-              )
-            `)
-            .eq('status', 'active')
-            .eq('leader_id', profile.id);
-
-          if (leaderError) {
-            console.error('Error fetching leader groups:', leaderError);
-          }
-
-          // Then get groups where user is a member
-          const { data: memberGroups, error: memberError } = await supabase
-            .from('members')
-            .select('cell_group_id')
-            .eq('id', profile.id)
-            .not('cell_group_id', 'is', null);
-
-          if (memberError) {
-            console.error('Error fetching member groups:', memberError);
-          }
-
-          const memberGroupIds = memberGroups?.map(m => m.cell_group_id).filter(Boolean) || [];
-          
-          // If user is a leader of any groups, use those
-          if (leaderGroups && leaderGroups.length > 0) {
-            console.log('User is leader of groups:', leaderGroups);
-            setAllGroups(leaderGroups);
-            setGroups(leaderGroups);
-            
-            // Fetch members for each group
-            await Promise.all(
-              leaderGroups.map(group => fetchGroupMembers(group.id))
-            );
-            return;
-          }
-          
-          // If user is a member of any groups, fetch those groups
-          if (memberGroupIds.length > 0) {
-            console.log('User is member of groups with IDs:', memberGroupIds);
-            const { data: memberGroupData, error: memberGroupError } = await supabase
-              .from('cell_groups')
-              .select(`
-                *,
-                leader:members!cell_groups_leader_id_fkey(
-                  id,
-                  name,
-                  surname
-                )
-              `)
-              .eq('status', 'active')
-              .in('id', memberGroupIds);
-
-            if (memberGroupError) {
-              console.error('Error fetching member group data:', memberGroupError);
-              throw memberGroupError;
-            }
-
-            console.log('Member groups data:', memberGroupData);
-            setAllGroups(memberGroupData || []);
-            setGroups(memberGroupData || []);
-            
-            // Fetch members for each group
-            if (memberGroupData && memberGroupData.length > 0) {
-              await Promise.all(
-                memberGroupData.map(group => fetchGroupMembers(group.id))
-              );
-            }
-            return;
-          }
-
-          // If no groups found for user, set empty arrays
+        } 
+        // If user is a group leader, show groups they lead
+        else if (profile?.role === 'group_leader' || profile?.is_leader) {
+          console.log('Filtering by leader_id:', profile.id);
+          query = query.eq('leader_id', profile.id);
+        }
+        // If user is just a member, show their cell group
+        else if (profile?.cell_group_id) {
+          console.log('Filtering by member cell_group_id:', profile.cell_group_id);
+          query = query.eq('id', profile.cell_group_id);
+        } else {
+          // User has no groups assigned
           setAllGroups([]);
           setGroups([]);
           return;
         }
       }
 
-      // Execute the query for admin and assigned group leaders
       const { data, error } = await query;
 
       if (error) {
@@ -295,12 +234,26 @@ const Groups = () => {
     }
   };
 
+  // Fetch members with permission filtering
   const fetchMembers = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('members')
         .select('*')
         .order('name');
+
+      // If not admin, filter members based on assigned groups/departments
+      if (!isAdmin) {
+        if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
+          // Filter members who belong to assigned groups
+          query = query.in('cell_group_id', profile.assigned_groups);
+        } else if (profile?.cell_group_id) {
+          // Show only members from user's cell group
+          query = query.eq('cell_group_id', profile.cell_group_id);
+        }
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setMembers(data || []);
@@ -364,21 +317,19 @@ const Groups = () => {
     }
   };
 
-  // Check if user can manage group
+  // Check if user can manage specific group
   const canManageGroup = (group: Group) => {
     if (!profile) return false;
     
     // Admin users can manage all groups
-    if (profile.isAdmin || profile.role === 'admin') {
+    if (isAdmin) return true;
+
+    // Users with manage_groups permission and assigned to this group
+    if (canManageGroups && profile.assigned_groups?.includes(group.id)) {
       return true;
     }
 
-    // Group leaders can manage their assigned groups
-    if (profile.assigned_groups && profile.assigned_groups.includes(group.id)) {
-      return true;
-    }
-
-    // Users can manage groups they are leaders of
+    // Group leaders can manage their own groups
     if (group.leader_id === profile.id) {
       return true;
     }
@@ -386,31 +337,44 @@ const Groups = () => {
     return false;
   };
 
-  // Check if user can view group
+  // Check if user can view specific group
   const canViewGroup = (group: Group) => {
     if (!profile) return false;
     
     // Admin users can view all groups
-    if (profile.isAdmin || profile.role === 'admin') {
+    if (isAdmin) return true;
+
+    // Users with view permission
+    if (canViewGroups) return true;
+
+    // Users assigned to this group
+    if (profile.assigned_groups?.includes(group.id)) {
       return true;
     }
 
-    // Group leaders can view their assigned groups
-    if (profile.assigned_groups && profile.assigned_groups.includes(group.id)) {
-      return true;
-    }
-
-    // Users can view groups they are members of
+    // Users who are members of this group
     if (group.members?.some(member => member.id === profile.id)) {
       return true;
     }
 
-    // Users can view groups they lead
+    // Group leaders can view their groups
     if (group.leader_id === profile.id) {
       return true;
     }
 
     return false;
+  };
+
+  // Check if user can add members
+  const canAddMembers = () => {
+    if (!profile) return false;
+    return isAdmin || hasPermission(currentUserPermissions, 'add_members') || profile.can_add_members;
+  };
+
+  // Check if user can edit members
+  const canEditMembers = () => {
+    if (!profile) return false;
+    return isAdmin || hasPermission(currentUserPermissions, 'edit_members') || profile.can_edit_members;
   };
 
   // Create new group function
@@ -418,7 +382,7 @@ const Groups = () => {
     e.preventDefault();
     
     // Check permission
-    if (!profile?.isAdmin && !(profile?.permissions && profile.permissions.includes('manage_groups'))) {
+    if (!canManageGroups) {
       setError('You do not have permission to create groups');
       return;
     }
@@ -491,6 +455,11 @@ const Groups = () => {
       return;
     }
 
+    if (!canAddMembers()) {
+      setError('You do not have permission to add members');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -518,6 +487,11 @@ const Groups = () => {
   const handleRemoveMemberFromGroup = async (memberId: string) => {
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
       setError('You do not have permission to manage this group');
+      return;
+    }
+
+    if (!canEditMembers()) {
+      setError('You do not have permission to remove members');
       return;
     }
 
@@ -788,13 +762,13 @@ const Groups = () => {
               Groups & Ministries
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              {profile?.isAdmin 
+              {isAdmin 
                 ? 'Manage all church groups, meetings, and member assignments' 
-                : `View and manage groups you are assigned to - ${profile?.role} access`
+                : `View and manage your assigned groups - ${profile?.role} access`
               }
             </p>
           </div>
-          {(profile?.isAdmin || (profile?.permissions && profile.permissions.includes('manage_groups'))) && (
+          {canManageGroups && (
             <button
               onClick={() => setShowForm(!showForm)}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
@@ -820,7 +794,7 @@ const Groups = () => {
         )}
 
         {/* Create Group Form */}
-        {showForm && (profile?.isAdmin || (profile?.permissions && profile.permissions.includes('manage_groups'))) && (
+        {showForm && canManageGroups && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Group</h2>
             <form onSubmit={handleCreateGroup} className="space-y-6">
@@ -928,7 +902,10 @@ const Groups = () => {
                 </p>
               </div>
               <button
-                onClick={() => setSelectedGroup(null)}
+                onClick={() => {
+                  setSelectedGroup(null);
+                  setActiveTab('groups');
+                }}
                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 Back to Groups
@@ -993,7 +970,10 @@ const Groups = () => {
                   {canManageGroup(selectedGroup) && (
                     <>
                       <button
-                        onClick={() => setShowMeetingForm(true)}
+                        onClick={() => {
+                          fetchGroupMeetings(selectedGroup.id);
+                          setShowMeetingForm(true);
+                        }}
                         className="w-full flex items-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                       >
                         <Plus className="h-4 w-4" />
@@ -1009,7 +989,10 @@ const Groups = () => {
                     </>
                   )}
                   <button
-                    onClick={() => setActiveTab('meetings')}
+                    onClick={() => {
+                      fetchGroupMeetings(selectedGroup.id);
+                      setActiveTab('meetings');
+                    }}
                     className="w-full flex items-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
                   >
                     <Calendar className="h-4 w-4" />
@@ -1024,7 +1007,10 @@ const Groups = () => {
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Meetings</h3>
                 <button
-                  onClick={() => setActiveTab('meetings')}
+                  onClick={() => {
+                    fetchGroupMeetings(selectedGroup.id);
+                    setActiveTab('meetings');
+                  }}
                   className="text-blue-600 hover:text-blue-700 text-sm font-medium"
                 >
                   View All
@@ -1228,7 +1214,7 @@ const Groups = () => {
             </div>
 
             {/* Add Members Section - Only show if user can manage group */}
-            {canManageGroup(selectedGroup) && (
+            {canManageGroup(selectedGroup) && canAddMembers() && (
               <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
                 <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Group</h4>
                 
@@ -1320,7 +1306,7 @@ const Groups = () => {
                           </div>
                         </div>
                       </div>
-                      {canManageGroup(selectedGroup) && (
+                      {canManageGroup(selectedGroup) && canEditMembers() && (
                         <button
                           onClick={() => handleRemoveMemberFromGroup(member.id)}
                           className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
@@ -1349,15 +1335,15 @@ const Groups = () => {
               <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                  {profile?.isAdmin ? 'No Groups Yet' : 'No Groups Available'}
+                  {isAdmin ? 'No Groups Yet' : 'No Groups Available'}
                 </h3>
                 <p className="text-gray-500 dark:text-gray-500 mb-6">
-                  {profile?.isAdmin 
+                  {isAdmin 
                     ? 'Create your first group to get started' 
                     : 'You are not assigned to any groups or there are no active groups.'
                   }
                 </p>
-                {profile?.isAdmin && (
+                {canManageGroups && (
                   <button
                     onClick={() => setShowForm(true)}
                     className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium"
@@ -1371,7 +1357,10 @@ const Groups = () => {
                 <div
                   key={group.id}
                   className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02] cursor-pointer group"
-                  onClick={() => setSelectedGroup(group)}
+                  onClick={() => {
+                    setSelectedGroup(group);
+                    fetchGroupMeetings(group.id);
+                  }}
                 >
                   <div className="flex items-start gap-4 mb-4">
                     <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-200">
