@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -64,6 +64,16 @@ interface Member {
   cell_group_id?: string | null;
 }
 
+interface Attendance {
+  id: string;
+  meeting_id: string;
+  member_id: string;
+  status: 'present' | 'absent' | 'absent_with_reason';
+  reason?: string | null;
+  created_at: string;
+  member?: Member;
+}
+
 // Permission checking utility
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
@@ -88,12 +98,16 @@ const CellGroups = () => {
   const [showReportsModal, setShowReportsModal] = useState(false);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showReportView, setShowReportView] = useState(false);
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [allCellGroups, setAllCellGroups] = useState<CellGroup[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingReports, setMeetingReports] = useState<MeetingReport[]>([]);
+  const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
   
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -130,6 +144,12 @@ const CellGroups = () => {
     action_items: '',
     next_meeting_date: ''
   });
+
+  const [attendanceFormData, setAttendanceFormData] = useState<{
+    [key: string]: 'present' | 'absent' | 'absent_with_reason';
+  }>({});
+
+  const [absenceReasons, setAbsenceReasons] = useState<{[key: string]: string}>({});
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -321,6 +341,22 @@ const CellGroups = () => {
     }
   };
 
+  const fetchAvailableMembers = async (groupId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .or(`cell_group_id.is.null,cell_group_id.eq.${groupId}`)
+        .order('name');
+
+      if (error) throw error;
+      setAvailableMembers(data || []);
+    } catch (error) {
+      console.error('Error fetching available members:', error);
+      setAvailableMembers([]);
+    }
+  };
+
   const fetchMeetings = async (groupId: string) => {
     try {
       const { data, error } = await supabase
@@ -354,6 +390,40 @@ const CellGroups = () => {
     } catch (error) {
       console.error('Error fetching meeting reports:', error);
       setMeetingReports([]);
+    }
+  };
+
+  const fetchAttendance = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select(`
+          *,
+          member:members(*)
+        `)
+        .eq('meeting_id', meetingId);
+
+      if (error) throw error;
+      
+      const attendanceData = data || [];
+      setAttendance(attendanceData);
+
+      // Initialize form data
+      const initialFormData: {[key: string]: 'present' | 'absent' | 'absent_with_reason'} = {};
+      const initialReasons: {[key: string]: string} = {};
+      
+      attendanceData.forEach((record: Attendance) => {
+        initialFormData[record.member_id] = record.status;
+        if (record.reason) {
+          initialReasons[record.member_id] = record.reason;
+        }
+      });
+      
+      setAttendanceFormData(initialFormData);
+      setAbsenceReasons(initialReasons);
+    } catch (error) {
+      console.error('Error fetching attendance:', error);
+      setAttendance([]);
     }
   };
 
@@ -423,6 +493,172 @@ const CellGroups = () => {
       setCellGroups(filtered);
     }
   }, [allCellGroups, profile]);
+
+  // Add Members Functions
+  const openAddMembersModal = async (group: CellGroup) => {
+    if (!canManageGroup(group)) {
+      setError('You do not have permission to add members to this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setSelectedMembers([]);
+    await fetchAvailableMembers(group.id);
+    setShowAddMembersModal(true);
+  };
+
+  const toggleMemberSelection = (memberId: string) => {
+    setSelectedMembers(prev => 
+      prev.includes(memberId) 
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
+
+  const addSelectedMembers = async () => {
+    if (!selectedGroup || selectedMembers.length === 0) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Update each selected member's cell_group_id
+      const updates = selectedMembers.map(memberId => 
+        supabase
+          .from('members')
+          .update({ cell_group_id: selectedGroup.id })
+          .eq('id', memberId)
+      );
+
+      const results = await Promise.all(updates);
+      
+      // Check for errors
+      const hasError = results.some(result => result.error);
+      if (hasError) {
+        throw new Error('Failed to add some members');
+      }
+
+      await fetchCellGroups();
+      await fetchAvailableMembers(selectedGroup.id);
+      setSelectedMembers([]);
+      alert('Members added successfully!');
+    } catch (error: any) {
+      console.error('Error adding members:', error);
+      setError(`Error adding members: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeMember = async (memberId: string) => {
+    if (!selectedGroup) return;
+
+    if (!confirm('Are you sure you want to remove this member from the group?')) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from('members')
+        .update({ cell_group_id: null })
+        .eq('id', memberId);
+
+      if (error) throw error;
+
+      await fetchCellGroups();
+      await fetchAvailableMembers(selectedGroup.id);
+      alert('Member removed successfully!');
+    } catch (error: any) {
+      console.error('Error removing member:', error);
+      setError(`Error removing member: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Attendance Functions
+  const openAttendanceModal = async (meeting: Meeting) => {
+    if (!selectedGroup || !canManageGroup(selectedGroup)) {
+      setError('You do not have permission to manage attendance for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    await fetchAttendance(meeting.id);
+    setShowAttendanceModal(true);
+  };
+
+  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
+    setAttendanceFormData(prev => ({
+      ...prev,
+      [memberId]: status
+    }));
+
+    // Clear reason if status is not absent_with_reason
+    if (status !== 'absent_with_reason') {
+      setAbsenceReasons(prev => {
+        const newReasons = { ...prev };
+        delete newReasons[memberId];
+        return newReasons;
+      });
+    }
+  };
+
+  const handleReasonChange = (memberId: string, reason: string) => {
+    setAbsenceReasons(prev => ({
+      ...prev,
+      [memberId]: reason
+    }));
+  };
+
+  const saveAttendance = async () => {
+    if (!selectedMeeting) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Get all group members
+      const groupMembers = members.filter(member => member.cell_group_id === selectedGroup?.id);
+
+      // Prepare attendance records
+      const attendanceRecords = groupMembers.map(member => {
+        const status = attendanceFormData[member.id] || 'present'; // Default to present
+        const reason = status === 'absent_with_reason' ? absenceReasons[member.id] || '' : null;
+
+        return {
+          meeting_id: selectedMeeting.id,
+          member_id: member.id,
+          status,
+          reason
+        };
+      });
+
+      // Delete existing attendance for this meeting
+      const { error: deleteError } = await supabase
+        .from('attendance')
+        .delete()
+        .eq('meeting_id', selectedMeeting.id);
+
+      if (deleteError) throw deleteError;
+
+      // Insert new attendance records
+      const { error: insertError } = await supabase
+        .from('attendance')
+        .insert(attendanceRecords);
+
+      if (insertError) throw insertError;
+
+      alert('Attendance saved successfully!');
+      setShowAttendanceModal(false);
+    } catch (error: any) {
+      console.error('Error saving attendance:', error);
+      setError(`Error saving attendance: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Meeting Reports Functions
   const createMeetingReport = async () => {
@@ -659,11 +895,15 @@ const CellGroups = () => {
     setShowReportsModal(false);
     setShowReportForm(false);
     setShowReportView(false);
+    setShowAddMembersModal(false);
+    setShowAttendanceModal(false);
     setSelectedGroup(null);
     setSelectedMeeting(null);
     setSelectedReport(null);
+    setSelectedMembers([]);
     setMeetings([]);
     setMeetingReports([]);
+    setAttendance([]);
     setMeetingFormData({
       meeting_date: '',
       meeting_time: '',
@@ -678,6 +918,8 @@ const CellGroups = () => {
       action_items: '',
       next_meeting_date: ''
     });
+    setAttendanceFormData({});
+    setAbsenceReasons({});
   };
 
   // Existing functions (handleSubmit, handleUpdateGroup, etc.) remain the same...
@@ -1007,6 +1249,13 @@ const CellGroups = () => {
                       {canManage && (
                         <>
                           <button
+                            onClick={() => openAddMembersModal(group)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                            title="Add members"
+                          >
+                            <UserPlus className="h-4 w-4" />
+                          </button>
+                          <button
                             onClick={() => openEditForm(group)}
                             className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
                             title="Edit group"
@@ -1029,6 +1278,218 @@ const CellGroups = () => {
             })
           )}
         </div>
+
+        {/* Add Members Modal */}
+        {showAddMembersModal && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Add Members to {selectedGroup.name}
+                </h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Available Members */}
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Available Members</h4>
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {availableMembers.filter(member => !member.cell_group_id || member.cell_group_id === selectedGroup.id).map(member => (
+                      <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            {member.email}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => toggleMemberSelection(member.id)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            selectedMembers.includes(member.id)
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                          }`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {availableMembers.filter(member => !member.cell_group_id || member.cell_group_id === selectedGroup.id).length === 0 && (
+                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No available members found
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Current Members */}
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Members</h4>
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {availableMembers.filter(member => member.cell_group_id === selectedGroup.id).map(member => (
+                      <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            {member.email}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeMember(member.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {availableMembers.filter(member => member.cell_group_id === selectedGroup.id).length === 0 && (
+                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No members in this group
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center mt-6 pt-6 border-t border-gray-200 dark:border-gray-600">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {selectedMembers.length} member{selectedMembers.length !== 1 ? 's' : ''} selected
+                </span>
+                <div className="flex gap-3">
+                  <button
+                    onClick={addSelectedMembers}
+                    disabled={selectedMembers.length === 0 || loading}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    {loading ? 'Adding...' : `Add ${selectedMembers.length} Member${selectedMembers.length !== 1 ? 's' : ''}`}
+                  </button>
+                  <button
+                    onClick={closeAllModals}
+                    className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Attendance Modal */}
+        {showAttendanceModal && selectedMeeting && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                </h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {members.filter(member => member.cell_group_id === selectedGroup.id).map(member => (
+                  <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-white">
+                        {member.name} {member.surname}
+                      </div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        {member.email}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
+                      {/* Present Button */}
+                      <button
+                        onClick={() => handleAttendanceChange(member.id, 'present')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          attendanceFormData[member.id] === 'present'
+                            ? 'bg-green-600 text-white'
+                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Present
+                      </button>
+
+                      {/* Absent Button */}
+                      <button
+                        onClick={() => handleAttendanceChange(member.id, 'absent')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          attendanceFormData[member.id] === 'absent'
+                            ? 'bg-red-600 text-white'
+                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Absent
+                      </button>
+
+                      {/* Absent with Reason Button */}
+                      <button
+                        onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          attendanceFormData[member.id] === 'absent_with_reason'
+                            ? 'bg-orange-600 text-white'
+                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <FileText className="h-4 w-4" />
+                        Absent with Reason
+                      </button>
+                    </div>
+
+                    {/* Reason Input */}
+                    {attendanceFormData[member.id] === 'absent_with_reason' && (
+                      <div className="w-full mt-3">
+                        <input
+                          type="text"
+                          value={absenceReasons[member.id] || ''}
+                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
+                          placeholder="Enter reason for absence..."
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200 dark:border-gray-600">
+                <button
+                  onClick={saveAttendance}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {loading ? 'Saving...' : 'Save Attendance'}
+                </button>
+                <button
+                  onClick={closeAllModals}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Meetings & Reports Modal */}
         {showMeetingsModal && selectedGroup && (
@@ -1103,13 +1564,22 @@ const CellGroups = () => {
                           </div>
                           <div className="flex gap-2 mt-3">
                             {canManageGroup(selectedGroup) && (
-                              <button
-                                onClick={() => openReportForm(meeting)}
-                                className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
-                              >
-                                <FileText className="h-3 w-3" />
-                                Create Report
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => openAttendanceModal(meeting)}
+                                  className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
+                                >
+                                  <Users className="h-3 w-3" />
+                                  Attendance
+                                </button>
+                                <button
+                                  onClick={() => openReportForm(meeting)}
+                                  className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  Create Report
+                                </button>
+                              </>
                             )}
                           </div>
                         </div>
@@ -1417,4 +1887,4 @@ const CellGroups = () => {
   );
 };
 
-export default Groups;
+export default CellGroups;
