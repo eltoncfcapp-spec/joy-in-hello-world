@@ -8,7 +8,6 @@ export default function Login() {
   const [identifier, setIdentifier] = useState('');
   const [secret, setSecret] = useState('');
   const [showSecret, setShowSecret] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -16,146 +15,114 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    // Try login with identifier and secret
-    const success = await login(identifier, secret, loginMode);
-
+    
+    const success = await login(identifier.trim(), secret, loginMode);
+    
     if (success) {
-      navigate('/');
+      navigate('/dashboard');
     } else {
-      setError(
-        loginMode === 'email'
-          ? 'Invalid email or password'
-          : 'Invalid username or PIN'
-      );
+      setError(loginMode === 'email' 
+        ? 'Invalid email or password' 
+        : 'Invalid username or PIN');
     }
   };
 
-  const handleDemoLogin = (demoIdentifier: string, demoSecret: string, mode: 'email' | 'username') => {
-    setIdentifier(demoIdentifier);
-    setSecret(demoSecret);
-    setLoginMode(mode);
-  };
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="max-w-md w-full space-y-8 p-8 bg-card rounded-lg shadow-lg">
-        <div>
-          <h2 className="text-3xl font-bold text-center text-foreground">Church Management</h2>
-          <p className="mt-2 text-center text-muted-foreground">Sign in to your account</p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 p-6">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="p-8 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+          <h1 className="text-3xl font-bold text-center">ChurchConnect</h1>
+          <p className="mt-2 text-center text-blue-100">Community Management Portal</p>
         </div>
+        
+        <div className="p-8">
+          <div className="flex justify-center gap-2 mb-6">
+            <button
+              type="button"
+              onClick={() => setLoginMode('email')}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                loginMode === 'email'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Email Login
+            </button>
+            <button
+              type="button"
+              onClick={() => setLoginMode('username')}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                loginMode === 'username'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Username Login
+            </button>
+          </div>
 
-        {/* Mode Toggle */}
-        <div className="flex justify-center gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => setLoginMode('email')}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              loginMode === 'email'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Email Login
-          </button>
-          <button
-            type="button"
-            onClick={() => setLoginMode('username')}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              loginMode === 'username'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Username Login
-          </button>
-        </div>
-
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="identifier" className="block text-sm font-medium text-foreground">
+          <form onSubmit={handleSubmit}>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 {loginMode === 'email' ? 'Email' : 'Username'}
               </label>
               <input
-                id="identifier"
                 type={loginMode === 'email' ? 'email' : 'text'}
-                required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
-                placeholder={loginMode === 'email' ? 'admin@church.com' : 'john_doe'}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                placeholder={loginMode === 'email' ? 'you@example.com' : 'johndoe123'}
+                required
               />
             </div>
 
-            <div>
-              <label htmlFor="secret" className="block text-sm font-medium text-foreground">
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 {loginMode === 'email' ? 'Password' : 'PIN'}
               </label>
               <div className="relative">
                 <input
-                  id="secret"
-                  type={showSecret ? 'text' : loginMode === 'username' ? 'number' : 'password'}
-                  required
+                  type={showSecret ? 'text' : loginMode === 'username' ? 'password' : 'password'}
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
-                  className="mt-1 block w-full px-3 py-2 pr-10 border border-border rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-primary focus:border-primary"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
                   placeholder={loginMode === 'email' ? '••••••••' : '1234'}
+                  required
                 />
                 <button
                   type="button"
                   onClick={() => setShowSecret(!showSecret)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-2 text-gray-400 hover:text-gray-600"
                 >
-                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showSecret ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
                 </button>
               </div>
             </div>
 
-            {/* Remember Me */}
-            <div className="flex items-center">
-              <input
-                id="remember-me"
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="h-4 w-4 text-primary border-border rounded focus:ring-primary"
-              />
-              <label htmlFor="remember-me" className="ml-2 block text-sm text-foreground">
-                Keep me logged in
-              </label>
-            </div>
-          </div>
+            {error && (
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
 
-          {error && <div className="text-destructive text-sm text-center">{error}</div>}
-
-          <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground">
-            <p className="font-medium mb-2">Demo Login Options:</p>
-            <div className="space-y-1">
+            <div className="mb-6">
               <button
-                type="button"
-                onClick={() => handleDemoLogin('admin@church.com', 'admin123', 'email')}
-                className="w-full text-left hover:text-foreground transition-colors"
+                type="submit"
+                className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:opacity-90 transition-opacity shadow-md"
               >
-                • Email: admin@church.com / Password: admin123
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('sarah_smith', '5432', 'username')}
-                className="w-full text-left hover:text-foreground transition-colors"
-              >
-                • Username: sarah_smith / PIN: 5432
+                Sign In
               </button>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-          >
-            Sign in
-          </button>
-        </form>
+            <div className="text-center text-sm text-gray-600">
+              <p>Forgot your password? Contact your administrator</p>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );
