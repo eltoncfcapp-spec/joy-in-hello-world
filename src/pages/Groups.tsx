@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus, Mail, Phone } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -100,6 +100,7 @@ const CellGroups = () => {
   const [showReportView, setShowReportView] = useState(false);
   const [showAddMembersModal, setShowAddMembersModal] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [showManageLeadersModal, setShowManageLeadersModal] = useState(false);
   
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [allCellGroups, setAllCellGroups] = useState<CellGroup[]>([]);
@@ -108,6 +109,7 @@ const CellGroups = () => {
   const [meetingReports, setMeetingReports] = useState<MeetingReport[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
+  const [potentialLeaders, setPotentialLeaders] = useState<Member[]>([]);
   
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -117,6 +119,7 @@ const CellGroups = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
 
@@ -153,10 +156,10 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Check if user can create cell groups (only Admin)
+  // Check if user can create cell groups (Admin, Pastor, or users with manage_groups permission)
   const canCreateGroups = () => {
     if (!profile) return false;
-    return isAdminOrPastor(profile.role);
+    return isAdminOrPastor(profile.role) || canManageAllGroups(profile.permissions);
   };
 
   // Check if user can manage specific cell group
@@ -315,7 +318,7 @@ const CellGroups = () => {
       // Map the data properly
       const mappedGroups = cellGroupsData.map(group => ({
         ...group,
-        members: []
+        members: group.cell_group_members?.map((cm: any) => cm.member) || []
       }));
       
       setAllCellGroups(mappedGroups as any);
@@ -354,6 +357,22 @@ const CellGroups = () => {
     } catch (error) {
       console.error('Error fetching available members:', error);
       setAvailableMembers([]);
+    }
+  };
+
+  const fetchPotentialLeaders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .or('role.eq.admin,role.eq.group_leader,role.eq.leader,is_leader.eq.true')
+        .order('name');
+
+      if (error) throw error;
+      setPotentialLeaders(data || []);
+    } catch (error) {
+      console.error('Error fetching potential leaders:', error);
+      setPotentialLeaders([]);
     }
   };
 
@@ -424,24 +443,6 @@ const CellGroups = () => {
     } catch (error) {
       console.error('Error fetching attendance:', error);
       setAttendance([]);
-    }
-  };
-
-  const fetchGroupMembers = async (groupId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select('id, name, surname, email, phone')
-        .eq('cell_group_id', groupId)
-        .order('role', { ascending: false });
-
-      if (error) throw error;
-      
-      setAllCellGroups(prev => prev.map(group => 
-        group.id === groupId ? { ...group, members: data || [] } : group
-      ));
-    } catch (error) {
-      console.error('Error fetching group members:', error);
     }
   };
 
@@ -541,7 +542,8 @@ const CellGroups = () => {
       await fetchCellGroups();
       await fetchAvailableMembers(selectedGroup.id);
       setSelectedMembers([]);
-      alert('Members added successfully!');
+      setSuccess(`${selectedMembers.length} member(s) added successfully!`);
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error adding members:', error);
       setError(`Error adding members: ${error.message}`);
@@ -568,7 +570,8 @@ const CellGroups = () => {
 
       await fetchCellGroups();
       await fetchAvailableMembers(selectedGroup.id);
-      alert('Member removed successfully!');
+      setSuccess('Member removed successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error removing member:', error);
       setError(`Error removing member: ${error.message}`);
@@ -650,11 +653,76 @@ const CellGroups = () => {
 
       if (insertError) throw insertError;
 
-      alert('Attendance saved successfully!');
+      setSuccess('Attendance saved successfully!');
+      setTimeout(() => setSuccess(null), 3000);
       setShowAttendanceModal(false);
     } catch (error: any) {
       console.error('Error saving attendance:', error);
       setError(`Error saving attendance: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Leader Management Functions
+  const openManageLeadersModal = async (group: CellGroup) => {
+    if (!canManageGroup(group)) {
+      setError('You do not have permission to manage leaders for this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    await fetchPotentialLeaders();
+    setShowManageLeadersModal(true);
+  };
+
+  const assignLeader = async (memberId: string) => {
+    if (!selectedGroup) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .update({ leader_id: memberId })
+        .eq('id', selectedGroup.id);
+
+      if (error) throw error;
+
+      await fetchCellGroups();
+      setSuccess('Leader assigned successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowManageLeadersModal(false);
+    } catch (error: any) {
+      console.error('Error assigning leader:', error);
+      setError(`Error assigning leader: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeLeader = async () => {
+    if (!selectedGroup) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .update({ leader_id: null })
+        .eq('id', selectedGroup.id);
+
+      if (error) throw error;
+
+      await fetchCellGroups();
+      setSuccess('Leader removed successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowManageLeadersModal(false);
+    } catch (error: any) {
+      console.error('Error removing leader:', error);
+      setError(`Error removing leader: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -704,7 +772,8 @@ const CellGroups = () => {
         next_meeting_date: ''
       });
       
-      alert('Meeting report created successfully!');
+      setSuccess('Meeting report created successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error creating meeting report:', error);
       setError(`Error creating meeting report: ${error.message}`);
@@ -755,7 +824,8 @@ const CellGroups = () => {
         next_meeting_date: ''
       });
       
-      alert('Meeting report updated successfully!');
+      setSuccess('Meeting report updated successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error updating meeting report:', error);
       setError(`Error updating meeting report: ${error.message}`);
@@ -782,7 +852,8 @@ const CellGroups = () => {
         await fetchMeetingReports(selectedGroup.id);
       }
       
-      alert('Meeting report deleted successfully!');
+      setSuccess('Meeting report deleted successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting meeting report:', error);
       setError(`Error deleting meeting report: ${error.message}`);
@@ -829,7 +900,8 @@ const CellGroups = () => {
         notes: ''
       });
       
-      alert('Meeting created successfully!');
+      setSuccess('Meeting created successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error creating meeting:', error);
       setError(`Error creating meeting: ${error.message}`);
@@ -890,6 +962,24 @@ const CellGroups = () => {
     setShowReportView(true);
   };
 
+  const openEditForm = (group: CellGroup) => {
+    if (!canManageGroup(group)) {
+      setError('You do not have permission to edit this cell group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setFormData({
+      name: group.name,
+      description: group.description || '',
+      location: group.location || '',
+      meeting_day: group.meeting_day || '',
+      meeting_time: group.meeting_time || '',
+      leader_id: group.leader_id || ''
+    });
+    setShowEditForm(true);
+  };
+
   const closeAllModals = () => {
     setShowMeetingsModal(false);
     setShowReportsModal(false);
@@ -897,6 +987,8 @@ const CellGroups = () => {
     setShowReportView(false);
     setShowAddMembersModal(false);
     setShowAttendanceModal(false);
+    setShowManageLeadersModal(false);
+    setShowEditForm(false);
     setSelectedGroup(null);
     setSelectedMeeting(null);
     setSelectedReport(null);
@@ -922,13 +1014,12 @@ const CellGroups = () => {
     setAbsenceReasons({});
   };
 
-  // Existing functions (handleSubmit, handleUpdateGroup, etc.) remain the same...
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check permission - only admin/pastor can create groups
+    // Check permission - only admin/pastor or users with manage_groups permission can create groups
     if (!canCreateGroups()) {
-      setError('You do not have permission to create cell groups. Only administrators can create new cell groups.');
+      setError('You do not have permission to create cell groups. Only administrators and users with manage_groups permission can create new cell groups.');
       return;
     }
 
@@ -962,6 +1053,8 @@ const CellGroups = () => {
         meeting_time: '', 
         leader_id: '' 
       });
+      setSuccess('Cell group created successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error creating cell group:', error);
       setError(`Error creating cell group: ${error.message}`);
@@ -1006,6 +1099,8 @@ const CellGroups = () => {
         meeting_time: '', 
         leader_id: '' 
       });
+      setSuccess('Cell group updated successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error updating cell group:', error);
       setError(`Error updating cell group: ${error.message}`);
@@ -1037,6 +1132,8 @@ const CellGroups = () => {
       if (error) throw error;
 
       await fetchCellGroups();
+      setSuccess('Cell group deleted successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting cell group:', error);
       setError(`Error deleting cell group: ${error.message}`);
@@ -1048,6 +1145,14 @@ const CellGroups = () => {
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
+
+  // Filter groups based on search term
+  const filteredGroups = cellGroups.filter(group =>
+    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.leader?.surname?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   // Show loading while checking permissions
   if (initialLoad) {
@@ -1112,10 +1217,27 @@ const CellGroups = () => {
           )}
         </div>
 
+        {/* Search Bar */}
+        <div className="mb-6">
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input
+              type="text"
+              placeholder="Search cell groups..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
-              <p className="text-red-700 font-medium">{error}</p>
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+                <p className="text-red-700 font-medium">{error}</p>
+              </div>
               <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
                 <X className="h-4 w-4" />
               </button>
@@ -1123,7 +1245,21 @@ const CellGroups = () => {
           </div>
         )}
 
-        {/* Create Cell Group Form - Keep existing form */}
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                <p className="text-green-700 font-medium">{success}</p>
+              </div>
+              <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Create Cell Group Form */}
         {showForm && canCreateGroups() && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Cell Group</h2>
@@ -1140,7 +1276,68 @@ const CellGroups = () => {
                     required
                   />
                 </div>
-                {/* ... rest of the form fields ... */}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter meeting location"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Day</label>
+                  <select
+                    value={formData.meeting_day}
+                    onChange={(e) => setFormData({ ...formData, meeting_day: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select day</option>
+                    {daysOfWeek.map(day => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
+                  <input
+                    type="time"
+                    value={formData.meeting_time}
+                    onChange={(e) => setFormData({ ...formData, meeting_time: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter group description"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader (Optional)</label>
+                  <select
+                    value={formData.leader_id}
+                    onChange={(e) => setFormData({ ...formData, leader_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select a leader</option>
+                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="flex gap-3">
                 <button
@@ -1163,14 +1360,115 @@ const CellGroups = () => {
           </div>
         )}
 
+        {/* Edit Cell Group Form */}
+        {showEditForm && selectedGroup && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Edit Cell Group</h2>
+            <form onSubmit={handleUpdateGroup} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Name *</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter cell group name"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter meeting location"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Day</label>
+                  <select
+                    value={formData.meeting_day}
+                    onChange={(e) => setFormData({ ...formData, meeting_day: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select day</option>
+                    {daysOfWeek.map(day => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
+                  <input
+                    type="time"
+                    value={formData.meeting_time}
+                    onChange={(e) => setFormData({ ...formData, meeting_time: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter group description"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader</label>
+                  <select
+                    value={formData.leader_id}
+                    onChange={(e) => setFormData({ ...formData, leader_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">No leader assigned</option>
+                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Save className="h-5 w-5" />
+                  {loading ? 'Updating...' : 'Update Cell Group'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditForm(false)}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* Cell Groups List */}
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {loading && cellGroups.length === 0 ? (
+          {loading && filteredGroups.length === 0 ? (
             <div className="col-span-full text-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
               <p className="mt-4 text-gray-600 dark:text-gray-400">Loading cell groups...</p>
             </div>
-          ) : cellGroups.length === 0 ? (
+          ) : filteredGroups.length === 0 ? (
             <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
@@ -1192,7 +1490,7 @@ const CellGroups = () => {
               )}
             </div>
           ) : (
-            cellGroups.map((group) => {
+            filteredGroups.map((group) => {
               const canManage = canManageGroup(group);
               const canView = canViewGroup(group);
               
@@ -1228,6 +1526,23 @@ const CellGroups = () => {
                         Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'Not assigned'}
                       </span>
                     </div>
+                    
+                    {group.location && (
+                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                        <MapPin className="h-4 w-4" />
+                        <span className="text-sm">{group.location}</span>
+                      </div>
+                    )}
+                    
+                    {(group.meeting_day || group.meeting_time) && (
+                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                        <Calendar className="h-4 w-4" />
+                        <span className="text-sm">
+                          {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                        </span>
+                      </div>
+                    )}
+                    
                     {group.description && (
                       <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
                         {group.description}
@@ -1254,6 +1569,13 @@ const CellGroups = () => {
                             title="Add members"
                           >
                             <UserPlus className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => openManageLeadersModal(group)}
+                            className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
+                            title="Manage leaders"
+                          >
+                            <User className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => openEditForm(group)}
@@ -1381,6 +1703,98 @@ const CellGroups = () => {
                     Close
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Manage Leaders Modal */}
+        {showManageLeadersModal && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Manage Leaders for {selectedGroup.name}
+                </h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Current Leader */}
+                {selectedGroup.leader && (
+                  <div className="p-4 border border-green-200 dark:border-green-800 rounded-lg bg-green-50 dark:bg-green-900/20">
+                    <h4 className="font-semibold text-green-800 dark:text-green-300 mb-2">Current Leader</h4>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">
+                          {selectedGroup.leader.name} {selectedGroup.leader.surname}
+                        </div>
+                        {selectedGroup.leader.email && (
+                          <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                            <Mail className="h-3 w-3" />
+                            {selectedGroup.leader.email}
+                          </div>
+                        )}
+                        {selectedGroup.leader.phone && (
+                          <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                            <Phone className="h-3 w-3" />
+                            {selectedGroup.leader.phone}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={removeLeader}
+                        className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Potential Leaders */}
+                <div>
+                  <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Assign New Leader</h4>
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {potentialLeaders.map(member => (
+                      <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            {member.email} • {member.role}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => assignLeader(member.id)}
+                          className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                        >
+                          Assign
+                        </button>
+                      </div>
+                    ))}
+                    {potentialLeaders.length === 0 && (
+                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No potential leaders found
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200 dark:border-gray-600">
+                <button
+                  onClick={closeAllModals}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
