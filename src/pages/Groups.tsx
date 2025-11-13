@@ -1,4 +1,4 @@
-import { Users, Plus, Calendar, User, Search, X, CheckCircle, XCircle, Clock4, Trash2 } from 'lucide-react';
+import { Users, Plus, Calendar, User, Search, X, CheckCircle, XCircle, Clock4, Trash2, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -68,6 +68,7 @@ const Groups = () => {
   const [activeTab, setActiveTab] = useState<'groups' | 'meetings' | 'members'>('groups');
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Meeting states
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -134,31 +135,11 @@ const Groups = () => {
     checkAccessAndLoadData();
   }, [profile]);
 
-  // Filter groups based on user permissions
-  const getFilteredGroups = () => {
-    if (!profile) return [];
-
-    // Admin users can see all groups
-    if (profile.isAdmin || profile.role === 'admin') {
-      return allGroups;
-    }
-
-    // Group leaders can only see their assigned groups
-    if (profile.assigned_groups && profile.assigned_groups.length > 0) {
-      return allGroups.filter(group => 
-        profile.assigned_groups?.includes(group.id)
-      );
-    }
-
-    // Regular users with group access can see groups they are members of
-    return allGroups.filter(group => 
-      group.members?.some(member => member.id === profile.id)
-    );
-  };
-
+  // Load all data
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
       
       await Promise.all([
         fetchGroups(),
@@ -166,53 +147,86 @@ const Groups = () => {
       ]);
     } catch (error) {
       console.error('Error loading data:', error);
+      setError('Failed to load groups data');
     } finally {
       setLoading(false);
       setInitialLoad(false);
     }
   };
 
+  // Fetch groups with proper filtering
   const fetchGroups = async () => {
     try {
-      setLoading(true);
+      console.log('Fetching groups for profile:', profile);
       
-      // Build the base query
       let query = supabase
         .from('cell_groups')
         .select(`
           *,
-          leader:members!cell_groups_leader_id_fkey(name, surname)
+          leader:members!cell_groups_leader_id_fkey(
+            name,
+            surname
+          )
         `)
-        .order('created_at', { ascending: false });
+        .eq('status', 'active');
 
       // Apply filtering based on user role
       if (profile) {
         if (profile.isAdmin || profile.role === 'admin') {
-          // Admin can see all groups
-          query = query;
+          // Admin can see all groups - no additional filter needed
+          console.log('Admin user - loading all groups');
         } else if (profile.assigned_groups && profile.assigned_groups.length > 0) {
           // Group leaders can see only their assigned groups
+          console.log('Group leader - loading assigned groups:', profile.assigned_groups);
           query = query.in('id', profile.assigned_groups);
         } else if (profile.id) {
           // Regular users can see groups they are members of
-          query = query.eq('members.id', profile.id);
+          console.log('Regular user - loading groups they are members of');
+          // We'll filter this after fetching all groups since Supabase doesn't easily support this in one query
         }
       }
 
       const { data, error } = await query;
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+
+      console.log('Raw groups data:', data);
+
+      let filteredData = data || [];
       
-      const groupsData = data as Group[] || [];
-      setAllGroups(groupsData);
-      
-      // Apply additional filtering based on user permissions
-      const filtered = getFilteredGroups();
-      setGroups(filtered);
+      // For regular users, filter groups they are members of
+      if (profile && profile.id && !profile.isAdmin && !(profile.assigned_groups && profile.assigned_groups.length > 0)) {
+        // We need to fetch group members to check membership
+        const { data: memberData, error: memberError } = await supabase
+          .from('members')
+          .select('cell_group_id')
+          .eq('id', profile.id)
+          .not('cell_group_id', 'is', null);
+
+        if (!memberError && memberData) {
+          const userGroupIds = memberData.map(m => m.cell_group_id).filter(Boolean);
+          filteredData = filteredData.filter(group => userGroupIds.includes(group.id));
+          console.log('Filtered groups for regular user:', filteredData);
+        }
+      }
+
+      setAllGroups(filteredData);
+      setGroups(filteredData);
+
+      // Fetch members for each group
+      if (filteredData.length > 0) {
+        await Promise.all(
+          filteredData.map(group => fetchGroupMembers(group.id))
+        );
+      }
+
     } catch (error) {
       console.error('Error fetching groups:', error);
-    } finally {
-      setLoading(false);
+      setError('Failed to load groups');
+      throw error;
     }
   };
 
@@ -227,12 +241,13 @@ const Groups = () => {
       setMembers(data || []);
     } catch (error) {
       console.error('Error fetching members:', error);
+      setError('Failed to load members');
     }
   };
 
   const fetchGroupMembers = async (groupId: string) => {
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('members')
         .select('*')
         .eq('cell_group_id', groupId)
@@ -243,6 +258,10 @@ const Groups = () => {
       setGroups(prev => prev.map(group => 
         group.id === groupId ? { ...group, members: data || [] } : group
       ));
+      
+      setAllGroups(prev => prev.map(group => 
+        group.id === groupId ? { ...group, members: data || [] } : group
+      ));
     } catch (error) {
       console.error('Error fetching group members:', error);
     }
@@ -250,7 +269,7 @@ const Groups = () => {
 
   const fetchGroupMeetings = async (groupId: string) => {
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('meetings')
         .select('*')
         .eq('group_id', groupId)
@@ -265,7 +284,7 @@ const Groups = () => {
 
   const fetchMeetingAttendance = async (meetingId: string) => {
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('attendance')
         .select(`
           *,
@@ -321,25 +340,31 @@ const Groups = () => {
       return true;
     }
 
+    // Users can view groups they lead
+    if (group.leader_id === profile.id) {
+      return true;
+    }
+
     return false;
   };
 
-  // FIXED: Create new group function
+  // Create new group function
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Check permission
     if (!profile?.isAdmin && !(profile?.permissions && profile.permissions.includes('manage_groups'))) {
-      alert('You do not have permission to create groups');
+      setError('You do not have permission to create groups');
       return;
     }
 
     try {
       setLoading(true);
+      setError(null);
       
       // Validate required fields
       if (!groupForm.name.trim()) {
-        alert('Group name is required');
+        setError('Group name is required');
         return;
       }
 
@@ -356,12 +381,15 @@ const Groups = () => {
 
       console.log('Creating group with data:', groupData);
 
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('cell_groups')
         .insert([groupData])
         .select(`
           *,
-          leader:members!cell_groups_leader_id_fkey(name, surname)
+          leader:members!cell_groups_leader_id_fkey(
+            name,
+            surname
+          )
         `)
         .single();
 
@@ -382,10 +410,9 @@ const Groups = () => {
         leader_id: ''
       });
       
-      alert('Group created successfully!');
     } catch (error: any) {
       console.error('Error creating group:', error);
-      alert(`Error creating group: ${error.message || 'Please check your data and try again'}`);
+      setError(`Error creating group: ${error.message || 'Please check your data and try again'}`);
     } finally {
       setLoading(false);
     }
@@ -394,12 +421,13 @@ const Groups = () => {
   // Add members to group
   const handleAddMembersToGroup = async (groupId: string, memberIds: string[]) => {
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
-      alert('You do not have permission to manage this group');
+      setError('You do not have permission to manage this group');
       return;
     }
 
     try {
       setLoading(true);
+      setError(null);
       
       const { error } = await supabase
         .from('members')
@@ -412,10 +440,9 @@ const Groups = () => {
       await fetchMembers();
       setSelectedMembers([]);
       setSearchTerm('');
-      alert('Members added to group successfully!');
     } catch (error) {
       console.error('Error adding members to group:', error);
-      alert('Error adding members to group');
+      setError('Error adding members to group');
     } finally {
       setLoading(false);
     }
@@ -424,7 +451,7 @@ const Groups = () => {
   // Remove member from group
   const handleRemoveMemberFromGroup = async (memberId: string) => {
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
-      alert('You do not have permission to manage this group');
+      setError('You do not have permission to manage this group');
       return;
     }
 
@@ -440,10 +467,9 @@ const Groups = () => {
         await fetchGroupMembers(selectedGroup.id);
         await fetchMembers();
       }
-      alert('Member removed from group successfully!');
     } catch (error) {
       console.error('Error removing member from group:', error);
-      alert('Error removing member from group');
+      setError('Error removing member from group');
     }
   };
 
@@ -451,20 +477,21 @@ const Groups = () => {
   const handleCreateMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGroup || !canManageGroup(selectedGroup)) {
-      alert('You do not have permission to manage meetings for this group');
+      setError('You do not have permission to manage meetings for this group');
       return;
     }
 
     try {
       setLoading(true);
+      setError(null);
       
       // Validate required fields
       if (!meetingForm.meeting_date || !meetingForm.meeting_time || !meetingForm.location) {
-        alert('Please fill in all required fields');
+        setError('Please fill in all required fields');
         return;
       }
 
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('meetings')
         .insert([{
           group_id: selectedGroup.id,
@@ -489,18 +516,17 @@ const Groups = () => {
         topic: '',
         notes: ''
       });
-      alert('Meeting scheduled successfully!');
     } catch (error) {
       console.error('Error creating meeting:', error);
-      alert('Error creating meeting');
+      setError('Error creating meeting');
     } finally {
       setLoading(false);
     }
   };
 
   const handleTakeAttendance = async (meeting: Meeting) => {
-    if (!canManageGroup(selectedGroup!)) {
-      alert('You do not have permission to take attendance for this group');
+    if (!selectedGroup || !canManageGroup(selectedGroup)) {
+      setError('You do not have permission to take attendance for this group');
       return;
     }
 
@@ -525,10 +551,11 @@ const Groups = () => {
   };
 
   const handleSaveAttendance = async () => {
-    if (!selectedMeeting || !canManageGroup(selectedGroup!)) return;
+    if (!selectedMeeting || !selectedGroup || !canManageGroup(selectedGroup)) return;
 
     try {
       setLoading(true);
+      setError(null);
       
       // Get current group members
       const currentGroup = groups.find(g => g.id === selectedMeeting.group_id);
@@ -544,7 +571,7 @@ const Groups = () => {
       }));
 
       // Delete existing attendance records for this meeting
-      const { error: deleteError } = await db
+      const { error: deleteError } = await supabase
         .from('attendance')
         .delete()
         .eq('meeting_id', selectedMeeting.id);
@@ -552,32 +579,32 @@ const Groups = () => {
       if (deleteError) throw deleteError;
 
       // Insert new attendance records
-      const { error: insertError } = await db
+      const { error: insertError } = await supabase
         .from('attendance')
         .insert(attendanceRecords);
 
       if (insertError) throw insertError;
 
       setShowAttendanceModal(false);
-      alert('Attendance saved successfully!');
     } catch (error) {
       console.error('Error saving attendance:', error);
-      alert('Error saving attendance');
+      setError('Error saving attendance');
     } finally {
       setLoading(false);
     }
   };
 
   const handleCloseMeeting = async () => {
-    if (!selectedMeeting || !canManageGroup(selectedGroup!)) return;
+    if (!selectedMeeting || !selectedGroup || !canManageGroup(selectedGroup)) return;
 
     try {
       setLoading(true);
+      setError(null);
       
       // Update meeting status to completed
-      const { error } = await db
+      const { error } = await supabase
         .from('meetings')
-        .update({ status: 'completed' as any })
+        .update({ status: 'completed' })
         .eq('id', selectedMeeting.id);
 
       if (error) throw error;
@@ -587,7 +614,7 @@ const Groups = () => {
       setShowReportModal(true);
     } catch (error) {
       console.error('Error closing meeting:', error);
-      alert('Error closing meeting');
+      setError('Error closing meeting');
     } finally {
       setLoading(false);
     }
@@ -595,12 +622,13 @@ const Groups = () => {
 
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMeeting || !canManageGroup(selectedGroup!)) return;
+    if (!selectedMeeting || !selectedGroup || !canManageGroup(selectedGroup)) return;
 
     try {
       setLoading(true);
+      setError(null);
       
-      const { error } = await db
+      const { error } = await supabase
         .from('meeting_reports')
         .insert([{
           meeting_id: selectedMeeting.id,
@@ -609,7 +637,7 @@ const Groups = () => {
           action_items: reportForm.action_items,
           next_meeting_date: reportForm.next_meeting_date || null,
           created_by: profile?.id || 'system'
-        }] as any);
+        }]);
 
       if (error) throw error;
 
@@ -620,10 +648,9 @@ const Groups = () => {
         action_items: '',
         next_meeting_date: ''
       });
-      alert('Meeting report submitted successfully!');
     } catch (error) {
       console.error('Error submitting report:', error);
-      alert('Error submitting report');
+      setError('Error submitting report');
     } finally {
       setLoading(false);
     }
@@ -668,13 +695,13 @@ const Groups = () => {
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
         <div className="text-center max-w-md">
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <X className="h-8 w-8 text-red-600" />
+            <AlertCircle className="h-8 w-8 text-red-600" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-          <p className="text-gray-600 mb-4">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Access Denied</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
             You don't have permission to access the groups section. Please contact an administrator.
           </p>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-500">
             Your role: {profile?.role || 'member'}
             {profile?.assigned_groups && profile.assigned_groups.length > 0 && (
               <span> • Assigned to {profile.assigned_groups.length} group(s)</span>
@@ -711,6 +738,20 @@ const Groups = () => {
             </button>
           )}
         </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+                <p className="text-red-700 font-medium">{error}</p>
+              </div>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Create Group Form */}
         {showForm && (profile?.isAdmin || (profile?.permissions && profile.permissions.includes('manage_groups'))) && (
@@ -1242,12 +1283,12 @@ const Groups = () => {
               <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                  {profile?.isAdmin ? 'No Groups Yet' : 'No Access to Groups'}
+                  {profile?.isAdmin ? 'No Groups Yet' : 'No Groups Available'}
                 </h3>
                 <p className="text-gray-500 dark:text-gray-500 mb-6">
                   {profile?.isAdmin 
                     ? 'Create your first group to get started' 
-                    : 'You are not assigned to any groups. Please contact an administrator.'
+                    : 'You are not assigned to any groups or there are no active groups.'
                   }
                 </p>
                 {profile?.isAdmin && (
@@ -1490,7 +1531,7 @@ const Groups = () => {
         )}
 
         {/* Report Modal */}
-        {showReportModal && selectedMeeting && canManageGroup(selectedGroup!) && (
+        {showReportModal && selectedMeeting && selectedGroup && canManageGroup(selectedGroup) && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
