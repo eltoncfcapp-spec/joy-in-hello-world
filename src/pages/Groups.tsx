@@ -237,9 +237,11 @@ const Groups = () => {
     }
   };
 
-  // Fetch members with permission filtering
+  // Fixed fetchMembers function with better error handling
   const fetchMembers = async () => {
     try {
+      console.log('Fetching members for user:', profile?.id);
+      
       let query = supabase
         .from('members')
         .select('*')
@@ -249,32 +251,56 @@ const Groups = () => {
       if (!isAdmin) {
         if (profile?.assigned_groups && profile.assigned_groups.length > 0) {
           // Filter members who belong to assigned groups
+          console.log('Filtering members by assigned groups:', profile.assigned_groups);
           query = query.in('cell_group_id', profile.assigned_groups);
         } else if (profile?.cell_group_id) {
           // Show only members from user's cell group
+          console.log('Filtering members by user cell group:', profile.cell_group_id);
           query = query.eq('cell_group_id', profile.cell_group_id);
         } else if (profile?.role === 'group_leader' || profile?.is_leader) {
           // For group leaders, show members from their groups
-          const { data: leaderGroups } = await supabase
+          console.log('User is group leader, fetching their groups first');
+          const { data: leaderGroups, error: groupsError } = await supabase
             .from('cell_groups')
             .select('id')
             .eq('leader_id', profile.id)
             .eq('status', 'active');
 
+          if (groupsError) {
+            console.error('Error fetching leader groups:', groupsError);
+            throw groupsError;
+          }
+
           if (leaderGroups && leaderGroups.length > 0) {
             const groupIds = leaderGroups.map(group => group.id);
+            console.log('Filtering members by leader group IDs:', groupIds);
             query = query.in('cell_group_id', groupIds);
+          } else {
+            console.log('No groups found for this leader');
+            setMembers([]);
+            return;
           }
+        } else {
+          // Regular member with no special access - show only themselves
+          console.log('Regular member, showing only their own data');
+          query = query.eq('id', profile.id);
         }
       }
 
       const { data, error } = await query;
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error fetching members:', error);
+        throw error;
+      }
+
+      console.log('Fetched members:', data?.length || 0);
       setMembers(data || []);
+      
     } catch (error) {
       console.error('Error fetching members:', error);
-      setError('Failed to load members');
+      setError('Failed to load members. Please try again.');
+      setMembers([]); // Set empty array to prevent further errors
     }
   };
 
@@ -906,442 +932,9 @@ const Groups = () => {
           </div>
         )}
 
-        {/* Group Selection and Tabs */}
-        {selectedGroup && canViewGroup(selectedGroup) && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedGroup.name}</h2>
-                <p className="text-gray-600 dark:text-gray-400">
-                  Leader: {selectedGroup.leader ? `${selectedGroup.leader.name} ${selectedGroup.leader.surname}` : 'Not assigned'}
-                  {selectedGroup.meeting_day && ` • Meets on ${selectedGroup.meeting_day}s`}
-                  {selectedGroup.location && ` • ${selectedGroup.location}`}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setSelectedGroup(null);
-                  setActiveTab('groups');
-                }}
-                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                Back to Groups
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-              {(['groups', 'meetings', 'members'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                    activeTab === tab
-                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                >
-                  {tab === 'groups' && 'Group Info'}
-                  {tab === 'meetings' && 'Meetings'}
-                  {tab === 'members' && 'Members'}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Group Details View */}
-        {selectedGroup && canViewGroup(selectedGroup) && activeTab === 'groups' && (
-          <div className="space-y-6">
-            {/* Group Information */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Group Information</h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Group Name</label>
-                    <p className="text-gray-900 dark:text-white">{selectedGroup.name}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
-                    <p className="text-gray-900 dark:text-white">{selectedGroup.description || 'No description'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Day</label>
-                    <p className="text-gray-900 dark:text-white">{selectedGroup.meeting_day || 'Not set'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Time</label>
-                    <p className="text-gray-900 dark:text-white">{selectedGroup.meeting_time || 'Not set'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                    <p className="text-gray-900 dark:text-white">{selectedGroup.location || 'Not set'}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h3>
-                <div className="space-y-3">
-                  {canManageGroup(selectedGroup) && (
-                    <>
-                      <button
-                        onClick={() => {
-                          fetchGroupMeetings(selectedGroup.id);
-                          setShowMeetingForm(true);
-                        }}
-                        className="w-full flex items-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Schedule Meeting
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('members')}
-                        className="w-full flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                      >
-                        <Users className="h-4 w-4" />
-                        Manage Members
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => {
-                      fetchGroupMeetings(selectedGroup.id);
-                      setActiveTab('meetings');
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-                  >
-                    <Calendar className="h-4 w-4" />
-                    View Meetings
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Meetings */}
-            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Meetings</h3>
-                <button
-                  onClick={() => {
-                    fetchGroupMeetings(selectedGroup.id);
-                    setActiveTab('meetings');
-                  }}
-                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                >
-                  View All
-                </button>
-              </div>
-              {meetings.length === 0 ? (
-                <div className="text-center py-8">
-                  <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 dark:text-gray-400">No meetings scheduled yet</p>
-                  {canManageGroup(selectedGroup) && (
-                    <button
-                      onClick={() => setShowMeetingForm(true)}
-                      className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                    >
-                      Schedule First Meeting
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {meetings.slice(0, 3).map((meeting) => {
-                    const stats = getAttendanceStats(meeting.id);
-                    return (
-                      <div key={meeting.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
-                          </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                            {meeting.topic} • {meeting.location}
-                          </div>
-                          {stats.total > 0 && (
-                            <div className="flex gap-4 mt-2 text-xs">
-                              <span className="flex items-center gap-1 text-green-600">
-                                <CheckCircle className="h-3 w-3" />
-                                {stats.present} Present
-                              </span>
-                              <span className="flex items-center gap-1 text-red-600">
-                                <XCircle className="h-3 w-3" />
-                                {stats.absent} Absent
-                              </span>
-                              <span className="flex items-center gap-1 text-yellow-600">
-                                <Clock4 className="h-3 w-3" />
-                                {stats.late} Late
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          {canManageGroup(selectedGroup) && (
-                            <>
-                              <button
-                                onClick={() => handleTakeAttendance(meeting)}
-                                className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
-                              >
-                                Attendance
-                              </button>
-                              {meeting.status === 'scheduled' && (
-                                <button
-                                  onClick={() => {
-                                    setSelectedMeeting(meeting);
-                                    handleCloseMeeting();
-                                  }}
-                                  className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
-                                >
-                                  Close
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Meetings Tab */}
-        {selectedGroup && canViewGroup(selectedGroup) && activeTab === 'meetings' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Meetings</h3>
-              {canManageGroup(selectedGroup) && (
-                <button
-                  onClick={() => setShowMeetingForm(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Schedule Meeting
-                </button>
-              )}
-            </div>
-
-            {meetings.length === 0 ? (
-              <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 rounded-2xl">
-                <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 dark:text-gray-400 mb-4">No meetings scheduled yet</p>
-                {canManageGroup(selectedGroup) && (
-                  <button
-                    onClick={() => setShowMeetingForm(true)}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Schedule First Meeting
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {meetings.map((meeting) => {
-                  const stats = getAttendanceStats(meeting.id);
-                  return (
-                    <div key={meeting.id} className="bg-white/70 dark:bg-gray-800/70 border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                      <div className="flex flex-col lg:flex-row justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
-                              {new Date(meeting.meeting_date).toLocaleDateString()} • {meeting.meeting_time}
-                            </h4>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              meeting.status === 'scheduled' 
-                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                : meeting.status === 'completed'
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                            }`}>
-                              {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
-                            </span>
-                          </div>
-                          <p className="text-gray-600 dark:text-gray-400 mb-2">{meeting.topic || 'No topic specified'}</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-500 mb-3">Location: {meeting.location}</p>
-                          
-                          {stats.total > 0 && (
-                            <div className="flex gap-4 text-sm">
-                              <span className="flex items-center gap-1 text-green-600">
-                                <CheckCircle className="h-4 w-4" />
-                                {stats.present} Present
-                              </span>
-                              <span className="flex items-center gap-1 text-red-600">
-                                <XCircle className="h-4 w-4" />
-                                {stats.absent} Absent
-                              </span>
-                              <span className="flex items-center gap-1 text-yellow-600">
-                                <Clock4 className="h-4 w-4" />
-                                {stats.late} Late
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          {canManageGroup(selectedGroup) && (
-                            <>
-                              <button
-                                onClick={() => handleTakeAttendance(meeting)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                              >
-                                Take Attendance
-                              </button>
-                              {meeting.status === 'scheduled' && (
-                                <button
-                                  onClick={() => {
-                                    setSelectedMeeting(meeting);
-                                    handleCloseMeeting();
-                                  }}
-                                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                                >
-                                  Close Meeting
-                                </button>
-                              )}
-                            </>
-                          )}
-                          {meeting.status === 'completed' && (
-                            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm text-center">
-                              Completed
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {meeting.notes && (
-                        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                          <p className="text-sm text-gray-600 dark:text-gray-400">{meeting.notes}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Members Management Tab */}
-        {selectedGroup && canViewGroup(selectedGroup) && activeTab === 'members' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Group Members ({selectedGroup.members?.length || 0})
-              </h3>
-            </div>
-
-            {/* Add Members Section - Only show if user can manage group */}
-            {canManageGroup(selectedGroup) && canAddMembers() && (
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Group</h4>
-                
-                <div className="space-y-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search members to add..."
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  {/* Available Members */}
-                  {availableMembers.length === 0 ? (
-                    <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                      {searchTerm ? 'No members found matching your search' : 'No available members to add'}
-                    </div>
-                  ) : (
-                    <div className="border border-gray-300 dark:border-gray-600 rounded-xl max-h-60 overflow-y-auto">
-                      {availableMembers.map((member) => (
-                        <div key={member.id} className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-600 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={selectedMembers.includes(member.id)}
-                            onChange={() => {
-                              if (selectedMembers.includes(member.id)) {
-                                setSelectedMembers(selectedMembers.filter(id => id !== member.id));
-                              } else {
-                                setSelectedMembers([...selectedMembers, member.id]);
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                          />
-                          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                            {getInitials(member.name, member.surname)}
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900 dark:text-white">
-                              {member.name} {member.surname}
-                            </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
-                              {member.email} • {member.phone}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {selectedMembers.length > 0 && (
-                    <button
-                      onClick={() => handleAddMembersToGroup(selectedGroup.id, selectedMembers)}
-                      disabled={loading}
-                      className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
-                    >
-                      {loading ? 'Adding Members...' : `Add ${selectedMembers.length} Member${selectedMembers.length > 1 ? 's' : ''} to Group`}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Current Members */}
-            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-              <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Members</h4>
-              
-              {!selectedGroup.members || selectedGroup.members.length === 0 ? (
-                <div className="text-center py-8">
-                  <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 dark:text-gray-400">No members in this group yet</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {selectedGroup.members.map((member) => (
-                    <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                          {getInitials(member.name, member.surname)}
-                        </div>
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {member.phone || 'No phone'}
-                          </div>
-                        </div>
-                      </div>
-                      {canManageGroup(selectedGroup) && canEditMembers() && (
-                        <button
-                          onClick={() => handleRemoveMemberFromGroup(member.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                          title="Remove from group"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Groups List (when no group is selected) */}
-        {!selectedGroup && (
+        {/* Main Content Area */}
+        {!selectedGroup ? (
+          // Groups List View
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {loading && groups.length === 0 ? (
               <div className="col-span-full text-center py-12">
@@ -1429,6 +1022,441 @@ const Groups = () => {
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        ) : (
+          // Group Detail View
+          <div className="space-y-6">
+            {/* Group Selection and Tabs */}
+            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedGroup.name}</h2>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Leader: {selectedGroup.leader ? `${selectedGroup.leader.name} ${selectedGroup.leader.surname}` : 'Not assigned'}
+                    {selectedGroup.meeting_day && ` • Meets on ${selectedGroup.meeting_day}s`}
+                    {selectedGroup.location && ` • ${selectedGroup.location}`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedGroup(null);
+                    setActiveTab('groups');
+                  }}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Back to Groups
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+                {(['groups', 'meetings', 'members'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                      activeTab === tab
+                        ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {tab === 'groups' && 'Group Info'}
+                    {tab === 'meetings' && 'Meetings'}
+                    {tab === 'members' && 'Members'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'groups' && (
+              <div className="space-y-6">
+                {/* Group Information */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Group Information</h3>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Group Name</label>
+                        <p className="text-gray-900 dark:text-white">{selectedGroup.name}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
+                        <p className="text-gray-900 dark:text-white">{selectedGroup.description || 'No description'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Day</label>
+                        <p className="text-gray-900 dark:text-white">{selectedGroup.meeting_day || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Time</label>
+                        <p className="text-gray-900 dark:text-white">{selectedGroup.meeting_time || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                        <p className="text-gray-900 dark:text-white">{selectedGroup.location || 'Not set'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h3>
+                    <div className="space-y-3">
+                      {canManageGroup(selectedGroup) && (
+                        <>
+                          <button
+                            onClick={() => {
+                              fetchGroupMeetings(selectedGroup.id);
+                              setShowMeetingForm(true);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Schedule Meeting
+                          </button>
+                          <button
+                            onClick={() => setActiveTab('members')}
+                            className="w-full flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                          >
+                            <Users className="h-4 w-4" />
+                            Manage Members
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => {
+                          fetchGroupMeetings(selectedGroup.id);
+                          setActiveTab('meetings');
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                      >
+                        <Calendar className="h-4 w-4" />
+                        View Meetings
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Meetings */}
+                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Meetings</h3>
+                    <button
+                      onClick={() => {
+                        fetchGroupMeetings(selectedGroup.id);
+                        setActiveTab('meetings');
+                      }}
+                      className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                    >
+                      View All
+                    </button>
+                  </div>
+                  {meetings.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 dark:text-gray-400">No meetings scheduled yet</p>
+                      {canManageGroup(selectedGroup) && (
+                        <button
+                          onClick={() => setShowMeetingForm(true)}
+                          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                        >
+                          Schedule First Meeting
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {meetings.slice(0, 3).map((meeting) => {
+                        const stats = getAttendanceStats(meeting.id);
+                        return (
+                          <div key={meeting.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900 dark:text-white">
+                                {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
+                              </div>
+                              <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                {meeting.topic} • {meeting.location}
+                              </div>
+                              {stats.total > 0 && (
+                                <div className="flex gap-4 mt-2 text-xs">
+                                  <span className="flex items-center gap-1 text-green-600">
+                                    <CheckCircle className="h-3 w-3" />
+                                    {stats.present} Present
+                                  </span>
+                                  <span className="flex items-center gap-1 text-red-600">
+                                    <XCircle className="h-3 w-3" />
+                                    {stats.absent} Absent
+                                  </span>
+                                  <span className="flex items-center gap-1 text-yellow-600">
+                                    <Clock4 className="h-3 w-3" />
+                                    {stats.late} Late
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              {canManageGroup(selectedGroup) && (
+                                <>
+                                  <button
+                                    onClick={() => handleTakeAttendance(meeting)}
+                                    className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+                                  >
+                                    Attendance
+                                  </button>
+                                  {meeting.status === 'scheduled' && (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedMeeting(meeting);
+                                        handleCloseMeeting();
+                                      }}
+                                      className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                                    >
+                                      Close
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Meetings Tab */}
+            {activeTab === 'meetings' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Meetings</h3>
+                  {canManageGroup(selectedGroup) && (
+                    <button
+                      onClick={() => setShowMeetingForm(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Schedule Meeting
+                    </button>
+                  )}
+                </div>
+
+                {meetings.length === 0 ? (
+                  <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 rounded-2xl">
+                    <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400 mb-4">No meetings scheduled yet</p>
+                    {canManageGroup(selectedGroup) && (
+                      <button
+                        onClick={() => setShowMeetingForm(true)}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Schedule First Meeting
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid gap-4">
+                    {meetings.map((meeting) => {
+                      const stats = getAttendanceStats(meeting.id);
+                      return (
+                        <div key={meeting.id} className="bg-white/70 dark:bg-gray-800/70 border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+                          <div className="flex flex-col lg:flex-row justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                  {new Date(meeting.meeting_date).toLocaleDateString()} • {meeting.meeting_time}
+                                </h4>
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  meeting.status === 'scheduled' 
+                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                    : meeting.status === 'completed'
+                                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                                }`}>
+                                  {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
+                                </span>
+                              </div>
+                              <p className="text-gray-600 dark:text-gray-400 mb-2">{meeting.topic || 'No topic specified'}</p>
+                              <p className="text-sm text-gray-500 dark:text-gray-500 mb-3">Location: {meeting.location}</p>
+                              
+                              {stats.total > 0 && (
+                                <div className="flex gap-4 text-sm">
+                                  <span className="flex items-center gap-1 text-green-600">
+                                    <CheckCircle className="h-4 w-4" />
+                                    {stats.present} Present
+                                  </span>
+                                  <span className="flex items-center gap-1 text-red-600">
+                                    <XCircle className="h-4 w-4" />
+                                    {stats.absent} Absent
+                                  </span>
+                                  <span className="flex items-center gap-1 text-yellow-600">
+                                    <Clock4 className="h-4 w-4" />
+                                    {stats.late} Late
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {canManageGroup(selectedGroup) && (
+                                <>
+                                  <button
+                                    onClick={() => handleTakeAttendance(meeting)}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                                  >
+                                    Take Attendance
+                                  </button>
+                                  {meeting.status === 'scheduled' && (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedMeeting(meeting);
+                                        handleCloseMeeting();
+                                      }}
+                                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                                    >
+                                      Close Meeting
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {meeting.status === 'completed' && (
+                                <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm text-center">
+                                  Completed
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {meeting.notes && (
+                            <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                              <p className="text-sm text-gray-600 dark:text-gray-400">{meeting.notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Members Management Tab */}
+            {activeTab === 'members' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    Group Members ({selectedGroup.members?.length || 0})
+                  </h3>
+                </div>
+
+                {/* Add Members Section - Only show if user can manage group */}
+                {canManageGroup(selectedGroup) && canAddMembers() && (
+                  <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Group</h4>
+                    
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Search members to add..."
+                          className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+
+                      {/* Available Members */}
+                      {availableMembers.length === 0 ? (
+                        <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                          {searchTerm ? 'No members found matching your search' : 'No available members to add'}
+                        </div>
+                      ) : (
+                        <div className="border border-gray-300 dark:border-gray-600 rounded-xl max-h-60 overflow-y-auto">
+                          {availableMembers.map((member) => (
+                            <div key={member.id} className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-600 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={selectedMembers.includes(member.id)}
+                                onChange={() => {
+                                  if (selectedMembers.includes(member.id)) {
+                                    setSelectedMembers(selectedMembers.filter(id => id !== member.id));
+                                  } else {
+                                    setSelectedMembers([...selectedMembers, member.id]);
+                                  }
+                                }}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                              />
+                              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                {getInitials(member.name, member.surname)}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 dark:text-white">
+                                  {member.name} {member.surname}
+                                </div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {member.email} • {member.phone}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {selectedMembers.length > 0 && (
+                        <button
+                          onClick={() => handleAddMembersToGroup(selectedGroup.id, selectedMembers)}
+                          disabled={loading}
+                          className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
+                        >
+                          {loading ? 'Adding Members...' : `Add ${selectedMembers.length} Member${selectedMembers.length > 1 ? 's' : ''} to Group`}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Current Members */}
+                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Members</h4>
+                  
+                  {!selectedGroup.members || selectedGroup.members.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 dark:text-gray-400">No members in this group yet</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {selectedGroup.members.map((member) => (
+                        <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                              {getInitials(member.name, member.surname)}
+                            </div>
+                            <div>
+                              <div className="font-medium text-gray-900 dark:text-white">
+                                {member.name} {member.surname}
+                              </div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">
+                                {member.phone || 'No phone'}
+                              </div>
+                            </div>
+                          </div>
+                          {canManageGroup(selectedGroup) && canEditMembers() && (
+                            <button
+                              onClick={() => handleRemoveMemberFromGroup(member.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                              title="Remove from group"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
