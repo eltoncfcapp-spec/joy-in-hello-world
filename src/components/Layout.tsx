@@ -1,15 +1,15 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, UsersRound, Shield, Menu, X, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, DollarSign, UsersRound, Shield, Menu, X, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Layout = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { logout, profile } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     navigate('/login');
   };
 
@@ -17,6 +17,7 @@ const Layout = () => {
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/members', icon: Users, label: 'Members' },
     { to: '/events', icon: Calendar, label: 'Events' },
+    { to: '/donations', icon: DollarSign, label: 'Donations' },
     { to: '/groups', icon: UsersRound, label: 'Groups' },
     { to: '/admin', icon: Shield, label: 'Admin' },
   ];
@@ -65,9 +66,7 @@ const Layout = () => {
           <div className="absolute bottom-6 left-6 right-6 space-y-3">
             <div className="px-4 py-3 bg-primary/10 rounded-lg border border-primary/20">
               <p className="text-sm text-muted-foreground">Logged in as</p>
-              <p className="text-sm font-medium text-foreground truncate">
-                {profile?.name || profile?.email || 'User'}
-              </p>
+              <p className="text-sm font-medium text-foreground truncate">{user?.name}</p>
             </div>
             <button
               onClick={handleLogout}
