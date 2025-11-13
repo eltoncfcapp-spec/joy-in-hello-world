@@ -297,38 +297,47 @@ const CellGroups = () => {
     }
   };
 
-  const fetchCellGroups = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .select(`
-          *,
-          leader:members!leader_id(id, name, surname, email, phone),
-          cell_group_members(
-            *,
-            member:members(id, name, surname, email, phone)
-          )
-        `)
-        .order('name');
+const fetchCellGroups = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('cell_groups')
+      .select(`
+        *,
+        leader:members!cell_groups_leader_id_fkey(id, name, surname, email, phone)
+      `)
+      .order('name');
 
-      if (error) throw error;
-      
-      const cellGroupsData = data || [];
-      
-      // Map the data properly
-      const mappedGroups = cellGroupsData.map(group => ({
-        ...group,
-        members: group.cell_group_members?.map((cm: any) => cm.member) || []
-      }));
-      
-      setAllCellGroups(mappedGroups as any);
-      
-    } catch (error) {
-      console.error('Error fetching cell groups:', error);
-      throw error;
-    }
-  };
+    if (error) throw error;
+    
+    const cellGroupsData = data || [];
+    
+    // Fetch members for each cell group separately
+    const groupsWithMembers = await Promise.all(
+      cellGroupsData.map(async (group) => {
+        // Fetch members for this specific group
+        const { data: membersData, error: membersError } = await supabase
+          .from('members')
+          .select('id, name, surname, email, phone, role, is_leader')
+          .eq('cell_group_id', group.id);
 
+        if (membersError) {
+          console.error(`Error fetching members for group ${group.name}:`, membersError);
+        }
+
+        return {
+          ...group,
+          members: membersData || []
+        };
+      })
+    );
+    
+    setAllCellGroups(groupsWithMembers as any);
+    
+  } catch (error) {
+    console.error('Error fetching cell groups:', error);
+    throw error;
+  }
+};
   const fetchMembers = async () => {
     try {
       const { data, error } = await supabase
