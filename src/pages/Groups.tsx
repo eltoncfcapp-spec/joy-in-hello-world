@@ -3,9 +3,6 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
-// Type-safe wrapper for groups-related queries
-const db = supabase as any;
-
 interface Group {
   id: string;
   name: string;
@@ -121,8 +118,9 @@ const Groups = () => {
       const userHasAccess = profile.isAdmin || 
         (profile.permissions && profile.permissions.includes('manage_groups')) ||
         profile.role === 'group_leader' ||
-        (profile.assigned_groups && profile.assigned_groups.length > 0);
-      
+        (profile.assigned_groups && profile.assigned_groups.length > 0) ||
+        profile.id; // Allow access if user has an ID (might be a member)
+
       setHasAccess(userHasAccess);
 
       if (userHasAccess) {
@@ -164,6 +162,7 @@ const Groups = () => {
         .select(`
           *,
           leader:members!cell_groups_leader_id_fkey(
+            id,
             name,
             surname
           )
@@ -180,12 +179,95 @@ const Groups = () => {
           console.log('Group leader - loading assigned groups:', profile.assigned_groups);
           query = query.in('id', profile.assigned_groups);
         } else if (profile.id) {
-          // Regular users can see groups they are members of
-          console.log('Regular user - loading groups they are members of');
-          // We'll filter this after fetching all groups since Supabase doesn't easily support this in one query
+          // For regular users or group leaders by leader_id, show groups where they are the leader
+          console.log('Checking groups where user is leader or member');
+          
+          // First, try to get groups where user is the leader
+          const { data: leaderGroups, error: leaderError } = await supabase
+            .from('cell_groups')
+            .select(`
+              *,
+              leader:members!cell_groups_leader_id_fkey(
+                id,
+                name,
+                surname
+              )
+            `)
+            .eq('status', 'active')
+            .eq('leader_id', profile.id);
+
+          if (leaderError) {
+            console.error('Error fetching leader groups:', leaderError);
+          }
+
+          // Then get groups where user is a member
+          const { data: memberGroups, error: memberError } = await supabase
+            .from('members')
+            .select('cell_group_id')
+            .eq('id', profile.id)
+            .not('cell_group_id', 'is', null);
+
+          if (memberError) {
+            console.error('Error fetching member groups:', memberError);
+          }
+
+          const memberGroupIds = memberGroups?.map(m => m.cell_group_id).filter(Boolean) || [];
+          
+          // If user is a leader of any groups, use those
+          if (leaderGroups && leaderGroups.length > 0) {
+            console.log('User is leader of groups:', leaderGroups);
+            setAllGroups(leaderGroups);
+            setGroups(leaderGroups);
+            
+            // Fetch members for each group
+            await Promise.all(
+              leaderGroups.map(group => fetchGroupMembers(group.id))
+            );
+            return;
+          }
+          
+          // If user is a member of any groups, fetch those groups
+          if (memberGroupIds.length > 0) {
+            console.log('User is member of groups with IDs:', memberGroupIds);
+            const { data: memberGroupData, error: memberGroupError } = await supabase
+              .from('cell_groups')
+              .select(`
+                *,
+                leader:members!cell_groups_leader_id_fkey(
+                  id,
+                  name,
+                  surname
+                )
+              `)
+              .eq('status', 'active')
+              .in('id', memberGroupIds);
+
+            if (memberGroupError) {
+              console.error('Error fetching member group data:', memberGroupError);
+              throw memberGroupError;
+            }
+
+            console.log('Member groups data:', memberGroupData);
+            setAllGroups(memberGroupData || []);
+            setGroups(memberGroupData || []);
+            
+            // Fetch members for each group
+            if (memberGroupData && memberGroupData.length > 0) {
+              await Promise.all(
+                memberGroupData.map(group => fetchGroupMembers(group.id))
+              );
+            }
+            return;
+          }
+
+          // If no groups found for user, set empty arrays
+          setAllGroups([]);
+          setGroups([]);
+          return;
         }
       }
 
+      // Execute the query for admin and assigned group leaders
       const { data, error } = await query;
 
       if (error) {
@@ -195,24 +277,7 @@ const Groups = () => {
 
       console.log('Raw groups data:', data);
 
-      let filteredData = data || [];
-      
-      // For regular users, filter groups they are members of
-      if (profile && profile.id && !profile.isAdmin && !(profile.assigned_groups && profile.assigned_groups.length > 0)) {
-        // We need to fetch group members to check membership
-        const { data: memberData, error: memberError } = await supabase
-          .from('members')
-          .select('cell_group_id')
-          .eq('id', profile.id)
-          .not('cell_group_id', 'is', null);
-
-        if (!memberError && memberData) {
-          const userGroupIds = memberData.map(m => m.cell_group_id).filter(Boolean);
-          filteredData = filteredData.filter(group => userGroupIds.includes(group.id));
-          console.log('Filtered groups for regular user:', filteredData);
-        }
-      }
-
+      const filteredData = data || [];
       setAllGroups(filteredData);
       setGroups(filteredData);
 
@@ -387,6 +452,7 @@ const Groups = () => {
         .select(`
           *,
           leader:members!cell_groups_leader_id_fkey(
+            id,
             name,
             surname
           )
@@ -1580,7 +1646,7 @@ const Groups = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Next Meeting Date</label>
+                  <label className="block text-sm font-medium text                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Next Meeting Date</label>
                   <input
                     type="date"
                     value={reportForm.next_meeting_date}
