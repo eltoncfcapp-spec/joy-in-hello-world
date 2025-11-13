@@ -1,5 +1,5 @@
 import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Edit, Eye, UserPlus, Download, Upload, Lock, AlertTriangle, Send, Save, FileText, Columns } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Member {
   id: string;
@@ -23,50 +23,17 @@ interface ImportColumnMapping {
   [excelColumn: string]: string;
 }
 
+interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  content: string;
+}
+
 const Admin = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [members, setMembers] = useState<Member[]>([
-    {
-      id: '1',
-      name: 'John',
-      surname: 'Doe',
-      email: 'john.doe@church.com',
-      phone: '+1234567890',
-      role: 'pastor',
-      permissions: ['view_members', 'edit_members', 'manage_events'],
-      is_active: true,
-      cell_group: 'Youth Ministry'
-    },
-    {
-      id: '2',
-      name: 'Jane',
-      surname: 'Smith',
-      email: 'jane.smith@church.com',
-      phone: '+0987654321',
-      role: 'leader',
-      permissions: ['view_members', 'view_groups', 'manage_groups'],
-      is_active: true,
-      cell_group: 'Women\'s Fellowship'
-    },
-    {
-      id: '3',
-      name: 'Bob',
-      surname: 'Johnson',
-      email: 'bob.j@church.com',
-      phone: '+1122334455',
-      role: 'member',
-      permissions: ['view_members', 'view_events'],
-      is_active: true,
-      cell_group: 'Men\'s Group'
-    }
-  ]);
-  
-  const groups: Group[] = [
-    { id: '1', name: 'Youth Ministry', description: 'Young adults and teenagers' },
-    { id: '2', name: 'Women\'s Fellowship', description: 'Women\'s support group' },
-    { id: '3', name: 'Men\'s Group', description: 'Men\'s Bible study' }
-  ];
-  
+  const [members, setMembers] = useState<Member[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [selectedUser, setSelectedUser] = useState<Member | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -119,7 +86,16 @@ const Admin = () => {
     auditLogRetention: 365,
   });
 
-  const [emailTemplates] = useState([
+  const [churchSettings, setChurchSettings] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    timezone: 'UTC-5',
+    dateFormat: 'MM/DD/YYYY',
+    language: 'English',
+  });
+
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([
     {
       id: 'welcome',
       name: 'Welcome Email',
@@ -225,6 +201,49 @@ const Admin = () => {
     { value: 'admin', label: 'Admin', description: 'Administration panel' },
   ];
 
+  // Load initial data
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  const loadInitialData = async () => {
+    setLoading(true);
+    try {
+      // In a real application, you would fetch this data from your API
+      const savedMembers = localStorage.getItem('church_members');
+      const savedGroups = localStorage.getItem('church_groups');
+      const savedSettings = localStorage.getItem('church_settings');
+
+      if (savedMembers) {
+        setMembers(JSON.parse(savedMembers));
+      }
+      if (savedGroups) {
+        setGroups(JSON.parse(savedGroups));
+      }
+      if (savedSettings) {
+        setChurchSettings(JSON.parse(savedSettings));
+      }
+    } catch (error) {
+      console.error('Error loading initial data:', error);
+    }
+    setLoading(false);
+  };
+
+  const saveMembers = (updatedMembers: Member[]) => {
+    setMembers(updatedMembers);
+    localStorage.setItem('church_members', JSON.stringify(updatedMembers));
+  };
+
+  const saveGroups = (updatedGroups: Group[]) => {
+    setGroups(updatedGroups);
+    localStorage.setItem('church_groups', JSON.stringify(updatedGroups));
+  };
+
+  const saveChurchSettings = (settings: typeof churchSettings) => {
+    setChurchSettings(settings);
+    localStorage.setItem('church_settings', JSON.stringify(settings));
+  };
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -233,35 +252,55 @@ const Admin = () => {
     setImportResult(null);
     setImportProgress(0);
 
-    const sampleData = [
-      { 'First Name': 'Alice', 'Surname': 'Williams', 'Email': 'alice@example.com', 'Phone Number': '+1111111111', 'Cell Group': 'Youth Ministry', 'Role': 'member' },
-      { 'First Name': 'Charlie', 'Surname': 'Brown', 'Email': 'charlie@example.com', 'Phone Number': '+2222222222', 'Cell Group': 'Men\'s Group', 'Role': 'leader' }
-    ];
-    
-    setExcelData(sampleData);
-    setPreviewData(sampleData);
-    
-    const columns = Object.keys(sampleData[0]);
-    setAvailableColumns(columns);
-    
-    const autoMapping: ImportColumnMapping = {};
-    columns.forEach((col: string) => {
-      const lowerCol = col.toLowerCase();
-      if (lowerCol.includes('first') || (lowerCol.includes('name') && !lowerCol.includes('surname'))) {
-        autoMapping[col] = 'name';
-      } else if (lowerCol.includes('last') || lowerCol.includes('surname')) {
-        autoMapping[col] = 'surname';
-      } else if (lowerCol.includes('email')) {
-        autoMapping[col] = 'email';
-      } else if (lowerCol.includes('phone')) {
-        autoMapping[col] = 'phone';
-      } else if (lowerCol.includes('cell') || lowerCol.includes('group')) {
-        autoMapping[col] = 'cell_group';
-      } else if (lowerCol.includes('role')) {
-        autoMapping[col] = 'role';
+    // In a real application, you would parse the actual CSV file
+    // For now, we'll simulate file parsing
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const lines = content.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        
+        const data = lines.slice(1).map(line => {
+          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+          const row: any = {};
+          headers.forEach((header, index) => {
+            row[header] = values[index] || '';
+          });
+          return row;
+        }).filter(row => Object.values(row).some(val => val !== ''));
+
+        setExcelData(data);
+        setPreviewData(data.slice(0, 5)); // Show first 5 rows for preview
+        
+        const columns = headers;
+        setAvailableColumns(columns);
+        
+        const autoMapping: ImportColumnMapping = {};
+        columns.forEach((col: string) => {
+          const lowerCol = col.toLowerCase();
+          if (lowerCol.includes('first') || (lowerCol.includes('name') && !lowerCol.includes('surname') && !lowerCol.includes('last'))) {
+            autoMapping[col] = 'name';
+          } else if (lowerCol.includes('last') || lowerCol.includes('surname')) {
+            autoMapping[col] = 'surname';
+          } else if (lowerCol.includes('email')) {
+            autoMapping[col] = 'email';
+          } else if (lowerCol.includes('phone')) {
+            autoMapping[col] = 'phone';
+          } else if (lowerCol.includes('cell') || lowerCol.includes('group')) {
+            autoMapping[col] = 'cell_group';
+          } else if (lowerCol.includes('role')) {
+            autoMapping[col] = 'role';
+          }
+        });
+        setColumnMapping(autoMapping);
+      } catch (error) {
+        alert('Error parsing file. Please make sure it is a valid CSV file.');
+        console.error('File parsing error:', error);
       }
-    });
-    setColumnMapping(autoMapping);
+    };
+    
+    reader.readAsText(file);
   };
 
   const handleColumnMappingChange = (excelColumn: string, databaseField: string) => {
@@ -285,12 +324,12 @@ const Admin = () => {
       const row = excelData[i];
       setImportProgress(Math.round(((i + 1) / excelData.length) * 100));
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
         const memberData: any = {
           id: Math.random().toString(36).substr(2, 9),
-          role: 'member' as const,
+          role: 'member',
           permissions: [] as string[],
           is_active: true,
           name: '',
@@ -315,17 +354,23 @@ const Admin = () => {
           memberData.email = `${memberData.name.toLowerCase()}.${memberData.surname.toLowerCase()}@church.com`;
         }
 
-        const existingMember = members.find(m => m.email === memberData.email);
+        const existingMember = members.find(m => 
+          m.email === memberData.email || 
+          (m.name === memberData.name && m.surname === memberData.surname)
+        );
 
         if (existingMember) {
-          setMembers(prev => prev.map(m => m.id === existingMember.id ? { ...m, ...memberData as Member, id: m.id } : m));
+          saveMembers(members.map(m => 
+            m.id === existingMember.id ? { ...m, ...memberData, id: m.id } : m
+          ));
           updated++;
         } else {
-          setMembers(prev => [...prev, memberData as Member]);
+          saveMembers([...members, memberData]);
           imported++;
         }
       } catch (error) {
         errors++;
+        console.error('Error importing row:', error);
       }
     }
 
@@ -344,7 +389,7 @@ const Admin = () => {
   const handleManualRowImport = async (row: any, index: number) => {
     const memberData: any = {
       id: Math.random().toString(36).substr(2, 9),
-      role: 'member' as const,
+      role: 'member',
       permissions: [] as string[],
       is_active: true,
       name: '',
@@ -369,14 +414,14 @@ const Admin = () => {
       memberData.email = `${memberData.name.toLowerCase()}.${memberData.surname.toLowerCase()}@church.com`;
     }
 
-    setMembers(prev => [...prev, memberData as Member]);
+    saveMembers([...members, memberData]);
     alert(`Successfully imported ${memberData.name} ${memberData.surname}`);
   };
 
   const exportToExcel = async () => {
     setLoading(true);
     
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     const csvContent = [
       ['First Name', 'Surname', 'Email', 'Phone', 'Cell Group', 'Role', 'Status'].join(','),
@@ -396,10 +441,12 @@ const Admin = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = `church-data-export-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
     
     setLoading(false);
-    alert('Data exported successfully!');
   };
 
   const downloadTemplate = () => {
@@ -414,7 +461,10 @@ const Admin = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'church-import-template.csv';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   };
 
   const openModal = (modalType: string, user?: Member) => {
@@ -424,7 +474,7 @@ const Admin = () => {
       setUserFormData({
         role: user.role || 'member',
         permissions: user.permissions || [],
-        assignedGroups: [],
+        assignedGroups: user.cell_group ? [user.cell_group] : [],
       });
     }
   };
@@ -453,15 +503,19 @@ const Admin = () => {
     setLoading(true);
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    setMembers(prev => prev.map(m => 
+    saveMembers(members.map(m => 
       m.id === selectedUser.id 
-        ? { ...m, role: userFormData.role, permissions: userFormData.permissions }
+        ? { 
+            ...m, 
+            role: userFormData.role, 
+            permissions: userFormData.permissions,
+            cell_group: userFormData.assignedGroups[0] || null
+          }
         : m
     ));
     
     setLoading(false);
     closeModal();
-    alert('User updated successfully!');
   };
 
   const handlePermissionToggle = (permission: string) => {
@@ -470,6 +524,15 @@ const Admin = () => {
       permissions: prev.permissions.includes(permission)
         ? prev.permissions.filter(p => p !== permission)
         : [...prev.permissions, permission]
+    }));
+  };
+
+  const handleGroupToggle = (groupId: string) => {
+    setUserFormData(prev => ({
+      ...prev,
+      assignedGroups: prev.assignedGroups.includes(groupId)
+        ? prev.assignedGroups.filter(g => g !== groupId)
+        : [...prev.assignedGroups, groupId]
     }));
   };
 
@@ -494,13 +557,41 @@ const Admin = () => {
     }));
   };
 
+  const handleChurchSettingChange = (setting: keyof typeof churchSettings, value: string) => {
+    setChurchSettings(prev => ({
+      ...prev,
+      [setting]: value
+    }));
+  };
+
+  const saveGeneralSettings = () => {
+    saveChurchSettings(churchSettings);
+    closeModal();
+  };
+
+  const saveSecuritySettings = () => {
+    localStorage.setItem('church_security_settings', JSON.stringify(securitySettings));
+    closeModal();
+  };
+
+  const saveNotificationSettings = () => {
+    localStorage.setItem('church_notification_settings', JSON.stringify(notificationSettings));
+    closeModal();
+  };
+
+  const saveCommunicationSettings = () => {
+    localStorage.setItem('church_communication_settings', JSON.stringify(communicationSettings));
+    localStorage.setItem('church_email_templates', JSON.stringify(emailTemplates));
+    closeModal();
+  };
+
   const getRolePermissions = (role: string): string[] => {
     const rolePermissions: Record<string, string[]> = {
       member: ['view_members', 'view_events', 'view_groups'],
       leader: ['view_members', 'view_events', 'view_groups', 'manage_groups'],
       deacon: ['view_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups', 'view_donations'],
       pastor: ['view_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'view_reports'],
-      admin: ['admin_access']
+      admin: ['admin_access', 'view_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'manage_donations', 'view_reports']
     };
     return rolePermissions[role] || [];
   };
@@ -839,7 +930,16 @@ const Admin = () => {
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
-                  <button className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium">
+                  <button 
+                    onClick={() => {
+                      if (confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
+                        saveMembers([]);
+                        saveGroups([]);
+                        closeModal();
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium"
+                  >
                     Clear All Data
                   </button>
                   <p className="text-xs text-red-600 text-center">
@@ -866,32 +966,38 @@ const Admin = () => {
               </div>
 
               <div className="space-y-4 max-h-96 overflow-y-auto">
-                {filteredMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {member.name.charAt(0)}{member.surname.charAt(0)}
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900">
-                          {member.name} {member.surname}
-                        </h4>
-                        <p className="text-sm text-gray-500">
-                          {member.email} • {member.role}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => openModal('userDetails', member)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                {filteredMembers.length > 0 ? (
+                  filteredMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                     >
-                      Manage
-                    </button>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                          {member.name.charAt(0)}{member.surname.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900">
+                            {member.name} {member.surname}
+                          </h4>
+                          <p className="text-sm text-gray-500">
+                            {member.email} • {member.role}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => openModal('userDetails', member)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    No members found. {members.length === 0 ? 'Start by importing some data.' : 'Try a different search term.'}
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </Modal>
@@ -942,66 +1048,36 @@ const Admin = () => {
                 </p>
               </div>
 
-              {userFormData.role === 'pastor' && (
-                <div className="space-y-4">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Page Access Control
-                  </label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {pageAccess.map(page => (
-                      <div key={page.value} className="flex items-center gap-3 p-3 border border-gray-300 rounded-lg">
-                        <input
-                          type="checkbox"
-                          checked={userFormData.permissions.includes(`view_${page.value}`)}
-                          onChange={() => handlePermissionToggle(`view_${page.value}`)}
-                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div>
-                          <div className="font-medium text-gray-900 text-sm">
-                            {page.label}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {page.description}
-                          </div>
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Assigned Groups
+                </label>
+                <div className="space-y-3">
+                  {groups.map(group => (
+                    <div key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 rounded-lg">
+                      <input
+                        type="checkbox"
+                        checked={userFormData.assignedGroups.includes(group.id)}
+                        onChange={() => handleGroupToggle(group.id)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900 text-sm">
+                          {group.name}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {group.description}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
+                  {groups.length === 0 && (
+                    <p className="text-sm text-gray-500 text-center py-4">
+                      No groups available. Create groups in the Groups section.
+                    </p>
+                  )}
                 </div>
-              )}
-
-              {userFormData.role === 'leader' && (
-                <div className="space-y-4">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Assigned Groups
-                  </label>
-                  <div className="space-y-3">
-                    {groups.map(group => (
-                      <div key={group.id} className="flex items-center justify-between p-3 border border-gray-300 rounded-lg">
-                        <div>
-                          <div className="font-medium text-gray-900">
-                            {group.name}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {group.description}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors">
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
-                            <UserPlus className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              </div>
 
               <div className="space-y-4">
                 <label className="block text-sm font-medium text-gray-700">
@@ -1128,7 +1204,10 @@ const Admin = () => {
               </div>
 
               <div className="flex gap-3 pt-4">
-                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                <button 
+                  onClick={saveSecuritySettings}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                >
                   <Lock className="h-4 w-4" />
                   Save Security Settings
                 </button>
@@ -1185,7 +1264,10 @@ const Admin = () => {
               </div>
 
               <div className="flex gap-3 pt-4">
-                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                <button 
+                  onClick={saveNotificationSettings}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                >
                   <Save className="h-4 w-4" />
                   Save Settings
                 </button>
@@ -1236,12 +1318,19 @@ const Admin = () => {
                             }`}
                           />
                         </button>
+                      ) : key === 'emailSignature' || key === 'smsSignature' ? (
+                        <textarea
+                          value={value}
+                          onChange={(e) => handleCommunicationSettingChange(key as keyof typeof communicationSettings, e.target.value)}
+                          className="w-48 px-3 py-1 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                          rows={3}
+                        />
                       ) : (
                         <input
                           type="text"
                           value={value}
                           onChange={(e) => handleCommunicationSettingChange(key as keyof typeof communicationSettings, e.target.value)}
-                          className="px-3 py-1 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                          className="w-48 px-3 py-1 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
                         />
                       )}
                     </div>
@@ -1265,7 +1354,10 @@ const Admin = () => {
               </div>
 
               <div className="flex gap-3 pt-4">
-                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                <button 
+                  onClick={saveCommunicationSettings}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                >
                   <Send className="h-4 w-4" />
                   Save & Test
                 </button>
@@ -1302,6 +1394,8 @@ const Admin = () => {
                     </label>
                     <input
                       type="text"
+                      value={churchSettings.name}
+                      onChange={(e) => handleChurchSettingChange('name', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900"
                       placeholder="Enter church name"
                     />
@@ -1312,6 +1406,8 @@ const Admin = () => {
                     </label>
                     <input
                       type="text"
+                      value={churchSettings.address}
+                      onChange={(e) => handleChurchSettingChange('address', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900"
                       placeholder="Enter church address"
                     />
@@ -1322,6 +1418,8 @@ const Admin = () => {
                     </label>
                     <input
                       type="tel"
+                      value={churchSettings.phone}
+                      onChange={(e) => handleChurchSettingChange('phone', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900"
                       placeholder="Enter phone number"
                     />
@@ -1334,38 +1432,53 @@ const Admin = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Time Zone
                     </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900">
-                      <option>UTC-5 (Eastern Time)</option>
-                      <option>UTC-6 (Central Time)</option>
-                      <option>UTC-7 (Mountain Time)</option>
-                      <option>UTC-8 (Pacific Time)</option>
+                    <select 
+                      value={churchSettings.timezone}
+                      onChange={(e) => handleChurchSettingChange('timezone', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900"
+                    >
+                      <option value="UTC-5">UTC-5 (Eastern Time)</option>
+                      <option value="UTC-6">UTC-6 (Central Time)</option>
+                      <option value="UTC-7">UTC-7 (Mountain Time)</option>
+                      <option value="UTC-8">UTC-8 (Pacific Time)</option>
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Date Format
                     </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900">
-                      <option>MM/DD/YYYY</option>
-                      <option>DD/MM/YYYY</option>
-                      <option>YYYY-MM-DD</option>
+                    <select 
+                      value={churchSettings.dateFormat}
+                      onChange={(e) => handleChurchSettingChange('dateFormat', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900"
+                    >
+                      <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                      <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                      <option value="YYYY-MM-DD">YYYY-MM-DD</option>
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Language
                     </label>
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900">
-                      <option>English</option>
-                      <option>Spanish</option>
-                      <option>French</option>
+                    <select 
+                      value={churchSettings.language}
+                      onChange={(e) => handleChurchSettingChange('language', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900"
+                    >
+                      <option value="English">English</option>
+                      <option value="Spanish">Spanish</option>
+                      <option value="French">French</option>
                     </select>
                   </div>
                 </div>
               </div>
 
               <div className="flex gap-3 pt-4">
-                <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium">
+                <button 
+                  onClick={saveGeneralSettings}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                >
                   <Save className="h-4 w-4" />
                   Save Settings
                 </button>
@@ -1384,4 +1497,4 @@ const Admin = () => {
   );
 };
 
-export default Admin
+export default Admin;
