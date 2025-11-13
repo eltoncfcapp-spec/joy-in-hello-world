@@ -1,4 +1,4 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle } from 'lucide-react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle } from 'lucide-react'; 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -162,7 +162,12 @@ const cloudService = {
     try {
       console.log('Updating member:', memberId, updates);
 
+      // Handle empty string for UUID fields - convert to null
       const updateData: any = {
+        name: updates.name,
+        surname: updates.surname,
+        email: updates.email,
+        phone: updates.phone,
         role: updates.role,
         permissions: updates.permissions || [],
         assigned_groups: updates.assigned_groups || [],
@@ -172,6 +177,8 @@ const cloudService = {
         can_view_own_data: Boolean(updates.can_view_own_data),
         login_username: updates.login_username || null,
         login_pin: updates.login_pin || null,
+        cell_group_id: updates.cell_group_id === '' ? null : updates.cell_group_id,
+        status: updates.status,
         updated_at: new Date().toISOString()
       };
 
@@ -398,6 +405,67 @@ const cloudService = {
       console.error('Error removing user from group:', error);
       throw error;
     }
+  },
+
+  // NEW FUNCTION: Update cell group leader
+  async updateCellGroupLeader(groupId: string | null, leaderId: string | null): Promise<void> {
+    try {
+      if (groupId) {
+        // Update the cell group to set the leader
+        const { error } = await supabase
+          .from('cell_groups')
+          .update({
+            leader_id: leaderId,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', groupId);
+
+        if (error) {
+          console.error('Error updating cell group leader:', error);
+          throw error;
+        }
+        console.log(`Updated cell group ${groupId} leader to ${leaderId}`);
+      }
+    } catch (error) {
+      console.error('Error updating cell group leader:', error);
+      throw error;
+    }
+  },
+
+  // NEW FUNCTION: Remove user as leader from old cell group
+  async removeUserAsLeaderFromOldGroup(userId: string): Promise<void> {
+    try {
+      // Find all cell groups where this user is the leader
+      const { data: groups, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .eq('leader_id', userId);
+
+      if (error) {
+        console.error('Error finding groups where user is leader:', error);
+        throw error;
+      }
+
+      // Remove user as leader from all groups
+      for (const group of groups || []) {
+        const { error: updateError } = await supabase
+          .from('cell_groups')
+          .update({
+            leader_id: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', group.id);
+
+        if (updateError) {
+          console.error(`Error removing user as leader from group ${group.name}:`, updateError);
+          throw updateError;
+        }
+        console.log(`Removed user ${userId} as leader from group ${group.name}`);
+      }
+    } catch (error) {
+      console.error('Error removing user as leader from old groups:', error);
+      throw error;
+    }
   }
 };
 
@@ -437,6 +505,10 @@ const Admin = () => {
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
+    name: string;
+    surname: string;
+    email: string;
+    phone: string;
     role: string;
     permissions: string[];
     assigned_groups: string[];
@@ -446,7 +518,13 @@ const Admin = () => {
     can_view_own_data: boolean;
     login_username: string;
     login_pin: string;
+    cell_group_id: string;
+    status: string;
   }>({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
     role: 'member',
     permissions: [],
     assigned_groups: [],
@@ -455,7 +533,9 @@ const Admin = () => {
     can_edit_members: false,
     can_view_own_data: false,
     login_username: '',
-    login_pin: ''
+    login_pin: '',
+    cell_group_id: '',
+    status: 'active'
   });
 
   const [groupFormData, setGroupFormData] = useState<{
@@ -465,13 +545,17 @@ const Admin = () => {
     meeting_day: string;
     meeting_time: string;
     login_username: string;
+    status: string;
+    leader_id: string;
   }>({
     name: '',
     description: '',
     location: '',
     meeting_day: '',
     meeting_time: '',
-    login_username: ''
+    login_username: '',
+    status: 'active',
+    leader_id: ''
   });
 
   // Check permissions and load data
@@ -761,6 +845,10 @@ const Admin = () => {
     if (user) {
       setSelectedUser(user);
       setUserFormData({
+        name: user.name || '',
+        surname: user.surname || '',
+        email: user.email || '',
+        phone: user.phone || '',
         role: user.role || 'member',
         permissions: user.permissions || [],
         assigned_groups: user.assigned_groups || [],
@@ -769,7 +857,9 @@ const Admin = () => {
         can_edit_members: user.can_edit_members || false,
         can_view_own_data: user.can_view_own_data || false,
         login_username: user.login_username || '',
-        login_pin: user.login_pin || ''
+        login_pin: user.login_pin || '',
+        cell_group_id: user.cell_group_id || '',
+        status: user.status || 'active'
       });
       setShowCredentials(false);
       setGeneratedCredentials(null);
@@ -783,7 +873,9 @@ const Admin = () => {
         location: group.location || '',
         meeting_day: group.meeting_day || '',
         meeting_time: group.meeting_time || '',
-        login_username: group.login_username || ''
+        login_username: group.login_username || '',
+        status: group.status || 'active',
+        leader_id: group.leader_id || ''
       });
       setShowGroupCredentials(false);
       setGeneratedGroupCredentials(null);
@@ -795,6 +887,10 @@ const Admin = () => {
     setSelectedUser(null);
     setSelectedGroup(null);
     setUserFormData({
+      name: '',
+      surname: '',
+      email: '',
+      phone: '',
       role: 'member',
       permissions: [],
       assigned_groups: [],
@@ -803,7 +899,9 @@ const Admin = () => {
       can_edit_members: false,
       can_view_own_data: false,
       login_username: '',
-      login_pin: ''
+      login_pin: '',
+      cell_group_id: '',
+      status: 'active'
     });
     setGroupFormData({
       name: '',
@@ -811,7 +909,9 @@ const Admin = () => {
       location: '',
       meeting_day: '',
       meeting_time: '',
-      login_username: ''
+      login_username: '',
+      status: 'active',
+      leader_id: ''
     });
     setShowCredentials(false);
     setShowGroupCredentials(false);
@@ -835,7 +935,30 @@ const Admin = () => {
       console.log('Starting user update for:', selectedUser.id);
       console.log('Update data:', userFormData);
 
+      const oldCellGroupId = selectedUser.cell_group_id;
+      const newCellGroupId = userFormData.cell_group_id === '' ? null : userFormData.cell_group_id;
+
+      // If user is a group leader and their cell group is changing, update the cell group leader
+      if (userFormData.role === 'group_leader' && oldCellGroupId !== newCellGroupId) {
+        console.log('User is a group leader and cell group is changing, updating cell group leaders...');
+        
+        // Remove user as leader from old cell group
+        if (oldCellGroupId) {
+          await cloudService.updateCellGroupLeader(oldCellGroupId, null);
+        }
+        
+        // Set user as leader for new cell group
+        if (newCellGroupId) {
+          await cloudService.updateCellGroupLeader(newCellGroupId, selectedUser.id);
+        }
+      }
+
+      // Update the user
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
+        name: userFormData.name,
+        surname: userFormData.surname,
+        email: userFormData.email,
+        phone: userFormData.phone,
         role: userFormData.role,
         permissions: userFormData.permissions,
         assigned_groups: userFormData.assigned_groups,
@@ -844,12 +967,20 @@ const Admin = () => {
         can_edit_members: userFormData.can_edit_members,
         can_view_own_data: userFormData.can_view_own_data,
         login_username: userFormData.login_username,
-        login_pin: userFormData.login_pin
+        login_pin: userFormData.login_pin,
+        cell_group_id: newCellGroupId,
+        status: userFormData.status
       });
 
+      // Replace the existing member data with the updated one
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id ? updatedMember : m
       ));
+
+      // Refresh cell groups to reflect leader changes
+      const cellGroupsData = await cloudService.getCellGroups();
+      setCellGroups(cellGroupsData);
+      setActiveCellGroups(cellGroupsData.filter(group => group.status === 'active'));
       
       alert('User updated successfully!');
       closeModal();
@@ -874,18 +1005,26 @@ const Admin = () => {
     setError(null);
     
     try {
-      await cloudService.updateCellGroup(selectedGroup.id, {
+      const updatedGroup = await cloudService.updateCellGroup(selectedGroup.id, {
         name: groupFormData.name,
         description: groupFormData.description,
         location: groupFormData.location,
         meeting_day: groupFormData.meeting_day,
         meeting_time: groupFormData.meeting_time,
-        login_username: groupFormData.login_username
+        login_username: groupFormData.login_username,
+        status: groupFormData.status,
+        leader_id: groupFormData.leader_id === '' ? null : groupFormData.leader_id
       });
 
-      // Refresh groups data
-      const groupsData = await cloudService.getCellGroups();
-      setCellGroups(groupsData);
+      // Replace the existing group data with the updated one
+      setCellGroups(prev => prev.map(g => 
+        g.id === selectedGroup.id ? updatedGroup : g
+      ));
+
+      // Also update active cell groups if needed
+      setActiveCellGroups(prev => prev.map(g => 
+        g.id === selectedGroup.id ? updatedGroup : g
+      ));
       
       alert('Group updated successfully!');
       closeModal();
@@ -1156,8 +1295,13 @@ const Admin = () => {
                       <p className="text-xs text-gray-500">
                         Members: {group.current_member_count || 0}
                       </p>
+                      {group.leader_id && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Leader: {members.find(m => m.id === group.leader_id)?.name} {members.find(m => m.id === group.leader_id)?.surname}
+                        </p>
+                      )}
                       {group.login_username && (
-                        <p className="text-xs text-blue-600 mt-2">
+                        <p className="text-xs text-blue-600 mt-1">
                           <Key className="h-3 w-3 inline mr-1" />
                           Group Login: {group.login_username}
                         </p>
@@ -1250,7 +1394,7 @@ const Admin = () => {
                         </p>
                         {member.cell_group_id && (
                           <p className="text-xs text-gray-500">
-                            Cell Group ID: {member.cell_group_id}
+                            Cell Group: {cellGroups.find(g => g.id === member.cell_group_id)?.name || member.cell_group_id}
                           </p>
                         )}
                         {member.login_username && (
@@ -1420,6 +1564,11 @@ const Admin = () => {
                           <p className="text-sm text-gray-500">
                             {member.email} • {roles.find(r => r.value === member.role)?.label || member.role || 'member'}
                           </p>
+                          {member.cell_group_id && (
+                            <p className="text-xs text-gray-500">
+                              Cell Group: {cellGroups.find(g => g.id === member.cell_group_id)?.name || member.cell_group_id}
+                            </p>
+                          )}
                           {member.assigned_groups && member.assigned_groups.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1">
                               {member.assigned_groups.map((group, index) => (
@@ -1476,7 +1625,9 @@ const Admin = () => {
                     <p className="text-gray-600">{selectedUser.email}</p>
                     <p className="text-sm text-gray-500">{selectedUser.phone}</p>
                     {selectedUser.cell_group_id && (
-                      <p className="text-sm text-gray-500">Cell Group ID: {selectedUser.cell_group_id}</p>
+                      <p className="text-sm text-gray-500">
+                        Current Cell Group: {cellGroups.find(g => g.id === selectedUser.cell_group_id)?.name || selectedUser.cell_group_id}
+                      </p>
                     )}
                     {selectedUser.assigned_groups && selectedUser.assigned_groups.length > 0 && (
                       <div className="mt-2">
@@ -1506,6 +1657,58 @@ const Admin = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.name}
+                    onChange={(e) => setUserFormData(prev => ({...prev, name: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Surname
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.surname}
+                    onChange={(e) => setUserFormData(prev => ({...prev, surname: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={userFormData.email}
+                    onChange={(e) => setUserFormData(prev => ({...prev, email: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.phone}
+                    onChange={(e) => setUserFormData(prev => ({...prev, phone: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
                     User Role
                   </label>
                   <select
@@ -1528,6 +1731,46 @@ const Admin = () => {
                   </select>
                   <p className="text-sm text-gray-500">
                     {roles.find(r => r.value === userFormData.role)?.description}
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Status
+                  </label>
+                  <select
+                    value={userFormData.status}
+                    onChange={(e) => setUserFormData(prev => ({...prev, status: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Cell Group
+                  </label>
+                  <select
+                    value={userFormData.cell_group_id}
+                    onChange={(e) => setUserFormData(prev => ({...prev, cell_group_id: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">No Cell Group</option>
+                    {cellGroups.map(group => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500">
+                    {userFormData.role === 'group_leader' 
+                      ? 'Setting a cell group will automatically assign this user as the leader of that group'
+                      : 'Select the cell group this user belongs to'}
                   </p>
                 </div>
 
@@ -1568,6 +1811,34 @@ const Admin = () => {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Login Username
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.login_username}
+                    onChange={(e) => setUserFormData(prev => ({...prev, login_username: e.target.value}))}
+                    placeholder="Manual username input"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Login PIN
+                  </label>
+                  <input
+                    type="text"
+                    value={userFormData.login_pin}
+                    onChange={(e) => setUserFormData(prev => ({...prev, login_pin: e.target.value}))}
+                    placeholder="Manual PIN input"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
 
@@ -1774,6 +2045,11 @@ const Admin = () => {
                     <p className="text-sm text-gray-500">
                       Members: {selectedGroup.current_member_count || 0} • Status: {selectedGroup.status}
                     </p>
+                    {selectedGroup.leader_id && (
+                      <p className="text-sm text-blue-600">
+                        Leader: {members.find(m => m.id === selectedGroup.leader_id)?.name} {members.find(m => m.id === selectedGroup.leader_id)?.surname}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1844,6 +2120,44 @@ const Admin = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Status
+                  </label>
+                  <select
+                    value={groupFormData.status}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, status: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Group Leader
+                  </label>
+                  <select
+                    value={groupFormData.leader_id}
+                    onChange={(e) => setGroupFormData(prev => ({...prev, leader_id: e.target.value}))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">No Leader</option>
+                    {members
+                      .filter(member => member.role === 'group_leader' || member.role === 'pastor' || member.role === 'admin')
+                      .map(member => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} {member.surname} ({member.role})
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+              </div>
+
               <div className="space-y-4">
                 <label className="block text-sm font-medium text-gray-700">
                   Group Login Credentials
@@ -1878,19 +2192,19 @@ const Admin = () => {
                     </div>
                   </div>
                 )}
+              </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Group Username
-                  </label>
-                  <input
-                    type="text"
-                    value={groupFormData.login_username}
-                    onChange={(e) => setGroupFormData(prev => ({...prev, login_username: e.target.value}))}
-                    placeholder="Group login username"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Group Username
+                </label>
+                <input
+                  type="text"
+                  value={groupFormData.login_username}
+                  onChange={(e) => setGroupFormData(prev => ({...prev, login_username: e.target.value}))}
+                  placeholder="Group login username"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               <div className="flex gap-3 pt-4">
