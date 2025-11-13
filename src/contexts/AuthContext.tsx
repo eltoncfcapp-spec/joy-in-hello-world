@@ -1,24 +1,23 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
-interface User {
+export interface User {
   id: string;
   name: string;
   surname: string;
   email: string | null;
   phone: string | null;
-  role: string;
-  permissions: string[];
+  role: 'member' | 'group_leader' | 'admin';
+  roles: string[];
   is_active: boolean;
   cell_group: string | null;
   department: string | null;
   login_username: string | null;
-  login_pin: string | null;
-  assigned_groups: string[];
-  assigned_departments: string[];
-  can_add_members: boolean;
-  can_edit_members: boolean;
-  can_view_own_data: boolean;
+  permissions: {
+    canAddMembers: boolean;
+    canEditMembers: boolean;
+    canViewOwnData: boolean;
+  };
 }
 
 interface AuthContextType {
@@ -32,84 +31,77 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for existing session on mount
   useEffect(() => {
+    const checkUserSession = async () => {
+      try {
+        const savedUser = localStorage.getItem('church_user');
+        if (savedUser) setUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error('Session error:', error);
+        localStorage.removeItem('church_user');
+      } finally {
+        setLoading(false);
+      }
+    };
+
     checkUserSession();
   }, []);
 
-  const checkUserSession = async () => {
-    try {
-      const savedUser = localStorage.getItem('church_user');
-      if (savedUser) {
-        const userData = JSON.parse(savedUser);
-        setUser(userData);
-      }
-    } catch (error) {
-      console.error('Error checking user session:', error);
-      localStorage.removeItem('church_user');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const login = async (identifier: string, secret: string, mode: 'email' | 'username'): Promise<boolean> => {
     try {
-      // Query Supabase for the user
-      let query = supabase.from('members').select('*');
-      
+      let query = supabase.from('members').select(`
+        *,
+        profile:profiles(id, name, surname, cell_group_id),
+        roles:user_roles(role)
+      `).eq('is_active', true);
+
       if (mode === 'email') {
         query = query.eq('email', identifier);
       } else {
-        query = query.eq('login_username', identifier).eq('login_pin', secret);
-      }
-      
-      const { data: members, error } = await query;
-
-      if (error || !members || members.length === 0) {
-        console.error('Login error:', error);
-        return false;
+        query = query.eq('login_username', identifier);
       }
 
-      const member = members[0];
+      const { data, error } = await query;
       
-      // For email mode, verify password (simplified for now)
-      if (mode === 'email') {
-        // TODO: Implement proper password hashing and verification
-        // For now, we'll just check if the email exists
-      }
+      if (error || !data?.length) return false;
+      
+      const member = data[0];
+      const validPassword = mode === 'email' 
+        ? member.login_pin === secret 
+        : member.login_pin === secret;
+
+      if (!validPassword) return false;
+
+      const userRoles = member.roles.map((role: any) => role.role);
+      const highestRole = ['admin', 'group_leader', 'member'].find(role => 
+        userRoles.includes(role)
+      ) || 'member';
 
       const authenticatedUser: User = {
         id: member.id,
-        name: member.name,
-        surname: member.surname,
+        name: member.profile?.name || member.name,
+        surname: member.profile?.surname || member.surname,
         email: member.email,
         phone: member.phone,
-        role: (member as any).is_leader ? 'leader' : 'member',
-        permissions: (member as any).permissions || [],
+        role: highestRole,
+        roles: userRoles,
         is_active: true,
-        cell_group: member.cell_group_id,
+        cell_group: member.cell_group_id || null,
         department: null,
-        login_username: (member as any).login_username,
-        login_pin: (member as any).login_pin,
-        assigned_groups: (member as any).assigned_groups || [],
-        assigned_departments: (member as any).assigned_departments || [],
-        can_add_members: (member as any).can_add_members || false,
-        can_edit_members: (member as any).can_edit_members || false,
-        can_view_own_data: (member as any).can_view_own_data || false
+        login_username: member.login_username,
+        permissions: {
+          canAddMembers: member.can_add_members || false,
+          canEditMembers: member.can_edit_members || false,
+          canViewOwnData: member.can_view_own_data || false
+        }
       };
 
       setUser(authenticatedUser);
@@ -126,15 +118,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.removeItem('church_user');
   };
 
-  const value = {
-    user,
-    login,
-    logout,
-    loading
-  };
-
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ user, login, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
