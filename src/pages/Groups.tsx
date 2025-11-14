@@ -62,6 +62,7 @@ interface Member {
   assigned_groups?: string[] | null;
   assigned_departments?: string[] | null;
   cell_group_id?: string | null;
+  is_leader?: boolean;
 }
 
 interface Attendance {
@@ -188,12 +189,6 @@ const CellGroups = () => {
       return true;
     }
 
-    // Check if user is marked as leader in cell_group_members
-    const isGroupLeader = group.members?.some(member => 
-      member.member_id === profile.id && member.role === 'leader'
-    );
-    if (isGroupLeader) return true;
-
     return false;
   };
 
@@ -220,13 +215,10 @@ const CellGroups = () => {
     
     // Regular members can only view groups they are members of
     if (profile.role === 'member') {
-      // Check if member belongs to this group via cell_group_members
-      const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-      
-      // Or check if their cell_group_id matches this group
+      // Check if their cell_group_id matches this group
       const isMemberByCellGroupId = profile.cell_group_id === group.id;
       
-      return isMemberOfGroup || isMemberByCellGroupId || false;
+      return isMemberByCellGroupId || false;
     }
     
     return false;
@@ -259,15 +251,9 @@ const CellGroups = () => {
 
     // Regular members can see groups they are members of
     if (profile.role === 'member') {
-      const memberGroups = allCellGroups.filter(group => {
-        // Check via cell_group_members table
-        const isMemberOfGroup = group.members?.some(member => member.member_id === profile.id);
-        
-        // Check via cell_group_id field
-        const isMemberByCellGroupId = profile.cell_group_id === group.id;
-        
-        return isMemberOfGroup || isMemberByCellGroupId;
-      });
+      // Check via cell_group_id field
+      const isMemberByCellGroupId = profile.cell_group_id;
+      const memberGroups = allCellGroups.filter(group => group.id === isMemberByCellGroupId);
       userGroups = [...userGroups, ...memberGroups];
     }
 
@@ -279,65 +265,58 @@ const CellGroups = () => {
     return uniqueGroups;
   };
 
-  const loadData = async () => {
+  // UPDATED: Fixed fetchCellGroups function
+  const fetchCellGroups = async () => {
     try {
-      setLoading(true);
-      setError(null);
+      // First fetch all cell groups
+      const { data: groupsData, error: groupsError } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .order('name');
+
+      if (groupsError) throw groupsError;
       
-      await Promise.all([
-        fetchCellGroups(),
-        fetchMembers()
-      ]);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      setError('Failed to load cell groups data');
-    } finally {
-      setLoading(false);
-      setInitialLoad(false);
-    }
-  };
+      // Then fetch all members with their cell groups
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select('id, name, surname, email, phone, cell_group_id, role, is_leader')
+        .order('name');
 
-const fetchCellGroups = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('cell_groups')
-      .select(`
-        *,
-        leader:members!cell_groups_leader_id_fkey(id, name, surname, email, phone)
-      `)
-      .order('name');
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+      }
 
-    if (error) throw error;
-    
-    const cellGroupsData = data || [];
-    
-    // Fetch members for each cell group separately
-    const groupsWithMembers = await Promise.all(
-      cellGroupsData.map(async (group) => {
-        // Fetch members for this specific group
-        const { data: membersData, error: membersError } = await supabase
-          .from('members')
-          .select('id, name, surname, email, phone, role, is_leader')
-          .eq('cell_group_id', group.id);
-
-        if (membersError) {
-          console.error(`Error fetching members for group ${group.name}:`, membersError);
-        }
+      // Combine the data
+      const groupsWithMembers = (groupsData || []).map(group => {
+        const groupMembers = (membersData || []).filter(member => 
+          member.cell_group_id === group.id
+        );
+        
+        // Find leader if leader_id exists
+        const leader = group.leader_id ? 
+          (membersData || []).find(member => member.id === group.leader_id) : null;
 
         return {
           ...group,
-          members: membersData || []
+          members: groupMembers,
+          leader: leader ? {
+            id: leader.id,
+            name: leader.name,
+            surname: leader.surname,
+            email: leader.email,
+            phone: leader.phone
+          } : null
         };
-      })
-    );
-    
-    setAllCellGroups(groupsWithMembers as any);
-    
-  } catch (error) {
-    console.error('Error fetching cell groups:', error);
-    throw error;
-  }
-};
+      });
+      
+      setAllCellGroups(groupsWithMembers);
+      
+    } catch (error) {
+      console.error('Error fetching cell groups:', error);
+      throw error;
+    }
+  };
+
   const fetchMembers = async () => {
     try {
       const { data, error } = await supabase
@@ -353,6 +332,7 @@ const fetchCellGroups = async () => {
     }
   };
 
+  // UPDATED: Fixed fetchAvailableMembers function
   const fetchAvailableMembers = async (groupId: string) => {
     try {
       const { data, error } = await supabase
@@ -504,7 +484,25 @@ const fetchCellGroups = async () => {
     }
   }, [allCellGroups, profile]);
 
-  // Add Members Functions
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      await Promise.all([
+        fetchCellGroups(),
+        fetchMembers()
+      ]);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      setError('Failed to load cell groups data');
+    } finally {
+      setLoading(false);
+      setInitialLoad(false);
+    }
+  };
+
+  // UPDATED: Fixed add members function
   const openAddMembersModal = async (group: CellGroup) => {
     if (!canManageGroup(group)) {
       setError('You do not have permission to add members to this group');
@@ -525,6 +523,7 @@ const fetchCellGroups = async () => {
     );
   };
 
+  // UPDATED: Fixed addSelectedMembers function
   const addSelectedMembers = async () => {
     if (!selectedGroup || selectedMembers.length === 0) return;
 
@@ -532,7 +531,7 @@ const fetchCellGroups = async () => {
       setLoading(true);
       setError(null);
 
-      // Update each selected member's cell_group_id
+      // Update each selected member's cell_group_id directly in members table
       const updates = selectedMembers.map(memberId => 
         supabase
           .from('members')
@@ -561,6 +560,7 @@ const fetchCellGroups = async () => {
     }
   };
 
+  // UPDATED: Fixed remove member function
   const removeMember = async (memberId: string) => {
     if (!selectedGroup) return;
 
@@ -570,6 +570,7 @@ const fetchCellGroups = async () => {
 
     try {
       setLoading(true);
+      // Set cell_group_id to null to remove from group
       const { error } = await supabase
         .from('members')
         .update({ cell_group_id: null })
@@ -2310,4 +2311,4 @@ const fetchCellGroups = async () => {
   );
 };
 
-export default CellGroups;
+export default Groups;
