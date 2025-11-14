@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus, Mail, Phone } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus, Mail, Phone, Ban } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,8 +31,11 @@ interface Meeting {
   location: string | null;
   topic: string | null;
   notes: string | null;
-  status: string;
+  status: 'scheduled' | 'completed' | 'cancelled';
+  cancellation_reason?: string | null;
   created_at: string;
+  has_attendance?: boolean;
+  has_report?: boolean;
 }
 
 interface MeetingReport {
@@ -79,14 +82,14 @@ const Groups = () => {
   const { profile, hasPermission, canViewGroup, canManageGroup, getUserGroups } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
-  const [showMembersModal, setShowMembersModal] = useState(false);
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
-  const [showReportsModal, setShowReportsModal] = useState(false);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showReportView, setShowReportView] = useState(false);
   const [showAddMembersModal, setShowAddMembersModal] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [showManageLeadersModal, setShowManageLeadersModal] = useState(false);
+  const [showCancelMeetingModal, setShowCancelMeetingModal] = useState(false);
+  const [showCompleteMeetingModal, setShowCompleteMeetingModal] = useState(false);
   
   const [Groups, setGroups] = useState<CellGroup[]>([]);
   const [allGroups, setAllGroups] = useState<CellGroup[]>([]);
@@ -101,6 +104,7 @@ const Groups = () => {
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [selectedReport, setSelectedReport] = useState<MeetingReport | null>(null);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [cancellationReason, setCancellationReason] = useState('');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -502,6 +506,125 @@ const Groups = () => {
     }
   };
 
+  // Cancel Meeting Function
+  const openCancelMeetingModal = (meeting: Meeting) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to cancel meetings for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    setCancellationReason('');
+    setShowCancelMeetingModal(true);
+  };
+
+  const cancelMeeting = async () => {
+    if (!selectedMeeting || !cancellationReason.trim()) {
+      setError('Cancellation reason is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Update meeting status to cancelled with reason
+      const { error } = await supabase
+        .from('meetings')
+        .update({ 
+          status: 'cancelled',
+          cancellation_reason: cancellationReason
+        })
+        .eq('id', selectedMeeting.id);
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetings(selectedGroup.id);
+      }
+
+      setSuccess('Meeting cancelled successfully');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowCancelMeetingModal(false);
+      setCancellationReason('');
+    } catch (error: any) {
+      console.error('Error cancelling meeting:', error);
+      setError(`Error cancelling meeting: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Complete Meeting Function
+  const openCompleteMeetingModal = async (meeting: Meeting) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to complete meetings for this group');
+      return;
+    }
+
+    // Check if attendance has been recorded
+    const { data: attendanceData } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('meeting_id', meeting.id);
+
+    const hasAttendance = attendanceData && attendanceData.length > 0;
+
+    // Check if report has been created
+    const { data: reportData } = await supabase
+      .from('meeting_reports')
+      .select('*')
+      .eq('meeting_id', meeting.id);
+
+    const hasReport = reportData && reportData.length > 0;
+
+    // Get total members count
+    const groupMembers = members.filter(m => m.cell_group_id === selectedGroup.id);
+    const allMembersRecorded = hasAttendance && attendanceData.length === groupMembers.length;
+
+    if (!allMembersRecorded) {
+      setError('Cannot complete meeting: Attendance must be recorded for all members');
+      return;
+    }
+
+    if (!hasReport) {
+      setError('Cannot complete meeting: A meeting report must be created first');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    setShowCompleteMeetingModal(true);
+  };
+
+  const completeMeeting = async () => {
+    if (!selectedMeeting) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('meetings')
+        .update({ status: 'completed' })
+        .eq('id', selectedMeeting.id);
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetings(selectedGroup.id);
+      }
+
+      setSuccess('Meeting marked as completed!');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowCompleteMeetingModal(false);
+    } catch (error: any) {
+      console.error('Error completing meeting:', error);
+      setError(`Error completing meeting: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Attendance Functions
   const openAttendanceModal = async (meeting: Meeting) => {
     if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
@@ -538,18 +661,38 @@ const Groups = () => {
   };
 
   const saveAttendance = async () => {
-    if (!selectedMeeting) return;
+    if (!selectedMeeting || !selectedGroup) return;
+
+    const groupMembers = members.filter(member => member.cell_group_id === selectedGroup.id);
+    
+    // Check if all members have attendance assigned
+    const allAssigned = groupMembers.every(member => attendanceFormData[member.id]);
+    
+    if (!allAssigned) {
+      setError('Please assign attendance status for all members before saving');
+      return;
+    }
+
+    // Check if reasons are provided for absent_with_reason
+    const needsReason = groupMembers.filter(member => 
+      attendanceFormData[member.id] === 'absent_with_reason'
+    );
+    
+    const allReasonsProvided = needsReason.every(member => 
+      absenceReasons[member.id] && absenceReasons[member.id].trim() !== ''
+    );
+
+    if (!allReasonsProvided) {
+      setError('Please provide reasons for all absences marked as "Absent with Reason"');
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
 
-      // Get all group members
-      const groupMembers = members.filter(member => member.cell_group_id === selectedGroup?.id);
-
-      // Prepare attendance records
       const attendanceRecords = groupMembers.map(member => {
-        const status = attendanceFormData[member.id] || 'present'; // Default to present
+        const status = attendanceFormData[member.id];
         const reason = status === 'absent_with_reason' ? absenceReasons[member.id] || '' : null;
 
         return {
@@ -904,17 +1047,19 @@ const Groups = () => {
 
   const closeAllModals = () => {
     setShowMeetingsModal(false);
-    setShowReportsModal(false);
     setShowReportForm(false);
     setShowReportView(false);
     setShowAddMembersModal(false);
     setShowAttendanceModal(false);
     setShowManageLeadersModal(false);
     setShowEditForm(false);
+    setShowCancelMeetingModal(false);
+    setShowCompleteMeetingModal(false);
     setSelectedGroup(null);
     setSelectedMeeting(null);
     setSelectedReport(null);
     setSelectedMembers([]);
+    setCancellationReason('');
     setMeetings([]);
     setMeetingReports([]);
     setAttendance([]);
@@ -1484,9 +1629,9 @@ const Groups = () => {
                     <div className="flex gap-2">
                       <button
                         onClick={() => openMeetingsModal(group)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                       >
-                        Meetings & Reports
+                        Meetings
                       </button>
                       {canManage && (
                         <>
@@ -1727,118 +1872,13 @@ const Groups = () => {
           </div>
         )}
 
-        {/* Attendance Modal */}
-        {showAttendanceModal && selectedMeeting && selectedGroup && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-                </h3>
-                <button
-                  onClick={closeAllModals}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {members.filter(member => member.cell_group_id === selectedGroup.id).map(member => (
-                  <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900 dark:text-white">
-                        {member.name} {member.surname}
-                      </div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                        {member.email}
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-4">
-                      {/* Present Button */}
-                      <button
-                        onClick={() => handleAttendanceChange(member.id, 'present')}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          attendanceFormData[member.id] === 'present'
-                            ? 'bg-green-600 text-white'
-                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                        }`}
-                      >
-                        <CheckCircle className="h-4 w-4" />
-                        Present
-                      </button>
-
-                      {/* Absent Button */}
-                      <button
-                        onClick={() => handleAttendanceChange(member.id, 'absent')}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          attendanceFormData[member.id] === 'absent'
-                            ? 'bg-red-600 text-white'
-                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                        }`}
-                      >
-                        <XCircle className="h-4 w-4" />
-                        Absent
-                      </button>
-
-                      {/* Absent with Reason Button */}
-                      <button
-                        onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          attendanceFormData[member.id] === 'absent_with_reason'
-                            ? 'bg-orange-600 text-white'
-                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                        }`}
-                      >
-                        <FileText className="h-4 w-4" />
-                        Absent with Reason
-                      </button>
-                    </div>
-
-                    {/* Reason Input */}
-                    {attendanceFormData[member.id] === 'absent_with_reason' && (
-                      <div className="w-full mt-3">
-                        <input
-                          type="text"
-                          value={absenceReasons[member.id] || ''}
-                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
-                          placeholder="Enter reason for absence..."
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200 dark:border-gray-600">
-                <button
-                  onClick={saveAttendance}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-                  {loading ? 'Saving...' : 'Save Attendance'}
-                </button>
-                <button
-                  onClick={closeAllModals}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Meetings & Reports Modal */}
+        {/* Meetings Modal */}
         {showMeetingsModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {selectedGroup.name} - Meetings & Reports
+                  {selectedGroup.name} - Meetings
                 </h3>
                 <button
                   onClick={closeAllModals}
@@ -1880,8 +1920,8 @@ const Groups = () => {
                   ) : (
                     <div className="space-y-3">
                       {meetings.map((meeting) => (
-                        <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
-                          <div className="flex justify-between items-start mb-2">
+                        <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
+                          <div className="flex justify-between items-start mb-3">
                             <div>
                               <div className="font-medium text-gray-900 dark:text-white">
                                 {new Date(meeting.meeting_date).toLocaleDateString()}
@@ -1892,8 +1932,14 @@ const Groups = () => {
                                   Topic: {meeting.topic}
                                 </div>
                               )}
+                              {meeting.status === 'cancelled' && meeting.cancellation_reason && (
+                                <div className="text-sm text-red-600 dark:text-red-400 mt-2 flex items-center gap-1">
+                                  <Ban className="h-3 w-3" />
+                                  Reason: {meeting.cancellation_reason}
+                                </div>
+                              )}
                             </div>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                               meeting.status === 'completed' 
                                 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                                 : meeting.status === 'cancelled'
@@ -1903,26 +1949,39 @@ const Groups = () => {
                               {meeting.status}
                             </span>
                           </div>
-                          <div className="flex gap-2 mt-3">
-                            {checkCanManageGroup(selectedGroup) && (
-                              <>
-                                <button
-                                  onClick={() => openAttendanceModal(meeting)}
-                                  className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
-                                >
-                                  <Users className="h-3 w-3" />
-                                  Attendance
-                                </button>
-                                <button
-                                  onClick={() => openReportForm(meeting)}
-                                  className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
-                                >
-                                  <FileText className="h-3 w-3" />
-                                  Create Report
-                                </button>
-                              </>
-                            )}
-                          </div>
+                          
+                          {meeting.status === 'scheduled' && checkCanManageGroup(selectedGroup) && (
+                            <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                              <button
+                                onClick={() => openAttendanceModal(meeting)}
+                                className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
+                              >
+                                <Users className="h-3 w-3" />
+                                Attendance
+                              </button>
+                              <button
+                                onClick={() => openReportForm(meeting)}
+                                className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                              >
+                                <FileText className="h-3 w-3" />
+                                Create Report
+                              </button>
+                              <button
+                                onClick={() => openCompleteMeetingModal(meeting)}
+                                className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+                              >
+                                <CheckCircle className="h-3 w-3" />
+                                Complete
+                              </button>
+                              <button
+                                onClick={() => openCancelMeetingModal(meeting)}
+                                className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 transition-colors"
+                              >
+                                <Ban className="h-3 w-3" />
+                                Cancel Meeting
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2008,6 +2067,249 @@ const Groups = () => {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cancel Meeting Modal */}
+        {showCancelMeetingModal && selectedMeeting && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-md w-full">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Cancel Meeting
+                </h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mb-6">
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  You are about to cancel the meeting scheduled for{' '}
+                  <span className="font-semibold">
+                    {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                  </span>
+                </p>
+                
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Cancellation Reason *
+                </label>
+                <textarea
+                  value={cancellationReason}
+                  onChange={(e) => setCancellationReason(e.target.value)}
+                  rows={4}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  placeholder="Please provide a reason for cancelling this meeting..."
+                  required
+                />
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                  This reason will be visible to all group members
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={cancelMeeting}
+                  disabled={loading || !cancellationReason.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Ban className="h-4 w-4" />
+                  {loading ? 'Cancelling...' : 'Cancel Meeting'}
+                </button>
+                <button
+                  onClick={closeAllModals}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Complete Meeting Modal */}
+        {showCompleteMeetingModal && selectedMeeting && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-md w-full">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Complete Meeting
+                </h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mb-6">
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                  Mark the meeting scheduled for{' '}
+                  <span className="font-semibold">
+                    {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                  </span>
+                  {' '}as completed?
+                </p>
+
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                    <CheckCircle className="h-4 w-4" />
+                    <span className="text-sm font-medium">All requirements met:</span>
+                  </div>
+                  <ul className="ml-6 space-y-1 text-sm text-green-600 dark:text-green-400">
+                    <li>✓ Attendance recorded for all members</li>
+                    <li>✓ Meeting report completed</li>
+                  </ul>
+                </div>
+
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                  Once completed, this meeting cannot be edited further.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={completeMeeting}
+                  disabled={loading}
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  {loading ? 'Completing...' : 'Mark as Complete'}
+                </button>
+                <button
+                  onClick={closeAllModals}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Attendance Modal */}
+        {showAttendanceModal && selectedMeeting && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Mark attendance for all members before saving
+                  </p>
+                </div>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {members.filter(member => member.cell_group_id === selectedGroup.id).map(member => (
+                  <div key={member.id} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                    <div className="flex flex-col space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </div>
+                          {member.email && (
+                            <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1 mt-1">
+                              <Mail className="h-3 w-3" />
+                              {member.email}
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleAttendanceChange(member.id, 'present')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
+                              attendanceFormData[member.id] === 'present'
+                                ? 'bg-green-600 text-white shadow-lg'
+                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                            }`}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            Present
+                          </button>
+
+                          <button
+                            onClick={() => handleAttendanceChange(member.id, 'absent')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
+                              attendanceFormData[member.id] === 'absent'
+                                ? 'bg-red-600 text-white shadow-lg'
+                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                            }`}
+                          >
+                            <XCircle className="h-4 w-4" />
+                            Absent
+                          </button>
+
+                          <button
+                            onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
+                              attendanceFormData[member.id] === 'absent_with_reason'
+                                ? 'bg-orange-600 text-white shadow-lg'
+                                : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                            }`}
+                          >
+                            <FileText className="h-4 w-4" />
+                            Absent w/ Reason
+                          </button>
+                        </div>
+                      </div>
+
+                      {attendanceFormData[member.id] === 'absent_with_reason' && (
+                        <div className="mt-3 pl-4 border-l-4 border-orange-500">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Reason for Absence *
+                          </label>
+                          <input
+                            type="text"
+                            value={absenceReasons[member.id] || ''}
+                            onChange={(e) => handleReasonChange(member.id, e.target.value)}
+                            placeholder="Enter reason for absence..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          />
+                        </div>
+                      )}
+
+                      {!attendanceFormData[member.id] && (
+                        <div className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded">
+                          ⚠️ Please mark attendance for this member
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200 dark:border-gray-600">
+                <button
+                  onClick={saveAttendance}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {loading ? 'Saving...' : 'Save Attendance'}
+                </button>
+                <button
+                  onClick={closeAllModals}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
@@ -2228,4 +2530,4 @@ const Groups = () => {
   );
 };
 
-export default Groups; 
+export default Groups;
