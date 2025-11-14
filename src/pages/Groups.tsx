@@ -2305,4 +2305,9 @@ const CellGroups = () => {
             </div>
           </div>
         )}
-export default CellGroups;
+      </div>
+    </div>
+  );
+};
+
+export default Groups;
