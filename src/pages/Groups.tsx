@@ -103,8 +103,8 @@ const Groups = () => {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [showManageLeadersModal, setShowManageLeadersModal] = useState(false);
   
-  const [Groups, setGroups] = useState<CellGroup[]>([]);
-  const [allGroups, setAllGroups] = useState<CellGroup[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [allCellGroups, setAllCellGroups] = useState<CellGroup[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingReports, setMeetingReports] = useState<MeetingReport[]>([]);
@@ -163,7 +163,7 @@ const Groups = () => {
     return isAdminOrPastor(profile.role) || canManageAllGroups(profile.permissions);
   };
 
-  // Check if user can manage specific cell group
+  // FIXED: Check if user can manage specific cell group
   const canManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -177,22 +177,16 @@ const Groups = () => {
       return true;
     }
     
-    // Group leaders can only manage their assigned groups
-    if (profile.role === 'group_leader' && profile.assigned_groups) {
-      return profile.assigned_groups.some(assignedGroup => 
-        assignedGroup.toLowerCase() === group.name.toLowerCase()
-      );
+    // Group leaders can only manage groups where they are the leader
+    if (profile.role === 'group_leader' || profile.role === 'leader') {
+      // Check if user is the leader of this specific group
+      return group.leader_id === profile.id;
     }
     
-    // Check if user is the leader of this group (from leader_id)
-    if (group.leader_id === profile.id) {
-      return true;
-    }
-
     return false;
   };
 
-  // Check if user can view specific cell group
+  // FIXED: Check if user can view specific cell group
   const canViewGroup = (group: CellGroup) => {
     if (!profile) return false;
     
@@ -206,55 +200,43 @@ const Groups = () => {
       return true;
     }
     
-    // Group leaders can view their assigned groups
-    if (profile.role === 'group_leader' && profile.assigned_groups) {
-      return profile.assigned_groups.some(assignedGroup => 
-        assignedGroup.toLowerCase() === group.name.toLowerCase()
-      );
+    // Group leaders can view groups where they are the leader
+    if (profile.role === 'group_leader' || profile.role === 'leader') {
+      return group.leader_id === profile.id;
     }
     
     // Regular members can only view groups they are members of
     if (profile.role === 'member') {
-      // Check if their cell_group_id matches this group
-      const isMemberByCellGroupId = profile.cell_group_id === group.id;
-      
-      return isMemberByCellGroupId || false;
+      return profile.cell_group_id === group.id;
     }
     
     return false;
   };
 
-  // Filter cell groups based on user permissions
-  const getFilteredGroups = () => {
+  // FIXED: Filter cell groups based on user permissions
+  const getFilteredCellGroups = () => {
     if (!profile) return [];
 
     // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
-      return allGroups;
+      return allCellGroups;
     }
 
     // Users with view_groups or manage_groups permission can see all groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
-      return allGroups;
+      return allCellGroups;
     }
 
     let userGroups: CellGroup[] = [];
 
-    // Group leaders can see their assigned groups
-    if (profile.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
-      userGroups = allGroups.filter(group => 
-        profile.assigned_groups?.some(assignedGroup => 
-          assignedGroup.toLowerCase() === group.name.toLowerCase()
-        )
-      );
+    // Group leaders can see only groups where they are the leader
+    if (profile.role === 'group_leader' || profile.role === 'leader') {
+      userGroups = allCellGroups.filter(group => group.leader_id === profile.id);
     }
 
-    // Regular members can see groups they are members of
+    // Regular members can see only groups they are members of
     if (profile.role === 'member') {
-      // Check via cell_group_id field
-      const isMemberByCellGroupId = profile.cell_group_id;
-      const memberGroups = allGroups.filter(group => group.id === isMemberByCellGroupId);
-      userGroups = [...userGroups, ...memberGroups];
+      userGroups = allCellGroups.filter(group => profile.cell_group_id === group.id);
     }
 
     // Remove duplicates
@@ -265,8 +247,8 @@ const Groups = () => {
     return uniqueGroups;
   };
 
-  // UPDATED: Fixed fetchGroups function
-  const fetchGroups = async () => {
+  // Fetch cell groups
+  const fetchCellGroups = async () => {
     try {
       // First fetch all cell groups
       const { data: groupsData, error: groupsError } = await supabase
@@ -309,7 +291,7 @@ const Groups = () => {
         };
       });
       
-      setAllGroups(groupsWithMembers);
+      setAllCellGroups(groupsWithMembers);
       
     } catch (error) {
       console.error('Error fetching cell groups:', error);
@@ -332,7 +314,6 @@ const Groups = () => {
     }
   };
 
-  // UPDATED: Fixed fetchAvailableMembers function
   const fetchAvailableMembers = async (groupId: string) => {
     try {
       const { data, error } = await supabase
@@ -455,8 +436,8 @@ const Groups = () => {
       else if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
         userHasAccess = true;
       }
-      // Group leaders with assigned groups
-      else if (profile.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
+      // Group leaders (they can access if they lead any group)
+      else if ((profile.role === 'group_leader' || profile.role === 'leader') && profile.is_leader) {
         userHasAccess = true;
       }
       // Regular members who belong to a cell group
@@ -476,13 +457,13 @@ const Groups = () => {
     checkAccessAndLoadData();
   }, [profile]);
 
-  // Update filtered cell groups when allGroups or profile changes
+  // Update filtered cell groups when allCellGroups or profile changes
   useEffect(() => {
-    if (allGroups.length > 0 && profile) {
-      const filtered = getFilteredGroups();
-      setGroups(filtered);
+    if (allCellGroups.length > 0 && profile) {
+      const filtered = getFilteredCellGroups();
+      setCellGroups(filtered);
     }
-  }, [allGroups, profile]);
+  }, [allCellGroups, profile]);
 
   const loadData = async () => {
     try {
@@ -490,7 +471,7 @@ const Groups = () => {
       setError(null);
       
       await Promise.all([
-        fetchGroups(),
+        fetchCellGroups(),
         fetchMembers()
       ]);
     } catch (error) {
@@ -502,7 +483,7 @@ const Groups = () => {
     }
   };
 
-  // UPDATED: Fixed add members function
+  // Add Members Functions
   const openAddMembersModal = async (group: CellGroup) => {
     if (!canManageGroup(group)) {
       setError('You do not have permission to add members to this group');
@@ -523,7 +504,6 @@ const Groups = () => {
     );
   };
 
-  // UPDATED: Fixed addSelectedMembers function
   const addSelectedMembers = async () => {
     if (!selectedGroup || selectedMembers.length === 0) return;
 
@@ -547,7 +527,7 @@ const Groups = () => {
         throw new Error('Failed to add some members');
       }
 
-      await fetchGroups();
+      await fetchCellGroups();
       await fetchAvailableMembers(selectedGroup.id);
       setSelectedMembers([]);
       setSuccess(`${selectedMembers.length} member(s) added successfully!`);
@@ -560,7 +540,6 @@ const Groups = () => {
     }
   };
 
-  // UPDATED: Fixed remove member function
   const removeMember = async (memberId: string) => {
     if (!selectedGroup) return;
 
@@ -578,7 +557,7 @@ const Groups = () => {
 
       if (error) throw error;
 
-      await fetchGroups();
+      await fetchCellGroups();
       await fetchAvailableMembers(selectedGroup.id);
       setSuccess('Member removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -674,10 +653,16 @@ const Groups = () => {
     }
   };
 
-  // Leader Management Functions
+  // Leader Management Functions - ONLY FOR ADMINS
   const openManageLeadersModal = async (group: CellGroup) => {
     if (!canManageGroup(group)) {
       setError('You do not have permission to manage leaders for this group');
+      return;
+    }
+
+    // Only admins can manage leaders
+    if (!isAdminOrPastor(profile?.role || '') && !canManageAllGroups(profile?.permissions || [])) {
+      setError('Only administrators can manage group leaders');
       return;
     }
 
@@ -700,7 +685,7 @@ const Groups = () => {
 
       if (error) throw error;
 
-      await fetchGroups();
+      await fetchCellGroups();
       setSuccess('Leader assigned successfully!');
       setTimeout(() => setSuccess(null), 3000);
       setShowManageLeadersModal(false);
@@ -726,7 +711,7 @@ const Groups = () => {
 
       if (error) throw error;
 
-      await fetchGroups();
+      await fetchCellGroups();
       setSuccess('Leader removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
       setShowManageLeadersModal(false);
@@ -978,6 +963,12 @@ const Groups = () => {
       return;
     }
 
+    // Only admins can edit group details (name, location, etc.)
+    if (!isAdminOrPastor(profile?.role || '') && !canManageAllGroups(profile?.permissions || [])) {
+      setError('Only administrators can edit cell group details');
+      return;
+    }
+
     setSelectedGroup(group);
     setFormData({
       name: group.name,
@@ -1053,7 +1044,7 @@ const Groups = () => {
 
       if (error) throw error;
 
-      await fetchGroups();
+      await fetchCellGroups();
       setShowForm(false);
       setFormData({ 
         name: '', 
@@ -1098,7 +1089,7 @@ const Groups = () => {
 
       if (error) throw error;
 
-      await fetchGroups();
+      await fetchCellGroups();
       setShowEditForm(false);
       setSelectedGroup(null);
       setFormData({ 
@@ -1120,9 +1111,15 @@ const Groups = () => {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    const groupToDelete = allGroups.find(g => g.id === groupId);
+    const groupToDelete = allCellGroups.find(g => g.id === groupId);
     if (!groupToDelete || !canManageGroup(groupToDelete)) {
       setError('You do not have permission to delete this cell group');
+      return;
+    }
+
+    // Only admins can delete groups
+    if (!isAdminOrPastor(profile?.role || '') && !canManageAllGroups(profile?.permissions || [])) {
+      setError('Only administrators can delete cell groups');
       return;
     }
 
@@ -1141,7 +1138,7 @@ const Groups = () => {
 
       if (error) throw error;
 
-      await fetchGroups();
+      await fetchCellGroups();
       setSuccess('Cell group deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -1157,7 +1154,7 @@ const Groups = () => {
   };
 
   // Filter groups based on search term
-  const filteredGroups = Groups.filter(group =>
+  const filteredGroups = cellGroups.filter(group =>
     group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1210,8 +1207,8 @@ const Groups = () => {
                 ? 'Full administrative access to all cell groups' 
                 : canManageAllGroups(profile?.permissions)
                 ? 'Can manage all cell groups and members'
-                : profile?.role === 'group_leader'
-                ? `Managing ${profile?.assigned_groups?.length || 0} assigned group(s)`
+                : profile?.role === 'group_leader' || profile?.role === 'leader'
+                ? `Managing your cell group as leader`
                 : `Viewing your cell group - ${profile?.role} access`
               }
             </p>
@@ -1341,7 +1338,7 @@ const Groups = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select a leader</option>
-                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader' || m.role === 'leader').map(member => (
                       <option key={member.id} value={member.id}>
                         {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
                       </option>
@@ -1442,7 +1439,7 @@ const Groups = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">No leader assigned</option>
-                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader' || m.role === 'leader').map(member => (
                       <option key={member.id} value={member.id}>
                         {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
                       </option>
@@ -1580,27 +1577,33 @@ const Groups = () => {
                           >
                             <UserPlus className="h-4 w-4" />
                           </button>
-                          <button
-                            onClick={() => openManageLeadersModal(group)}
-                            className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
-                            title="Manage leaders"
-                          >
-                            <User className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => openEditForm(group)}
-                            className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                            title="Edit group"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteGroup(group.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title="Delete group"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {(isAdminOrPastor(profile?.role || '') || canManageAllGroups(profile?.permissions || [])) && (
+                            <button
+                              onClick={() => openManageLeadersModal(group)}
+                              className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
+                              title="Manage leaders"
+                            >
+                              <User className="h-4 w-4" />
+                            </button>
+                          )}
+                          {(isAdminOrPastor(profile?.role || '') || canManageAllGroups(profile?.permissions || [])) && (
+                            <button
+                              onClick={() => openEditForm(group)}
+                              className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                              title="Edit group"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
+                          {(isAdminOrPastor(profile?.role || '') || canManageAllGroups(profile?.permissions || [])) && (
+                            <button
+                              onClick={() => handleDeleteGroup(group.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                              title="Delete group"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -1610,6 +1613,7 @@ const Groups = () => {
             })
           )}
         </div>
+
         {/* Add Members Modal */}
         {showAddMembersModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
