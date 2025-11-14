@@ -1,7 +1,7 @@
 import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus, Mail, Phone, Ban } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase'; // Adjust import path as needed
-
+import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
 // Types
 interface CellGroup {
   id: string;
