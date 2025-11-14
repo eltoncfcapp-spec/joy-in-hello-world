@@ -1610,7 +1610,6 @@ const CellGroups = () => {
             })
           )}
         </div>
-
         {/* Add Members Modal */}
         {showAddMembersModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -2305,7 +2304,5 @@ const CellGroups = () => {
               </div>
             </div>
           </div>
-     )}
-};
-
-export default Groups;
+        )}
+export default CellGroups;
