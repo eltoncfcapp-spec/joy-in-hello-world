@@ -1,4 +1,4 @@
-import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus, Mail, Phone, Ban } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, CheckCircle, UserPlus } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,38 +18,7 @@ interface CellGroup {
     phone: string | null;
   } | null;
   description?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
   members?: any[];
-}
-
-interface Meeting {
-  id: string;
-  group_id: string;
-  meeting_date: string;
-  meeting_time: string | null;
-  location: string | null;
-  topic: string | null;
-  notes: string | null;
-  status: 'scheduled' | 'completed' | 'cancelled';
-  cancellation_reason?: string | null;
-  created_at: string;
-}
-
-interface MeetingReport {
-  id: string;
-  meeting_id: string | null;
-  report_text: string;
-  decisions_made: string | null;
-  action_items: string | null;
-  next_meeting_date: string | null;
-  created_by: string | null;
-  created_at: string;
-  meeting?: Meeting;
-  author?: {
-    name: string;
-    surname: string;
-  };
 }
 
 interface Member {
@@ -59,52 +28,22 @@ interface Member {
   email: string | null;
   phone: string | null;
   role?: string | null;
-  permissions?: string[] | null;
-  assigned_groups?: string[] | null;
-  assigned_departments?: string[] | null;
   cell_group_id?: string | null;
-  is_leader?: boolean;
-}
-
-interface Attendance {
-  id: string;
-  meeting_id: string;
-  member_id: string;
-  status: 'present' | 'absent' | 'absent_with_reason';
-  reason?: string | null;
-  created_at: string;
-  member?: Member;
 }
 
 const Groups = () => {
   const { profile, hasPermission, canViewGroup, canManageGroup, getUserGroups } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
-  const [showMembersModal, setShowMembersModal] = useState(false);
-  const [showMeetingsModal, setShowMeetingsModal] = useState(false);
-  const [showReportsModal, setShowReportsModal] = useState(false);
-  const [showReportForm, setShowReportForm] = useState(false);
-  const [showReportView, setShowReportView] = useState(false);
   const [showAddMembersModal, setShowAddMembersModal] = useState(false);
-  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [showManageLeadersModal, setShowManageLeadersModal] = useState(false);
-  const [showCancelMeetingModal, setShowCancelMeetingModal] = useState(false);
-  const [showCompleteMeetingModal, setShowCompleteMeetingModal] = useState(false);
   
-  const [Groups, setGroups] = useState<CellGroup[]>([]);
+  const [groups, setGroups] = useState<CellGroup[]>([]);
   const [allGroups, setAllGroups] = useState<CellGroup[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [meetingReports, setMeetingReports] = useState<MeetingReport[]>([]);
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
-  const [potentialLeaders, setPotentialLeaders] = useState<Member[]>([]);
   
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
-  const [selectedReport, setSelectedReport] = useState<MeetingReport | null>(null);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
-  const [cancellationReason, setCancellationReason] = useState('');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -122,31 +61,9 @@ const Groups = () => {
     leader_id: '',
   });
 
-  const [meetingFormData, setMeetingFormData] = useState({
-    meeting_date: '',
-    meeting_time: '',
-    location: '',
-    topic: '',
-    notes: ''
-  });
-
-  const [reportFormData, setReportFormData] = useState({
-    meeting_id: '',
-    report_text: '',
-    decisions_made: '',
-    action_items: '',
-    next_meeting_date: ''
-  });
-
-  const [attendanceFormData, setAttendanceFormData] = useState<{
-    [key: string]: 'present' | 'absent' | 'absent_with_reason';
-  }>({});
-
-  const [absenceReasons, setAbsenceReasons] = useState<{[key: string]: string}>({});
-
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Permission check functions using the auth context
+  // Permission check functions
   const canCreateGroups = () => {
     if (!profile) return false;
     return hasPermission('manage_all_groups') || profile.role === 'admin';
@@ -162,7 +79,6 @@ const Groups = () => {
     return hasPermission('manage_all_groups') || profile.role === 'admin';
   };
 
-  // Enhanced permission checks using auth context methods
   const checkCanManageGroup = (group: CellGroup) => {
     if (!profile) return false;
     return canManageGroup(group.id) || canManageAllGroups();
@@ -177,15 +93,12 @@ const Groups = () => {
   const getFilteredGroups = () => {
     if (!profile) return [];
 
-    // Admin and users with view_all_groups can see all cell groups
     if (canViewAllGroups()) {
       return allGroups;
     }
 
-    // Get user's accessible groups from auth context
     const userGroupIds = getUserGroups();
     
-    // Filter groups based on user's accessible groups
     const userGroups = allGroups.filter(group => 
       userGroupIds.includes(group.id) || 
       userGroupIds.includes('all_groups') ||
@@ -198,7 +111,6 @@ const Groups = () => {
   // Fetch all cell groups with members and leaders
   const fetchGroups = async () => {
     try {
-      // First fetch all cell groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -206,23 +118,20 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
       
-      // Then fetch all members with their cell groups
       const { data: membersData, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, email, phone, cell_group_id, role, is_leader')
+        .select('id, name, surname, email, phone, cell_group_id, role')
         .order('name');
 
       if (membersError) {
         console.error('Error fetching members:', membersError);
       }
 
-      // Combine the data
       const groupsWithMembers = (groupsData || []).map(group => {
         const groupMembers = (membersData || []).filter(member => 
           member.cell_group_id === group.id
         );
         
-        // Find leader if leader_id exists
         const leader = group.leader_id ? 
           (membersData || []).find(member => member.id === group.leader_id) : null;
 
@@ -278,124 +187,6 @@ const Groups = () => {
     }
   };
 
-  const fetchPotentialLeaders = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select('*')
-        .or('role.eq.admin,role.eq.group_leader,role.eq.leader,is_leader.eq.true')
-        .order('name');
-
-      if (error) throw error;
-      setPotentialLeaders(data || []);
-    } catch (error) {
-      console.error('Error fetching potential leaders:', error);
-      setPotentialLeaders([]);
-    }
-  };
-
-  const fetchMeetings = async (groupId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('meetings')
-        .select('*')
-        .eq('group_id', groupId)
-        .order('meeting_date', { ascending: false });
-
-      if (error) throw error;
-      setMeetings(data || []);
-    } catch (error) {
-      console.error('Error fetching meetings:', error);
-      setMeetings([]);
-    }
-  };
-
-  const fetchMeetingReports = async (groupId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('meeting_reports')
-        .select(`
-          *,
-          meeting:meetings(*),
-          author:members(name, surname)
-        `)
-        .eq('meeting.group_id', groupId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setMeetingReports(data || []);
-    } catch (error) {
-      console.error('Error fetching meeting reports:', error);
-      setMeetingReports([]);
-    }
-  };
-
-  const fetchAttendance = async (meetingId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('attendance')
-        .select(`
-          *,
-          member:members(*)
-        `)
-        .eq('meeting_id', meetingId);
-
-      if (error) throw error;
-      
-      const attendanceData = data || [];
-      setAttendance(attendanceData);
-
-      // Initialize form data
-      const initialFormData: {[key: string]: 'present' | 'absent' | 'absent_with_reason'} = {};
-      const initialReasons: {[key: string]: string} = {};
-      
-      attendanceData.forEach((record: Attendance) => {
-        initialFormData[record.member_id] = record.status;
-        if (record.reason) {
-          initialReasons[record.member_id] = record.reason;
-        }
-      });
-      
-      setAttendanceFormData(initialFormData);
-      setAbsenceReasons(initialReasons);
-    } catch (error) {
-      console.error('Error fetching attendance:', error);
-      setAttendance([]);
-    }
-  };
-
-  // Check if meeting has attendance recorded
-  const checkMeetingHasAttendance = async (meetingId: string, groupId: string): Promise<boolean> => {
-    try {
-      const { data: attendanceData } = await supabase
-        .from('attendance')
-        .select('*')
-        .eq('meeting_id', meetingId);
-
-      const groupMembers = members.filter(m => m.cell_group_id === groupId);
-      
-      return attendanceData && attendanceData.length === groupMembers.length && groupMembers.length > 0;
-    } catch (error) {
-      console.error('Error checking attendance:', error);
-      return false;
-    }
-  };
-
-  // Check if meeting has report
-  const checkMeetingHasReport = async (meetingId: string): Promise<boolean> => {
-    try {
-      const { data: reportData } = await supabase
-        .from('meeting_reports')
-        .select('*')
-        .eq('meeting_id', meetingId);
-
-      return reportData && reportData.length > 0;
-    } catch (error) {
-      console.error('Error checking report:', error);
-      return false;
-    }
-  };
-
   // Check permissions and load data
   useEffect(() => {
     const checkAccessAndLoadData = async () => {
@@ -405,7 +196,6 @@ const Groups = () => {
         return;
       }
 
-      // Determine access based on permissions from auth context
       const userHasAccess = 
         hasPermission('view_all_groups') ||
         hasPermission('view_own_group') ||
@@ -480,7 +270,6 @@ const Groups = () => {
       setLoading(true);
       setError(null);
 
-      // Update each selected member's cell_group_id directly in members table
       const updates = selectedMembers.map(memberId => 
         supabase
           .from('members')
@@ -490,7 +279,6 @@ const Groups = () => {
 
       const results = await Promise.all(updates);
       
-      // Check for errors
       const hasError = results.some(result => result.error);
       if (hasError) {
         throw new Error('Failed to add some members');
@@ -518,7 +306,6 @@ const Groups = () => {
 
     try {
       setLoading(true);
-      // Set cell_group_id to null to remove from group
       const { error } = await supabase
         .from('members')
         .update({ cell_group_id: null })
@@ -536,516 +323,6 @@ const Groups = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Cancel Meeting Function
-  const openCancelMeetingModal = (meeting: Meeting) => {
-    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
-      setError('You do not have permission to cancel meetings for this group');
-      return;
-    }
-
-    setSelectedMeeting(meeting);
-    setCancellationReason('');
-    setShowCancelMeetingModal(true);
-  };
-
-  const cancelMeeting = async () => {
-    if (!selectedMeeting || !cancellationReason.trim()) {
-      setError('Cancellation reason is required');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Update meeting status to cancelled with reason
-      const { error } = await supabase
-        .from('meetings')
-        .update({ 
-          status: 'cancelled',
-          cancellation_reason: cancellationReason
-        })
-        .eq('id', selectedMeeting.id);
-
-      if (error) throw error;
-
-      if (selectedGroup) {
-        await fetchMeetings(selectedGroup.id);
-      }
-
-      setSuccess('Meeting cancelled successfully');
-      setTimeout(() => setSuccess(null), 3000);
-      setShowCancelMeetingModal(false);
-      setCancellationReason('');
-      setSelectedMeeting(null);
-    } catch (error: any) {
-      console.error('Error cancelling meeting:', error);
-      setError(`Error cancelling meeting: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Complete Meeting Function
-  const openCompleteMeetingModal = async (meeting: Meeting) => {
-    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
-      setError('You do not have permission to complete meetings for this group');
-      return;
-    }
-
-    // Check if attendance has been recorded for all members
-    const hasAttendance = await checkMeetingHasAttendance(meeting.id, selectedGroup.id);
-
-    if (!hasAttendance) {
-      setError('Cannot complete meeting: Attendance must be recorded for all members');
-      return;
-    }
-
-    // Check if report has been created
-    const hasReport = await checkMeetingHasReport(meeting.id);
-
-    if (!hasReport) {
-      setError('Cannot complete meeting: A meeting report must be created first');
-      return;
-    }
-
-    setSelectedMeeting(meeting);
-    setShowCompleteMeetingModal(true);
-  };
-
-  const completeMeeting = async () => {
-    if (!selectedMeeting) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { error } = await supabase
-        .from('meetings')
-        .update({ status: 'completed' })
-        .eq('id', selectedMeeting.id);
-
-      if (error) throw error;
-
-      if (selectedGroup) {
-        await fetchMeetings(selectedGroup.id);
-      }
-
-      setSuccess('Meeting marked as completed!');
-      setTimeout(() => setSuccess(null), 3000);
-      setShowCompleteMeetingModal(false);
-      setSelectedMeeting(null);
-    } catch (error: any) {
-      console.error('Error completing meeting:', error);
-      setError(`Error completing meeting: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Attendance Functions
-  const openAttendanceModal = async (meeting: Meeting) => {
-    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
-      setError('You do not have permission to manage attendance for this group');
-      return;
-    }
-
-    setSelectedMeeting(meeting);
-    await fetchAttendance(meeting.id);
-    setShowAttendanceModal(true);
-  };
-
-  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
-    setAttendanceFormData(prev => ({
-      ...prev,
-      [memberId]: status
-    }));
-
-    // Clear reason if status is not absent_with_reason
-    if (status !== 'absent_with_reason') {
-      setAbsenceReasons(prev => {
-        const newReasons = { ...prev };
-        delete newReasons[memberId];
-        return newReasons;
-      });
-    }
-  };
-
-  const handleReasonChange = (memberId: string, reason: string) => {
-    setAbsenceReasons(prev => ({
-      ...prev,
-      [memberId]: reason
-    }));
-  };
-
-  const saveAttendance = async () => {
-    if (!selectedMeeting || !selectedGroup) return;
-
-    const groupMembers = members.filter(member => member.cell_group_id === selectedGroup.id);
-    
-    // Check if all members have attendance assigned
-    const allAssigned = groupMembers.every(member => attendanceFormData[member.id]);
-    
-    if (!allAssigned) {
-      setError('Please assign attendance status for all members before saving');
-      return;
-    }
-
-    // Check if reasons are provided for absent_with_reason
-    const needsReason = groupMembers.filter(member => 
-      attendanceFormData[member.id] === 'absent_with_reason'
-    );
-    
-    const allReasonsProvided = needsReason.every(member => 
-      absenceReasons[member.id] && absenceReasons[member.id].trim() !== ''
-    );
-
-    if (!allReasonsProvided) {
-      setError('Please provide reasons for all absences marked as "Absent with Reason"');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Get all group members
-      const attendanceRecords = groupMembers.map(member => {
-        const status = attendanceFormData[member.id] || 'present';
-        const reason = status === 'absent_with_reason' ? absenceReasons[member.id] || '' : null;
-
-        return {
-          meeting_id: selectedMeeting.id,
-          member_id: member.id,
-          status,
-          reason
-        };
-      });
-
-      // Delete existing attendance for this meeting
-      const { error: deleteError } = await supabase
-        .from('attendance')
-        .delete()
-        .eq('meeting_id', selectedMeeting.id);
-
-      if (deleteError) throw deleteError;
-
-      // Insert new attendance records
-      const { error: insertError } = await supabase
-        .from('attendance')
-        .insert(attendanceRecords);
-
-      if (insertError) throw insertError;
-
-      setSuccess('Attendance saved successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-      setShowAttendanceModal(false);
-    } catch (error: any) {
-      console.error('Error saving attendance:', error);
-      setError(`Error saving attendance: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Leader Management Functions
-  const openManageLeadersModal = async (group: CellGroup) => {
-    if (!checkCanManageGroup(group)) {
-      setError('You do not have permission to manage leaders for this group');
-      return;
-    }
-
-    setSelectedGroup(group);
-    await fetchPotentialLeaders();
-    setShowManageLeadersModal(true);
-  };
-
-  const assignLeader = async (memberId: string) => {
-    if (!selectedGroup) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { error } = await supabase
-        .from('cell_groups')
-        .update({ leader_id: memberId })
-        .eq('id', selectedGroup.id);
-
-      if (error) throw error;
-
-      await fetchGroups();
-      setSuccess('Leader assigned successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-      setShowManageLeadersModal(false);
-    } catch (error: any) {
-      console.error('Error assigning leader:', error);
-      setError(`Error assigning leader: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const removeLeader = async () => {
-    if (!selectedGroup) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { error } = await supabase
-        .from('cell_groups')
-        .update({ leader_id: null })
-        .eq('id', selectedGroup.id);
-
-      if (error) throw error;
-
-      await fetchGroups();
-      setSuccess('Leader removed successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-      setShowManageLeadersModal(false);
-    } catch (error: any) {
-      console.error('Error removing leader:', error);
-      setError(`Error removing leader: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Meeting Reports Functions
-  const createMeetingReport = async () => {
-    if (!profile) {
-      setError('You must be logged in to create reports');
-      return;
-    }
-
-    if (!reportFormData.report_text.trim()) {
-      setError('Report text is required');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error } = await supabase
-        .from('meeting_reports')
-        .insert({
-          meeting_id: reportFormData.meeting_id || null,
-          report_text: reportFormData.report_text,
-          decisions_made: reportFormData.decisions_made || null,
-          action_items: reportFormData.action_items || null,
-          next_meeting_date: reportFormData.next_meeting_date || null,
-          created_by: profile.id
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      if (selectedGroup) {
-        await fetchMeetingReports(selectedGroup.id);
-      }
-
-      setShowReportForm(false);
-      setReportFormData({
-        meeting_id: '',
-        report_text: '',
-        decisions_made: '',
-        action_items: '',
-        next_meeting_date: ''
-      });
-      
-      setSuccess('Meeting report created successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error creating meeting report:', error);
-      setError(`Error creating meeting report: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateMeetingReport = async () => {
-    if (!selectedReport || !profile) {
-      setError('Invalid request');
-      return;
-    }
-
-    if (!reportFormData.report_text.trim()) {
-      setError('Report text is required');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { error } = await supabase
-        .from('meeting_reports')
-        .update({
-          meeting_id: reportFormData.meeting_id || null,
-          report_text: reportFormData.report_text,
-          decisions_made: reportFormData.decisions_made || null,
-          action_items: reportFormData.action_items || null,
-          next_meeting_date: reportFormData.next_meeting_date || null
-        })
-        .eq('id', selectedReport.id);
-
-      if (error) throw error;
-
-      if (selectedGroup) {
-        await fetchMeetingReports(selectedGroup.id);
-      }
-
-      setShowReportForm(false);
-      setSelectedReport(null);
-      setReportFormData({
-        meeting_id: '',
-        report_text: '',
-        decisions_made: '',
-        action_items: '',
-        next_meeting_date: ''
-      });
-      
-      setSuccess('Meeting report updated successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error updating meeting report:', error);
-      setError(`Error updating meeting report: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const deleteMeetingReport = async (reportId: string) => {
-    if (!confirm('Are you sure you want to delete this meeting report? This action cannot be undone.')) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const { error } = await supabase
-        .from('meeting_reports')
-        .delete()
-        .eq('id', reportId);
-
-      if (error) throw error;
-
-      if (selectedGroup) {
-        await fetchMeetingReports(selectedGroup.id);
-      }
-      
-      setSuccess('Meeting report deleted successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error deleting meeting report:', error);
-      setError(`Error deleting meeting report: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createMeeting = async () => {
-    if (!selectedGroup || !profile) {
-      setError('Invalid request');
-      return;
-    }
-
-    if (!meetingFormData.meeting_date) {
-      setError('Meeting date is required');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { error } = await supabase
-        .from('meetings')
-        .insert({
-          group_id: selectedGroup.id,
-          meeting_date: meetingFormData.meeting_date,
-          meeting_time: meetingFormData.meeting_time || null,
-          location: meetingFormData.location || null,
-          topic: meetingFormData.topic || null,
-          notes: meetingFormData.notes || null,
-          status: 'scheduled'
-        });
-
-      if (error) throw error;
-
-      await fetchMeetings(selectedGroup.id);
-      setMeetingFormData({
-        meeting_date: '',
-        meeting_time: '',
-        location: '',
-        topic: '',
-        notes: ''
-      });
-      
-      setSuccess('Meeting created successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error creating meeting:', error);
-      setError(`Error creating meeting: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Modal Handlers
-  const openMeetingsModal = async (group: CellGroup) => {
-    if (!checkCanViewGroup(group)) {
-      setError('You do not have permission to view this cell group');
-      return;
-    }
-
-    setSelectedGroup(group);
-    setShowMeetingsModal(true);
-    await fetchMeetings(group.id);
-    await fetchMeetingReports(group.id);
-  };
-
-  const openReportForm = (meeting?: Meeting) => {
-    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
-      setError('You do not have permission to create reports for this group');
-      return;
-    }
-
-    setSelectedMeeting(meeting || null);
-    setReportFormData({
-      meeting_id: meeting?.id || '',
-      report_text: '',
-      decisions_made: '',
-      action_items: '',
-      next_meeting_date: ''
-    });
-    setShowReportForm(true);
-  };
-
-  const openEditReportForm = (report: MeetingReport) => {
-    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
-      setError('You do not have permission to edit reports for this group');
-      return;
-    }
-
-    setSelectedReport(report);
-    setReportFormData({
-      meeting_id: report.meeting_id || '',
-      report_text: report.report_text,
-      decisions_made: report.decisions_made || '',
-      action_items: report.action_items || '',
-      next_meeting_date: report.next_meeting_date || ''
-    });
-    setShowReportForm(true);
-  };
-
-  const openReportView = (report: MeetingReport) => {
-    setSelectedReport(report);
-    setShowReportView(true);
   };
 
   const openEditForm = (group: CellGroup) => {
@@ -1067,46 +344,15 @@ const Groups = () => {
   };
 
   const closeAllModals = () => {
-    setShowMeetingsModal(false);
-    setShowReportsModal(false);
-    setShowReportForm(false);
-    setShowReportView(false);
     setShowAddMembersModal(false);
-    setShowAttendanceModal(false);
-    setShowManageLeadersModal(false);
     setShowEditForm(false);
-    setShowCancelMeetingModal(false);
-    setShowCompleteMeetingModal(false);
     setSelectedGroup(null);
-    setSelectedMeeting(null);
-    setSelectedReport(null);
     setSelectedMembers([]);
-    setMeetings([]);
-    setMeetingReports([]);
-    setAttendance([]);
-    setCancellationReason('');
-    setMeetingFormData({
-      meeting_date: '',
-      meeting_time: '',
-      location: '',
-      topic: '',
-      notes: ''
-    });
-    setReportFormData({
-      meeting_id: '',
-      report_text: '',
-      decisions_made: '',
-      action_items: '',
-      next_meeting_date: ''
-    });
-    setAttendanceFormData({});
-    setAbsenceReasons({});
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check permission - only admin or users with manage_all_groups permission can create groups
     if (!canCreateGroups()) {
       setError('You do not have permission to create cell groups. Only administrators and users with manage_all_groups permission can create new cell groups.');
       return;
@@ -1203,7 +449,7 @@ const Groups = () => {
   };
 
   // Filter groups based on search term
-  const filteredGroups = Groups.filter(group =>
+  const filteredGroups = groups.filter(group =>
     group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1237,11 +483,6 @@ const Groups = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Your role: {profile?.role || 'member'}
           </p>
-          {profile?.assigned_groups && profile.assigned_groups.length > 0 && (
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-              Assigned groups: {profile.assigned_groups.join(', ')}
-            </p>
-          )}
         </div>
       </div>
     );
@@ -1392,7 +633,7 @@ const Groups = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select a leader</option>
-                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                    {members.filter(m => m.role === 'admin' || m.role === 'group_leader').map(member => (
                       <option key={member.id} value={member.id}>
                         {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
                       </option>
@@ -1493,7 +734,7 @@ const Groups = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">No leader assigned</option>
-                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                    {members.filter(m => m.role === 'admin' || m.role === 'group_leader').map(member => (
                       <option key={member.id} value={member.id}>
                         {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
                       </option>
@@ -1616,12 +857,6 @@ const Groups = () => {
                       {group.members?.length || 0} member{(group.members?.length || 0) !== 1 ? 's' : ''}
                     </span>
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => openMeetingsModal(group)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                      >
-                        Meetings
-                      </button>
                       {canManage && (
                         <>
                           <button
@@ -1630,13 +865,6 @@ const Groups = () => {
                             title="Add members"
                           >
                             <UserPlus className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => openManageLeadersModal(group)}
-                            className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
-                            title="Manage leaders"
-                          >
-                            <User className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => openEditForm(group)}
@@ -1654,244 +882,6 @@ const Groups = () => {
             })
           )}
         </div>
-
-        {/* Meetings Modal */}
-        {showMeetingsModal && selectedGroup && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    Meetings - {selectedGroup.name}
-                  </h2>
-                  <button
-                    onClick={closeAllModals}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                {/* Create Meeting Form */}
-                {checkCanManageGroup(selectedGroup) && (
-                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-6">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Schedule New Meeting</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Date *</label>
-                        <input
-                          type="date"
-                          value={meetingFormData.meeting_date}
-                          onChange={(e) => setMeetingFormData({ ...meetingFormData, meeting_date: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
-                        <input
-                          type="time"
-                          value={meetingFormData.meeting_time}
-                          onChange={(e) => setMeetingFormData({ ...meetingFormData, meeting_time: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
-                        <input
-                          type="text"
-                          value={meetingFormData.location}
-                          onChange={(e) => setMeetingFormData({ ...meetingFormData, location: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Meeting location"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Topic</label>
-                        <input
-                          type="text"
-                          value={meetingFormData.topic}
-                          onChange={(e) => setMeetingFormData({ ...meetingFormData, topic: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Meeting topic"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Notes</label>
-                        <textarea
-                          value={meetingFormData.notes}
-                          onChange={(e) => setMeetingFormData({ ...meetingFormData, notes: e.target.value })}
-                          rows={2}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Additional notes"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end mt-4">
-                      <button
-                        onClick={createMeeting}
-                        disabled={loading}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                      >
-                        {loading ? 'Scheduling...' : 'Schedule Meeting'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Meetings List */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Upcoming & Past Meetings</h3>
-                  {meetings.length === 0 ? (
-                    <p className="text-gray-500 dark:text-gray-400 text-center py-8">No meetings scheduled yet.</p>
-                  ) : (
-                    meetings.map((meeting) => (
-                      <div
-                        key={meeting.id}
-                        className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-3">
-                            <Calendar className="h-5 w-5 text-gray-500" />
-                            <span className="font-medium text-gray-900 dark:text-white">
-                              {new Date(meeting.meeting_date).toLocaleDateString()}
-                              {meeting.meeting_time && ` at ${meeting.meeting_time}`}
-                            </span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              meeting.status === 'scheduled' 
-                                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
-                                : meeting.status === 'completed'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                            }`}>
-                              {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
-                            </span>
-                          </div>
-                          <div className="flex gap-2">
-                            {meeting.status === 'scheduled' && checkCanManageGroup(selectedGroup) && (
-                              <>
-                                <button
-                                  onClick={() => openAttendanceModal(meeting)}
-                                  className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
-                                >
-                                  Attendance
-                                </button>
-                                <button
-                                  onClick={() => openCancelMeetingModal(meeting)}
-                                  className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 transition-colors"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={() => openCompleteMeetingModal(meeting)}
-                                  className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
-                                >
-                                  Complete
-                                </button>
-                              </>
-                            )}
-                            <button
-                              onClick={() => openReportForm(meeting)}
-                              className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
-                            >
-                              Report
-                            </button>
-                          </div>
-                        </div>
-                        {meeting.topic && (
-                          <p className="text-gray-600 dark:text-gray-400 mb-2">
-                            <strong>Topic:</strong> {meeting.topic}
-                          </p>
-                        )}
-                        {meeting.location && (
-                          <p className="text-gray-600 dark:text-gray-400 mb-2">
-                            <strong>Location:</strong> {meeting.location}
-                          </p>
-                        )}
-                        {meeting.notes && (
-                          <p className="text-gray-600 dark:text-gray-400">
-                            <strong>Notes:</strong> {meeting.notes}
-                          </p>
-                        )}
-                        {meeting.cancellation_reason && (
-                          <p className="text-red-600 dark:text-red-400 mt-2">
-                            <strong>Cancellation Reason:</strong> {meeting.cancellation_reason}
-                          </p>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* Meeting Reports Section */}
-                <div className="mt-8">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Meeting Reports</h3>
-                  {meetingReports.length === 0 ? (
-                    <p className="text-gray-500 dark:text-gray-400 text-center py-4">No meeting reports yet.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {meetingReports.map((report) => (
-                        <div
-                          key={report.id}
-                          className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-3">
-                              <FileText className="h-5 w-5 text-gray-500" />
-                              <span className="font-medium text-gray-900 dark:text-white">
-                                {report.meeting ? 
-                                  `Report for ${new Date(report.meeting.meeting_date).toLocaleDateString()}` : 
-                                  'General Report'
-                                }
-                              </span>
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => openReportView(report)}
-                                className="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-                                title="View Report"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </button>
-                              {checkCanManageGroup(selectedGroup) && (
-                                <>
-                                  <button
-                                    onClick={() => openEditReportForm(report)}
-                                    className="p-1 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
-                                    title="Edit Report"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => deleteMeetingReport(report.id)}
-                                    className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                                    title="Delete Report"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-gray-600 dark:text-gray-400 line-clamp-2">
-                            {report.report_text}
-                          </p>
-                          {report.author && (
-                            <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                              By {report.author.name} {report.author.surname} • {new Date(report.created_at).toLocaleDateString()}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Add Members Modal */}
         {showAddMembersModal && selectedGroup && (
@@ -1969,442 +959,6 @@ const Groups = () => {
                     >
                       {loading ? 'Adding...' : 'Add Selected Members'}
                     </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Manage Leaders Modal */}
-        {showManageLeadersModal && selectedGroup && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    Manage Leaders - {selectedGroup.name}
-                  </h2>
-                  <button
-                    onClick={closeAllModals}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Current Leader</h3>
-                  {selectedGroup.leader ? (
-                    <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-full flex items-center justify-center text-white font-medium">
-                          {getInitials(selectedGroup.leader.name, selectedGroup.leader.surname)}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {selectedGroup.leader.name} {selectedGroup.leader.surname}
-                          </p>
-                          {selectedGroup.leader.email && (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{selectedGroup.leader.email}</p>
-                          )}
-                          {selectedGroup.leader.phone && (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{selectedGroup.leader.phone}</p>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        onClick={removeLeader}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                      >
-                        Remove Leader
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 dark:text-gray-400 text-center py-4">No leader assigned.</p>
-                  )}
-
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mt-6">Assign New Leader</h3>
-                  <div className="space-y-3">
-                    {potentialLeaders
-                      .filter(leader => leader.id !== selectedGroup.leader_id)
-                      .map((leader) => (
-                        <div
-                          key={leader.id}
-                          className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-medium">
-                              {getInitials(leader.name, leader.surname)}
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900 dark:text-white">
-                                {leader.name} {leader.surname}
-                              </p>
-                              <p className="text-sm text-gray-500 dark:text-gray-400">
-                                {leader.role} • {leader.email}
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => assignLeader(leader.id)}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                          >
-                            Assign as Leader
-                          </button>
-                        </div>
-                      ))
-                    }
-                  </div>
-
-                  {potentialLeaders.filter(leader => leader.id !== selectedGroup.leader_id).length === 0 && (
-                    <p className="text-gray-500 dark:text-gray-400 text-center py-4">
-                      No potential leaders available.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Attendance Modal */}
-        {showAttendanceModal && selectedMeeting && selectedGroup && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    Attendance - {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-                  </h2>
-                  <button
-                    onClick={closeAllModals}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                <div className="space-y-4">
-                  {selectedGroup.members?.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-medium">
-                          {getInitials(member.name, member.surname)}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </p>
-                          {member.email && (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{member.email}</p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <select
-                          value={attendanceFormData[member.id] || 'present'}
-                          onChange={(e) => handleAttendanceChange(member.id, e.target.value as any)}
-                          className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="present">Present</option>
-                          <option value="absent">Absent</option>
-                          <option value="absent_with_reason">Absent with Reason</option>
-                        </select>
-                        {attendanceFormData[member.id] === 'absent_with_reason' && (
-                          <input
-                            type="text"
-                            value={absenceReasons[member.id] || ''}
-                            onChange={(e) => handleReasonChange(member.id, e.target.value)}
-                            placeholder="Reason for absence"
-                            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <button
-                    onClick={closeAllModals}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveAttendance}
-                    disabled={loading}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  >
-                    {loading ? 'Saving...' : 'Save Attendance'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Cancel Meeting Modal */}
-        {showCancelMeetingModal && selectedMeeting && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Cancel Meeting</h2>
-              </div>
-              <div className="p-6">
-                <p className="text-gray-600 dark:text-gray-400 mb-4">
-                  Are you sure you want to cancel the meeting on {new Date(selectedMeeting.meeting_date).toLocaleDateString()}?
-                </p>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Cancellation Reason *
-                  </label>
-                  <textarea
-                    value={cancellationReason}
-                    onChange={(e) => setCancellationReason(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Please provide a reason for cancellation..."
-                    required
-                  />
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowCancelMeetingModal(false)}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Keep Meeting
-                  </button>
-                  <button
-                    onClick={cancelMeeting}
-                    disabled={!cancellationReason.trim() || loading}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
-                  >
-                    {loading ? 'Cancelling...' : 'Cancel Meeting'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Complete Meeting Modal */}
-        {showCompleteMeetingModal && selectedMeeting && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Complete Meeting</h2>
-              </div>
-              <div className="p-6">
-                <p className="text-gray-600 dark:text-gray-400 mb-4">
-                  Are you sure you want to mark the meeting on {new Date(selectedMeeting.meeting_date).toLocaleDateString()} as completed?
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-500 mb-4">
-                  This action will finalize the meeting and cannot be undone.
-                </p>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowCompleteMeetingModal(false)}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={completeMeeting}
-                    disabled={loading}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                  >
-                    {loading ? 'Completing...' : 'Complete Meeting'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Report Form Modal */}
-        {showReportForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {selectedReport ? 'Edit Meeting Report' : 'Create Meeting Report'}
-                  </h2>
-                  <button
-                    onClick={closeAllModals}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Associated Meeting
-                    </label>
-                    <select
-                      value={reportFormData.meeting_id}
-                      onChange={(e) => setReportFormData({ ...reportFormData, meeting_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">General Report (No specific meeting)</option>
-                      {meetings.map((meeting) => (
-                        <option key={meeting.id} value={meeting.id}>
-                          {new Date(meeting.meeting_date).toLocaleDateString()} - {meeting.topic || 'No topic'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Report Text *
-                    </label>
-                    <textarea
-                      value={reportFormData.report_text}
-                      onChange={(e) => setReportFormData({ ...reportFormData, report_text: e.target.value })}
-                      rows={6}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter the meeting report details..."
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Decisions Made
-                    </label>
-                    <textarea
-                      value={reportFormData.decisions_made}
-                      onChange={(e) => setReportFormData({ ...reportFormData, decisions_made: e.target.value })}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="List any decisions made during the meeting..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Action Items
-                    </label>
-                    <textarea
-                      value={reportFormData.action_items}
-                      onChange={(e) => setReportFormData({ ...reportFormData, action_items: e.target.value })}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="List any action items or tasks assigned..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Next Meeting Date
-                    </label>
-                    <input
-                      type="date"
-                      value={reportFormData.next_meeting_date}
-                      onChange={(e) => setReportFormData({ ...reportFormData, next_meeting_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <button
-                    onClick={closeAllModals}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={selectedReport ? updateMeetingReport : createMeetingReport}
-                    disabled={loading || !reportFormData.report_text.trim()}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  >
-                    {loading ? 'Saving...' : selectedReport ? 'Update Report' : 'Create Report'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Report View Modal */}
-        {showReportView && selectedReport && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    Meeting Report
-                    {selectedReport.meeting && (
-                      <span className="text-lg font-normal text-gray-600 dark:text-gray-400 block">
-                        for {new Date(selectedReport.meeting.meeting_date).toLocaleDateString()}
-                      </span>
-                    )}
-                  </h2>
-                  <button
-                    onClick={closeAllModals}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Report Details</h3>
-                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                      {selectedReport.report_text}
-                    </p>
-                  </div>
-
-                  {selectedReport.decisions_made && (
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Decisions Made</h3>
-                      <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                        {selectedReport.decisions_made}
-                      </p>
-                    </div>
-                  )}
-
-                  {selectedReport.action_items && (
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Action Items</h3>
-                      <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                        {selectedReport.action_items}
-                      </p>
-                    </div>
-                  )}
-
-                  {selectedReport.next_meeting_date && (
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Next Meeting</h3>
-                      <p className="text-gray-700 dark:text-gray-300">
-                        {new Date(selectedReport.next_meeting_date).toLocaleDateString()}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <p className="text-sm text-gray-500 dark:text-gray-500">
-                      Created {new Date(selectedReport.created_at).toLocaleDateString()}
-                      {selectedReport.author && ` by ${selectedReport.author.name} ${selectedReport.author.surname}`}
-                    </p>
                   </div>
                 </div>
               </div>
