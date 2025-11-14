@@ -40,23 +40,6 @@ const supabase = {
     })
   })
 };
-
-// Mock Auth Context
-const useAuth = () => ({
-  profile: {
-    id: 'user-1',
-    name: 'John',
-    surname: 'Doe',
-    role: 'group_leader',
-    assigned_groups: ['group-1'],
-    cell_group_id: 'group-1'
-  },
-  hasPermission: (permission: string) => true,
-  canViewGroup: (groupId: string) => true,
-  canManageGroup: (groupId: string) => true,
-  getUserGroups: () => ['group-1']
-});
-
 interface CellGroup {
   id: string;
   name: string;
