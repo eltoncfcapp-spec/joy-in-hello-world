@@ -90,7 +90,7 @@ const canManageAllGroups = (permissions: string[] = []): boolean => {
   return hasPermission(permissions, 'manage_groups');
 };
 
-const CellGroups = () => {
+const Groups = () => {
   const { profile } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -103,8 +103,8 @@ const CellGroups = () => {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [showManageLeadersModal, setShowManageLeadersModal] = useState(false);
   
-  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
-  const [allCellGroups, setAllCellGroups] = useState<CellGroup[]>([]);
+  const [Groups, setGroups] = useState<CellGroup[]>([]);
+  const [allGroups, setAllGroups] = useState<CellGroup[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingReports, setMeetingReports] = useState<MeetingReport[]>([]);
@@ -225,24 +225,24 @@ const CellGroups = () => {
   };
 
   // Filter cell groups based on user permissions
-  const getFilteredCellGroups = () => {
+  const getFilteredGroups = () => {
     if (!profile) return [];
 
     // Admin and Pastor can see all cell groups
     if (isAdminOrPastor(profile.role)) {
-      return allCellGroups;
+      return allGroups;
     }
 
     // Users with view_groups or manage_groups permission can see all groups
     if (hasPermission(profile.permissions, 'view_groups') || canManageAllGroups(profile.permissions)) {
-      return allCellGroups;
+      return allGroups;
     }
 
     let userGroups: CellGroup[] = [];
 
     // Group leaders can see their assigned groups
     if (profile.role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
-      userGroups = allCellGroups.filter(group => 
+      userGroups = allGroups.filter(group => 
         profile.assigned_groups?.some(assignedGroup => 
           assignedGroup.toLowerCase() === group.name.toLowerCase()
         )
@@ -253,7 +253,7 @@ const CellGroups = () => {
     if (profile.role === 'member') {
       // Check via cell_group_id field
       const isMemberByCellGroupId = profile.cell_group_id;
-      const memberGroups = allCellGroups.filter(group => group.id === isMemberByCellGroupId);
+      const memberGroups = allGroups.filter(group => group.id === isMemberByCellGroupId);
       userGroups = [...userGroups, ...memberGroups];
     }
 
@@ -265,8 +265,8 @@ const CellGroups = () => {
     return uniqueGroups;
   };
 
-  // UPDATED: Fixed fetchCellGroups function
-  const fetchCellGroups = async () => {
+  // UPDATED: Fixed fetchGroups function
+  const fetchGroups = async () => {
     try {
       // First fetch all cell groups
       const { data: groupsData, error: groupsError } = await supabase
@@ -309,7 +309,7 @@ const CellGroups = () => {
         };
       });
       
-      setAllCellGroups(groupsWithMembers);
+      setAllGroups(groupsWithMembers);
       
     } catch (error) {
       console.error('Error fetching cell groups:', error);
@@ -476,13 +476,13 @@ const CellGroups = () => {
     checkAccessAndLoadData();
   }, [profile]);
 
-  // Update filtered cell groups when allCellGroups or profile changes
+  // Update filtered cell groups when allGroups or profile changes
   useEffect(() => {
-    if (allCellGroups.length > 0 && profile) {
-      const filtered = getFilteredCellGroups();
-      setCellGroups(filtered);
+    if (allGroups.length > 0 && profile) {
+      const filtered = getFilteredGroups();
+      setGroups(filtered);
     }
-  }, [allCellGroups, profile]);
+  }, [allGroups, profile]);
 
   const loadData = async () => {
     try {
@@ -490,7 +490,7 @@ const CellGroups = () => {
       setError(null);
       
       await Promise.all([
-        fetchCellGroups(),
+        fetchGroups(),
         fetchMembers()
       ]);
     } catch (error) {
@@ -547,7 +547,7 @@ const CellGroups = () => {
         throw new Error('Failed to add some members');
       }
 
-      await fetchCellGroups();
+      await fetchGroups();
       await fetchAvailableMembers(selectedGroup.id);
       setSelectedMembers([]);
       setSuccess(`${selectedMembers.length} member(s) added successfully!`);
@@ -578,7 +578,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      await fetchCellGroups();
+      await fetchGroups();
       await fetchAvailableMembers(selectedGroup.id);
       setSuccess('Member removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -700,7 +700,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      await fetchCellGroups();
+      await fetchGroups();
       setSuccess('Leader assigned successfully!');
       setTimeout(() => setSuccess(null), 3000);
       setShowManageLeadersModal(false);
@@ -726,7 +726,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      await fetchCellGroups();
+      await fetchGroups();
       setSuccess('Leader removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
       setShowManageLeadersModal(false);
@@ -1053,7 +1053,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      await fetchCellGroups();
+      await fetchGroups();
       setShowForm(false);
       setFormData({ 
         name: '', 
@@ -1098,7 +1098,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      await fetchCellGroups();
+      await fetchGroups();
       setShowEditForm(false);
       setSelectedGroup(null);
       setFormData({ 
@@ -1120,7 +1120,7 @@ const CellGroups = () => {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    const groupToDelete = allCellGroups.find(g => g.id === groupId);
+    const groupToDelete = allGroups.find(g => g.id === groupId);
     if (!groupToDelete || !canManageGroup(groupToDelete)) {
       setError('You do not have permission to delete this cell group');
       return;
@@ -1141,7 +1141,7 @@ const CellGroups = () => {
 
       if (error) throw error;
 
-      await fetchCellGroups();
+      await fetchGroups();
       setSuccess('Cell group deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -1157,7 +1157,7 @@ const CellGroups = () => {
   };
 
   // Filter groups based on search term
-  const filteredGroups = cellGroups.filter(group =>
+  const filteredGroups = Groups.filter(group =>
     group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
