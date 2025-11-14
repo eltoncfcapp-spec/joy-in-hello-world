@@ -96,18 +96,7 @@ interface AuthContext {
 }
 
 const Groups = () => {
-  // Mock Auth Context - Replace with your actual auth context
-  const useAuth = (): AuthContext => ({
-    profile: null, // Will be set by your auth system
-    hasPermission: (permission: string) => true, // Implement based on your permissions
-    canViewGroup: (groupId: string) => true, // Implement based on your access control
-    canManageGroup: (groupId: string) => true, // Implement based on your access control
-    getUserGroups: () => [] // Implement based on your user groups
-  });
-
   const { profile, hasPermission, canViewGroup, canManageGroup, getUserGroups } = useAuth();
-  
-  // State declarations
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
@@ -132,7 +121,6 @@ const Groups = () => {
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [selectedReport, setSelectedReport] = useState<MeetingReport | null>(null);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
-  const [cancellationReason, setCancellationReason] = useState('');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -141,7 +129,6 @@ const Groups = () => {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
 
-  // Form states
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -150,7 +137,6 @@ const Groups = () => {
     meeting_time: '',
     leader_id: '',
   });
-
   const [meetingFormData, setMeetingFormData] = useState({
     meeting_date: '',
     meeting_time: '',
