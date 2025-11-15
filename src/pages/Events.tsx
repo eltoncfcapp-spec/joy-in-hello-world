@@ -1,23 +1,55 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, Users, MapPin, Calendar, User, Search, X, Trash2, Edit, Shield, AlertCircle, FileText, Save, Eye, Clock, CheckCircle, XCircle, UserPlus, Mail, Phone, Ban } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
 
-// Type-safe wrapper for events-related queries
-const db = supabase as any;
-
-interface Event {
+interface CellGroup {
   id: string;
   name: string;
-  topic: string | null;
-  event_date: string;
-  event_time: string;
   location: string | null;
-  created_at: string | null;
-  is_whole_church: boolean;
-  target_groups: string[] | null;
-  target_departments: string[] | null;
-  is_completed: boolean;
-  completed_at: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  leader_id: string | null;
+  leader?: {
+    id: string;
+    name: string;
+    surname: string;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  description?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  members?: any[];
+}
+
+interface Meeting {
+  id: string;
+  group_id: string;
+  meeting_date: string;
+  meeting_time: string | null;
+  location: string | null;
+  topic: string | null;
+  notes: string | null;
+  status: 'scheduled' | 'completed' | 'cancelled';
+  cancellation_reason?: string | null;
+  created_at: string;
+}
+
+interface MeetingReport {
+  id: string;
+  meeting_id: string | null;
+  report_text: string;
+  decisions_made: string | null;
+  action_items: string | null;
+  next_meeting_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  meeting?: Meeting;
+  author?: {
+    name: string;
+    surname: string;
+  };
 }
 
 interface Member {
@@ -26,823 +58,1480 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  cell_group_id: string | null;
-  cell_groups: { name: string } | null;
-  ministry_group_id: string | null;
-  ministry_groups: { name: string } | null;
-  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  role?: string | null;
+  permissions?: string[] | null;
+  assigned_groups?: string[] | null;
+  assigned_departments?: string[] | null;
+  cell_group_id?: string | null;
+  is_leader?: boolean;
 }
 
-interface CellGroup {
+interface Attendance {
   id: string;
-  name: string;
+  meeting_id: string;
+  member_id: string;
+  status: 'present' | 'absent' | 'absent_with_reason';
+  reason?: string | null;
+  created_at: string;
+  member?: Member;
 }
 
-interface MinistryGroup {
-  id: string;
-  name: string;
-}
-
-interface EventAttendee {
-  id: string;
-  event_id: string;
-  members_id: string;
-  first_time: boolean | null;
-  invited_by_id: string | null;
-  attended_at: string | null;
-  attendance_status: 'present' | 'absent';
-  members: Member;
-  invited_by_member?: {
-    id: string;
-    name: string;
-    surname: string;
-  } | null;
-}
-
-interface AttendeeFormData {
-  memberId: string;
-  firstTime: boolean;
-  invitedById: string;
-}
-
-const Events = () => {
-  const [showEventForm, setShowEventForm] = useState(false);
-  const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
-  const [events, setEvents] = useState<Event[]>([]);
+const Groups = () => {
+  const { profile, hasPermission, canViewGroup, canManageGroup, getUserGroups } = useAuth();
+  const [showForm, setShowForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [showMeetingsModal, setShowMeetingsModal] = useState(false);
+  const [showReportsModal, setShowReportsModal] = useState(false);
+  const [showReportForm, setShowReportForm] = useState(false);
+  const [showReportView, setShowReportView] = useState(false);
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [showManageLeadersModal, setShowManageLeadersModal] = useState(false);
+  const [showCancelMeetingModal, setShowCancelMeetingModal] = useState(false);
+  const [showCompleteMeetingModal, setShowCompleteMeetingModal] = useState(false);
+  
+  const [Groups, setGroups] = useState<CellGroup[]>([]);
+  const [allGroups, setAllGroups] = useState<CellGroup[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
-  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
-  const [attendees, setAttendees] = useState<EventAttendee[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [meetingReports, setMeetingReports] = useState<MeetingReport[]>([]);
+  const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
+  const [potentialLeaders, setPotentialLeaders] = useState<Member[]>([]);
+  
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [selectedReport, setSelectedReport] = useState<MeetingReport | null>(null);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [cancellationReason, setCancellationReason] = useState('');
+  
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [inviterSearchTerm, setInviterSearchTerm] = useState('');
-  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
-  const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
-  
-  // State for toggling lists
-  const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
-  const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+  const [initialLoad, setInitialLoad] = useState(true);
 
-  const [eventFormData, setEventFormData] = useState({
+  const [formData, setFormData] = useState({
     name: '',
-    topic: '',
-    eventDate: '',
-    eventTime: '',
+    description: '',
     location: '',
-    isWholeChurch: true,
-    targetCellGroups: [] as string[],
-    targetMinistryGroups: [] as string[],
+    meeting_day: '',
+    meeting_time: '',
+    leader_id: '',
   });
 
-  const [attendeeFormData, setAttendeeFormData] = useState<AttendeeFormData>({
-    memberId: '',
-    firstTime: false,
-    invitedById: '',
+  const [meetingFormData, setMeetingFormData] = useState({
+    meeting_date: '',
+    meeting_time: '',
+    location: '',
+    topic: '',
+    notes: ''
   });
 
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [reportFormData, setReportFormData] = useState({
+    meeting_id: '',
+    report_text: '',
+    decisions_made: '',
+    action_items: '',
+    next_meeting_date: ''
+  });
 
-  useEffect(() => {
-    fetchEvents();
-    fetchMembers();
-    fetchCellGroups();
-    fetchMinistryGroups();
-  }, []);
+  const [attendanceFormData, setAttendanceFormData] = useState<{
+    [key: string]: 'present' | 'absent' | 'absent_with_reason';
+  }>({});
 
-  const fetchEvents = async () => {
+  const [absenceReasons, setAbsenceReasons] = useState<{[key: string]: string}>({});
+
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  // Permission check functions using the auth context
+  const canCreateGroups = () => {
+    if (!profile) return false;
+    return hasPermission('manage_all_groups') || profile.role === 'admin';
+  };
+
+  const canViewAllGroups = () => {
+    if (!profile) return false;
+    return hasPermission('view_all_groups') || profile.role === 'admin';
+  };
+
+  const canManageAllGroups = () => {
+    if (!profile) return false;
+    return hasPermission('manage_all_groups') || profile.role === 'admin';
+  };
+
+  // Enhanced permission checks using auth context methods
+  const checkCanManageGroup = (group: CellGroup) => {
+    if (!profile) return false;
+    return canManageGroup(group.id) || canManageAllGroups();
+  };
+
+  const checkCanViewGroup = (group: CellGroup) => {
+    if (!profile) return false;
+    return canViewGroup(group.id) || canViewAllGroups();
+  };
+
+  // Filter cell groups based on user permissions
+  const getFilteredGroups = () => {
+    if (!profile) return [];
+
+    // Admin and users with view_all_groups can see all cell groups
+    if (canViewAllGroups()) {
+      return allGroups;
+    }
+
+    // Get user's accessible groups from auth context
+    const userGroupIds = getUserGroups();
+    
+    // Filter groups based on user's accessible groups
+    const userGroups = allGroups.filter(group => 
+      userGroupIds.includes(group.id) || 
+      userGroupIds.includes('all_groups') ||
+      (profile.cell_group_id && profile.cell_group_id === group.id)
+    );
+
+    return userGroups;
+  };
+
+  // Fetch all cell groups with members and leaders
+  const fetchGroups = async () => {
     try {
-      setLoading(true);
-      setError(null);
-      
-      const { data, error } = await db
-        .from('events')
+      // First fetch all cell groups
+      const { data: groupsData, error: groupsError } = await supabase
+        .from('cell_groups')
         .select('*')
-        .order('event_date', { ascending: true });
+        .order('name');
 
-      if (error) {
-        throw error;
+      if (groupsError) throw groupsError;
+      
+      // Then fetch all members with their cell groups
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select('id, name, surname, email, phone, cell_group_id, role, is_leader')
+        .order('name');
+
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
       }
 
-      const eventsWithDefaults = (data || []).map((event: any) => ({
-        ...event,
-        is_whole_church: event.is_whole_church ?? true,
-        target_groups: event.target_groups ?? null,
-        target_departments: event.target_departments ?? null,
-        is_completed: event.is_completed ?? false,
-        completed_at: event.completed_at ?? null
-      }));
+      // Combine the data
+      const groupsWithMembers = (groupsData || []).map(group => {
+        const groupMembers = (membersData || []).filter(member => 
+          member.cell_group_id === group.id
+        );
+        
+        // Find leader if leader_id exists
+        const leader = group.leader_id ? 
+          (membersData || []).find(member => member.id === group.leader_id) : null;
 
-      setEvents(eventsWithDefaults);
-      
-      eventsWithDefaults.forEach((event: any) => {
-        fetchEventAttendees(event.id);
+        return {
+          ...group,
+          members: groupMembers,
+          leader: leader ? {
+            id: leader.id,
+            name: leader.name,
+            surname: leader.surname,
+            email: leader.email,
+            phone: leader.phone
+          } : null
+        };
       });
-    } catch (error: any) {
-      console.error('Error fetching events:', error);
-      setError(error.message || 'Failed to load events.');
-    } finally {
-      setLoading(false);
+      
+      setAllGroups(groupsWithMembers);
+      
+    } catch (error) {
+      console.error('Error fetching cell groups:', error);
+      throw error;
     }
   };
 
   const fetchMembers = async () => {
     try {
-      setError(null);
-      
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('members')
-        .select(`
-          id,
-          name,
-          surname,
-          email,
-          phone,
-          cell_group_id,
-          ministry_group_id,
-          status,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
-        `)
+        .select('*')
         .order('name');
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setMembers(data || []);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error fetching members:', error);
-      setError(error.message || 'Failed to load members.');
-    }
-  };
-
-  const fetchCellGroups = async () => {
-    try {
-      const { data, error } = await db
-        .from('cell_groups')
-        .select('id, name')
-        .order('name');
-
-      if (error) {
-        throw error;
-      }
-
-      setCellGroups(data || []);
-    } catch (error: any) {
-      console.error('Error fetching cell groups:', error);
-      setError(error.message || 'Failed to load cell groups.');
-    }
-  };
-
-  const fetchMinistryGroups = async () => {
-    try {
-      const { data, error } = await db
-        .from('ministry_groups')
-        .select('id, name')
-        .order('name');
-
-      if (error) {
-        throw error;
-      }
-
-      setMinistryGroups(data || []);
-    } catch (error: any) {
-      console.error('Error fetching ministry groups:', error);
-      setError(error.message || 'Failed to load ministry groups.');
-    }
-  };
-
-  const fetchEventAttendees = async (eventId: string) => {
-    try {
-      const { data, error } = await db
-        .from('event_attendees')
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey (
-            id,
-            name,
-            surname,
-            email,
-            phone,
-            status,
-            cell_group_id,
-            ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name)
-          ),
-          invited_by_member:members!event_attendees_invited_by_id_fkey (
-            id,
-            name,
-            surname
-          )
-        `)
-        .eq('event_id', eventId)
-        .order('attended_at', { ascending: false });
-
-      if (error) {
-        throw error;
-      }
-
-      const attendeesWithDefaults = (data || []).map((attendee: any) => ({
-        ...attendee,
-        attendance_status: attendee.attendance_status || 'present'
-      }));
-
-      setAttendees(prev => {
-        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...attendeesWithDefaults as EventAttendee[]];
-      });
-    } catch (error: any) {
-      console.error('Error fetching attendees:', error);
-    }
-  };
-
-  const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
-    try {
-      const absentRecords = absentMemberIds.map(memberId => {
-        const member = members.find(m => m.id === memberId);
-        return {
-          event_id: eventId,
-          members_id: memberId,
-          name: member?.name || 'Unknown',
-          surname: member?.surname || 'Member',
-          first_time: false,
-          attendance_status: 'absent',
-          attended_at: null
-        };
-      });
-
-      const { error } = await supabase
-        .from('event_attendees')
-        .insert(absentRecords);
-
-      if (error) {
-        throw error;
-      }
-
-      await fetchEventAttendees(eventId);
-    } catch (error: any) {
-      console.error('Error marking members as absent:', error);
       throw error;
     }
   };
 
-  const handleCompleteEvent = async (eventId: string) => {
-    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
+  const fetchAvailableMembers = async (groupId: string) => {
     try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) {
-        throw new Error('Event not found');
-      }
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .or(`cell_group_id.is.null,cell_group_id.eq.${groupId}`)
+        .order('name');
 
-      const eventAttendees = getEventAttendees(eventId);
-      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
-
-      let expectedMembers: Member[] = [];
-
-      if (event.is_whole_church) {
-        expectedMembers = members.filter(member => 
-          member.status !== 'not_attending'
-        );
-      } else {
-        expectedMembers = members.filter(member => {
-          const inTargetCellGroup = event.target_groups?.some(groupId => 
-            member.cell_group_id === groupId
-          );
-          
-          const inTargetMinistryGroup = event.target_departments?.some(deptId => 
-            member.ministry_group_id === deptId
-          );
-
-          return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
-        });
-      }
-
-      const absentMemberIds = expectedMembers
-        .filter(member => !attendeeIds.has(member.id))
-        .map(member => member.id);
-
-      if (absentMemberIds.length > 0) {
-        await markMembersAsAbsent(eventId, absentMemberIds);
-      }
-
-      const { error } = await db
-        .from('events')
-        .update({
-          is_completed: true,
-          completed_at: new Date().toISOString()
-        } as any)
-        .eq('id', eventId);
-
-      if (error) {
-        throw error;
-      }
-
-      setEvents(prev => prev.map(event => 
-        event.id === eventId 
-          ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
-          : event
-      ));
-
-      setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error completing event:', error);
-      setError(error.message || 'Failed to complete event. Please try again.');
-    } finally {
-      setLoading(false);
+      if (error) throw error;
+      setAvailableMembers(data || []);
+    } catch (error) {
+      console.error('Error fetching available members:', error);
+      setAvailableMembers([]);
     }
   };
 
-  const handleEventSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-    
+  const fetchPotentialLeaders = async () => {
     try {
-      const eventData = {
-        name: eventFormData.name.trim(),
-        topic: eventFormData.topic.trim() || null,
-        event_date: eventFormData.eventDate,
-        event_time: eventFormData.eventTime,
-        location: eventFormData.location.trim() || null,
-        is_whole_church: eventFormData.isWholeChurch,
-        is_completed: false,
-        completed_at: null,
-        target_groups: !eventFormData.isWholeChurch && eventFormData.targetCellGroups.length > 0 ? eventFormData.targetCellGroups : null,
-        target_departments: !eventFormData.isWholeChurch && eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null,
-      };
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .or('role.eq.admin,role.eq.group_leader,role.eq.leader,is_leader.eq.true')
+        .order('name');
 
-      const { error } = await db.from('events').insert([eventData]);
+      if (error) throw error;
+      setPotentialLeaders(data || []);
+    } catch (error) {
+      console.error('Error fetching potential leaders:', error);
+      setPotentialLeaders([]);
+    }
+  };
 
-      if (error) {
-        throw error;
-      }
+  const fetchMeetings = async (groupId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('group_id', groupId)
+        .order('meeting_date', { ascending: false });
 
-      setShowEventForm(false);
-      setEventFormData({ 
-        name: '', 
-        topic: '', 
-        eventDate: '', 
-        eventTime: '', 
-        location: '',
-        isWholeChurch: true,
-        targetCellGroups: [],
-        targetMinistryGroups: [],
-      });
-      setSuccess('Event created successfully!');
-      await fetchEvents();
+      if (error) throw error;
+      setMeetings(data || []);
+    } catch (error) {
+      console.error('Error fetching meetings:', error);
+      setMeetings([]);
+    }
+  };
+
+  const fetchMeetingReports = async (groupId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meeting_reports')
+        .select(`
+          *,
+          meeting:meetings(*),
+          author:members(name, surname)
+        `)
+        .eq('meeting.group_id', groupId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setMeetingReports(data || []);
+    } catch (error) {
+      console.error('Error fetching meeting reports:', error);
+      setMeetingReports([]);
+    }
+  };
+
+  const fetchAttendance = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select(`
+          *,
+          member:members(*)
+        `)
+        .eq('meeting_id', meetingId);
+
+      if (error) throw error;
       
+      const attendanceData = data || [];
+      setAttendance(attendanceData);
+
+      // Initialize form data
+      const initialFormData: {[key: string]: 'present' | 'absent' | 'absent_with_reason'} = {};
+      const initialReasons: {[key: string]: string} = {};
+      
+      attendanceData.forEach((record: Attendance) => {
+        initialFormData[record.member_id] = record.status;
+        if (record.reason) {
+          initialReasons[record.member_id] = record.reason;
+        }
+      });
+      
+      setAttendanceFormData(initialFormData);
+      setAbsenceReasons(initialReasons);
+    } catch (error) {
+      console.error('Error fetching attendance:', error);
+      setAttendance([]);
+    }
+  };
+
+  // Check if meeting has attendance recorded
+  const checkMeetingHasAttendance = async (meetingId: string, groupId: string): Promise<boolean> => {
+    try {
+      const { data: attendanceData } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('meeting_id', meetingId);
+
+      const groupMembers = members.filter(m => m.cell_group_id === groupId);
+      
+      return attendanceData && attendanceData.length === groupMembers.length && groupMembers.length > 0;
+    } catch (error) {
+      console.error('Error checking attendance:', error);
+      return false;
+    }
+  };
+
+  // Check if meeting has report
+  const checkMeetingHasReport = async (meetingId: string): Promise<boolean> => {
+    try {
+      const { data: reportData } = await supabase
+        .from('meeting_reports')
+        .select('*')
+        .eq('meeting_id', meetingId);
+
+      return reportData && reportData.length > 0;
+    } catch (error) {
+      console.error('Error checking report:', error);
+      return false;
+    }
+  };
+
+  // Check permissions and load data
+  useEffect(() => {
+    const checkAccessAndLoadData = async () => {
+      if (!profile) {
+        setHasAccess(false);
+        setInitialLoad(false);
+        return;
+      }
+
+      // Determine access based on permissions from auth context
+      const userHasAccess = 
+        hasPermission('view_all_groups') ||
+        hasPermission('view_own_group') ||
+        hasPermission('manage_all_groups') ||
+        hasPermission('manage_own_group') ||
+        profile.role === 'admin' ||
+        (profile.assigned_groups && profile.assigned_groups.length > 0) ||
+        profile.cell_group_id !== null;
+      
+      setHasAccess(userHasAccess);
+
+      if (userHasAccess) {
+        await loadData();
+      } else {
+        setInitialLoad(false);
+      }
+    };
+
+    checkAccessAndLoadData();
+  }, [profile]);
+
+  // Update filtered cell groups when allGroups or profile changes
+  useEffect(() => {
+    if (allGroups.length > 0 && profile) {
+      const filtered = getFilteredGroups();
+      setGroups(filtered);
+    }
+  }, [allGroups, profile]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      await Promise.all([
+        fetchGroups(),
+        fetchMembers()
+      ]);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      setError('Failed to load cell groups data');
+    } finally {
+      setLoading(false);
+      setInitialLoad(false);
+    }
+  };
+
+  const openAddMembersModal = async (group: CellGroup) => {
+    if (!checkCanManageGroup(group)) {
+      setError('You do not have permission to add members to this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setSelectedMembers([]);
+    await fetchAvailableMembers(group.id);
+    setShowAddMembersModal(true);
+  };
+
+  const toggleMemberSelection = (memberId: string) => {
+    setSelectedMembers(prev => 
+      prev.includes(memberId) 
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
+
+  const addSelectedMembers = async () => {
+    if (!selectedGroup || selectedMembers.length === 0) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Update each selected member's cell_group_id directly in members table
+      const updates = selectedMembers.map(memberId => 
+        supabase
+          .from('members')
+          .update({ cell_group_id: selectedGroup.id })
+          .eq('id', memberId)
+      );
+
+      const results = await Promise.all(updates);
+      
+      // Check for errors
+      const hasError = results.some(result => result.error);
+      if (hasError) {
+        throw new Error('Failed to add some members');
+      }
+
+      await fetchGroups();
+      await fetchAvailableMembers(selectedGroup.id);
+      setSelectedMembers([]);
+      setSuccess(`${selectedMembers.length} member(s) added successfully!`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
-      console.error('Error creating event:', error);
-      setError(error.message || 'Failed to create event. Please try again.');
+      console.error('Error adding members:', error);
+      setError(`Error adding members: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
-    e.preventDefault();
-    
-    if (!attendeeFormData.memberId) {
-      setError('Please select a member');
-      setTimeout(() => setError(null), 3000);
+  const removeMember = async (memberId: string) => {
+    if (!selectedGroup) return;
+
+    if (!confirm('Are you sure you want to remove this member from the group?')) {
       return;
     }
 
-    const alreadyRegistered = attendees.some(
-      a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
+    try {
+      setLoading(true);
+      // Set cell_group_id to null to remove from group
+      const { error } = await supabase
+        .from('members')
+        .update({ cell_group_id: null })
+        .eq('id', memberId);
+
+      if (error) throw error;
+
+      await fetchGroups();
+      await fetchAvailableMembers(selectedGroup.id);
+      setSuccess('Member removed successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error removing member:', error);
+      setError(`Error removing member: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cancel Meeting Function
+  const openCancelMeetingModal = (meeting: Meeting) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to cancel meetings for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    setCancellationReason('');
+    setShowCancelMeetingModal(true);
+  };
+
+  const cancelMeeting = async () => {
+    if (!selectedMeeting || !cancellationReason.trim()) {
+      setError('Cancellation reason is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Update meeting status to cancelled with reason
+      const { error } = await supabase
+        .from('meetings')
+        .update({ 
+          status: 'cancelled',
+          cancellation_reason: cancellationReason
+        })
+        .eq('id', selectedMeeting.id);
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetings(selectedGroup.id);
+      }
+
+      setSuccess('Meeting cancelled successfully');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowCancelMeetingModal(false);
+      setCancellationReason('');
+      setSelectedMeeting(null);
+    } catch (error: any) {
+      console.error('Error cancelling meeting:', error);
+      setError(`Error cancelling meeting: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Complete Meeting Function
+  const openCompleteMeetingModal = async (meeting: Meeting) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to complete meetings for this group');
+      return;
+    }
+
+    // Check if attendance has been recorded for all members
+    const hasAttendance = await checkMeetingHasAttendance(meeting.id, selectedGroup.id);
+
+    if (!hasAttendance) {
+      setError('Cannot complete meeting: Attendance must be recorded for all members');
+      return;
+    }
+
+    // Check if report has been created
+    const hasReport = await checkMeetingHasReport(meeting.id);
+
+    if (!hasReport) {
+      setError('Cannot complete meeting: A meeting report must be created first');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    setShowCompleteMeetingModal(true);
+  };
+
+  const completeMeeting = async () => {
+    if (!selectedMeeting) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('meetings')
+        .update({ status: 'completed' })
+        .eq('id', selectedMeeting.id);
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetings(selectedGroup.id);
+      }
+
+      setSuccess('Meeting marked as completed!');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowCompleteMeetingModal(false);
+      setSelectedMeeting(null);
+    } catch (error: any) {
+      console.error('Error completing meeting:', error);
+      setError(`Error completing meeting: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Attendance Functions
+  const openAttendanceModal = async (meeting: Meeting) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to manage attendance for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    await fetchAttendance(meeting.id);
+    setShowAttendanceModal(true);
+  };
+
+  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
+    setAttendanceFormData(prev => ({
+      ...prev,
+      [memberId]: status
+    }));
+
+    // Clear reason if status is not absent_with_reason
+    if (status !== 'absent_with_reason') {
+      setAbsenceReasons(prev => {
+        const newReasons = { ...prev };
+        delete newReasons[memberId];
+        return newReasons;
+      });
+    }
+  };
+
+  const handleReasonChange = (memberId: string, reason: string) => {
+    setAbsenceReasons(prev => ({
+      ...prev,
+      [memberId]: reason
+    }));
+  };
+
+  const saveAttendance = async () => {
+    if (!selectedMeeting || !selectedGroup) return;
+
+    const groupMembers = members.filter(member => member.cell_group_id === selectedGroup.id);
+    
+    // Check if all members have attendance assigned
+    const allAssigned = groupMembers.every(member => attendanceFormData[member.id]);
+    
+    if (!allAssigned) {
+      setError('Please assign attendance status for all members before saving');
+      return;
+    }
+
+    // Check if reasons are provided for absent_with_reason
+    const needsReason = groupMembers.filter(member => 
+      attendanceFormData[member.id] === 'absent_with_reason'
+    );
+    
+    const allReasonsProvided = needsReason.every(member => 
+      absenceReasons[member.id] && absenceReasons[member.id].trim() !== ''
     );
 
-    if (alreadyRegistered) {
-      setError('This member is already registered for this event');
-      setTimeout(() => setError(null), 3000);
+    if (!allReasonsProvided) {
+      setError('Please provide reasons for all absences marked as "Absent with Reason"');
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
     try {
-      const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
-      
-      if (!selectedMember) {
-        throw new Error('Selected member not found');
-      }
+      setLoading(true);
+      setError(null);
 
-      const attendeeData = {
-        event_id: eventId,
-        members_id: attendeeFormData.memberId,
-        name: selectedMember.name,
-        surname: selectedMember.surname,
-        first_time: attendeeFormData.firstTime,
-        attendance_status: 'present',
-        invited_by_id: attendeeFormData.invitedById || null
-      };
+      // Get all group members
+      const attendanceRecords = groupMembers.map(member => {
+        const status = attendanceFormData[member.id] || 'present';
+        const reason = status === 'absent_with_reason' ? absenceReasons[member.id] || '' : null;
 
-      const { error } = await db.from('event_attendees').insert([attendeeData]);
+        return {
+          meeting_id: selectedMeeting.id,
+          member_id: member.id,
+          status,
+          reason
+        };
+      });
 
-      if (error) {
-        throw error;
-      }
+      // Delete existing attendance for this meeting
+      const { error: deleteError } = await supabase
+        .from('attendance')
+        .delete()
+        .eq('meeting_id', selectedMeeting.id);
 
-      resetAttendeeForm();
-      await fetchEventAttendees(eventId);
-      setSuccess('Attendee added successfully!');
-      
+      if (deleteError) throw deleteError;
+
+      // Insert new attendance records
+      const { error: insertError } = await supabase
+        .from('attendance')
+        .insert(attendanceRecords);
+
+      if (insertError) throw insertError;
+
+      setSuccess('Attendance saved successfully!');
       setTimeout(() => setSuccess(null), 3000);
+      setShowAttendanceModal(false);
     } catch (error: any) {
-      console.error('Error adding attendee:', error);
-      setError(error.message || 'Failed to add attendee. Please try again.');
+      console.error('Error saving attendance:', error);
+      setError(`Error saving attendance: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
-    if (!confirm('Are you sure you want to remove this attendee?')) {
+  // Leader Management Functions
+  const openManageLeadersModal = async (group: CellGroup) => {
+    if (!checkCanManageGroup(group)) {
+      setError('You do not have permission to manage leaders for this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    await fetchPotentialLeaders();
+    setShowManageLeadersModal(true);
+  };
+
+  const assignLeader = async (memberId: string) => {
+    if (!selectedGroup) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .update({ leader_id: memberId })
+        .eq('id', selectedGroup.id);
+
+      if (error) throw error;
+
+      await fetchGroups();
+      setSuccess('Leader assigned successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowManageLeadersModal(false);
+    } catch (error: any) {
+      console.error('Error assigning leader:', error);
+      setError(`Error assigning leader: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeLeader = async () => {
+    if (!selectedGroup) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .update({ leader_id: null })
+        .eq('id', selectedGroup.id);
+
+      if (error) throw error;
+
+      await fetchGroups();
+      setSuccess('Leader removed successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+      setShowManageLeadersModal(false);
+    } catch (error: any) {
+      console.error('Error removing leader:', error);
+      setError(`Error removing leader: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Meeting Reports Functions
+  const createMeetingReport = async () => {
+    if (!profile) {
+      setError('You must be logged in to create reports');
+      return;
+    }
+
+    if (!reportFormData.report_text.trim()) {
+      setError('Report text is required');
       return;
     }
 
     try {
+      setLoading(true);
       setError(null);
-      setSuccess(null);
+
+      const { data, error } = await supabase
+        .from('meeting_reports')
+        .insert({
+          meeting_id: reportFormData.meeting_id || null,
+          report_text: reportFormData.report_text,
+          decisions_made: reportFormData.decisions_made || null,
+          action_items: reportFormData.action_items || null,
+          next_meeting_date: reportFormData.next_meeting_date || null,
+          created_by: profile.id
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetingReports(selectedGroup.id);
+      }
+
+      setShowReportForm(false);
+      setReportFormData({
+        meeting_id: '',
+        report_text: '',
+        decisions_made: '',
+        action_items: '',
+        next_meeting_date: ''
+      });
+      
+      setSuccess('Meeting report created successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error creating meeting report:', error);
+      setError(`Error creating meeting report: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateMeetingReport = async () => {
+    if (!selectedReport || !profile) {
+      setError('Invalid request');
+      return;
+    }
+
+    if (!reportFormData.report_text.trim()) {
+      setError('Report text is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('meeting_reports')
+        .update({
+          meeting_id: reportFormData.meeting_id || null,
+          report_text: reportFormData.report_text,
+          decisions_made: reportFormData.decisions_made || null,
+          action_items: reportFormData.action_items || null,
+          next_meeting_date: reportFormData.next_meeting_date || null
+        })
+        .eq('id', selectedReport.id);
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetingReports(selectedGroup.id);
+      }
+
+      setShowReportForm(false);
+      setSelectedReport(null);
+      setReportFormData({
+        meeting_id: '',
+        report_text: '',
+        decisions_made: '',
+        action_items: '',
+        next_meeting_date: ''
+      });
+      
+      setSuccess('Meeting report updated successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error updating meeting report:', error);
+      setError(`Error updating meeting report: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteMeetingReport = async (reportId: string) => {
+    if (!confirm('Are you sure you want to delete this meeting report? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from('meeting_reports')
+        .delete()
+        .eq('id', reportId);
+
+      if (error) throw error;
+
+      if (selectedGroup) {
+        await fetchMeetingReports(selectedGroup.id);
+      }
+      
+      setSuccess('Meeting report deleted successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting meeting report:', error);
+      setError(`Error deleting meeting report: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createMeeting = async () => {
+    if (!selectedGroup || !profile) {
+      setError('Invalid request');
+      return;
+    }
+
+    if (!meetingFormData.meeting_date) {
+      setError('Meeting date is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { error } = await supabase
+        .from('meetings')
+        .insert({
+          group_id: selectedGroup.id,
+          meeting_date: meetingFormData.meeting_date,
+          meeting_time: meetingFormData.meeting_time || null,
+          location: meetingFormData.location || null,
+          topic: meetingFormData.topic || null,
+          notes: meetingFormData.notes || null,
+          status: 'scheduled'
+        });
+
+      if (error) throw error;
+
+      await fetchMeetings(selectedGroup.id);
+      setMeetingFormData({
+        meeting_date: '',
+        meeting_time: '',
+        location: '',
+        topic: '',
+        notes: ''
+      });
+      
+      setSuccess('Meeting created successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error creating meeting:', error);
+      setError(`Error creating meeting: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Modal Handlers
+  const openMeetingsModal = async (group: CellGroup) => {
+    if (!checkCanViewGroup(group)) {
+      setError('You do not have permission to view this cell group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setShowMeetingsModal(true);
+    await fetchMeetings(group.id);
+    await fetchMeetingReports(group.id);
+  };
+
+  const openReportForm = (meeting?: Meeting) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to create reports for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting || null);
+    setReportFormData({
+      meeting_id: meeting?.id || '',
+      report_text: '',
+      decisions_made: '',
+      action_items: '',
+      next_meeting_date: ''
+    });
+    setShowReportForm(true);
+  };
+
+  const openEditReportForm = (report: MeetingReport) => {
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to edit reports for this group');
+      return;
+    }
+
+    setSelectedReport(report);
+    setReportFormData({
+      meeting_id: report.meeting_id || '',
+      report_text: report.report_text,
+      decisions_made: report.decisions_made || '',
+      action_items: report.action_items || '',
+      next_meeting_date: report.next_meeting_date || ''
+    });
+    setShowReportForm(true);
+  };
+
+  const openReportView = (report: MeetingReport) => {
+    setSelectedReport(report);
+    setShowReportView(true);
+  };
+
+  const openEditForm = (group: CellGroup) => {
+    if (!checkCanManageGroup(group)) {
+      setError('You do not have permission to edit this cell group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setFormData({
+      name: group.name,
+      description: group.description || '',
+      location: group.location || '',
+      meeting_day: group.meeting_day || '',
+      meeting_time: group.meeting_time || '',
+      leader_id: group.leader_id || ''
+    });
+    setShowEditForm(true);
+  };
+
+  const closeAllModals = () => {
+    setShowMeetingsModal(false);
+    setShowReportsModal(false);
+    setShowReportForm(false);
+    setShowReportView(false);
+    setShowAddMembersModal(false);
+    setShowAttendanceModal(false);
+    setShowManageLeadersModal(false);
+    setShowEditForm(false);
+    setShowCancelMeetingModal(false);
+    setShowCompleteMeetingModal(false);
+    setSelectedGroup(null);
+    setSelectedMeeting(null);
+    setSelectedReport(null);
+    setSelectedMembers([]);
+    setMeetings([]);
+    setMeetingReports([]);
+    setAttendance([]);
+    setCancellationReason('');
+    setMeetingFormData({
+      meeting_date: '',
+      meeting_time: '',
+      location: '',
+      topic: '',
+      notes: ''
+    });
+    setReportFormData({
+      meeting_id: '',
+      report_text: '',
+      decisions_made: '',
+      action_items: '',
+      next_meeting_date: ''
+    });
+    setAttendanceFormData({});
+    setAbsenceReasons({});
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Check permission - only admin or users with manage_all_groups permission can create groups
+    if (!canCreateGroups()) {
+      setError('You do not have permission to create cell groups. Only administrators and users with manage_all_groups permission can create new cell groups.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      
+      if (!formData.name.trim()) {
+        setError('Cell group name is required');
+        return;
+      }
+
+      const { error } = await supabase.from('cell_groups').insert({
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
+        location: formData.location.trim() || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        leader_id: formData.leader_id || null,
+      });
+
+      if (error) throw error;
+
+      await fetchGroups();
+      setShowForm(false);
+      setFormData({ 
+        name: '', 
+        description: '', 
+        location: '', 
+        meeting_day: '', 
+        meeting_time: '', 
+        leader_id: '' 
+      });
+      setSuccess('Cell group created successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error creating cell group:', error);
+      setError(`Error creating cell group: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGroup || !checkCanManageGroup(selectedGroup)) {
+      setError('You do not have permission to edit this cell group');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
       
       const { error } = await supabase
-        .from('event_attendees')
-        .delete()
-        .eq('id', attendeeId);
+        .from('cell_groups')
+        .update({
+          name: formData.name.trim(),
+          description: formData.description.trim() || null,
+          location: formData.location.trim() || null,
+          meeting_day: formData.meeting_day || null,
+          meeting_time: formData.meeting_time || null,
+          leader_id: formData.leader_id || null,
+        })
+        .eq('id', selectedGroup.id);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
-      await fetchEventAttendees(eventId);
-      setSuccess('Attendee removed successfully!');
-      
+      await fetchGroups();
+      setShowEditForm(false);
+      setSelectedGroup(null);
+      setFormData({ 
+        name: '', 
+        description: '', 
+        location: '', 
+        meeting_day: '', 
+        meeting_time: '', 
+        leader_id: '' 
+      });
+      setSuccess('Cell group updated successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
-      console.error('Error removing attendee:', error);
-      setError(error.message || 'Failed to remove attendee.');
+      console.error('Error updating cell group:', error);
+      setError(`Error updating cell group: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const resetAttendeeForm = () => {
-    setShowAttendeeForm(null);
-    setAttendeeFormData({
-      memberId: '',
-      firstTime: false,
-      invitedById: '',
-    });
-    setSelectedMember(null);
-    setSearchTerm('');
-    setInviterSearchTerm('');
-    setIsMemberDropdownOpen(false);
-    setIsInviterDropdownOpen(false);
-  };
-
-  const handleMemberSelect = (member: Member) => {
-    setAttendeeFormData({
-      ...attendeeFormData,
-      memberId: member.id,
-    });
-    setSelectedMember(member);
-    setSearchTerm(`${member.name} ${member.surname}`);
-    setIsMemberDropdownOpen(false);
-  };
-
-  const handleInviterSelect = (member: Member) => {
-    setAttendeeFormData({
-      ...attendeeFormData,
-      invitedById: member.id,
-    });
-    setInviterSearchTerm(`${member.name} ${member.surname}`);
-    setIsInviterDropdownOpen(false);
-  };
-
-  const togglePresentList = (eventId: string) => {
-    setShowPresentList(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowAbsentList(prev => ({
-      ...prev,
-      [eventId]: false
-    }));
-  };
-
-  const toggleAbsentList = (eventId: string) => {
-    setShowAbsentList(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowPresentList(prev => ({
-      ...prev,
-      [eventId]: false
-    }));
-  };
-
-  const filteredMembers = members.filter(member => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const filteredInviters = members.filter(member => {
-    const searchLower = inviterSearchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const getEventAttendees = (eventId: string) => {
-    return attendees.filter(attendee => attendee.event_id === eventId);
-  };
-
-  const getPresentAttendees = (eventId: string) => {
-    return getEventAttendees(eventId).filter(attendee => 
-      attendee.attendance_status === 'present'
-    );
-  };
-
-  const getAbsentAttendees = (eventId: string) => {
-    return getEventAttendees(eventId).filter(attendee => 
-      attendee.attendance_status === 'absent'
-    );
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
-
-  const formatTime = (timeString: string) => {
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const formattedHour = hour % 12 || 12;
-    return `${formattedHour}:${minutes} ${ampm}`;
   };
 
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
-  const getStatusBadge = (status: string | null) => {
-    const badges = {
-      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
-      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
-      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
-    };
-    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
-  };
+  // Filter groups based on search term
+  const filteredGroups = Groups.filter(group =>
+    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.leader?.surname?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  const getEventScopeBadge = (event: Event) => {
-    if (event.is_whole_church) {
-      return {
-        color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-        text: 'Whole Church',
-        icon: Building
-      };
-    } else {
-      return {
-        color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-        text: 'Target Groups',
-        icon: GroupsIcon
-      };
-    }
-  };
+  // Show loading while checking permissions
+  if (initialLoad) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Checking permissions...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const getEventStatusBadge = (event: Event) => {
-    if (event.is_completed) {
-      return {
-        color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
-        text: 'Completed',
-        icon: CheckCircle
-      };
-    } else {
-      return {
-        color: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
-        text: 'Active',
-        icon: AlertCircle
-      };
-    }
-  };
+  // Show access denied if user doesn't have permission to access cell groups
+  if (hasAccess === false) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="h-8 w-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Access Denied</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            You don't have permission to access the cell groups section.
+          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Your role: {profile?.role || 'member'}
+          </p>
+          {profile?.assigned_groups && profile.assigned_groups.length > 0 && (
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+              Assigned groups: {profile.assigned_groups.join(', ')}
+            </p>
+          )}
+
+        {/* Cell Groups List */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          {loading && filteredGroups.length === 0 ? (
+            <div className="col-span-full text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading cell groups...</p>
+            </div>
+          ) : filteredGroups.length === 0 ? (
+            <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+              <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                {canViewAllGroups() ? 'No Cell Groups Yet' : 'No Access to Cell Groups'}
+              </h3>
+              <p className="text-gray-500 dark:text-gray-500 mb-6">
+                {canViewAllGroups()
+                  ? 'Create your first cell group to get started' 
+                  : 'You are not a member of any cell groups'
+                }
+              </p>
+              {canCreateGroups() && (
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium"
+                >
+                  Create First Cell Group
+                </button>
+              )}
+            </div>
+          ) : (
+            filteredGroups.map((group) => {
+              const canManage = checkCanManageGroup(group);
+              const canView = checkCanViewGroup(group);
+              
+              return (
+                <div
+                  key={group.id}
+                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+                >
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+                      <Users className="h-7 w-7 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
+                      {canManage ? (
+                        <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 rounded-full text-xs font-medium mb-2">
+                          <Shield className="h-3 w-3 mr-1" />
+                          Can Manage
+                        </span>
+                      ) : canView ? (
+                        <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-full text-xs font-medium mb-2">
+                          <Shield className="h-3 w-3 mr-1" />
+                          View Only
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 mb-4">
+                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                      <User className="h-4 w-4" />
+                      <span className="text-sm">
+                        Leader: {group.leader ? `${group.leader.name} ${group.leader.surname}` : 'Not assigned'}
+                      </span>
+                    </div>
+                    
+                    {group.location && (
+                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                        <MapPin className="h-4 w-4" />
+                        <span className="text-sm">{group.location}</span>
+                      </div>
+                    )}
+                    
+                    {(group.meeting_day || group.meeting_time) && (
+                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                        <Calendar className="h-4 w-4" />
+                        <span className="text-sm">
+                          {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {group.description && (
+                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                        {group.description}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {group.members?.length || 0} member{(group.members?.length || 0) !== 1 ? 's' : ''}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openMeetingsModal(group)}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                      >
+                        Meetings
+                      </button>
+                      {canManage && (
+                        <>
+                          <button
+                            onClick={() => openAddMembersModal(group)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                            title="Add members"
+                          >
+                            <UserPlus className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => openManageLeadersModal(group)}
+                            className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
+                            title="Manage leaders"
+                          >
+                            <User className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => openEditForm(group)}
+                            className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                            title="Edit group"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Events Calendar
+              Cell Groups
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Manage church events and track attendance</p>
+            <p className="text-gray-600 dark:text-gray-400">
+              {canManageAllGroups()
+                ? 'Full administrative access to all cell groups' 
+                : canViewAllGroups()
+                ? 'Can view all cell groups'
+                : profile?.role === 'group_leader'
+                ? `Managing ${profile?.assigned_groups?.length || 0} assigned group(s)`
+                : `Viewing your cell group - ${profile?.role} access`
+              }
+            </p>
           </div>
-          <button 
-            onClick={() => setShowEventForm(!showEventForm)}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-          >
-            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-            {showEventForm ? 'Cancel' : 'Create Event'}
-          </button>
+          {canCreateGroups() && (
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+              {showForm ? 'Cancel' : 'Create Cell Group'}
+            </button>
+          )}
         </div>
 
-        {/* Success Message */}
-        {success && (
-          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
-            {success}
+        {/* Search Bar */}
+        <div className="mb-6">
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input
+              type="text"
+              placeholder="Search cell groups..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
-        )}
+        </div>
 
-        {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
-            {error}
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+                <p className="text-red-700 font-medium">{error}</p>
+              </div>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Event Creation Form */}
-        {showEventForm && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
-            <form onSubmit={handleEventSubmit} className="space-y-6">
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                <p className="text-green-700 font-medium">{success}</p>
+              </div>
+              <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Create Cell Group Form */}
+        {showForm && canCreateGroups() && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Cell Group</h2>
+            <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Name *</label>
                   <input
                     type="text"
-                    value={eventFormData.name}
-                    onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter event name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter cell group name"
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
                   <input
                     type="text"
-                    value={eventFormData.topic}
-                    onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event topic or theme"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter meeting location"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
-                  <input
-                    type="date"
-                    value={eventFormData.eventDate}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Day</label>
+                  <select
+                    value={formData.meeting_day}
+                    onChange={(e) => setFormData({ ...formData, meeting_day: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select day</option>
+                    {daysOfWeek.map(day => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
                   <input
                     type="time"
-                    value={eventFormData.eventTime}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                  <input
-                    type="text"
-                    value={eventFormData.location}
-                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event location"
+                    value={formData.meeting_time}
+                    onChange={(e) => setFormData({ ...formData, meeting_time: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
 
-                {/* Event Scope */}
-                <div className="md:col-span-2 space-y-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
-                      <input
-                        type="radio"
-                        name="eventScope"
-                        checked={eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [] })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
-                      />
-                      <Building className="h-5 w-5 text-purple-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
-                      <input
-                        type="radio"
-                        name="eventScope"
-                        checked={!eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
-                      />
-                      <GroupsIcon className="h-5 w-5 text-orange-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups or ministry departments</div>
-                      </div>
-                    </label>
-                  </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter group description"
+                  />
                 </div>
 
-                {/* Target Groups Selection */}
-                {!eventFormData.isWholeChurch && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {cellGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetCellGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {ministryGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader (Optional)</label>
+                  <select
+                    value={formData.leader_id}
+                    onChange={(e) => setFormData({ ...formData, leader_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select a leader</option>
+                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="flex gap-3">
                 <button
@@ -850,11 +1539,12 @@ const Events = () => {
                   disabled={loading}
                   className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loading ? 'Creating...' : 'Create Event'}
+                  <Plus className="h-5 w-5" />
+                  {loading ? 'Creating...' : 'Create Cell Group'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowEventForm(false)}
+                  onClick={() => setShowForm(false)}
                   className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
                 >
                   Cancel
@@ -864,6 +1554,106 @@ const Events = () => {
           </div>
         )}
 
+        {/* Edit Cell Group Form */}
+        {showEditForm && selectedGroup && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Edit Cell Group</h2>
+            <form onSubmit={handleUpdateGroup} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Name *</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter cell group name"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter meeting location"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Day</label>
+                  <select
+                    value={formData.meeting_day}
+                    onChange={(e) => setFormData({ ...formData, meeting_day: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select day</option>
+                    {daysOfWeek.map(day => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
+                  <input
+                    type="time"
+                    value={formData.meeting_time}
+                    onChange={(e) => setFormData({ ...formData, meeting_time: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter group description"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Group Leader</label>
+                  <select
+                    value={formData.leader_id}
+                    onChange={(e) => setFormData({ ...formData, leader_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">No leader assigned</option>
+                    {members.filter(m => m.is_leader || m.role === 'admin' || m.role === 'group_leader').map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} {member.surname} {member.email ? `(${member.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Save className="h-5 w-5" />
+                  {loading ? 'Updating...' : 'Update Cell Group'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditForm(false)}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
         {/* Loading State */}
         {loading && events.length === 0 && (
           <div className="text-center py-12">
