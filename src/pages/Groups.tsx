@@ -69,6 +69,7 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
   const { profile } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const steps = [
     { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
@@ -86,7 +87,6 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
     
     // Group leaders can access all steps for their groups
     if (profile.role === 'group_leader') {
-      // Check if this group is in their assigned groups or if they're the leader
       const isAssignedGroup = profile.assigned_groups?.includes(group.id) || 
                              profile.assigned_groups?.includes('all_groups') ||
                              profile.cell_group_id === group.id;
@@ -95,7 +95,6 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
     
     // Regular members have limited access
     if (profile.role === 'member') {
-      // Members can only view their own group
       const isOwnGroup = profile.cell_group_id === group.id;
       
       switch (stepNumber) {
@@ -108,6 +107,10 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
     }
     
     return false;
+  };
+
+  const refreshMeetings = () => {
+    setRefreshTrigger(prev => prev + 1);
   };
 
   return (
@@ -143,6 +146,7 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
             group={group}
             onMeetingCreated={() => {
               onSuccess('Meeting created successfully!');
+              refreshMeetings();
               setCurrentStep(2);
             }}
             onError={onError}
@@ -157,6 +161,7 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
             onMeetingSelect={setSelectedMeeting}
             onAttendanceSaved={() => {
               onSuccess('Attendance saved successfully!');
+              refreshMeetings();
               setCurrentStep(3);
             }}
             onError={onError}
@@ -254,7 +259,6 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // Simple query without complex relationships
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -318,17 +322,14 @@ const Groups = () => {
   const canViewGroup = (groupId: string) => {
     if (!profile) return false;
     
-    // Admin can view all groups
     if (profile.isAdmin) return true;
     
-    // Group leaders can view assigned groups and their own group
     if (profile.role === 'group_leader') {
       return profile.assigned_groups?.includes(groupId) || 
              profile.assigned_groups?.includes('all_groups') ||
              profile.cell_group_id === groupId;
     }
     
-    // Regular members can only view their own group
     if (profile.role === 'member') {
       return profile.cell_group_id === groupId;
     }
@@ -339,28 +340,20 @@ const Groups = () => {
   const canManageGroup = (groupId: string) => {
     if (!profile) return false;
     
-    // Admin can manage all groups
     if (profile.isAdmin) return true;
     
-    // Group leaders can manage assigned groups and their own group
     if (profile.role === 'group_leader') {
       return profile.assigned_groups?.includes(groupId) || 
              profile.assigned_groups?.includes('all_groups') ||
              profile.cell_group_id === groupId;
     }
     
-    // Regular members need specific permissions for their own group
     if (profile.role === 'member') {
       const isOwnGroup = profile.cell_group_id === groupId;
       return isOwnGroup && profile.permissions?.includes('manage_group');
     }
     
     return false;
-  };
-
-  const hasPermission = (permission: string) => {
-    if (!profile) return false;
-    return profile.permissions?.includes(permission) || profile.isAdmin;
   };
 
   const openMeetingsModal = async (group: CellGroup) => {
