@@ -1,12 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus, Download,
+  Shield, AlertCircle, CheckCircle, Plus,
   FileText, Eye, ClipboardList
 } from 'lucide-react';
-import { jsPDF } from 'jspdf';
 
 // Simple interfaces
 interface CellGroup {
@@ -792,141 +791,112 @@ const ReportStep: React.FC<{
     }
   };
 
-  const generatePDFReport = () => {
-    const doc = new jsPDF();
-    let yPosition = 20;
+  const generatePrintableReport = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
 
-    // Title
-    doc.setFontSize(20);
-    doc.text('CELL GROUP MEETING REPORT', 105, yPosition, { align: 'center' });
-    yPosition += 15;
-
-    // Group and Meeting Info
-    doc.setFontSize(12);
-    doc.text(`Group: ${group.name}`, 20, yPosition);
-    yPosition += 7;
-    doc.text(`Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'}`, 20, yPosition);
-    yPosition += 7;
-    doc.text(`Location: ${selectedMeeting?.location || group.location || 'N/A'}`, 20, yPosition);
-    yPosition += 15;
-
-    // Attendance Summary
-    doc.setFontSize(14);
-    doc.text('ATTENDANCE SUMMARY', 20, yPosition);
-    yPosition += 10;
-    
     const presentCount = attendanceData.filter(a => a.attended).length;
     const absentCount = attendanceData.filter(a => !a.attended).length;
-    
-    doc.setFontSize(10);
-    doc.text(`Present: ${presentCount} members`, 30, yPosition);
-    yPosition += 5;
-    doc.text(`Absent: ${absentCount} members`, 30, yPosition);
-    yPosition += 5;
-    doc.text(`Total: ${attendanceData.length} members`, 30, yPosition);
-    yPosition += 10;
-
-    // Absent Members with Reasons
     const absentMembers = attendanceData.filter(a => !a.attended);
-    if (absentMembers.length > 0) {
-      doc.setFontSize(12);
-      doc.text('ABSENT MEMBERS:', 20, yPosition);
-      yPosition += 7;
-      
-      doc.setFontSize(9);
-      absentMembers.forEach(member => {
-        const memberName = `${member.members.name} ${member.members.surname}`;
-        const reason = member.reason || 'No reason provided';
-        doc.text(`• ${memberName}: ${reason}`, 25, yPosition);
-        yPosition += 5;
-        
-        // Check if we need a new page
-        if (yPosition > 270) {
-          doc.addPage();
-          yPosition = 20;
-        }
-      });
-      yPosition += 5;
-    }
 
-    // Discussion Topics
-    if (discussionData.length > 0) {
-      doc.setFontSize(14);
-      doc.text('DISCUSSION TOPICS', 20, yPosition);
-      yPosition += 10;
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${reportData.title}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+          .section { margin-bottom: 30px; }
+          .section-title { font-size: 18px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+          .attendance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 20px; }
+          .attendance-card { text-align: center; padding: 15px; border-radius: 8px; }
+          .present { background: #d1fae5; color: #065f46; }
+          .absent { background: #fee2e2; color: #991b1b; }
+          .total { background: #dbeafe; color: #1e40af; }
+          .member-list { margin-left: 20px; }
+          .topic { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+          @media print {
+            body { margin: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>CELL GROUP MEETING REPORT</h1>
+          <h2>${reportData.title}</h2>
+          <p><strong>Group:</strong> ${group.name} | <strong>Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'} | <strong>Location:</strong> ${selectedMeeting?.location || group.location || 'N/A'}</p>
+        </div>
 
-      discussionData.forEach((topic, index) => {
-        doc.setFontSize(11);
-        doc.text(`${index + 1}. ${topic.topic}`, 25, yPosition);
-        yPosition += 6;
+        <div class="section">
+          <div class="section-title">ATTENDANCE SUMMARY</div>
+          <div class="attendance-grid">
+            <div class="attendance-card present">
+              <div style="font-size: 24px; font-weight: bold;">${presentCount}</div>
+              <div>Present</div>
+            </div>
+            <div class="attendance-card absent">
+              <div style="font-size: 24px; font-weight: bold;">${absentCount}</div>
+              <div>Absent</div>
+            </div>
+            <div class="attendance-card total">
+              <div style="font-size: 24px; font-weight: bold;">${attendanceData.length}</div>
+              <div>Total Members</div>
+            </div>
+          </div>
+          
+          ${absentMembers.length > 0 ? `
+            <p><strong>Absent Members:</strong></p>
+            <div class="member-list">
+              ${absentMembers.map(member => `
+                <div>• ${member.members.name} ${member.members.surname} - ${member.reason || 'No reason provided'}</div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
 
-        if (topic.discussion_points) {
-          doc.setFontSize(9);
-          const discussionLines = doc.splitTextToSize(`Discussion: ${topic.discussion_points}`, 160);
-          doc.text(discussionLines, 30, yPosition);
-          yPosition += discussionLines.length * 4;
-        }
+        ${discussionData.length > 0 ? `
+          <div class="section">
+            <div class="section-title">DISCUSSION TOPICS</div>
+            ${discussionData.map((topic, index) => `
+              <div class="topic">
+                <h3>${index + 1}. ${topic.topic}</h3>
+                ${topic.discussion_points ? `<p><strong>Discussion:</strong> ${topic.discussion_points}</p>` : ''}
+                ${topic.decisions_made ? `<p><strong>Decisions/Actions:</strong> ${topic.decisions_made}</p>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
 
-        if (topic.decisions_made) {
-          doc.setFontSize(9);
-          const decisionLines = doc.splitTextToSize(`Decisions: ${topic.decisions_made}`, 160);
-          doc.text(decisionLines, 30, yPosition);
-          yPosition += decisionLines.length * 4;
-        }
+        <div class="section">
+          <div class="section-title">MEETING REPORT</div>
+          ${reportData.spiritual_highlights ? `
+            <p><strong>Spiritual Highlights:</strong><br>${reportData.spiritual_highlights}</p>
+          ` : ''}
+          ${reportData.challenges ? `
+            <p><strong>Challenges & Concerns:</strong><br>${reportData.challenges}</p>
+          ` : ''}
+          ${reportData.prayer_requests ? `
+            <p><strong>Prayer Requests:</strong><br>${reportData.prayer_requests}</p>
+          ` : ''}
+          ${reportData.next_steps ? `
+            <p><strong>Next Steps & Action Items:</strong><br>${reportData.next_steps}</p>
+          ` : ''}
+          ${reportData.additional_notes ? `
+            <p><strong>Additional Notes:</strong><br>${reportData.additional_notes}</p>
+          ` : ''}
+        </div>
 
-        yPosition += 5;
+        <div class="no-print" style="margin-top: 40px; text-align: center;">
+          <button onclick="window.print()" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">Print Report</button>
+        </div>
+      </body>
+      </html>
+    `;
 
-        // Check if we need a new page
-        if (yPosition > 270) {
-          doc.addPage();
-          yPosition = 20;
-        }
-      });
-    }
-
-    // Report Details
-    if (reportData.spiritual_highlights || reportData.challenges || reportData.prayer_requests || reportData.next_steps) {
-      doc.setFontSize(14);
-      doc.text('MEETING REPORT DETAILS', 20, yPosition);
-      yPosition += 10;
-
-      doc.setFontSize(10);
-      if (reportData.spiritual_highlights) {
-        doc.text('Spiritual Highlights:', 25, yPosition);
-        yPosition += 5;
-        const highlights = doc.splitTextToSize(reportData.spiritual_highlights, 160);
-        doc.text(highlights, 30, yPosition);
-        yPosition += highlights.length * 4 + 5;
-      }
-
-      if (reportData.challenges) {
-        doc.text('Challenges:', 25, yPosition);
-        yPosition += 5;
-        const challenges = doc.splitTextToSize(reportData.challenges, 160);
-        doc.text(challenges, 30, yPosition);
-        yPosition += challenges.length * 4 + 5;
-      }
-
-      if (reportData.prayer_requests) {
-        doc.text('Prayer Requests:', 25, yPosition);
-        yPosition += 5;
-        const prayers = doc.splitTextToSize(reportData.prayer_requests, 160);
-        doc.text(prayers, 30, yPosition);
-        yPosition += prayers.length * 4 + 5;
-      }
-
-      if (reportData.next_steps) {
-        doc.text('Next Steps:', 25, yPosition);
-        yPosition += 5;
-        const nextSteps = doc.splitTextToSize(reportData.next_steps, 160);
-        doc.text(nextSteps, 30, yPosition);
-        yPosition += nextSteps.length * 4;
-      }
-    }
-
-    // Save the PDF
-    const fileName = `Meeting_Report_${group.name}_${selectedMeeting ? new Date(selectedMeeting.meeting_date).toISOString().split('T')[0] : ''}.pdf`;
-    doc.save(fileName);
+    printWindow.document.write(printContent);
+    printWindow.document.close();
   };
 
   const presentCount = attendanceData.filter(a => a.attended).length;
@@ -937,11 +907,11 @@ const ReportStep: React.FC<{
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-xl font-semibold">Create Meeting Report</h3>
         <button
-          onClick={generatePDFReport}
-          className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          onClick={generatePrintableReport}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
-          <Download className="h-4 w-4" />
-          Download PDF
+          <FileText className="h-4 w-4" />
+          Print Report
         </button>
       </div>
 
@@ -1059,11 +1029,11 @@ const ReportStep: React.FC<{
               
               <button
                 type="button"
-                onClick={generatePDFReport}
+                onClick={generatePrintableReport}
                 className="flex items-center gap-2 px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <FileText className="h-4 w-4" />
-                Preview PDF
+                Preview Report
               </button>
             </div>
           </form>
@@ -1099,7 +1069,7 @@ const ReportStep: React.FC<{
   );
 };
 
-// Main Groups Component (same as before, but with updated imports)
+// Main Groups Component (same as before)
 const Groups = () => {
   const { profile } = useAuth();
   
