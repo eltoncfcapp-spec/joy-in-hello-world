@@ -3,7 +3,7 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Eye, FileText
+  Shield, AlertCircle, CheckCircle, Plus
 } from 'lucide-react';
 
 // Import the step components
@@ -11,9 +11,6 @@ import MeetingCreationStep from '../components/groups/steps/MeetingCreationStep'
 import AttendanceStep from '../components/groups/steps/AttendanceStep';
 import NewcomerStep from '../components/groups/steps/NewcomerStep';
 import ReportStep from '../components/groups/steps/ReportStep';
-import MeetingViewModal from '../components/groups/MeetingViewModal';
-import AttendanceModal from '../components/groups/AttendanceModal';
-import ReportFormModal from '../components/groups/ReportFormModal';
 
 // Simple interfaces
 interface CellGroup {
@@ -86,8 +83,8 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
     // Group leaders can access all steps for their groups
     if (profile.role === 'group_leader') {
       // Check if this group is in their assigned groups or if they're the leader
-      const isAssignedGroup = profile.assigned_groups.includes(group.id) || 
-                             profile.assigned_groups.includes('all_groups') ||
+      const isAssignedGroup = profile.assigned_groups?.includes(group.id) || 
+                             profile.assigned_groups?.includes('all_groups') ||
                              profile.cell_group_id === group.id;
       return isAssignedGroup;
     }
@@ -98,10 +95,10 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
       const isOwnGroup = profile.cell_group_id === group.id;
       
       switch (stepNumber) {
-        case 1: return isOwnGroup && profile.permissions.includes('create_meetings');
-        case 2: return isOwnGroup && profile.permissions.includes('manage_attendance');
-        case 3: return isOwnGroup && profile.permissions.includes('add_newcomers');
-        case 4: return isOwnGroup && profile.permissions.includes('create_reports');
+        case 1: return isOwnGroup && profile.permissions?.includes('create_meetings');
+        case 2: return isOwnGroup && profile.permissions?.includes('manage_attendance');
+        case 3: return isOwnGroup && profile.permissions?.includes('add_newcomers');
+        case 4: return isOwnGroup && profile.permissions?.includes('create_reports');
         default: return false;
       }
     }
@@ -218,6 +215,495 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
   );
 };
 
+// Step Components Implementation
+const MeetingCreationStep: React.FC<{
+  group: CellGroup;
+  onMeetingCreated: () => void;
+  onError: (message: string) => void;
+}> = ({ group, onMeetingCreated, onError }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    meeting_date: '',
+    meeting_time: '',
+    location: group.location || '',
+    topic: '',
+    notes: ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .insert([{
+          group_id: group.id,
+          meeting_date: formData.meeting_date,
+          meeting_time: formData.meeting_time,
+          location: formData.location,
+          topic: formData.topic,
+          notes: formData.notes,
+          status: 'scheduled'
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      onMeetingCreated();
+    } catch (error: any) {
+      onError('Failed to create meeting: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-xl font-semibold mb-4">Schedule New Meeting</h3>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Meeting Date</label>
+            <input
+              type="date"
+              required
+              value={formData.meeting_date}
+              onChange={(e) => setFormData({ ...formData, meeting_date: e.target.value })}
+              className="w-full p-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Meeting Time</label>
+            <input
+              type="time"
+              value={formData.meeting_time}
+              onChange={(e) => setFormData({ ...formData, meeting_time: e.target.value })}
+              className="w-full p-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Location</label>
+          <input
+            type="text"
+            value={formData.location}
+            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            placeholder="Meeting location"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Topic</label>
+          <input
+            type="text"
+            value={formData.topic}
+            onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            placeholder="Meeting topic or theme"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Notes</label>
+          <textarea
+            value={formData.notes}
+            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            rows={3}
+            placeholder="Additional notes or agenda"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Creating...' : 'Create Meeting'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+const AttendanceStep: React.FC<{
+  group: CellGroup;
+  meetings: Meeting[];
+  selectedMeeting: Meeting | null;
+  onMeetingSelect: (meeting: Meeting) => void;
+  onAttendanceSaved: () => void;
+  onError: (message: string) => void;
+}> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
+  const [members, setMembers] = useState<Member[]>([]);
+  const [attendance, setAttendance] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadMembers();
+  }, [group.id]);
+
+  const loadMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .eq('cell_group_id', group.id);
+
+      if (error) throw error;
+      setMembers(data || []);
+    } catch (error: any) {
+      onError('Failed to load members: ' + error.message);
+    }
+  };
+
+  const handleSaveAttendance = async () => {
+    if (!selectedMeeting) {
+      onError('Please select a meeting first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Save attendance records
+      const attendanceRecords = Object.entries(attendance).map(([memberId, attended]) => ({
+        meeting_id: selectedMeeting.id,
+        member_id: memberId,
+        attended: attended,
+        group_id: group.id
+      }));
+
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(attendanceRecords);
+
+      if (error) throw error;
+
+      // Update meeting status to completed
+      const { error: meetingError } = await supabase
+        .from('meetings')
+        .update({ status: 'completed' })
+        .eq('id', selectedMeeting.id);
+
+      if (meetingError) throw meetingError;
+
+      onAttendanceSaved();
+    } catch (error: any) {
+      onError('Failed to save attendance: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-xl font-semibold mb-4">Take Attendance</h3>
+      
+      <div className="mb-6">
+        <label className="block text-sm font-medium mb-2">Select Meeting</label>
+        <select
+          value={selectedMeeting?.id || ''}
+          onChange={(e) => {
+            const meeting = meetings.find(m => m.id === e.target.value);
+            if (meeting) onMeetingSelect(meeting);
+          }}
+          className="w-full p-2 border border-gray-300 rounded-lg"
+        >
+          <option value="">Choose a meeting...</option>
+          {meetings.map(meeting => (
+            <option key={meeting.id} value={meeting.id}>
+              {new Date(meeting.meeting_date).toLocaleDateString()} - {meeting.topic || 'No topic'}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedMeeting && (
+        <div className="space-y-4">
+          <h4 className="font-medium">Mark Attendance for Members:</h4>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {members.map(member => (
+              <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                <span>{member.name} {member.surname}</span>
+                <input
+                  type="checkbox"
+                  checked={attendance[member.id] || false}
+                  onChange={(e) => setAttendance(prev => ({
+                    ...prev,
+                    [member.id]: e.target.checked
+                  }))}
+                  className="w-4 h-4"
+                />
+              </div>
+            ))}
+          </div>
+          
+          <button
+            onClick={handleSaveAttendance}
+            disabled={loading}
+            className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Attendance'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const NewcomerStep: React.FC<{
+  group: CellGroup;
+  selectedMeeting: Meeting | null;
+  onNewcomerAdded: () => void;
+  onError: (message: string) => void;
+}> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    surname: '',
+    email: '',
+    phone: '',
+    notes: ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .insert([{
+          name: formData.name,
+          surname: formData.surname,
+          email: formData.email || null,
+          phone: formData.phone || null,
+          cell_group_id: group.id,
+          is_newcomer: true,
+          newcomer_meeting_id: selectedMeeting?.id || null,
+          newcomer_notes: formData.notes
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      setFormData({ name: '', surname: '', email: '', phone: '', notes: '' });
+      onNewcomerAdded();
+    } catch (error: any) {
+      onError('Failed to add newcomer: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-xl font-semibold mb-4">Add Newcomer</h3>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">First Name *</label>
+            <input
+              type="text"
+              required
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full p-2 border border-gray-300 rounded-lg"
+              placeholder="First name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Last Name *</label>
+            <input
+              type="text"
+              required
+              value={formData.surname}
+              onChange={(e) => setFormData({ ...formData, surname: e.target.value })}
+              className="w-full p-2 border border-gray-300 rounded-lg"
+              placeholder="Last name"
+            />
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Email</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className="w-full p-2 border border-gray-300 rounded-lg"
+              placeholder="Email address"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Phone</label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full p-2 border border-gray-300 rounded-lg"
+              placeholder="Phone number"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Notes</label>
+          <textarea
+            value={formData.notes}
+            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            rows={3}
+            placeholder="Additional notes about the newcomer"
+          />
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm text-blue-800">
+            {selectedMeeting 
+              ? `This newcomer will be associated with the meeting on ${new Date(selectedMeeting.meeting_date).toLocaleDateString()}`
+              : 'No meeting selected - newcomer will not be associated with a specific meeting'
+            }
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Adding...' : 'Add Newcomer'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+const ReportStep: React.FC<{
+  group: CellGroup;
+  selectedMeeting: Meeting | null;
+  onReportCreated: () => void;
+  onError: (message: string) => void;
+}> = ({ group, selectedMeeting, onReportCreated, onError }) => {
+  const [loading, setLoading] = useState(false);
+  const [reportData, setReportData] = useState({
+    title: '',
+    content: '',
+    meeting_highlights: '',
+    challenges: '',
+    next_steps: ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('reports')
+        .insert([{
+          group_id: group.id,
+          meeting_id: selectedMeeting?.id || null,
+          title: reportData.title,
+          content: reportData.content,
+          meeting_highlights: reportData.meeting_highlights,
+          challenges: reportData.challenges,
+          next_steps: reportData.next_steps,
+          report_date: new Date().toISOString().split('T')[0]
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      onReportCreated();
+    } catch (error: any) {
+      onError('Failed to create report: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-xl font-semibold mb-4">Create Meeting Report</h3>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Report Title *</label>
+          <input
+            type="text"
+            required
+            value={reportData.title}
+            onChange={(e) => setReportData({ ...reportData, title: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            placeholder="Enter report title"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Meeting Highlights</label>
+          <textarea
+            value={reportData.meeting_highlights}
+            onChange={(e) => setReportData({ ...reportData, meeting_highlights: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            rows={3}
+            placeholder="Key highlights from the meeting..."
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Challenges & Prayer Requests</label>
+          <textarea
+            value={reportData.challenges}
+            onChange={(e) => setReportData({ ...reportData, challenges: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            rows={3}
+            placeholder="Any challenges faced or prayer requests..."
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Next Steps & Action Items</label>
+          <textarea
+            value={reportData.next_steps}
+            onChange={(e) => setReportData({ ...reportData, next_steps: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            rows={3}
+            placeholder="Plans for next meeting or follow-up actions..."
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Additional Notes</label>
+          <textarea
+            value={reportData.content}
+            onChange={(e) => setReportData({ ...reportData, content: e.target.value })}
+            className="w-full p-2 border border-gray-300 rounded-lg"
+            rows={4}
+            placeholder="Any additional notes or observations..."
+          />
+        </div>
+
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <p className="text-sm text-gray-600">
+            {selectedMeeting 
+              ? `This report will be linked to the meeting on ${new Date(selectedMeeting.meeting_date).toLocaleDateString()}`
+              : 'This is a general group report (not linked to a specific meeting)'
+            }
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Creating Report...' : 'Create Report'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
 // Main Groups Component
 const Groups = () => {
   const { profile } = useAuth();
@@ -233,14 +719,9 @@ const Groups = () => {
   // Modal states
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
-  const [showMeetingView, setShowMeetingView] = useState(false);
-  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [showReportForm, setShowReportForm] = useState(false);
   
   // Data states
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
-  const [selectedMeetingForView, setSelectedMeetingForView] = useState<Meeting | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
 
   // Load groups on component mount
@@ -322,8 +803,8 @@ const Groups = () => {
     
     // Group leaders can view assigned groups and their own group
     if (profile.role === 'group_leader') {
-      return profile.assigned_groups.includes(groupId) || 
-             profile.assigned_groups.includes('all_groups') ||
+      return profile.assigned_groups?.includes(groupId) || 
+             profile.assigned_groups?.includes('all_groups') ||
              profile.cell_group_id === groupId;
     }
     
@@ -343,15 +824,15 @@ const Groups = () => {
     
     // Group leaders can manage assigned groups and their own group
     if (profile.role === 'group_leader') {
-      return profile.assigned_groups.includes(groupId) || 
-             profile.assigned_groups.includes('all_groups') ||
+      return profile.assigned_groups?.includes(groupId) || 
+             profile.assigned_groups?.includes('all_groups') ||
              profile.cell_group_id === groupId;
     }
     
     // Regular members need specific permissions for their own group
     if (profile.role === 'member') {
       const isOwnGroup = profile.cell_group_id === groupId;
-      return isOwnGroup && profile.permissions.includes('manage_group');
+      return isOwnGroup && profile.permissions?.includes('manage_group');
     }
     
     return false;
@@ -359,7 +840,7 @@ const Groups = () => {
 
   const hasPermission = (permission: string) => {
     if (!profile) return false;
-    return profile.permissions.includes(permission) || profile.isAdmin;
+    return profile.permissions?.includes(permission) || profile.isAdmin;
   };
 
   const openMeetingsModal = async (group: CellGroup) => {
@@ -384,42 +865,10 @@ const Groups = () => {
     await loadMeetings(group.id);
   };
 
-  const openMeetingView = async (meeting: Meeting) => {
-    if (!selectedGroup) return;
-    
-    setSelectedMeetingForView(meeting);
-    setShowMeetingView(true);
-  };
-
-  const openAttendanceModal = async (meeting: Meeting) => {
-    if (!selectedGroup || !canManageGroup(selectedGroup.id)) {
-      setError('You do not have permission to manage attendance for this group');
-      return;
-    }
-
-    setSelectedMeeting(meeting);
-    setShowAttendanceModal(true);
-  };
-
-  const openReportForm = async (meeting?: Meeting) => {
-    if (!selectedGroup || !canManageGroup(selectedGroup.id)) {
-      setError('You do not have permission to create reports for this group');
-      return;
-    }
-
-    setSelectedMeeting(meeting || null);
-    setShowReportForm(true);
-  };
-
   const closeAllModals = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
-    setShowMeetingView(false);
-    setShowAttendanceModal(false);
-    setShowReportForm(false);
     setSelectedGroup(null);
-    setSelectedMeeting(null);
-    setSelectedMeetingForView(null);
   };
 
   const filteredGroups = groups.filter(group =>
@@ -639,7 +1088,7 @@ const Groups = () => {
                   meetings.map((meeting) => (
                     <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
                       <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1">
+                        <div>
                           <div className="font-medium text-gray-900 dark:text-white">
                             {new Date(meeting.meeting_date).toLocaleDateString()}
                             {meeting.meeting_time && ` at ${meeting.meeting_time}`}
@@ -647,11 +1096,6 @@ const Groups = () => {
                           {meeting.topic && (
                             <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                               Topic: {meeting.topic}
-                            </div>
-                          )}
-                          {meeting.location && (
-                            <div className="text-sm text-gray-600 dark:text-gray-400">
-                              Location: {meeting.location}
                             </div>
                           )}
                         </div>
@@ -664,35 +1108,6 @@ const Groups = () => {
                         }`}>
                           {meeting.status}
                         </span>
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        {meeting.status === 'completed' && (
-                          <button
-                            onClick={() => openMeetingView(meeting)}
-                            className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
-                          >
-                            <Eye className="h-3 w-3" />
-                            View Details
-                          </button>
-                        )}
-                        {canManageGroup(selectedGroup.id) && (
-                          <>
-                            <button
-                              onClick={() => openAttendanceModal(meeting)}
-                              className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
-                            >
-                              <Users className="h-3 w-3" />
-                              Attendance
-                            </button>
-                            <button
-                              onClick={() => openReportForm(meeting)}
-                              className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
-                            >
-                              <FileText className="h-3 w-3" />
-                              Create Report
-                            </button>
-                          </>
-                        )}
                       </div>
                     </div>
                   ))
@@ -734,49 +1149,6 @@ const Groups = () => {
               />
             </div>
           </div>
-        )}
-
-        {/* Meeting View Modal */}
-        {showMeetingView && selectedMeetingForView && selectedGroup && (
-          <MeetingViewModal 
-            meeting={selectedMeetingForView}
-            group={selectedGroup}
-            onClose={closeAllModals}
-          />
-        )}
-
-        {/* Attendance Modal */}
-        {showAttendanceModal && selectedMeeting && selectedGroup && (
-          <AttendanceModal 
-            meeting={selectedMeeting}
-            group={selectedGroup}
-            onClose={closeAllModals}
-            onSuccess={(message) => {
-              setSuccess(message);
-              setTimeout(() => setSuccess(null), 3000);
-            }}
-            onError={(message) => {
-              setError(message);
-              setTimeout(() => setError(null), 3000);
-            }}
-          />
-        )}
-
-        {/* Report Form Modal */}
-        {showReportForm && selectedGroup && (
-          <ReportFormModal 
-            meeting={selectedMeeting}
-            group={selectedGroup}
-            onClose={closeAllModals}
-            onSuccess={(message) => {
-              setSuccess(message);
-              setTimeout(() => setSuccess(null), 3000);
-            }}
-            onError={(message) => {
-              setError(message);
-              setTimeout(() => setError(null), 3000);
-            }}
-          />
         )}
       </div>
     </div>
