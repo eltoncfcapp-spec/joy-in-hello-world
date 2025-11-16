@@ -282,17 +282,48 @@ const Groups = () => {
   const loadGroups = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      
+      // First, get all cell groups
+      const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
-        .select(`
-          *,
-          leader:members(id, name, surname, email, phone),
-          members:members(id, name, surname, email, phone, gender, status)
-        `)
+        .select('*')
         .order('name');
 
-      if (error) throw error;
-      setGroups(data || []);
+      if (groupsError) throw groupsError;
+
+      // Then, get all members to manually associate them
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (membersError) throw membersError;
+
+      // Manually build the groups with their members and leaders
+      const groupsWithMembers = (groupsData || []).map(group => {
+        // Find members in this group
+        const groupMembers = (membersData || []).filter(member => 
+          member.cell_group_id === group.id
+        );
+
+        // Find leader for this group
+        const leader = group.leader_id ? 
+          (membersData || []).find(member => member.id === group.leader_id) : null;
+
+        return {
+          ...group,
+          members: groupMembers,
+          leader: leader ? {
+            id: leader.id,
+            name: leader.name,
+            surname: leader.surname,
+            email: leader.email,
+            phone: leader.phone
+          } : null
+        };
+      });
+
+      setGroups(groupsWithMembers);
     } catch (error: any) {
       setError('Failed to load groups: ' + error.message);
     } finally {
@@ -361,7 +392,8 @@ const Groups = () => {
   const filteredGroups = groups.filter(group =>
     group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase())
+    group.leader?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.leader?.surname?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
