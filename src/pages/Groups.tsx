@@ -1,8 +1,3 @@
-import MeetingCreationStep from './steps/MeetingCreationStep';
-import AttendanceStep from './steps/AttendanceStep';
-import NewcomerStep from './steps/NewcomerStep';
-import ReportStep from './steps/ReportStep';
-
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,7 +7,13 @@ import {
   XCircle, UserPlus, Mail, Phone, ChevronRight, Check, ArrowRight
 } from 'lucide-react';
 
-// Interfaces
+// Import the step components
+import MeetingCreationStep from '../components/groups/steps/MeetingCreationStep';
+import AttendanceStep from '../components/groups/steps/AttendanceStep';
+import NewcomerStep from '../components/groups/steps/NewcomerStep';
+import ReportStep from '../components/groups/steps/ReportStep';
+
+// Interfaces (paste all the interfaces from the previous code here)
 interface CellGroup {
   id: string;
   name: string;
@@ -83,6 +84,175 @@ interface MeetingReport {
 type Gender = 'male' | 'female' | 'other';
 type AttendanceStatus = 'present' | 'absent' | 'absent_with_reason';
 
+// Group Management Workflow Component
+interface WorkflowProps {
+  group: CellGroup;
+  meetings: Meeting[];
+  members: Member[];
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}
+
+const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
+  group,
+  meetings,
+  members,
+  onClose,
+  onSuccess,
+  onError
+}) => {
+  const { profile, hasPermission, canManageGroup } = useAuth();
+  const [currentStep, setCurrentStep] = useState(1);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const steps = [
+    { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
+    { number: 2, title: 'Take Attendance', description: 'Record member attendance' },
+    { number: 3, title: 'Add Newcomers', description: 'Register first-time visitors' },
+    { number: 4, title: 'Create Report', description: 'Generate meeting report' }
+  ];
+
+  // Reset selected meeting when step changes
+  useEffect(() => {
+    if (currentStep !== 2 && currentStep !== 3 && currentStep !== 4) {
+      setSelectedMeeting(null);
+    }
+  }, [currentStep]);
+
+  const canAccessStep = (stepNumber: number) => {
+    if (!profile) return false;
+    
+    switch (stepNumber) {
+      case 1:
+        return canManageGroup(group.id) || hasPermission('manage_all_meetings');
+      case 2:
+        return canManageGroup(group.id) || hasPermission('manage_attendance');
+      case 3:
+        return canManageGroup(group.id) || hasPermission('add_newcomers');
+      case 4:
+        return canManageGroup(group.id) || hasPermission('create_reports');
+      default:
+        return false;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Step Progress */}
+      <div className="flex justify-between mb-8 relative">
+        <div className="absolute top-4 left-0 right-0 h-0.5 bg-gray-200 -z-10"></div>
+        {steps.map((step, index) => (
+          <div key={step.number} className="text-center flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 transition-all duration-300 ${
+              currentStep >= step.number 
+                ? 'bg-blue-600 text-white shadow-lg' 
+                : 'bg-gray-300 text-gray-600'
+            }`}>
+              {currentStep > step.number ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                step.number
+              )}
+            </div>
+            <div className={`text-sm font-medium ${
+              currentStep >= step.number ? 'text-blue-600' : 'text-gray-500'
+            }`}>
+              {step.title}
+            </div>
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
+              {step.description}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Current Step Content */}
+      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 min-h-[400px]">
+        {currentStep === 1 && (
+          <MeetingCreationStep 
+            group={group}
+            onMeetingCreated={() => {
+              onSuccess('Meeting created successfully!');
+              setCurrentStep(2);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 2 && (
+          <AttendanceStep 
+            group={group}
+            meetings={meetings}
+            selectedMeeting={selectedMeeting}
+            onMeetingSelect={setSelectedMeeting}
+            onAttendanceSaved={() => {
+              onSuccess('Attendance saved successfully!');
+              setCurrentStep(3);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 3 && (
+          <NewcomerStep 
+            group={group}
+            selectedMeeting={selectedMeeting}
+            onNewcomerAdded={() => {
+              onSuccess('Newcomer added successfully!');
+              setCurrentStep(4);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 4 && (
+          <ReportStep 
+            group={group}
+            selectedMeeting={selectedMeeting}
+            onReportCreated={() => {
+              onSuccess('Report created successfully!');
+              onClose();
+            }}
+            onError={onError}
+          />
+        )}
+      </div>
+
+      {/* Navigation */}
+      <div className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-600">
+        <button 
+          onClick={() => setCurrentStep(prev => prev - 1)}
+          disabled={currentStep === 1}
+          className="flex items-center gap-2 px-6 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Previous
+        </button>
+        
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+          >
+            Close
+          </button>
+          
+          <button 
+            onClick={() => setCurrentStep(prev => prev + 1)}
+            disabled={currentStep === 4 || !canAccessStep(currentStep + 1)}
+            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Main Groups Component
 const Groups = () => {
   const { profile, hasPermission, canViewGroup, canManageGroup, getUserGroups } = useAuth();
   
@@ -102,27 +272,6 @@ const Groups = () => {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-
-  // Permission checks
-  const canCreateMeeting = (groupId: string) => {
-    if (!profile) return false;
-    return canManageGroup(groupId) || hasPermission('manage_all_meetings');
-  };
-
-  const canTakeAttendance = (groupId: string) => {
-    if (!profile) return false;
-    return canManageGroup(groupId) || hasPermission('manage_attendance');
-  };
-
-  const canAddNewcomers = (groupId: string) => {
-    if (!profile) return false;
-    return canManageGroup(groupId) || hasPermission('add_newcomers');
-  };
-
-  const canCreateReports = (groupId: string) => {
-    if (!profile) return false;
-    return canManageGroup(groupId) || hasPermission('create_reports');
-  };
 
   // Load groups on component mount
   useEffect(() => {
@@ -466,175 +615,6 @@ const Groups = () => {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-// Step 2: Create the Group Management Workflow Component
-
-interface WorkflowProps {
-  group: CellGroup;
-  meetings: Meeting[];
-  members: Member[];
-  onClose: () => void;
-  onSuccess: (message: string) => void;
-  onError: (message: string) => void;
-}
-
-const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
-  group,
-  meetings,
-  members,
-  onClose,
-  onSuccess,
-  onError
-}) => {
-  const { profile, canManageGroup } = useAuth();
-  const [currentStep, setCurrentStep] = useState(1);
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const steps = [
-    { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
-    { number: 2, title: 'Take Attendance', description: 'Record member attendance' },
-    { number: 3, title: 'Add Newcomers', description: 'Register first-time visitors' },
-    { number: 4, title: 'Create Report', description: 'Generate meeting report' }
-  ];
-
-  // Reset selected meeting when step changes
-  useEffect(() => {
-    if (currentStep !== 2 && currentStep !== 3 && currentStep !== 4) {
-      setSelectedMeeting(null);
-    }
-  }, [currentStep]);
-
-  const canAccessStep = (stepNumber: number) => {
-    if (!profile) return false;
-    
-    switch (stepNumber) {
-      case 1:
-        return canManageGroup(group.id) || hasPermission('manage_all_meetings');
-      case 2:
-        return canManageGroup(group.id) || hasPermission('manage_attendance');
-      case 3:
-        return canManageGroup(group.id) || hasPermission('add_newcomers');
-      case 4:
-        return canManageGroup(group.id) || hasPermission('create_reports');
-      default:
-        return false;
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Step Progress */}
-      <div className="flex justify-between mb-8 relative">
-        <div className="absolute top-4 left-0 right-0 h-0.5 bg-gray-200 -z-10"></div>
-        {steps.map((step, index) => (
-          <div key={step.number} className="text-center flex-1">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 transition-all duration-300 ${
-              currentStep >= step.number 
-                ? 'bg-blue-600 text-white shadow-lg' 
-                : 'bg-gray-300 text-gray-600'
-            }`}>
-              {currentStep > step.number ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                step.number
-              )}
-            </div>
-            <div className={`text-sm font-medium ${
-              currentStep >= step.number ? 'text-blue-600' : 'text-gray-500'
-            }`}>
-              {step.title}
-            </div>
-            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
-              {step.description}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Current Step Content */}
-      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 min-h-[400px]">
-        {currentStep === 1 && (
-          <MeetingCreationStep 
-            group={group}
-            onMeetingCreated={() => {
-              onSuccess('Meeting created successfully!');
-              setCurrentStep(2);
-            }}
-            onError={onError}
-          />
-        )}
-
-        {currentStep === 2 && (
-          <AttendanceStep 
-            group={group}
-            meetings={meetings}
-            selectedMeeting={selectedMeeting}
-            onMeetingSelect={setSelectedMeeting}
-            onAttendanceSaved={() => {
-              onSuccess('Attendance saved successfully!');
-              setCurrentStep(3);
-            }}
-            onError={onError}
-          />
-        )}
-
-        {currentStep === 3 && (
-          <NewcomerStep 
-            group={group}
-            selectedMeeting={selectedMeeting}
-            onNewcomerAdded={() => {
-              onSuccess('Newcomer added successfully!');
-              setCurrentStep(4);
-            }}
-            onError={onError}
-          />
-        )}
-
-        {currentStep === 4 && (
-          <ReportStep 
-            group={group}
-            selectedMeeting={selectedMeeting}
-            onReportCreated={() => {
-              onSuccess('Report created successfully!');
-              onClose();
-            }}
-            onError={onError}
-          />
-        )}
-      </div>
-
-      {/* Navigation */}
-      <div className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-600">
-        <button 
-          onClick={() => setCurrentStep(prev => prev - 1)}
-          disabled={currentStep === 1}
-          className="flex items-center gap-2 px-6 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Previous
-        </button>
-        
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-          >
-            Close
-          </button>
-          
-          <button 
-            onClick={() => setCurrentStep(prev => prev + 1)}
-            disabled={currentStep === 4 || !canAccessStep(currentStep + 1)}
-            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Next
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
       </div>
     </div>
   );
