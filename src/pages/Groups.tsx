@@ -3,7 +3,7 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus
+  Shield, AlertCircle, CheckCircle, Eye, FileText
 } from 'lucide-react';
 
 // Import the step components
@@ -11,6 +11,9 @@ import MeetingCreationStep from '../components/groups/steps/MeetingCreationStep'
 import AttendanceStep from '../components/groups/steps/AttendanceStep';
 import NewcomerStep from '../components/groups/steps/NewcomerStep';
 import ReportStep from '../components/groups/steps/ReportStep';
+import MeetingViewModal from '../components/groups/MeetingViewModal';
+import AttendanceModal from '../components/groups/AttendanceModal';
+import ReportFormModal from '../components/groups/ReportFormModal';
 
 // Simple interfaces
 interface CellGroup {
@@ -21,6 +24,7 @@ interface CellGroup {
   meeting_time: string | null;
   leader_id: string | null;
   description?: string | null;
+  memberCount?: number;
 }
 
 interface Meeting {
@@ -229,11 +233,15 @@ const Groups = () => {
   // Modal states
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [showMeetingView, setShowMeetingView] = useState(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [showReportForm, setShowReportForm] = useState(false);
   
   // Data states
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [selectedMeetingForView, setSelectedMeetingForView] = useState<Meeting | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [groupMembers, setGroupMembers] = useState<Record<string, Member[]>>({});
 
   // Load groups on component mount
   useEffect(() => {
@@ -376,10 +384,42 @@ const Groups = () => {
     await loadMeetings(group.id);
   };
 
+  const openMeetingView = async (meeting: Meeting) => {
+    if (!selectedGroup) return;
+    
+    setSelectedMeetingForView(meeting);
+    setShowMeetingView(true);
+  };
+
+  const openAttendanceModal = async (meeting: Meeting) => {
+    if (!selectedGroup || !canManageGroup(selectedGroup.id)) {
+      setError('You do not have permission to manage attendance for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting);
+    setShowAttendanceModal(true);
+  };
+
+  const openReportForm = async (meeting?: Meeting) => {
+    if (!selectedGroup || !canManageGroup(selectedGroup.id)) {
+      setError('You do not have permission to create reports for this group');
+      return;
+    }
+
+    setSelectedMeeting(meeting || null);
+    setShowReportForm(true);
+  };
+
   const closeAllModals = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
+    setShowMeetingView(false);
+    setShowAttendanceModal(false);
+    setShowReportForm(false);
     setSelectedGroup(null);
+    setSelectedMeeting(null);
+    setSelectedMeetingForView(null);
   };
 
   const filteredGroups = groups.filter(group =>
@@ -599,7 +639,7 @@ const Groups = () => {
                   meetings.map((meeting) => (
                     <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
                       <div className="flex justify-between items-start mb-2">
-                        <div>
+                        <div className="flex-1">
                           <div className="font-medium text-gray-900 dark:text-white">
                             {new Date(meeting.meeting_date).toLocaleDateString()}
                             {meeting.meeting_time && ` at ${meeting.meeting_time}`}
@@ -607,6 +647,11 @@ const Groups = () => {
                           {meeting.topic && (
                             <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                               Topic: {meeting.topic}
+                            </div>
+                          )}
+                          {meeting.location && (
+                            <div className="text-sm text-gray-600 dark:text-gray-400">
+                              Location: {meeting.location}
                             </div>
                           )}
                         </div>
@@ -619,6 +664,35 @@ const Groups = () => {
                         }`}>
                           {meeting.status}
                         </span>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        {meeting.status === 'completed' && (
+                          <button
+                            onClick={() => openMeetingView(meeting)}
+                            className="flex items-center gap-1 px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
+                          >
+                            <Eye className="h-3 w-3" />
+                            View Details
+                          </button>
+                        )}
+                        {canManageGroup(selectedGroup.id) && (
+                          <>
+                            <button
+                              onClick={() => openAttendanceModal(meeting)}
+                              className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+                            >
+                              <Users className="h-3 w-3" />
+                              Attendance
+                            </button>
+                            <button
+                              onClick={() => openReportForm(meeting)}
+                              className="flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                            >
+                              <FileText className="h-3 w-3" />
+                              Create Report
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))
@@ -660,6 +734,49 @@ const Groups = () => {
               />
             </div>
           </div>
+        )}
+
+        {/* Meeting View Modal */}
+        {showMeetingView && selectedMeetingForView && selectedGroup && (
+          <MeetingViewModal 
+            meeting={selectedMeetingForView}
+            group={selectedGroup}
+            onClose={closeAllModals}
+          />
+        )}
+
+        {/* Attendance Modal */}
+        {showAttendanceModal && selectedMeeting && selectedGroup && (
+          <AttendanceModal 
+            meeting={selectedMeeting}
+            group={selectedGroup}
+            onClose={closeAllModals}
+            onSuccess={(message) => {
+              setSuccess(message);
+              setTimeout(() => setSuccess(null), 3000);
+            }}
+            onError={(message) => {
+              setError(message);
+              setTimeout(() => setError(null), 3000);
+            }}
+          />
+        )}
+
+        {/* Report Form Modal */}
+        {showReportForm && selectedGroup && (
+          <ReportFormModal 
+            meeting={selectedMeeting}
+            group={selectedGroup}
+            onClose={closeAllModals}
+            onSuccess={(message) => {
+              setSuccess(message);
+              setTimeout(() => setSuccess(null), 3000);
+            }}
+            onError={(message) => {
+              setError(message);
+              setTimeout(() => setError(null), 3000);
+            }}
+          />
         )}
       </div>
     </div>
