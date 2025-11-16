@@ -1,12 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
-import { UserPlus, User, Phone, Mail } from 'lucide-react';
+import { UserPlus, User, Phone, Mail, Search } from 'lucide-react';
 
 interface NewcomerStepProps {
   group: any;
   selectedMeeting: any;
   onNewcomerAdded: () => void;
   onError: (message: string) => void;
+}
+
+interface ChurchMember {
+  id: string;
+  name: string;
+  surname: string;
+  email: string | null;
+  phone: string | null;
 }
 
 const NewcomerStep: React.FC<NewcomerStepProps> = ({
@@ -16,14 +24,77 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
   onError
 }) => {
   const [loading, setLoading] = useState(false);
+  const [churchMembers, setChurchMembers] = useState<ChurchMember[]>([]);
+  const [filteredMembers, setFilteredMembers] = useState<ChurchMember[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
     phone: '',
     gender: '' as 'male' | 'female',
     invited_by: '',
+    invited_by_member_id: '',
     notes: ''
   });
+
+  // Load all church members for the "Invited By" dropdown
+  useEffect(() => {
+    loadChurchMembers();
+  }, []);
+
+  // Filter members based on search term
+  useEffect(() => {
+    if (searchTerm.trim() === '') {
+      setFilteredMembers(churchMembers.slice(0, 10)); // Show first 10 members when no search
+    } else {
+      const filtered = churchMembers.filter(member =>
+        `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        member.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        member.phone?.includes(searchTerm)
+      ).slice(0, 10); // Limit to 10 results
+      setFilteredMembers(filtered);
+    }
+  }, [searchTerm, churchMembers]);
+
+  const loadChurchMembers = async () => {
+    try {
+      // Get all members from the church (excluding newcomers if needed)
+      const { data, error } = await supabase
+        .from('members')
+        .select('id, name, surname, email, phone')
+        .neq('status', 'newcomer') // Optional: exclude newcomers from inviting
+        .order('name');
+
+      if (error) throw error;
+      setChurchMembers(data || []);
+      setFilteredMembers(data?.slice(0, 10) || []);
+    } catch (error: any) {
+      console.error('Failed to load church members:', error);
+    }
+  };
+
+  const handleMemberSelect = (member: ChurchMember) => {
+    setFormData({
+      ...formData,
+      invited_by: `${member.name} ${member.surname}`,
+      invited_by_member_id: member.id
+    });
+    setSearchTerm(`${member.name} ${member.surname}`);
+    setShowMemberDropdown(false);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    if (value.trim() === '') {
+      setFormData({
+        ...formData,
+        invited_by: '',
+        invited_by_member_id: ''
+      });
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,20 +116,24 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
           cell_group_id: group.id,
           status: 'newcomer',
           invited_by: formData.invited_by,
+          invited_by_member_id: formData.invited_by_member_id || null,
           first_time_visit_date: new Date().toISOString(),
           notes: formData.notes
         });
 
       if (error) throw error;
 
+      // Reset form
       setFormData({
         name: '',
         surname: '',
         phone: '',
         gender: '' as 'male' | 'female',
         invited_by: '',
+        invited_by_member_id: '',
         notes: ''
       });
+      setSearchTerm('');
       
       onNewcomerAdded();
     } catch (error: any) {
@@ -138,7 +213,7 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
             </label>
             <select
               value={formData.gender}
-              onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female'})}
+              onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' })}
               className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">Select gender</option>
@@ -149,18 +224,89 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
 
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Invited By
+              Invited By (Select from church members)
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5 z-10" />
               <input
                 type="text"
-                value={formData.invited_by}
-                onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
-                placeholder="Who invited this person?"
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={searchTerm}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onFocus={() => setShowMemberDropdown(true)}
+                placeholder="Search for church member..."
+                className="w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
+              <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+              
+              {/* Member Dropdown */}
+              {showMemberDropdown && (
+                <>
+                  {/* Backdrop */}
+                  <div 
+                    className="fixed inset-0 z-20"
+                    onClick={() => setShowMemberDropdown(false)}
+                  />
+                  
+                  {/* Dropdown List */}
+                  <div className="absolute top-full left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg">
+                    {filteredMembers.length === 0 ? (
+                      <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                        No members found
+                      </div>
+                    ) : (
+                      filteredMembers.map((member) => (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => handleMemberSelect(member)}
+                          className="w-full p-3 text-left hover:bg-gray-100 dark:hover:bg-gray-600 border-b border-gray-200 dark:border-gray-500 last:border-b-0 transition-colors"
+                        >
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            {member.email && `${member.email} • `}{member.phone}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                    
+                    {/* Manual entry option */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMemberDropdown(false);
+                        setFormData(prev => ({
+                          ...prev,
+                          invited_by: searchTerm,
+                          invited_by_member_id: ''
+                        }));
+                      }}
+                      className="w-full p-3 text-left hover:bg-gray-100 dark:hover:bg-gray-600 border-t border-gray-200 dark:border-gray-500 transition-colors text-blue-600 dark:text-blue-400 font-medium"
+                    >
+                      + Use custom name: "{searchTerm}"
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
+            
+            {/* Selected member display */}
+            {formData.invited_by_member_id && (
+              <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <div className="text-sm text-green-800 dark:text-green-300">
+                  <strong>Selected:</strong> {formData.invited_by}
+                </div>
+              </div>
+            )}
+            
+            {formData.invited_by && !formData.invited_by_member_id && (
+              <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                <div className="text-sm text-yellow-800 dark:text-yellow-300">
+                  <strong>Custom entry:</strong> {formData.invited_by}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="md:col-span-2">
