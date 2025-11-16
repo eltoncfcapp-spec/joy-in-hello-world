@@ -20,7 +20,7 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
     name: '',
     surname: '',
     phone: '',
-    gender: '' as 'male' | 'female' | 'other',
+    gender: '' as 'male' | 'female',
     invited_by: '',
     notes: ''
   });
@@ -55,7 +55,7 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
         name: '',
         surname: '',
         phone: '',
-        gender: '' as 'male' | 'female' | 'other',
+        gender: '' as 'male' | 'female',
         invited_by: '',
         notes: ''
       });
@@ -138,13 +138,12 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
             </label>
             <select
               value={formData.gender}
-              onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' | 'other' })}
+              onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female'})}
               className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">Select gender</option>
               <option value="male">Male</option>
               <option value="female">Female</option>
-              <option value="other">Other</option>
             </select>
           </div>
 
