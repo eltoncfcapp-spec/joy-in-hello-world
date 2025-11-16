@@ -3,8 +3,8 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus,
-  FileText, Eye, ClipboardList
+  Shield, AlertCircle, CheckCircle,
+  FileText, Eye
 } from 'lucide-react';
 
 // Import the step components
