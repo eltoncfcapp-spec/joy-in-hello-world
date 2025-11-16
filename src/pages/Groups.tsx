@@ -3,7 +3,7 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle
+  Shield, AlertCircle, CheckCircle, Plus
 } from 'lucide-react';
 
 // Import the step components
@@ -72,12 +72,37 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
     { number: 4, title: 'Create Report', description: 'Generate meeting report' }
   ];
 
-  // Simple permission check - adjust based on your AuthContext
+  // Permission checks based on AuthContext profile
   const canAccessStep = (stepNumber: number) => {
     if (!profile) return false;
-    // For now, allow all steps if user has a profile
-    // You can replace this with your actual permission logic
-    return true;
+    
+    // Admin can access everything
+    if (profile.isAdmin) return true;
+    
+    // Group leaders can access all steps for their groups
+    if (profile.role === 'group_leader') {
+      // Check if this group is in their assigned groups or if they're the leader
+      const isAssignedGroup = profile.assigned_groups.includes(group.id) || 
+                             profile.assigned_groups.includes('all_groups') ||
+                             profile.cell_group_id === group.id;
+      return isAssignedGroup;
+    }
+    
+    // Regular members have limited access
+    if (profile.role === 'member') {
+      // Members can only view their own group
+      const isOwnGroup = profile.cell_group_id === group.id;
+      
+      switch (stepNumber) {
+        case 1: return isOwnGroup && profile.permissions.includes('create_meetings');
+        case 2: return isOwnGroup && profile.permissions.includes('manage_attendance');
+        case 3: return isOwnGroup && profile.permissions.includes('add_newcomers');
+        case 4: return isOwnGroup && profile.permissions.includes('create_reports');
+        default: return false;
+      }
+    }
+    
+    return false;
   };
 
   return (
@@ -98,6 +123,9 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
               currentStep >= step.number ? 'text-blue-600' : 'text-gray-500'
             }`}>
               {step.title}
+            </div>
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
+              {step.description}
             </div>
           </div>
         ))}
@@ -205,6 +233,7 @@ const Groups = () => {
   // Data states
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [groupMembers, setGroupMembers] = useState<Record<string, Member[]>>({});
 
   // Load groups on component mount
   useEffect(() => {
@@ -223,7 +252,23 @@ const Groups = () => {
         .order('name');
 
       if (groupsError) throw groupsError;
-      setGroups(groupsData || []);
+      
+      // Load member counts for each group
+      const groupsWithMemberCounts = await Promise.all(
+        (groupsData || []).map(async (group) => {
+          const { count, error: countError } = await supabase
+            .from('members')
+            .select('*', { count: 'exact', head: true })
+            .eq('cell_group_id', group.id);
+
+          return {
+            ...group,
+            memberCount: count || 0
+          };
+        })
+      );
+
+      setGroups(groupsWithMemberCounts);
     } catch (error: any) {
       setError('Failed to load groups: ' + error.message);
     } finally {
@@ -260,13 +305,72 @@ const Groups = () => {
     }
   };
 
+  // Permission functions based on AuthContext
+  const canViewGroup = (groupId: string) => {
+    if (!profile) return false;
+    
+    // Admin can view all groups
+    if (profile.isAdmin) return true;
+    
+    // Group leaders can view assigned groups and their own group
+    if (profile.role === 'group_leader') {
+      return profile.assigned_groups.includes(groupId) || 
+             profile.assigned_groups.includes('all_groups') ||
+             profile.cell_group_id === groupId;
+    }
+    
+    // Regular members can only view their own group
+    if (profile.role === 'member') {
+      return profile.cell_group_id === groupId;
+    }
+    
+    return false;
+  };
+
+  const canManageGroup = (groupId: string) => {
+    if (!profile) return false;
+    
+    // Admin can manage all groups
+    if (profile.isAdmin) return true;
+    
+    // Group leaders can manage assigned groups and their own group
+    if (profile.role === 'group_leader') {
+      return profile.assigned_groups.includes(groupId) || 
+             profile.assigned_groups.includes('all_groups') ||
+             profile.cell_group_id === groupId;
+    }
+    
+    // Regular members need specific permissions for their own group
+    if (profile.role === 'member') {
+      const isOwnGroup = profile.cell_group_id === groupId;
+      return isOwnGroup && profile.permissions.includes('manage_group');
+    }
+    
+    return false;
+  };
+
+  const hasPermission = (permission: string) => {
+    if (!profile) return false;
+    return profile.permissions.includes(permission) || profile.isAdmin;
+  };
+
   const openMeetingsModal = async (group: CellGroup) => {
+    if (!canViewGroup(group.id)) {
+      setError('You do not have permission to view this group');
+      return;
+    }
+
     setSelectedGroup(group);
     setShowMeetingsModal(true);
     await loadMeetings(group.id);
   };
 
   const openWorkflowModal = async (group: CellGroup) => {
+    if (!canManageGroup(group.id)) {
+      setError('You do not have permission to manage this group');
+      return;
+    }
+
     setSelectedGroup(group);
     setShowWorkflowModal(true);
     await loadMeetings(group.id);
@@ -278,25 +382,21 @@ const Groups = () => {
     setSelectedGroup(null);
   };
 
-  // Simple permission checks - replace with your actual AuthContext functions
-  const canManageGroup = (groupId: string) => {
-    if (!profile) return false;
-    // For now, allow management if user has a profile
-    // Replace with your actual permission logic
-    return true;
-  };
-
-  const canViewGroup = (groupId: string) => {
-    if (!profile) return false;
-    // For now, allow viewing if user has a profile  
-    // Replace with your actual permission logic
-    return true;
-  };
-
   const filteredGroups = groups.filter(group =>
-    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.location?.toLowerCase().includes(searchTerm.toLowerCase())
+    canViewGroup(group.id) && (
+      group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      group.location?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
+
+  // Get user's display role
+  const getUserRoleDisplay = () => {
+    if (!profile) return 'Guest';
+    
+    if (profile.isAdmin) return 'Administrator';
+    if (profile.role === 'group_leader') return 'Group Leader';
+    return 'Member';
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
@@ -308,7 +408,7 @@ const Groups = () => {
               Cell Groups
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Manage your cell groups, meetings, and members
+              {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view groups'}
             </p>
           </div>
         </div>
@@ -357,109 +457,121 @@ const Groups = () => {
         )}
 
         {/* Groups Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {loading && filteredGroups.length === 0 ? (
-            <div className="col-span-full text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading cell groups...</p>
-            </div>
-          ) : filteredGroups.length === 0 ? (
-            <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
-              <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                No Cell Groups Found
-              </h3>
-              <p className="text-gray-500 dark:text-gray-500 mb-6">
-                {searchTerm ? 'Try adjusting your search terms' : 'No cell groups available'}
-              </p>
-            </div>
-          ) : (
-            filteredGroups.map((group) => {
-              const canManage = canManageGroup(group.id);
-              const canView = canViewGroup(group.id);
-              
-              return (
-                <div
-                  key={group.id}
-                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
-                >
-                  <div className="flex items-start gap-4 mb-4">
-                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
-                      <Users className="h-7 w-7 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
-                      {canManage ? (
-                        <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 rounded-full text-xs font-medium mb-2">
-                          <Shield className="h-3 w-3 mr-1" />
-                          Can Manage
-                        </span>
-                      ) : canView ? (
-                        <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-full text-xs font-medium mb-2">
-                          <Shield className="h-3 w-3 mr-1" />
-                          View Only
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 mb-4">
-                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                      <User className="h-4 w-4" />
-                      <span className="text-sm">
-                        Leader: {group.leader_id ? 'Assigned' : 'Not assigned'}
-                      </span>
-                    </div>
-                    
-                    {group.location && (
-                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                        <MapPin className="h-4 w-4" />
-                        <span className="text-sm">{group.location}</span>
+        {!profile ? (
+          <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+              Please Log In
+            </h3>
+            <p className="text-gray-500 dark:text-gray-500 mb-6">
+              You need to be logged in to view cell groups
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {loading && filteredGroups.length === 0 ? (
+              <div className="col-span-full text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-4 text-gray-600 dark:text-gray-400">Loading cell groups...</p>
+              </div>
+            ) : filteredGroups.length === 0 ? (
+              <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+                <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                  No Accessible Cell Groups
+                </h3>
+                <p className="text-gray-500 dark:text-gray-500 mb-6">
+                  {searchTerm ? 'No groups match your search' : 'You do not have access to any cell groups'}
+                </p>
+              </div>
+            ) : (
+              filteredGroups.map((group: any) => {
+                const canManage = canManageGroup(group.id);
+                const canView = canViewGroup(group.id);
+                
+                return (
+                  <div
+                    key={group.id}
+                    className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+                  >
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+                        <Users className="h-7 w-7 text-white" />
                       </div>
-                    )}
-                    
-                    {(group.meeting_day || group.meeting_time) && (
+                      <div className="flex-1">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{group.name}</h3>
+                        {canManage ? (
+                          <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 rounded-full text-xs font-medium mb-2">
+                            <Shield className="h-3 w-3 mr-1" />
+                            Can Manage
+                          </span>
+                        ) : canView ? (
+                          <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-full text-xs font-medium mb-2">
+                            <Shield className="h-3 w-3 mr-1" />
+                            View Only
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 mb-4">
                       <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                        <Calendar className="h-4 w-4" />
+                        <User className="h-4 w-4" />
                         <span className="text-sm">
-                          {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                          Leader: {group.leader_id ? 'Assigned' : 'Not assigned'}
                         </span>
                       </div>
-                    )}
-                    
-                    {group.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                        {group.description}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Members: Loading...
-                    </span>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => openMeetingsModal(group)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                      >
-                        View Meetings
-                      </button>
-                      {canManage && (
-                        <button
-                          onClick={() => openWorkflowModal(group)}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                        >
-                          Manage Group
-                        </button>
+                      
+                      {group.location && (
+                        <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                          <MapPin className="h-4 w-4" />
+                          <span className="text-sm">{group.location}</span>
+                        </div>
+                      )}
+                      
+                      {(group.meeting_day || group.meeting_time) && (
+                        <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                          <Calendar className="h-4 w-4" />
+                          <span className="text-sm">
+                            {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {group.description && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                          {group.description}
+                        </p>
                       )}
                     </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        {group.memberCount || 0} member{(group.memberCount || 0) !== 1 ? 's' : ''}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => openMeetingsModal(group)}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                        >
+                          View Meetings
+                        </button>
+                        {canManage && (
+                          <button
+                            onClick={() => openWorkflowModal(group)}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                          >
+                            Manage Group
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+                );
+              })
+            )}
+          </div>
+        )}
 
         {/* Meetings Modal */}
         {showMeetingsModal && selectedGroup && (
