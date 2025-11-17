@@ -1,35 +1,37 @@
-import { Users, Plus, Calendar, User, Search, X, CheckCircle, XCircle, Clock4, Trash2, Shield, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+import { 
+  Users, MapPin, Calendar, User, Search, X, 
+  Shield, AlertCircle, CheckCircle, Plus, Printer
+} from 'lucide-react';
 
-// Type-safe wrapper for department-related queries
-const db = supabase as any;
+// Import the step components (you'll need to create these for departments)
+import DepartmentMeetingCreationStep from '../components/departments/steps/DepartmentMeetingCreationStep';
+import DepartmentAttendanceStep from '../components/departments/steps/DepartmentAttendanceStep';
+import DepartmentNewcomerStep from '../components/departments/steps/DepartmentNewcomerStep';
+import DepartmentReportStep from '../components/departments/steps/DepartmentReportStep';
 
+// Simple interfaces for departments
 interface Department {
   id: string;
   name: string;
-  description?: string | null;
-  meeting_day: string | null;
-  meeting_time?: string | null;
   location: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
   leader_id: string | null;
-  leader?: {
-    name: string;
-    surname: string;
-  } | null;
-  members?: DepartmentMember[];
-  created_at?: string;
-  updated_at?: string;
+  description?: string | null;
 }
 
-interface DepartmentMember {
+interface DepartmentMeeting {
   id: string;
   department_id: string;
-  member_id: string;
-  role: 'leader' | 'member' | 'assistant';
-  assigned_at: string;
-  member?: Member;
+  meeting_date: string;
+  meeting_time: string | null;
+  location: string | null;
+  topic: string | null;
+  notes: string | null;
+  status: string;
 }
 
 interface Member {
@@ -38,689 +40,422 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  cell_group_id: string | null;
-  invited_by: string | null;
-  role?: string;
-  permissions?: string[];
-  assigned_groups?: string[];
-  assigned_departments?: string[];
-  can_add_members?: boolean;
-  can_edit_members?: boolean;
-  can_view_own_data?: boolean;
+  department_id?: string | null;
 }
 
-interface DepartmentMeeting {
-  id: string;
-  department_id: string;
-  meeting_date: string;
-  meeting_time: string;
-  location: string;
-  topic: string;
-  notes: string;
-  status: 'scheduled' | 'completed' | 'cancelled';
-  created_at: string;
-}
-
-interface DepartmentAttendance {
+interface DepartmentAttendanceRecord {
   id: string;
   meeting_id: string;
   member_id: string;
-  status: 'present' | 'absent' | 'late';
-  arrival_time: string;
-  notes: string;
-  member?: Member;
+  status: 'present' | 'absent' | 'absent_with_reason';
+  reason?: string | null;
+  members?: Member;
 }
 
-// Permission checking utility
-const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
-  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
-};
+// Department Management Workflow Component
+interface DepartmentWorkflowProps {
+  department: Department;
+  meetings: DepartmentMeeting[];
+  members: Member[];
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}
 
-const Departments = () => {
+const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
+  department,
+  meetings,
+  members,
+  onClose,
+  onSuccess,
+  onError
+}) => {
   const { profile } = useAuth();
-  const [showForm, setShowForm] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'departments' | 'meetings' | 'members'>('departments');
-  const [error, setError] = useState<string | null>(null);
-  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [initialLoad, setInitialLoad] = useState(true);
-  
-  // Meeting states
-  const [meetings, setMeetings] = useState<DepartmentMeeting[]>([]);
-  const [attendance, setAttendance] = useState<DepartmentAttendance[]>([]);
-  const [showMeetingForm, setShowMeetingForm] = useState(false);
-  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [showReportModal, setShowReportModal] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<DepartmentMeeting | null>(null);
 
-  // Form states
-  const [departmentForm, setDepartmentForm] = useState({
-    name: '',
-    description: '',
-    meeting_day: '',
-    meeting_time: '',
-    location: '',
-    leader_id: ''
-  });
+  const steps = [
+    { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
+    { number: 2, title: 'Take Attendance', description: 'Record member attendance' },
+    { number: 3, title: 'Add Newcomers', description: 'Register first-time visitors' },
+    { number: 4, title: 'Create Report', description: 'Generate meeting report' }
+  ];
 
-  const [meetingForm, setMeetingForm] = useState({
-    meeting_date: '',
-    meeting_time: '',
-    location: '',
-    topic: '',
-    notes: ''
-  });
-
-  const [reportForm, setReportForm] = useState({
-    report_text: '',
-    decisions_made: '',
-    action_items: '',
-    next_meeting_date: ''
-  });
-
-  const [attendanceData, setAttendanceData] = useState<{[key: string]: 'present' | 'absent' | 'late'}>({});
-  const [attendanceNotes, setAttendanceNotes] = useState<{[key: string]: string}>({});
-
-  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  const memberRoles = ['member', 'leader', 'assistant'];
-
-  // Check permissions and load data
-  useEffect(() => {
-    const checkAccessAndLoadData = async () => {
-      if (!profile) {
-        setHasAccess(false);
-        setInitialLoad(false);
-        return;
-      }
-
-      // Check if user has access to departments
-      const userHasAccess = profile.isAdmin || 
-        hasPermission(profile.permissions, 'admin_access') ||
-        hasPermission(profile.permissions, 'manage_departments') ||
-        (profile.assigned_departments && profile.assigned_departments.length > 0);
+  // Permission checks based on AuthContext profile
+  const canAccessStep = (stepNumber: number) => {
+    if (!profile) return false;
+    
+    // Admin can access everything
+    if (profile.isAdmin) return true;
+    
+    // Department leaders can access all steps for their departments
+    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
+      // Check if this department is in their assigned departments or if they're the leader
+      const isAssignedDepartment = profile.assigned_departments?.includes(department.id) || 
+                                   profile.assigned_departments?.includes('all_departments') ||
+                                   profile.department_id === department.id;
+      return isAssignedDepartment;
+    }
+    
+    // Regular members have limited access
+    if (profile.role === 'member') {
+      // Members can only view their own department
+      const isOwnDepartment = profile.department_id === department.id;
       
-      setHasAccess(userHasAccess);
-
-      if (userHasAccess) {
-        await loadData();
-      } else {
-        setInitialLoad(false);
+      switch (stepNumber) {
+        case 1: return isOwnDepartment && profile.permissions?.includes('create_meetings');
+        case 2: return isOwnDepartment && profile.permissions?.includes('manage_attendance');
+        case 3: return isOwnDepartment && profile.permissions?.includes('add_newcomers');
+        case 4: return isOwnDepartment && profile.permissions?.includes('create_reports');
+        default: return false;
       }
-    };
-
-    checkAccessAndLoadData();
-  }, [profile]);
-
-  // Filter departments based on user permissions
-  const getFilteredDepartments = () => {
-    if (!profile) return [];
-
-    // Admin users can see all departments
-    if (profile.isAdmin || hasPermission(profile.permissions, 'admin_access')) {
-      return allDepartments;
     }
-
-    // Department leaders can only see their assigned departments
-    if (profile.assigned_departments && profile.assigned_departments.length > 0) {
-      return allDepartments.filter(dept => 
-        profile.assigned_departments?.includes(dept.name)
-      );
-    }
-
-    // Regular users with department access can see departments they are members of
-    return allDepartments.filter(dept => 
-      dept.members?.some(member => member.member_id === profile.id)
-    );
+    
+    return false;
   };
 
-  const loadData = async () => {
+  return (
+    <div className="space-y-6">
+      {/* Step Progress */}
+      <div className="flex justify-between mb-8 relative">
+        <div className="absolute top-4 left-0 right-0 h-0.5 bg-gray-200 -z-10"></div>
+        {steps.map((step) => (
+          <div key={step.number} className="text-center flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 transition-all duration-300 ${
+              currentStep >= step.number 
+                ? 'bg-blue-600 text-white shadow-lg' 
+                : 'bg-gray-300 text-gray-600'
+            }`}>
+              {step.number}
+            </div>
+            <div className={`text-sm font-medium ${
+              currentStep >= step.number ? 'text-blue-600' : 'text-gray-500'
+            }`}>
+              {step.title}
+            </div>
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
+              {step.description}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Current Step Content */}
+      <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 min-h-[400px]">
+        {currentStep === 1 && (
+          <DepartmentMeetingCreationStep 
+            department={department}
+            onMeetingCreated={() => {
+              onSuccess('Department meeting created successfully!');
+              setCurrentStep(2);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 2 && (
+          <DepartmentAttendanceStep 
+            department={department}
+            meetings={meetings}
+            selectedMeeting={selectedMeeting}
+            onMeetingSelect={setSelectedMeeting}
+            onAttendanceSaved={() => {
+              onSuccess('Attendance saved successfully!');
+              setCurrentStep(3);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 3 && (
+          <DepartmentNewcomerStep 
+            department={department}
+            selectedMeeting={selectedMeeting}
+            onNewcomerAdded={() => {
+              onSuccess('Newcomer added successfully!');
+              setCurrentStep(4);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 4 && (
+          <DepartmentReportStep 
+            department={department}
+            selectedMeeting={selectedMeeting}
+            onReportCreated={() => {
+              onSuccess('Report created successfully!');
+              onClose();
+            }}
+            onError={onError}
+          />
+        )}
+      </div>
+
+      {/* Navigation */}
+      <div className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-600">
+        <button 
+          onClick={() => setCurrentStep(prev => prev - 1)}
+          disabled={currentStep === 1}
+          className="px-6 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition-all duration-200 font-medium disabled:opacity-50"
+        >
+          Previous
+        </button>
+        
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+          >
+            Close
+          </button>
+          
+          <button 
+            onClick={() => setCurrentStep(prev => prev + 1)}
+            disabled={currentStep === 4 || !canAccessStep(currentStep + 1)}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Main Departments Component
+const Departments = () => {
+  const { profile } = useAuth();
+  
+  // State management
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Modal states
+  const [showMeetingsModal, setShowMeetingsModal] = useState(false);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  
+  // Data states
+  const [meetings, setMeetings] = useState<DepartmentMeeting[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [departmentMembers, setDepartmentMembers] = useState<Record<string, Member[]>>({});
+  const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
+
+  // Load departments on component mount
+  useEffect(() => {
+    loadDepartments();
+    loadAllMembers();
+  }, []);
+
+  const loadDepartments = async () => {
     try {
       setLoading(true);
-      setError(null);
       
-      await Promise.all([
-        fetchDepartments(),
-        fetchMembers()
-      ]);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      setError('Failed to load departments data');
-    } finally {
-      setLoading(false);
-      setInitialLoad(false);
-    }
-  };
-
-  const fetchDepartments = async () => {
-    try {
-      // @ts-ignore - Supabase types may be out of sync
-      const { data, error } = await db
+      // Simple query without complex relationships
+      const { data: departmentsData, error: departmentsError } = await supabase
         .from('departments')
-        .select(`
-          *,
-          leader:members!departments_leader_id_fkey(name, surname),
-          department_members(
-            *,
-            member:members(*)
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      
-      const departmentsData = (data || []) as any;
-      setAllDepartments(departmentsData);
-      
-      // Apply filtering based on user permissions
-      const filtered = getFilteredDepartments();
-      setDepartments(filtered);
-    } catch (error) {
-      console.error('Error fetching departments:', error);
-      throw error;
-    }
-  };
-
-  const fetchMembers = async () => {
-    try {
-      const { data, error } = await db
-        .from('members')
         .select('*')
         .order('name');
 
+      if (departmentsError) throw departmentsError;
+      
+      // Load member counts for each department
+      const departmentsWithMemberCounts = await Promise.all(
+        (departmentsData || []).map(async (department) => {
+          const { count, error: countError } = await supabase
+            .from('department_members')
+            .select('*', { count: 'exact', head: true })
+            .eq('department_id', department.id);
+
+          return {
+            ...department,
+            memberCount: count || 0
+          };
+        })
+      );
+
+      setDepartments(departmentsWithMemberCounts);
+    } catch (error: any) {
+      setError('Failed to load departments: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAllMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+      
       if (error) throw error;
       setMembers(data || []);
-    } catch (error) {
-      console.error('Error fetching members:', error);
-      throw error;
+    } catch (error: any) {
+      console.error('Failed to load members:', error);
     }
   };
 
-  const fetchDepartmentMembers = async (departmentId: string) => {
+  const loadMeetings = async (departmentId: string) => {
     try {
-      const { data, error } = await db
-        .from('department_members')
-        .select(`
-          *,
-          member:members(*)
-        `)
-        .eq('department_id', departmentId)
-        .order('role', { ascending: false });
-
-      if (error) throw error;
-      
-      setDepartments(prev => prev.map(dept => 
-        dept.id === departmentId ? { ...dept, members: (data || []) as any } : dept
-      ));
-    } catch (error) {
-      console.error('Error fetching department members:', error);
-    }
-  };
-
-  const fetchDepartmentMeetings = async (departmentId: string) => {
-    try {
-      // @ts-ignore - Supabase types may be out of sync
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('department_meetings')
         .select('*')
         .eq('department_id', departmentId)
         .order('meeting_date', { ascending: false });
 
       if (error) throw error;
-      setMeetings((data || []) as any);
-    } catch (error) {
-      console.error('Error fetching meetings:', error);
+      setMeetings(data || []);
+    } catch (error: any) {
+      setError('Failed to load meetings: ' + error.message);
     }
   };
 
-  const fetchMeetingAttendance = async (meetingId: string) => {
+  const loadAttendanceForMeeting = async (meetingId: string) => {
     try {
-      // @ts-ignore - Supabase types may be out of sync
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('department_attendance')
         .select(`
           *,
-          member:members(*)
+          members:member_id (
+            id,
+            name,
+            surname,
+            email,
+            phone
+          )
         `)
         .eq('meeting_id', meetingId);
 
       if (error) throw error;
-      setAttendance((data || []) as any);
-    } catch (error) {
-      console.error('Error fetching attendance:', error);
-    }
-  };
-
-  // Check if user can manage department
-  const canManageDepartment = (department: Department) => {
-    if (!profile) return false;
-    
-    // Admin users can manage all departments
-    if (profile.isAdmin || hasPermission(profile.permissions, 'admin_access')) {
-      return true;
-    }
-
-    // Department leaders can manage their assigned departments
-    if (profile.assigned_departments && profile.assigned_departments.includes(department.name)) {
-      return true;
-    }
-
-    // Users can manage departments they are leaders of
-    if (department.members?.some(member => 
-      member.member_id === profile.id && member.role === 'leader'
-    )) {
-      return true;
-    }
-
-    return false;
-  };
-
-  // Check if user can view department
-  const canViewDepartment = (department: Department) => {
-    if (!profile) return false;
-    
-    // Admin users can view all departments
-    if (profile.isAdmin || hasPermission(profile.permissions, 'admin_access')) {
-      return true;
-    }
-
-    // Department leaders can view their assigned departments
-    if (profile.assigned_departments && profile.assigned_departments.includes(department.name)) {
-      return true;
-    }
-
-    // Users can view departments they are members of
-    if (department.members?.some(member => member.member_id === profile.id)) {
-      return true;
-    }
-
-    return false;
-  };
-
-  // Create new department
-  const handleCreateDepartment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Check permission
-    if (!profile?.isAdmin && !hasPermission(profile?.permissions, 'manage_departments')) {
-      setError('You do not have permission to create departments');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      
-      if (!departmentForm.name.trim()) {
-        setError('Department name is required');
-        return;
-      }
-
-      const departmentData = {
-        name: departmentForm.name.trim(),
-        description: departmentForm.description.trim() || null,
-        meeting_day: departmentForm.meeting_day || null,
-        meeting_time: departmentForm.meeting_time || null,
-        location: departmentForm.location.trim() || null,
-        leader_id: departmentForm.leader_id || null
-      };
-
-      const { error } = await db
-        .from('departments')
-        .insert([departmentData])
-        .select(`
-          *,
-          leader:members!departments_leader_id_fkey(name, surname)
-        `)
-        .single();
-
-      if (error) throw error;
-
-      // Refresh departments list
-      await fetchDepartments();
-      setShowForm(false);
-      setDepartmentForm({
-        name: '',
-        description: '',
-        meeting_day: '',
-        meeting_time: '',
-        location: '',
-        leader_id: ''
-      });
+      setAttendanceRecords(data || []);
     } catch (error: any) {
-      console.error('Error creating department:', error);
-      setError(`Error creating department: ${error.message}`);
-    } finally {
-      setLoading(false);
+      setError('Failed to load attendance: ' + error.message);
     }
   };
 
-  // Add members to department
-  const handleAddMembersToDepartment = async (departmentId: string, memberIds: string[], role: string = 'member') => {
-    if (!selectedDepartment || !canManageDepartment(selectedDepartment)) {
-      setError('You do not have permission to manage this department');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const memberAssignments = memberIds.map(memberId => ({
-        department_id: departmentId,
-        member_id: memberId,
-        role: role
-      }));
-
-      const { error } = await db
-        .from('department_members')
-        .insert(memberAssignments);
-
-      if (error) throw error;
-
-      await fetchDepartmentMembers(departmentId);
-      await fetchMembers();
-      setSelectedMembers([]);
-      setSearchTerm('');
-    } catch (error) {
-      console.error('Error adding members to department:', error);
-      setError('Error adding members to department');
-    } finally {
-      setLoading(false);
-    }
+  const openReportModal = async (meeting: DepartmentMeeting) => {
+    setSelectedMeetingForReport(meeting);
+    await loadAttendanceForMeeting(meeting.id);
+    setShowReportModal(true);
   };
 
-  // Remove member from department
-  const handleRemoveMemberFromDepartment = async (departmentMemberId: string) => {
-    if (!selectedDepartment || !canManageDepartment(selectedDepartment)) {
-      setError('You do not have permission to manage this department');
-      return;
-    }
-
-    try {
-      const { error } = await db
-        .from('department_members')
-        .delete()
-        .eq('id', departmentMemberId);
-
-      if (error) throw error;
-
-      if (selectedDepartment) {
-        await fetchDepartmentMembers(selectedDepartment.id);
-      }
-    } catch (error) {
-      console.error('Error removing member from department:', error);
-      setError('Error removing member from department');
-    }
+  const handlePrintReport = () => {
+    window.print();
   };
 
-  // Update member role
-  const handleUpdateMemberRole = async (departmentMemberId: string, newRole: string) => {
-    if (!selectedDepartment || !canManageDepartment(selectedDepartment)) {
-      setError('You do not have permission to manage this department');
-      return;
-    }
-
-    try {
-      const { error } = await db
-        .from('department_members')
-        .update({ role: newRole })
-        .eq('id', departmentMemberId);
-
-      if (error) throw error;
-
-      if (selectedDepartment) {
-        await fetchDepartmentMembers(selectedDepartment.id);
-      }
-    } catch (error) {
-      console.error('Error updating member role:', error);
-      setError('Error updating member role');
-    }
-  };
-
-  // Meeting management
-  const handleCreateMeeting = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDepartment || !canManageDepartment(selectedDepartment)) {
-      setError('You do not have permission to manage meetings for this department');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      
-      if (!meetingForm.meeting_date || !meetingForm.meeting_time || !meetingForm.location) {
-        setError('Please fill in all required fields');
-        return;
-      }
-
-      const { data, error } = await db
-        .from('department_meetings')
-        .insert([{
-          department_id: selectedDepartment.id,
-          meeting_date: meetingForm.meeting_date,
-          meeting_time: meetingForm.meeting_time,
-          location: meetingForm.location,
-          topic: meetingForm.topic,
-          notes: meetingForm.notes,
-          status: 'scheduled'
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setMeetings(prev => [data, ...prev]);
-      setShowMeetingForm(false);
-      setMeetingForm({
-        meeting_date: '',
-        meeting_time: '',
-        location: '',
-        topic: '',
-        notes: ''
-      });
-    } catch (error) {
-      console.error('Error creating meeting:', error);
-      setError('Error creating meeting');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTakeAttendance = async (meeting: DepartmentMeeting) => {
-    if (!canManageDepartment(selectedDepartment!)) {
-      setError('You do not have permission to take attendance for this department');
-      return;
-    }
-
-    setSelectedMeeting(meeting);
-    await fetchMeetingAttendance(meeting.id);
+  // Permission functions based on AuthContext
+  const canViewDepartment = (departmentId: string) => {
+    if (!profile) return false;
     
-    const currentDepartment = departments.find(d => d.id === meeting.department_id);
-    const departmentMembers = currentDepartment?.members || [];
-    const initialAttendance: {[key: string]: 'present' | 'absent' | 'late'} = {};
-    const initialNotes: {[key: string]: string} = {};
-
-    departmentMembers.forEach(deptMember => {
-      const existing = attendance.find(a => a.member_id === deptMember.member_id);
-      initialAttendance[deptMember.member_id] = existing?.status || 'absent';
-      initialNotes[deptMember.member_id] = existing?.notes || '';
-    });
-
-    setAttendanceData(initialAttendance);
-    setAttendanceNotes(initialNotes);
-    setShowAttendanceModal(true);
-  };
-
-  const handleSaveAttendance = async () => {
-    if (!selectedMeeting || !canManageDepartment(selectedDepartment!)) {
-      setError('You do not have permission to save attendance for this department');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const currentDepartment = departments.find(d => d.id === selectedMeeting.department_id);
-      const departmentMembers = currentDepartment?.members || [];
-
-      const attendanceRecords = departmentMembers.map(deptMember => ({
-        meeting_id: selectedMeeting.id,
-        member_id: deptMember.member_id,
-        status: attendanceData[deptMember.member_id] || 'absent',
-        notes: attendanceNotes[deptMember.member_id] || '',
-        arrival_time: attendanceData[deptMember.member_id] === 'late' ? new Date().toTimeString().split(' ')[0] : null
-      }));
-
-      const { error: deleteError } = await db
-        .from('department_attendance')
-        .delete()
-        .eq('meeting_id', selectedMeeting.id);
-
-      if (deleteError) throw deleteError;
-
-      const { error: insertError } = await db
-        .from('department_attendance')
-        .insert(attendanceRecords);
-
-      if (insertError) throw insertError;
-
-      setShowAttendanceModal(false);
-    } catch (error) {
-      console.error('Error saving attendance:', error);
-      setError('Error saving attendance');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCloseMeeting = async () => {
-    if (!selectedMeeting || !canManageDepartment(selectedDepartment!)) {
-      setError('You do not have permission to close meetings for this department');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const { error } = await db
-        .from('department_meetings')
-        .update({ status: 'completed' })
-        .eq('id', selectedMeeting.id);
-
-      if (error) throw error;
-
-      await fetchDepartmentMeetings(selectedMeeting.department_id);
-      setShowReportModal(true);
-    } catch (error) {
-      console.error('Error closing meeting:', error);
-      setError('Error closing meeting');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmitReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedMeeting || !canManageDepartment(selectedDepartment!)) {
-      setError('You do not have permission to submit reports for this department');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const { error } = await db
-        .from('department_reports')
-        .insert([{
-          meeting_id: selectedMeeting.id,
-          report_text: reportForm.report_text,
-          decisions_made: reportForm.decisions_made,
-          action_items: reportForm.action_items,
-          next_meeting_date: reportForm.next_meeting_date || null,
-          created_by: 'system'
-        }]);
-
-      if (error) throw error;
-
-      setShowReportModal(false);
-      setReportForm({
-        report_text: '',
-        decisions_made: '',
-        action_items: '',
-        next_meeting_date: ''
-      });
-    } catch (error) {
-      console.error('Error submitting report:', error);
-      setError('Error submitting report');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getInitials = (name: string, surname: string) => {
-    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
-  };
-
-  const getAttendanceStats = (meetingId: string) => {
-    const meetingAttendance = attendance.filter(a => a.meeting_id === meetingId);
-    const present = meetingAttendance.filter(a => a.status === 'present').length;
-    const absent = meetingAttendance.filter(a => a.status === 'absent').length;
-    const late = meetingAttendance.filter(a => a.status === 'late').length;
+    // Admin can view all departments
+    if (profile.isAdmin) return true;
     
-    return { present, absent, late, total: meetingAttendance.length };
+    // Department leaders can view assigned departments and their own department
+    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
+      return profile.assigned_departments?.includes(departmentId) || 
+             profile.assigned_departments?.includes('all_departments') ||
+             profile.department_id === departmentId;
+    }
+    
+    // Regular members can only view their own department
+    if (profile.role === 'member') {
+      return profile.department_id === departmentId;
+    }
+    
+    return false;
   };
 
-  const availableMembers = members.filter(member => 
-    !selectedDepartment?.members?.some(m => m.member_id === member.id) &&
-    (member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     member.surname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     member.email?.toLowerCase().includes(searchTerm.toLowerCase()))
+  const canManageDepartment = (departmentId: string) => {
+    if (!profile) return false;
+    
+    // Admin can manage all departments
+    if (profile.isAdmin) return true;
+    
+    // Department leaders can manage assigned departments and their own department
+    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
+      return profile.assigned_departments?.includes(departmentId) || 
+             profile.assigned_departments?.includes('all_departments') ||
+             profile.department_id === departmentId;
+    }
+    
+    // Regular members need specific permissions for their own department
+    if (profile.role === 'member') {
+      const isOwnDepartment = profile.department_id === departmentId;
+      return isOwnDepartment && profile.permissions?.includes('manage_department');
+    }
+    
+    return false;
+  };
+
+  const hasPermission = (permission: string) => {
+    if (!profile) return false;
+    return profile.permissions?.includes(permission) || profile.isAdmin;
+  };
+
+  const openMeetingsModal = async (department: Department) => {
+    if (!canViewDepartment(department.id)) {
+      setError('You do not have permission to view this department');
+      return;
+    }
+
+    setSelectedDepartment(department);
+    setShowMeetingsModal(true);
+    await loadMeetings(department.id);
+  };
+
+  const openWorkflowModal = async (department: Department) => {
+    if (!canManageDepartment(department.id)) {
+      setError('You do not have permission to manage this department');
+      return;
+    }
+
+    setSelectedDepartment(department);
+    setShowWorkflowModal(true);
+    await loadMeetings(department.id);
+  };
+
+  const closeAllModals = () => {
+    setShowMeetingsModal(false);
+    setShowWorkflowModal(false);
+    setShowReportModal(false);
+    setSelectedDepartment(null);
+    setSelectedMeetingForReport(null);
+    setAttendanceRecords([]);
+  };
+
+  const filteredDepartments = departments.filter(department =>
+    canViewDepartment(department.id) && (
+      department.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      department.location?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
 
-  // Show loading while checking permissions
-  if (initialLoad) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Checking permissions...</p>
-        </div>
-      </div>
-    );
-  }
+  // Get user's display role
+  const getUserRoleDisplay = () => {
+    if (!profile) return 'Guest';
+    
+    if (profile.isAdmin) return 'Administrator';
+    if (profile.role === 'department_leader') return 'Department Leader';
+    if (profile.role === 'group_leader') return 'Group Leader';
+    return 'Member';
+  };
 
-  // Show access denied if user doesn't have permission to access departments
-  if (hasAccess === false) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="h-8 w-8 text-red-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-          <p className="text-gray-600 mb-4">
-            You don't have permission to access the departments section. Please contact an administrator.
-          </p>
-          <p className="text-sm text-gray-500">
-            Your role: {profile?.role || 'member'}
-            {profile?.assigned_departments && profile.assigned_departments.length > 0 && (
-              <span> • Assigned to {profile.assigned_departments.length} department(s)</span>
-            )}
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Calculate attendance statistics
+  const getAttendanceStats = () => {
+    const attended = attendanceRecords.filter(r => r.status === 'present').length;
+    const absent = attendanceRecords.filter(r => r.status === 'absent').length;
+    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+    const total = attendanceRecords.length;
+
+    return { attended, absent, absentWithReason, total };
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
@@ -732,32 +467,33 @@ const Departments = () => {
               Church Departments
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              {profile?.isAdmin 
-                ? 'Manage all church departments, meetings, and member assignments' 
-                : `View and manage departments you are assigned to - ${profile?.role} access`
-              }
+              {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
             </p>
-            {!profile?.isAdmin && (
-              <p className="text-sm text-gray-500 mt-1">
-                You can only view and manage departments you are assigned to as a leader or member
-              </p>
-            )}
           </div>
-          {(profile?.isAdmin || hasPermission(profile?.permissions, 'manage_departments')) && (
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-            >
-              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-              {showForm ? 'Cancel' : 'Create Department'}
-            </button>
-          )}
         </div>
 
+        {/* Search Bar */}
+        <div className="mb-6">
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input
+              type="text"
+              placeholder="Search departments..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+
+        {/* Error and Success Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
-              <p className="text-red-700 font-medium">{error}</p>
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+                <p className="text-red-700 font-medium">{error}</p>
+              </div>
               <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
                 <X className="h-4 w-4" />
               </button>
@@ -765,899 +501,545 @@ const Departments = () => {
           </div>
         )}
 
-        {/* Create Department Form */}
-        {showForm && (profile?.isAdmin || hasPermission(profile?.permissions, 'manage_departments')) && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Department</h2>
-            <form onSubmit={handleCreateDepartment} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Department Name *</label>
-                  <input
-                    type="text"
-                    value={departmentForm.name}
-                    onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter department name"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
-                  <input
-                    type="text"
-                    value={departmentForm.location}
-                    onChange={(e) => setDepartmentForm({ ...departmentForm, location: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Meeting location"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Day</label>
-                  <select
-                    value={departmentForm.meeting_day}
-                    onChange={(e) => setDepartmentForm({ ...departmentForm, meeting_day: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select day</option>
-                    {daysOfWeek.map(day => (
-                      <option key={day} value={day}>{day}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time</label>
-                  <input
-                    type="time"
-                    value={departmentForm.meeting_time}
-                    onChange={(e) => setDepartmentForm({ ...departmentForm, meeting_time: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
-                  <textarea
-                    value={departmentForm.description}
-                    onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Department description and purpose"
-                    rows={3}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Department Leader (Optional)</label>
-                  <select
-                    value={departmentForm.leader_id}
-                    onChange={(e) => setDepartmentForm({ ...departmentForm, leader_id: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select leader</option>
-                    {members.map(member => (
-                      <option key={member.id} value={member.id}>
-                        {member.name} {member.surname}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                <p className="text-green-700 font-medium">{success}</p>
               </div>
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus className="h-5 w-5" />
-                  {loading ? 'Creating...' : 'Create Department'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* Department Selection and Tabs */}
-        {selectedDepartment && canViewDepartment(selectedDepartment) && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedDepartment.name}</h2>
-                <p className="text-gray-600 dark:text-gray-400">
-                  Leader: {selectedDepartment.leader ? `${selectedDepartment.leader.name} ${selectedDepartment.leader.surname}` : 'Not assigned'}
-                  {selectedDepartment.meeting_day && ` • Meets on ${selectedDepartment.meeting_day}s`}
-                  {selectedDepartment.location && ` • ${selectedDepartment.location}`}
-                </p>
-                {!canManageDepartment(selectedDepartment) && (
-                  <p className="text-sm text-yellow-600 mt-1">
-                    <Shield className="h-3 w-3 inline mr-1" />
-                    View-only access
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={() => setSelectedDepartment(null)}
-                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                Back to Departments
+              <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700">
+                <X className="h-4 w-4" />
               </button>
             </div>
-
-            {/* Tabs */}
-            <div className="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-              {(['departments', 'meetings', 'members'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                    activeTab === tab
-                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                >
-                  {tab === 'departments' && 'Department Info'}
-                  {tab === 'meetings' && 'Meetings'}
-                  {tab === 'members' && 'Members'}
-                </button>
-              ))}
-            </div>
           </div>
         )}
 
-        {/* Department Details View */}
-        {selectedDepartment && canViewDepartment(selectedDepartment) && activeTab === 'departments' && (
-          <div className="space-y-6">
-            {/* Department Information */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Department Information</h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Department Name</label>
-                    <p className="text-gray-900 dark:text-white">{selectedDepartment.name}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
-                    <p className="text-gray-900 dark:text-white">{selectedDepartment.description || 'No description'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Day</label>
-                    <p className="text-gray-900 dark:text-white">{selectedDepartment.meeting_day || 'Not set'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Meeting Time</label>
-                    <p className="text-gray-900 dark:text-white">{selectedDepartment.meeting_time || 'Not set'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                    <p className="text-gray-900 dark:text-white">{selectedDepartment.location || 'Not set'}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h3>
-                <div className="space-y-3">
-                  {canManageDepartment(selectedDepartment) && (
-                    <>
-                      <button
-                        onClick={() => setShowMeetingForm(true)}
-                        className="w-full flex items-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Schedule Meeting
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('members')}
-                        className="w-full flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                      >
-                        <Users className="h-4 w-4" />
-                        Manage Members
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => setActiveTab('meetings')}
-                    className="w-full flex items-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-                  >
-                    <Calendar className="h-4 w-4" />
-                    View Meetings
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Meetings */}
-            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Meetings</h3>
-                <button
-                  onClick={() => setActiveTab('meetings')}
-                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                >
-                  View All
-                </button>
-              </div>
-              {meetings.length === 0 ? (
-                <div className="text-center py-8">
-                  <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 dark:text-gray-400">No meetings scheduled yet</p>
-                  {canManageDepartment(selectedDepartment) && (
-                    <button
-                      onClick={() => setShowMeetingForm(true)}
-                      className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                    >
-                      Schedule First Meeting
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {meetings.slice(0, 3).map((meeting) => {
-                    const stats = getAttendanceStats(meeting.id);
-                    return (
-                      <div key={meeting.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
-                          </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                            {meeting.topic} • {meeting.location}
-                          </div>
-                          {stats.total > 0 && (
-                            <div className="flex gap-4 mt-2 text-xs">
-                              <span className="flex items-center gap-1 text-green-600">
-                                <CheckCircle className="h-3 w-3" />
-                                {stats.present} Present
-                              </span>
-                              <span className="flex items-center gap-1 text-red-600">
-                                <XCircle className="h-3 w-3" />
-                                {stats.absent} Absent
-                              </span>
-                              <span className="flex items-center gap-1 text-yellow-600">
-                                <Clock4 className="h-3 w-3" />
-                                {stats.late} Late
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          {canManageDepartment(selectedDepartment) && (
-                            <>
-                              <button
-                                onClick={() => handleTakeAttendance(meeting)}
-                                className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
-                              >
-                                Attendance
-                              </button>
-                              {meeting.status === 'scheduled' && (
-                                <button
-                                  onClick={() => {
-                                    setSelectedMeeting(meeting);
-                                    handleCloseMeeting();
-                                  }}
-                                  className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
-                                >
-                                  Close
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+        {/* Departments Grid */}
+        {!profile ? (
+          <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+              Please Log In
+            </h3>
+            <p className="text-gray-500 dark:text-gray-500 mb-6">
+              You need to be logged in to view departments
+            </p>
           </div>
-        )}
-
-        {/* Meetings Tab */}
-        {selectedDepartment && canViewDepartment(selectedDepartment) && activeTab === 'meetings' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Meetings</h3>
-              {canManageDepartment(selectedDepartment) && (
-                <button
-                  onClick={() => setShowMeetingForm(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Schedule Meeting
-                </button>
-              )}
-            </div>
-
-            {meetings.length === 0 ? (
-              <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 rounded-2xl">
-                <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 dark:text-gray-400 mb-4">No meetings scheduled yet</p>
-                {canManageDepartment(selectedDepartment) && (
-                  <button
-                    onClick={() => setShowMeetingForm(true)}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Schedule First Meeting
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {meetings.map((meeting) => {
-                  const stats = getAttendanceStats(meeting.id);
-                  return (
-                    <div key={meeting.id} className="bg-white/70 dark:bg-gray-800/70 border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                      <div className="flex flex-col lg:flex-row justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
-                              {new Date(meeting.meeting_date).toLocaleDateString()} • {meeting.meeting_time}
-                            </h4>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              meeting.status === 'scheduled' 
-                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                : meeting.status === 'completed'
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                            }`}>
-                              {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
-                            </span>
-                          </div>
-                          <p className="text-gray-600 dark:text-gray-400 mb-2">{meeting.topic || 'No topic specified'}</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-500 mb-3">Location: {meeting.location}</p>
-                          
-                          {stats.total > 0 && (
-                            <div className="flex gap-4 text-sm">
-                              <span className="flex items-center gap-1 text-green-600">
-                                <CheckCircle className="h-4 w-4" />
-                                {stats.present} Present
-                              </span>
-                              <span className="flex items-center gap-1 text-red-600">
-                                <XCircle className="h-4 w-4" />
-                                {stats.absent} Absent
-                              </span>
-                              <span className="flex items-center gap-1 text-yellow-600">
-                                <Clock4 className="h-4 w-4" />
-                                {stats.late} Late
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          {canManageDepartment(selectedDepartment) && (
-                            <>
-                              <button
-                                onClick={() => handleTakeAttendance(meeting)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                              >
-                                Take Attendance
-                              </button>
-                              {meeting.status === 'scheduled' && (
-                                <button
-                                  onClick={() => {
-                                    setSelectedMeeting(meeting);
-                                    handleCloseMeeting();
-                                  }}
-                                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                                >
-                                  Close Meeting
-                                </button>
-                              )}
-                            </>
-                          )}
-                          {meeting.status === 'completed' && (
-                            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm text-center">
-                              Completed
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {meeting.notes && (
-                        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                          <p className="text-sm text-gray-600 dark:text-gray-400">{meeting.notes}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Members Management Tab */}
-        {selectedDepartment && canViewDepartment(selectedDepartment) && activeTab === 'members' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Department Members ({selectedDepartment.members?.length || 0})
-              </h3>
-            </div>
-
-            {/* Add Members Section - Only show if user can manage department */}
-            {canManageDepartment(selectedDepartment) && (
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Members to Department</h4>
-                
-                <div className="space-y-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search members to add..."
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  {/* Available Members */}
-                  {availableMembers.length === 0 ? (
-                    <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                      {searchTerm ? 'No members found matching your search' : 'No available members to add'}
-                    </div>
-                  ) : (
-                    <div className="border border-gray-300 dark:border-gray-600 rounded-xl max-h-60 overflow-y-auto">
-                      {availableMembers.map((member) => (
-                        <div key={member.id} className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-600 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={selectedMembers.includes(member.id)}
-                            onChange={() => {
-                              if (selectedMembers.includes(member.id)) {
-                                setSelectedMembers(selectedMembers.filter(id => id !== member.id));
-                              } else {
-                                setSelectedMembers([...selectedMembers, member.id]);
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                          />
-                          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-                            {getInitials(member.name, member.surname)}
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900 dark:text-white">
-                              {member.name} {member.surname}
-                            </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
-                              {member.email} • {member.phone}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {selectedMembers.length > 0 && (
-                    <div className="flex gap-3">
-                      <select
-                        onChange={(e) => {
-                          const role = e.target.value;
-                          handleAddMembersToDepartment(selectedDepartment.id, selectedMembers, role);
-                        }}
-                        className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      >
-                        <option value="member">Add as Member</option>
-                        <option value="leader">Add as Leader</option>
-                        <option value="assistant">Add as Assistant</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Current Members */}
-            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-              <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Current Members</h4>
-              
-              {!selectedDepartment.members || selectedDepartment.members.length === 0 ? (
-                <div className="text-center py-8">
-                  <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 dark:text-gray-400">No members in this department yet</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {selectedDepartment.members.map((deptMember) => (
-                    <div key={deptMember.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                          {getInitials(deptMember.member?.name || '', deptMember.member?.surname || '')}
-                        </div>
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {deptMember.member?.name} {deptMember.member?.surname}
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {deptMember.member?.phone || 'No phone'}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          deptMember.role === 'leader' 
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : deptMember.role === 'assistant'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {deptMember.role}
-                        </span>
-                        {canManageDepartment(selectedDepartment) && (
-                          <>
-                            <select
-                              value={deptMember.role}
-                              onChange={(e) => handleUpdateMemberRole(deptMember.id, e.target.value)}
-                              className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700"
-                            >
-                              {memberRoles.map(role => (
-                                <option key={role} value={role}>
-                                  {role.charAt(0).toUpperCase() + role.slice(1)}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              onClick={() => handleRemoveMemberFromDepartment(deptMember.id)}
-                              className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                              title="Remove from department"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Departments List (when no department is selected) */}
-        {!selectedDepartment && (
+        ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {loading && departments.length === 0 ? (
+            {loading && filteredDepartments.length === 0 ? (
               <div className="col-span-full text-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                 <p className="mt-4 text-gray-600 dark:text-gray-400">Loading departments...</p>
               </div>
-            ) : departments.length === 0 ? (
+            ) : filteredDepartments.length === 0 ? (
               <div className="col-span-full text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                  {profile?.isAdmin ? 'No Departments Yet' : 'No Access to Departments'}
+                  No Accessible Departments
                 </h3>
                 <p className="text-gray-500 dark:text-gray-500 mb-6">
-                  {profile?.isAdmin 
-                    ? 'Create your first department to get started' 
-                    : 'You are not assigned to any departments. Please contact an administrator.'
-                  }
+                  {searchTerm ? 'No departments match your search' : 'You do not have access to any departments'}
                 </p>
-                {profile?.isAdmin && (
-                  <button
-                    onClick={() => setShowForm(true)}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium"
-                  >
-                    Create First Department
-                  </button>
-                )}
               </div>
             ) : (
-              departments.map((department) => (
-                <div
-                  key={department.id}
-                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02] cursor-pointer group"
-                  onClick={() => setSelectedDepartment(department)}
-                >
-                  <div className="flex items-start gap-4 mb-4">
-                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-200">
-                      <Users className="h-7 w-7 text-white" />
+              filteredDepartments.map((department: any) => {
+                const canManage = canManageDepartment(department.id);
+                const canView = canViewDepartment(department.id);
+                
+                return (
+                  <div
+                    key={department.id}
+                    className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+                  >
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+                        <Users className="h-7 w-7 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{department.name}</h3>
+                        {canManage ? (
+                          <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 rounded-full text-xs font-medium mb-2">
+                            <Shield className="h-3 w-3 mr-1" />
+                            Can Manage
+                          </span>
+                        ) : canView ? (
+                          <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-full text-xs font-medium mb-2">
+                            <Shield className="h-3 w-3 mr-1" />
+                            View Only
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{department.name}</h3>
-                      {department.location && (
-                        <span className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium mb-2">
-                          {department.location}
+
+                    <div className="space-y-3 mb-4">
+                      <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                        <User className="h-4 w-4" />
+                        <span className="text-sm">
+                          Leader: {department.leader_id ? 'Assigned' : 'Not assigned'}
                         </span>
-                      )}
-                      {department.meeting_day && (
-                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
-                          <Calendar className="h-4 w-4" />
-                          Meets on {department.meeting_day}s
-                          {department.meeting_time && ` at ${department.meeting_time}`}
+                      </div>
+                      
+                      {department.location && (
+                        <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                          <MapPin className="h-4 w-4" />
+                          <span className="text-sm">{department.location}</span>
                         </div>
                       )}
+                      
+                      {(department.meeting_day || department.meeting_time) && (
+                        <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                          <Calendar className="h-4 w-4" />
+                          <span className="text-sm">
+                            {department.meeting_day} {department.meeting_time && `at ${department.meeting_time}`}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {department.description && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                          {department.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        {department.memberCount || 0} member{(department.memberCount || 0) !== 1 ? 's' : ''}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => openMeetingsModal(department)}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                        >
+                          View Meetings
+                        </button>
+                        {canManage && (
+                          <button
+                            onClick={() => openWorkflowModal(department)}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                          >
+                            Manage Department
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-
-                  <div className="space-y-3 mb-4">
-                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
-                      <User className="h-4 w-4" />
-                      <span className="text-sm">
-                        Leader: {department.leader ? `${department.leader.name} ${department.leader.surname}` : 'Not assigned'}
-                      </span>
-                    </div>
-                    {department.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                        {department.description}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-600">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {department.members?.length || 0} members
-                    </span>
-                    {!canManageDepartment(department) && (
-                      <span className="text-xs text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full">
-                        View Only
-                      </span>
-                    )}
-                    <button className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium text-sm">
-                      {canManageDepartment(department) ? 'Manage Department' : 'View Department'}
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
 
-        {/* Meeting Form Modal */}
-        {showMeetingForm && selectedDepartment && canManageDepartment(selectedDepartment) && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Schedule New Meeting</h3>
-                <button
-                  onClick={() => setShowMeetingForm(false)}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <form onSubmit={handleCreateMeeting} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Date *</label>
-                    <input
-                      type="date"
-                      value={meetingForm.meeting_date}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, meeting_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Time *</label>
-                    <input
-                      type="time"
-                      value={meetingForm.meeting_time}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, meeting_time: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location *</label>
-                  <input
-                    type="text"
-                    value={meetingForm.location}
-                    onChange={(e) => setMeetingForm({ ...meetingForm, location: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter meeting location"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Topic/Agenda</label>
-                  <input
-                    type="text"
-                    value={meetingForm.topic}
-                    onChange={(e) => setMeetingForm({ ...meetingForm, topic: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter meeting topic or agenda"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Notes</label>
-                  <textarea
-                    value={meetingForm.notes}
-                    onChange={(e) => setMeetingForm({ ...meetingForm, notes: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Additional notes for the meeting"
-                    rows={3}
-                  />
-                </div>
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
-                  >
-                    {loading ? 'Scheduling...' : 'Schedule Meeting'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowMeetingForm(false)}
-                    className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Attendance Modal */}
-        {showAttendanceModal && selectedMeeting && selectedDepartment && canManageDepartment(selectedDepartment) && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        {/* Meetings Modal */}
+        {showMeetingsModal && selectedDepartment && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  Take Attendance - {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                  {selectedDepartment.name} - Meetings
                 </h3>
                 <button
-                  onClick={() => setShowAttendanceModal(false)}
+                  onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              
-              <div className="space-y-4 mb-6">
-                {selectedDepartment.members?.map((deptMember) => (
-                  <div key={deptMember.member_id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {getInitials(deptMember.member?.name || '', deptMember.member?.surname || '')}
-                      </div>
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {deptMember.member?.name} {deptMember.member?.surname}
-                        </div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                          {deptMember.member?.phone || 'No phone'} • {deptMember.role}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-4">
-                      <select
-                        value={attendanceData[deptMember.member_id] || 'absent'}
-                        onChange={(e) => setAttendanceData({
-                          ...attendanceData,
-                          [deptMember.member_id]: e.target.value as 'present' | 'absent' | 'late'
-                        })}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="present">Present</option>
-                        <option value="absent">Absent</option>
-                        <option value="late">Late</option>
-                      </select>
-                      
-                      <input
-                        type="text"
-                        placeholder="Notes..."
-                        value={attendanceNotes[deptMember.member_id] || ''}
-                        onChange={(e) => setAttendanceNotes({
-                          ...attendanceNotes,
-                          [deptMember.member_id]: e.target.value
-                        })}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white w-48 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
 
-              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-600">
-                <button
-                  onClick={handleSaveAttendance}
-                  disabled={loading}
-                  className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 font-medium"
-                >
-                  {loading ? 'Saving...' : 'Save Attendance'}
-                </button>
-                <button
-                  onClick={() => setShowAttendanceModal(false)}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  Cancel
-                </button>
+              <div className="space-y-4">
+                {meetings.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+                    <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600 dark:text-gray-400">No meetings scheduled</p>
+                  </div>
+                ) : (
+                  meetings.map((meeting) => (
+                    <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {new Date(meeting.meeting_date).toLocaleDateString()}
+                            {meeting.meeting_time && ` at ${meeting.meeting_time}`}
+                          </div>
+                          {meeting.topic && (
+                            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                              Topic: {meeting.topic}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            meeting.status === 'completed' 
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : meeting.status === 'cancelled'
+                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                          }`}>
+                            {meeting.status}
+                          </span>
+                          {meeting.status === 'completed' && (
+                            <button
+                              onClick={() => openReportModal(meeting)}
+                              className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
+                            >
+                              <Printer className="h-3 w-3" />
+                              View Report
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Report Modal */}
-        {showReportModal && selectedMeeting && canManageDepartment(selectedDepartment!) && (
+        {/* Report Modal with Print Feature */}
+        {showReportModal && selectedMeetingForReport && selectedDepartment && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none print:dark:bg-white">
+              <div className="flex justify-between items-center mb-6 print:mb-8">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white print:text-black print:text-3xl">
+                  Department Meeting Report
+                </h3>
+                <div className="flex gap-2 print:hidden">
+                  <button
+                    onClick={handlePrintReport}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print Report
+                  </button>
+                  <button
+                    onClick={closeAllModals}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Print Header */}
+              <div className="mb-8 pb-6 border-b-2 border-gray-300 print:border-black">
+                <div className="text-center mb-4">
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white print:text-black mb-2">
+                    {selectedDepartment.name}
+                  </h1>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 print:text-black">
+                    Department Meeting Attendance Report
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Date</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Time</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {selectedMeetingForReport.meeting_time || 'Not specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Location</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {selectedMeetingForReport.location || selectedDepartment.location || 'Not specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Topic</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {selectedMeetingForReport.topic || 'Not specified'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Attendance Statistics */}
+              <div className="mb-8">
+                <h4 className="text-xl font-bold text-gray-900 dark:text-white print:text-black mb-4">
+                  Attendance Summary
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 print:bg-blue-50 border border-blue-200 dark:border-blue-800 print:border-blue-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-600 dark:text-blue-400 print:text-blue-700 font-medium">Total Members</p>
+                        <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 print:text-blue-900">
+                          {getAttendanceStats().total}
+                        </p>
+                      </div>
+                      <Users className="h-10 w-10 text-blue-400 dark:text-blue-500 print:text-blue-600" />
+                    </div>
+                  </div>
+
+                  <div className="bg-green-50 dark:bg-green-900/20 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-600 dark:text-green-400 print:text-green-700 font-medium">Attended</p>
+                        <p className="text-3xl font-bold text-green-700 dark:text-green-300 print:text-green-900">
+                          {getAttendanceStats().attended}
+                        </p>
+                      </div>
+                      <CheckCircle className="h-10 w-10 text-green-400 dark:text-green-500 print:text-green-600" />
+                    </div>
+                    <p className="text-xs text-green-600 dark:text-green-400 print:text-green-700 mt-2">
+                      {getAttendanceStats().total > 0 
+                        ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%`
+                        : '0%'}
+                    </p>
+                  </div>
+
+                  <div className="bg-red-50 dark:bg-red-900/20 print:bg-red-50 border border-red-200 dark:border-red-800 print:border-red-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-red-600 dark:text-red-400 print:text-red-700 font-medium">Absent</p>
+                        <p className="text-3xl font-bold text-red-700 dark:text-red-300 print:text-red-900">
+                          {getAttendanceStats().absent}
+                        </p>
+                      </div>
+                      <X className="h-10 w-10 text-red-400 dark:text-red-500 print:text-red-600" />
+                    </div>
+                    <p className="text-xs text-red-600 dark:text-red-400 print:text-red-700 mt-2">
+                      {getAttendanceStats().total > 0 
+                        ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%`
+                        : '0%'}
+                    </p>
+                  </div>
+
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-yellow-600 dark:text-yellow-400 print:text-yellow-700 font-medium">Absent w/ Reason</p>
+                        <p className="text-3xl font-bold text-yellow-700 dark:text-yellow-300 print:text-yellow-900">
+                          {getAttendanceStats().absentWithReason}
+                        </p>
+                      </div>
+                      <AlertCircle className="h-10 w-10 text-yellow-400 dark:text-yellow-500 print:text-yellow-600" />
+                    </div>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 print:text-yellow-700 mt-2">
+                      {getAttendanceStats().total > 0 
+                        ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%`
+                        : '0%'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Attendance List */}
+              <div className="mb-6">
+                <h4 className="text-xl font-bold text-gray-900 dark:text-white print:text-black mb-4">
+                  Detailed Attendance
+                </h4>
+
+                {attendanceRecords.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 print:bg-gray-50 rounded-lg">
+                    <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600 dark:text-gray-400 print:text-gray-700">
+                      No attendance records found
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Present Members */}
+                    {getAttendanceStats().attended > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-green-700 dark:text-green-400 print:text-green-800 mb-3 flex items-center gap-2">
+                          <CheckCircle className="h-5 w-5" />
+                          Present ({getAttendanceStats().attended})
+                        </h5>
+                        <div className="bg-green-50 dark:bg-green-900/10 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'present')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                                  <span className="text-gray-900 dark:text-white print:text-black">
+                                    {record.members?.name} {record.members?.surname}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Absent Members */}
+                    {getAttendanceStats().absent > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-red-700 dark:text-red-400 print:text-red-800 mb-3 flex items-center gap-2">
+                          <X className="h-5 w-5" />
+                          Absent ({getAttendanceStats().absent})
+                        </h5>
+                        <div className="bg-red-50 dark:bg-red-900/10 print:bg-red-50 border border-red-200 dark:border-red-800 print:border-red-300 rounded-lg p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'absent')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-red-600 rounded-full"></div>
+                                  <span className="text-gray-900 dark:text-white print:text-black">
+                                    {record.members?.name} {record.members?.surname}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Absent with Reason */}
+                    {getAttendanceStats().absentWithReason > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-yellow-700 dark:text-yellow-400 print:text-yellow-800 mb-3 flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5" />
+                          Absent with Reason ({getAttendanceStats().absentWithReason})
+                        </h5>
+                        <div className="bg-yellow-50 dark:bg-yellow-900/10 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'absent_with_reason')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-start gap-2">
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="flex-1">
+                                    <span className="text-gray-900 dark:text-white print:text-black font-medium">
+                                      {record.members?.name} {record.members?.surname}
+                                    </span>
+                                    {record.reason && (
+                                      <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
+                                        Reason: {record.reason}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Notes Section */}
+              {selectedMeetingForReport.notes && (
+                <div className="mb-6">
+                  <h4 className="text-xl font-bold text-gray-900 dark:text-white print:text-black mb-3">
+                    Meeting Notes
+                  </h4>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 print:bg-gray-50 border border-gray-200 dark:border-gray-600 print:border-gray-300 rounded-lg p-4">
+                    <p className="text-gray-700 dark:text-gray-300 print:text-black whitespace-pre-wrap">
+                      {selectedMeetingForReport.notes}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Footer for print */}
+              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
+                <p className="text-sm text-gray-600 text-center">
+                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Workflow Modal */}
+        {showWorkflowModal && selectedDepartment && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Meeting Report</h3>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Manage {selectedDepartment.name}
+                </h3>
                 <button
-                  onClick={() => setShowReportModal(false)}
+                  onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              
-              <form onSubmit={handleSubmitReport} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Meeting Report *</label>
-                  <textarea
-                    value={reportForm.report_text}
-                    onChange={(e) => setReportForm({ ...reportForm, report_text: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="What was discussed and accomplished..."
-                    rows={4}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Decisions Made</label>
-                  <textarea
-                    value={reportForm.decisions_made}
-                    onChange={(e) => setReportForm({ ...reportForm, decisions_made: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Key decisions made during the meeting..."
-                    rows={3}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Action Items</label>
-                  <textarea
-                    value={reportForm.action_items}
-                    onChange={(e) => setReportForm({ ...reportForm, action_items: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Tasks and responsibilities assigned..."
-                    rows={3}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Next Meeting Date</label>
-                  <input
-                    type="date"
-                    value={reportForm.next_meeting_date}
-                    onChange={(e) => setReportForm({ ...reportForm, next_meeting_date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
 
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
-                  >
-                    {loading ? 'Submitting...' : 'Submit Report'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowReportModal(false)}
-                    className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
+              <DepartmentManagementWorkflow 
+                department={selectedDepartment}
+                meetings={meetings}
+                members={members}
+                onClose={closeAllModals}
+                onSuccess={(message) => {
+                  setSuccess(message);
+                  setTimeout(() => setSuccess(null), 3000);
+                }}
+                onError={(message) => {
+                  setError(message);
+                  setTimeout(() => setError(null), 3000);
+                }}
+              />
             </div>
           </div>
         )}
       </div>
+
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+          
+          @page {
+            margin: 1cm;
+            size: A4;
+          }
+          
+          .print\\:hidden {
+            display: none !important;
+          }
+          
+          .print\\:block {
+            display: block !important;
+          }
+          
+          .print\\:p-0 {
+            padding: 0 !important;
+          }
+          
+          .print\\:bg-white {
+            background-color: white !important;
+          }
+          
+          .print\\:text-black {
+            color: black !important;
+          }
+          
+          .print\\:max-h-none {
+            max-height: none !important;
+          }
+          
+          .print\\:rounded-none {
+            border-radius: 0 !important;
+          }
+          
+          .print\\:shadow-none {
+            box-shadow: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };
