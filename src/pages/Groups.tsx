@@ -3,7 +3,7 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus
+  Shield, AlertCircle, CheckCircle, Plus, Printer
 } from 'lucide-react';
 
 // Import the step components
@@ -41,6 +41,15 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id?: string | null;
+}
+
+interface AttendanceRecord {
+  id: string;
+  meeting_id: string;
+  member_id: string;
+  status: 'present' | 'absent' | 'absent_with_reason';
+  reason?: string | null;
+  members?: Member;
 }
 
 // Group Management Workflow Component
@@ -229,11 +238,14 @@ const Groups = () => {
   // Modal states
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   
   // Data states
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [groupMembers, setGroupMembers] = useState<Record<string, Member[]>>({});
+  const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<Meeting | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
 
   // Load groups on component mount
   useEffect(() => {
@@ -303,6 +315,39 @@ const Groups = () => {
     } catch (error: any) {
       setError('Failed to load meetings: ' + error.message);
     }
+  };
+
+  const loadAttendanceForMeeting = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select(`
+          *,
+          members:member_id (
+            id,
+            name,
+            surname,
+            email,
+            phone
+          )
+        `)
+        .eq('meeting_id', meetingId);
+
+      if (error) throw error;
+      setAttendanceRecords(data || []);
+    } catch (error: any) {
+      setError('Failed to load attendance: ' + error.message);
+    }
+  };
+
+  const openReportModal = async (meeting: Meeting) => {
+    setSelectedMeetingForReport(meeting);
+    await loadAttendanceForMeeting(meeting.id);
+    setShowReportModal(true);
+  };
+
+  const handlePrintReport = () => {
+    window.print();
   };
 
   // Permission functions based on AuthContext
@@ -379,7 +424,10 @@ const Groups = () => {
   const closeAllModals = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
+    setShowReportModal(false);
     setSelectedGroup(null);
+    setSelectedMeetingForReport(null);
+    setAttendanceRecords([]);
   };
 
   const filteredGroups = groups.filter(group =>
@@ -396,6 +444,16 @@ const Groups = () => {
     if (profile.isAdmin) return 'Administrator';
     if (profile.role === 'group_leader') return 'Group Leader';
     return 'Member';
+  };
+
+  // Calculate attendance statistics
+  const getAttendanceStats = () => {
+    const attended = attendanceRecords.filter(r => r.status === 'present').length;
+    const absent = attendanceRecords.filter(r => r.status === 'absent').length;
+    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+    const total = attendanceRecords.length;
+
+    return { attended, absent, absentWithReason, total };
   };
 
   return (
@@ -575,7 +633,7 @@ const Groups = () => {
 
         {/* Meetings Modal */}
         {showMeetingsModal && selectedGroup && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -610,19 +668,291 @@ const Groups = () => {
                             </div>
                           )}
                         </div>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          meeting.status === 'completed' 
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                            : meeting.status === 'cancelled'
-                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                            : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                        }`}>
-                          {meeting.status}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            meeting.status === 'completed' 
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : meeting.status === 'cancelled'
+                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                          }`}>
+                            {meeting.status}
+                          </span>
+                          {meeting.status === 'completed' && (
+                            <button
+                              onClick={() => openReportModal(meeting)}
+                              className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
+                            >
+                              <Printer className="h-3 w-3" />
+                              View Report
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Report Modal with Print Feature */}
+        {showReportModal && selectedMeetingForReport && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none print:dark:bg-white">
+              <div className="flex justify-between items-center mb-6 print:mb-8">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white print:text-black print:text-3xl">
+                  Meeting Report
+                </h3>
+                <div className="flex gap-2 print:hidden">
+                  <button
+                    onClick={handlePrintReport}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print Report
+                  </button>
+                  <button
+                    onClick={closeAllModals}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Print Header */}
+              <div className="mb-8 pb-6 border-b-2 border-gray-300 print:border-black">
+                <div className="text-center mb-4">
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white print:text-black mb-2">
+                    {selectedGroup.name}
+                  </h1>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 print:text-black">
+                    Meeting Attendance Report
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Date</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Time</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {selectedMeetingForReport.meeting_time || 'Not specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Location</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {selectedMeetingForReport.location || selectedGroup.location || 'Not specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-700">Topic</p>
+                    <p className="font-semibold text-gray-900 dark:text-white print:text-black">
+                      {selectedMeetingForReport.topic || 'Not specified'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Attendance Statistics */}
+              <div className="mb-8">
+                <h4 className="text-xl font-bold text-gray-900 dark:text-white print:text-black mb-4">
+                  Attendance Summary
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 print:bg-blue-50 border border-blue-200 dark:border-blue-800 print:border-blue-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-600 dark:text-blue-400 print:text-blue-700 font-medium">Total Members</p>
+                        <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 print:text-blue-900">
+                          {getAttendanceStats().total}
+                        </p>
+                      </div>
+                      <Users className="h-10 w-10 text-blue-400 dark:text-blue-500 print:text-blue-600" />
+                    </div>
+                  </div>
+
+                  <div className="bg-green-50 dark:bg-green-900/20 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-600 dark:text-green-400 print:text-green-700 font-medium">Attended</p>
+                        <p className="text-3xl font-bold text-green-700 dark:text-green-300 print:text-green-900">
+                          {getAttendanceStats().attended}
+                        </p>
+                      </div>
+                      <CheckCircle className="h-10 w-10 text-green-400 dark:text-green-500 print:text-green-600" />
+                    </div>
+                    <p className="text-xs text-green-600 dark:text-green-400 print:text-green-700 mt-2">
+                      {getAttendanceStats().total > 0 
+                        ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%`
+                        : '0%'}
+                    </p>
+                  </div>
+
+                  <div className="bg-red-50 dark:bg-red-900/20 print:bg-red-50 border border-red-200 dark:border-red-800 print:border-red-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-red-600 dark:text-red-400 print:text-red-700 font-medium">Absent</p>
+                        <p className="text-3xl font-bold text-red-700 dark:text-red-300 print:text-red-900">
+                          {getAttendanceStats().absent}
+                        </p>
+                      </div>
+                      <X className="h-10 w-10 text-red-400 dark:text-red-500 print:text-red-600" />
+                    </div>
+                    <p className="text-xs text-red-600 dark:text-red-400 print:text-red-700 mt-2">
+                      {getAttendanceStats().total > 0 
+                        ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%`
+                        : '0%'}
+                    </p>
+                  </div>
+
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-yellow-600 dark:text-yellow-400 print:text-yellow-700 font-medium">Absent w/ Reason</p>
+                        <p className="text-3xl font-bold text-yellow-700 dark:text-yellow-300 print:text-yellow-900">
+                          {getAttendanceStats().absentWithReason}
+                        </p>
+                      </div>
+                      <AlertCircle className="h-10 w-10 text-yellow-400 dark:text-yellow-500 print:text-yellow-600" />
+                    </div>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 print:text-yellow-700 mt-2">
+                      {getAttendanceStats().total > 0 
+                        ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%`
+                        : '0%'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Attendance List */}
+              <div className="mb-6">
+                <h4 className="text-xl font-bold text-gray-900 dark:text-white print:text-black mb-4">
+                  Detailed Attendance
+                </h4>
+
+                {attendanceRecords.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 print:bg-gray-50 rounded-lg">
+                    <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600 dark:text-gray-400 print:text-gray-700">
+                      No attendance records found
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Present Members */}
+                    {getAttendanceStats().attended > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-green-700 dark:text-green-400 print:text-green-800 mb-3 flex items-center gap-2">
+                          <CheckCircle className="h-5 w-5" />
+                          Present ({getAttendanceStats().attended})
+                        </h5>
+                        <div className="bg-green-50 dark:bg-green-900/10 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'present')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                                  <span className="text-gray-900 dark:text-white print:text-black">
+                                    {record.members?.name} {record.members?.surname}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Absent Members */}
+                    {getAttendanceStats().absent > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-red-700 dark:text-red-400 print:text-red-800 mb-3 flex items-center gap-2">
+                          <X className="h-5 w-5" />
+                          Absent ({getAttendanceStats().absent})
+                        </h5>
+                        <div className="bg-red-50 dark:bg-red-900/10 print:bg-red-50 border border-red-200 dark:border-red-800 print:border-red-300 rounded-lg p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'absent')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-red-600 rounded-full"></div>
+                                  <span className="text-gray-900 dark:text-white print:text-black">
+                                    {record.members?.name} {record.members?.surname}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Absent with Reason */}
+                    {getAttendanceStats().absentWithReason > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-yellow-700 dark:text-yellow-400 print:text-yellow-800 mb-3 flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5" />
+                          Absent with Reason ({getAttendanceStats().absentWithReason})
+                        </h5>
+                        <div className="bg-yellow-50 dark:bg-yellow-900/10 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'absent_with_reason')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-start gap-2">
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="flex-1">
+                                    <span className="text-gray-900 dark:text-white print:text-black font-medium">
+                                      {record.members?.name} {record.members?.surname}
+                                    </span>
+                                    {record.reason && (
+                                      <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
+                                        Reason: {record.reason}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Notes Section */}
+              {selectedMeetingForReport.notes && (
+                <div className="mb-6">
+                  <h4 className="text-xl font-bold text-gray-900 dark:text-white print:text-black mb-3">
+                    Meeting Notes
+                  </h4>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 print:bg-gray-50 border border-gray-200 dark:border-gray-600 print:border-gray-300 rounded-lg p-4">
+                    <p className="text-gray-700 dark:text-gray-300 print:text-black whitespace-pre-wrap">
+                      {selectedMeetingForReport.notes}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Footer for print */}
+              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
+                <p className="text-sm text-gray-600 text-center">
+                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
+                </p>
               </div>
             </div>
           </div>
@@ -662,6 +992,53 @@ const Groups = () => {
           </div>
         )}
       </div>
+
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+          
+          @page {
+            margin: 1cm;
+            size: A4;
+          }
+          
+          .print\\:hidden {
+            display: none !important;
+          }
+          
+          .print\\:block {
+            display: block !important;
+          }
+          
+          .print\\:p-0 {
+            padding: 0 !important;
+          }
+          
+          .print\\:bg-white {
+            background-color: white !important;
+          }
+          
+          .print\\:text-black {
+            color: black !important;
+          }
+          
+          .print\\:max-h-none {
+            max-height: none !important;
+          }
+          
+          .print\\:rounded-none {
+            border-radius: 0 !important;
+          }
+          
+          .print\\:shadow-none {
+            box-shadow: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };
