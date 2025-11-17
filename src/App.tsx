@@ -5,7 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Events from './pages/Events';
 import Groups from './pages/Groups';
-import Departments from './pages/Departments';
+import Departments from './pages/Departments';//
 import Trends from './pages/Trends';
 import Analytics from './pages/Analytics';
 import Admin from './pages/Admin';
