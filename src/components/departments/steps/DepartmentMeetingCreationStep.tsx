@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect import
 import { supabase } from '../../../integrations/supabase/client';
 import { Calendar, MapPin, Clock, FileText, Save } from 'lucide-react';
 
