@@ -6,7 +6,7 @@ import {
   Shield, AlertCircle, CheckCircle, Plus, Printer
 } from 'lucide-react';
 
-// Import the step components (you'll need to create these for departments)
+// Import the step components
 import DepartmentMeetingCreationStep from '../components/departments/steps/DepartmentMeetingCreationStep';
 import DepartmentAttendanceStep from '../components/departments/steps/DepartmentAttendanceStep';
 import DepartmentNewcomerStep from '../components/departments/steps/DepartmentNewcomerStep';
@@ -21,6 +21,7 @@ interface Department {
   meeting_time: string | null;
   leader_id: string | null;
   description?: string | null;
+  memberCount?: number;
 }
 
 interface DepartmentMeeting {
@@ -47,8 +48,9 @@ interface DepartmentAttendanceRecord {
   id: string;
   meeting_id: string;
   member_id: string;
-  status: 'present' | 'absent' | 'absent_with_reason';
-  reason?: string | null;
+  status: 'present' | 'absent' | 'late';
+  arrival_time?: string | null;
+  notes?: string | null;
   members?: Member;
 }
 
@@ -223,6 +225,240 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   );
 };
 
+// Create Department Modal Component
+interface CreateDepartmentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}
+
+const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({
+  isOpen,
+  onClose,
+  onSuccess,
+  onError
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    meeting_day: '',
+    meeting_time: '',
+    location: '',
+    leader_id: ''
+  });
+
+  const [members, setMembers] = useState<Member[]>([]);
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  useEffect(() => {
+    if (isOpen) {
+      loadMembers();
+    }
+  }, [isOpen]);
+
+  const loadMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('id, name, surname')
+        .order('name');
+
+      if (error) throw error;
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Failed to load members:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const createDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.name.trim()) {
+      onError('Department name is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const { data, error } = await supabase
+        .from('departments')
+        .insert([{
+          name: formData.name.trim(),
+          description: formData.description.trim() || null,
+          meeting_day: formData.meeting_day || null,
+          meeting_time: formData.meeting_time || null,
+          location: formData.location.trim() || null,
+          leader_id: formData.leader_id || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Reset form
+      setFormData({
+        name: '',
+        description: '',
+        meeting_day: '',
+        meeting_time: '',
+        location: '',
+        leader_id: ''
+      });
+
+      onSuccess('Department created successfully!');
+      onClose();
+    } catch (error: any) {
+      onError('Failed to create department: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Create New Department</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={createDepartment} className="p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Department Name *
+              </label>
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter department name"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Meeting Day
+              </label>
+              <select
+                name="meeting_day"
+                value={formData.meeting_day}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select day</option>
+                {daysOfWeek.map(day => (
+                  <option key={day} value={day}>{day}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Meeting Time
+              </label>
+              <input
+                type="time"
+                name="meeting_time"
+                value={formData.meeting_time}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Location
+              </label>
+              <input
+                type="text"
+                name="location"
+                value={formData.location}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter department location"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Department Leader
+              </label>
+              <select
+                name="leader_id"
+                value={formData.leader_id}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select department leader</option>
+                {members.map(member => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} {member.surname}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Description
+              </label>
+              <textarea
+                name="description"
+                value={formData.description}
+                onChange={handleInputChange}
+                rows={4}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter department description and purpose"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              {loading ? 'Creating Department...' : 'Create Department'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 // Main Departments Component
 const Departments = () => {
   const { profile } = useAuth();
@@ -239,11 +475,11 @@ const Departments = () => {
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showCreateDepartmentModal, setShowCreateDepartmentModal] = useState(false);
   
   // Data states
   const [meetings, setMeetings] = useState<DepartmentMeeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [departmentMembers, setDepartmentMembers] = useState<Record<string, Member[]>>({});
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
 
@@ -257,7 +493,7 @@ const Departments = () => {
     try {
       setLoading(true);
       
-      // Simple query without complex relationships
+      // Load departments
       const { data: departmentsData, error: departmentsError } = await supabase
         .from('departments')
         .select('*')
@@ -425,6 +661,7 @@ const Departments = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
+    setShowCreateDepartmentModal(false);
     setSelectedDepartment(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
@@ -449,12 +686,12 @@ const Departments = () => {
 
   // Calculate attendance statistics
   const getAttendanceStats = () => {
-    const attended = attendanceRecords.filter(r => r.status === 'present').length;
+    const present = attendanceRecords.filter(r => r.status === 'present').length;
     const absent = attendanceRecords.filter(r => r.status === 'absent').length;
-    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+    const late = attendanceRecords.filter(r => r.status === 'late').length;
     const total = attendanceRecords.length;
 
-    return { attended, absent, absentWithReason, total };
+    return { present, absent, late, total };
   };
 
   return (
@@ -470,6 +707,17 @@ const Departments = () => {
               {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
             </p>
           </div>
+          
+          {/* Create Department Button - Only show for users with permission */}
+          {(profile?.isAdmin || hasPermission('manage_departments')) && (
+            <button
+              onClick={() => setShowCreateDepartmentModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+              Create Department
+            </button>
+          )}
         </div>
 
         {/* Search Bar */}
@@ -542,6 +790,14 @@ const Departments = () => {
                 <p className="text-gray-500 dark:text-gray-500 mb-6">
                   {searchTerm ? 'No departments match your search' : 'You do not have access to any departments'}
                 </p>
+                {(profile?.isAdmin || hasPermission('manage_departments')) && (
+                  <button
+                    onClick={() => setShowCreateDepartmentModal(true)}
+                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 font-medium"
+                  >
+                    Create First Department
+                  </button>
+                )}
               </div>
             ) : (
               filteredDepartments.map((department: any) => {
@@ -632,13 +888,28 @@ const Departments = () => {
           </div>
         )}
 
+        {/* Create Department Modal */}
+        <CreateDepartmentModal
+          isOpen={showCreateDepartmentModal}
+          onClose={() => setShowCreateDepartmentModal(false)}
+          onSuccess={(message) => {
+            setSuccess(message);
+            setTimeout(() => setSuccess(null), 3000);
+            loadDepartments(); // Refresh the list
+          }}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+        />
+
         {/* Meetings Modal */}
         {showMeetingsModal && selectedDepartment && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {selectedDepartment.name} - Meetings
+                  {selectedDepartment.name} - Department Meetings
                 </h3>
                 <button
                   onClick={closeAllModals}
@@ -652,7 +923,7 @@ const Departments = () => {
                 {meetings.length === 0 ? (
                   <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                     <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 dark:text-gray-400">No meetings scheduled</p>
+                    <p className="text-gray-600 dark:text-gray-400">No department meetings scheduled</p>
                   </div>
                 ) : (
                   meetings.map((meeting) => (
@@ -788,16 +1059,16 @@ const Departments = () => {
                   <div className="bg-green-50 dark:bg-green-900/20 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-green-600 dark:text-green-400 print:text-green-700 font-medium">Attended</p>
+                        <p className="text-sm text-green-600 dark:text-green-400 print:text-green-700 font-medium">Present</p>
                         <p className="text-3xl font-bold text-green-700 dark:text-green-300 print:text-green-900">
-                          {getAttendanceStats().attended}
+                          {getAttendanceStats().present}
                         </p>
                       </div>
                       <CheckCircle className="h-10 w-10 text-green-400 dark:text-green-500 print:text-green-600" />
                     </div>
                     <p className="text-xs text-green-600 dark:text-green-400 print:text-green-700 mt-2">
                       {getAttendanceStats().total > 0 
-                        ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%`
+                        ? `${Math.round((getAttendanceStats().present / getAttendanceStats().total) * 100)}%`
                         : '0%'}
                     </p>
                   </div>
@@ -822,16 +1093,16 @@ const Departments = () => {
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-yellow-600 dark:text-yellow-400 print:text-yellow-700 font-medium">Absent w/ Reason</p>
+                        <p className="text-sm text-yellow-600 dark:text-yellow-400 print:text-yellow-700 font-medium">Late</p>
                         <p className="text-3xl font-bold text-yellow-700 dark:text-yellow-300 print:text-yellow-900">
-                          {getAttendanceStats().absentWithReason}
+                          {getAttendanceStats().late}
                         </p>
                       </div>
                       <AlertCircle className="h-10 w-10 text-yellow-400 dark:text-yellow-500 print:text-yellow-600" />
                     </div>
                     <p className="text-xs text-yellow-600 dark:text-yellow-400 print:text-yellow-700 mt-2">
                       {getAttendanceStats().total > 0 
-                        ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%`
+                        ? `${Math.round((getAttendanceStats().late / getAttendanceStats().total) * 100)}%`
                         : '0%'}
                     </p>
                   </div>
@@ -854,11 +1125,11 @@ const Departments = () => {
                 ) : (
                   <>
                     {/* Present Members */}
-                    {getAttendanceStats().attended > 0 && (
+                    {getAttendanceStats().present > 0 && (
                       <div className="mb-6">
                         <h5 className="text-lg font-semibold text-green-700 dark:text-green-400 print:text-green-800 mb-3 flex items-center gap-2">
                           <CheckCircle className="h-5 w-5" />
-                          Present ({getAttendanceStats().attended})
+                          Present ({getAttendanceStats().present})
                         </h5>
                         <div className="bg-green-50 dark:bg-green-900/10 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -901,17 +1172,17 @@ const Departments = () => {
                       </div>
                     )}
 
-                    {/* Absent with Reason */}
-                    {getAttendanceStats().absentWithReason > 0 && (
+                    {/* Late Members */}
+                    {getAttendanceStats().late > 0 && (
                       <div className="mb-6">
                         <h5 className="text-lg font-semibold text-yellow-700 dark:text-yellow-400 print:text-yellow-800 mb-3 flex items-center gap-2">
                           <AlertCircle className="h-5 w-5" />
-                          Absent with Reason ({getAttendanceStats().absentWithReason})
+                          Late ({getAttendanceStats().late})
                         </h5>
                         <div className="bg-yellow-50 dark:bg-yellow-900/10 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
                           <div className="space-y-3">
                             {attendanceRecords
-                              .filter(record => record.status === 'absent_with_reason')
+                              .filter(record => record.status === 'late')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
                                   <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
@@ -919,9 +1190,14 @@ const Departments = () => {
                                     <span className="text-gray-900 dark:text-white print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
                                     </span>
-                                    {record.reason && (
+                                    {record.arrival_time && (
                                       <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
-                                        Reason: {record.reason}
+                                        Arrived at: {record.arrival_time}
+                                      </p>
+                                    )}
+                                    {record.notes && (
+                                      <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
+                                        Notes: {record.notes}
                                       </p>
                                     )}
                                   </div>
