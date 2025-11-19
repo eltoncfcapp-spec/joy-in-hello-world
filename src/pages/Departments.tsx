@@ -608,25 +608,63 @@ const Departments = () => {
     return false;
   };
 
+  // Updated canManageDepartment function with debugging
   const canManageDepartment = (departmentId: string) => {
-    if (!profile) return false;
+    if (!profile) {
+      console.log('No profile found');
+      return false;
+    }
     
+    console.log('User Profile:', {
+      id: profile.id,
+      role: profile.role,
+      isAdmin: profile.isAdmin,
+      department_id: profile.department_id,
+      assigned_departments: profile.assigned_departments,
+      permissions: profile.permissions
+    });
+    
+    console.log('Checking department:', departmentId);
+
     // Admin can manage all departments
-    if (profile.isAdmin) return true;
+    if (profile.isAdmin) {
+      console.log('User is admin - can manage all departments');
+      return true;
+    }
     
     // Department leaders can manage assigned departments and their own department
     if (profile.role === 'department_leader' || profile.role === 'group_leader') {
-      return profile.assigned_departments?.includes(departmentId) || 
-             profile.assigned_departments?.includes('all_departments') ||
-             profile.department_id === departmentId;
+      const isAssignedDepartment = profile.assigned_departments?.includes(departmentId) || 
+                                   profile.assigned_departments?.includes('all_departments') ||
+                                   profile.department_id === departmentId;
+      
+      console.log('Department leader check:', {
+        isAssignedDepartment,
+        assignedDepartments: profile.assigned_departments,
+        userDepartmentId: profile.department_id,
+        targetDepartmentId: departmentId
+      });
+      
+      return isAssignedDepartment;
     }
     
     // Regular members need specific permissions for their own department
     if (profile.role === 'member') {
       const isOwnDepartment = profile.department_id === departmentId;
-      return isOwnDepartment && profile.permissions?.includes('manage_department');
+      const canManage = isOwnDepartment && profile.permissions?.includes('manage_department');
+      
+      console.log('Member check:', {
+        isOwnDepartment,
+        canManage,
+        userDepartmentId: profile.department_id,
+        targetDepartmentId: departmentId,
+        hasPermission: profile.permissions?.includes('manage_department')
+      });
+      
+      return canManage;
     }
     
+    console.log('No matching role or permissions');
     return false;
   };
 
