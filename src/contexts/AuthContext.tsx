@@ -9,8 +9,7 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  department_id: string | null; // ADDED: For department assignment
-  role: 'admin' | 'department_leader' | 'group_leader' | 'member'; // UPDATED: Added department_leader
+  role: 'admin' | 'group_leader' | 'member';
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
@@ -19,6 +18,20 @@ interface UserProfile {
   assigned_departments: string[];
 }
 
+// Permission types
+export type Permission = 
+  | 'view_all_groups'
+  | 'view_all_departments'
+  | 'view_own_group'
+  | 'view_own_department'
+  | 'manage_all_groups'
+  | 'manage_all_departments'
+  | 'manage_own_group'
+  | 'manage_own_department'
+  | 'edit_users'
+  | 'view_reports'
+  | 'manage_system';
+
 interface AuthContextType {
   user: SupabaseUser | null;
   session: Session | null;
@@ -26,8 +39,13 @@ interface AuthContextType {
   login: (identifier: string, credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
-  hasPermission: (permission: string) => boolean; // ADDED: Permission check helper
-  canManageDepartment: (departmentId: string) => boolean; // ADDED: Department permission check
+  hasPermission: (permission: Permission) => boolean;
+  canViewGroup: (groupId: string) => boolean;
+  canViewDepartment: (departmentId: string) => boolean;
+  canManageGroup: (groupId: string) => boolean;
+  canManageDepartment: (departmentId: string) => boolean;
+  getUserGroups: () => string[];
+  getUserDepartments: () => string[];
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,77 +68,227 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Permission check helper function
-  const hasPermission = (permission: string): boolean => {
+  // Permission check function
+  const hasPermission = (permission: Permission): boolean => {
     if (!profile) return false;
     
-    // Admins have all permissions
-    if (profile.isAdmin) return true;
+    // Admin has all permissions
+    if (profile.role === 'admin') return true;
     
-    // Check if user has the specific permission
-    return profile.permissions?.includes(permission) || false;
+    // Check specific permissions based on role
+    switch (permission) {
+      case 'view_all_groups':
+      case 'view_all_departments':
+      case 'manage_all_groups':
+      case 'manage_all_departments':
+      case 'edit_users':
+      case 'manage_system':
+        return profile.role === 'admin';
+        
+      case 'view_own_group':
+      case 'view_own_department':
+        return profile.role === 'admin' || profile.role === 'group_leader' || profile.role === 'member';
+        
+      case 'manage_own_group':
+      case 'manage_own_department':
+        return profile.role === 'admin' || profile.role === 'group_leader';
+        
+      case 'view_reports':
+        return profile.role === 'admin' || profile.role === 'group_leader';
+        
+      default:
+        return false;
+    }
   };
 
-  // Department management permission check
-  const canManageDepartment = (departmentId: string): boolean => {
+  // Check if user can view a specific group
+  const canViewGroup = (groupId: string): boolean => {
     if (!profile) return false;
     
-    // Admin can manage all departments
-    if (profile.isAdmin) return true;
+    if (hasPermission('view_all_groups')) return true;
     
-    // Department leaders can manage assigned departments and their own department
-    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
-      return profile.assigned_departments?.includes(departmentId) || 
-             profile.assigned_departments?.includes('all_departments') ||
-             profile.department_id === departmentId;
-    }
-    
-    // Regular members need specific permissions for their own department
-    if (profile.role === 'member') {
-      const isOwnDepartment = profile.department_id === departmentId;
-      return isOwnDepartment && hasPermission('manage_department');
+    // Group leaders and members can only view their assigned groups
+    if (hasPermission('view_own_group')) {
+      // Check if user is assigned to this group
+      const isAssigned = profile.assigned_groups.includes(groupId);
+      // Check if user's cell group matches
+      const isCellGroup = profile.cell_group_id === groupId;
+      
+      return isAssigned || isCellGroup;
     }
     
     return false;
   };
 
+  // Check if user can view a specific department
+  const canViewDepartment = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    if (hasPermission('view_all_departments')) return true;
+    
+    // Group leaders and members can only view their assigned departments
+    if (hasPermission('view_own_department')) {
+      return profile.assigned_departments.includes(departmentId);
+    }
+    
+    return false;
+  };
+
+  // Check if user can manage a specific group
+  const canManageGroup = (groupId: string): boolean => {
+    if (!profile) return false;
+    
+    if (hasPermission('manage_all_groups')) return true;
+    
+    // Group leaders can only manage their assigned groups
+    if (hasPermission('manage_own_group')) {
+      // Check if user is assigned to this group
+      const isAssigned = profile.assigned_groups.includes(groupId);
+      // Check if user's cell group matches
+      const isCellGroup = profile.cell_group_id === groupId;
+      
+      return isAssigned || isCellGroup;
+    }
+    
+    return false;
+  };
+
+  // Check if user can manage a specific department
+  const canManageDepartment = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    if (hasPermission('manage_all_departments')) return true;
+    
+    // Group leaders can only manage their assigned departments
+    if (hasPermission('manage_own_department')) {
+      return profile.assigned_departments.includes(departmentId);
+    }
+    
+    return false;
+  };
+
+  // Get user's accessible groups
+  const getUserGroups = (): string[] => {
+    if (!profile) return [];
+    
+    if (hasPermission('view_all_groups')) {
+      // Return a special indicator that user can access all groups
+      return ['all_groups'];
+    }
+    
+    const groups = [...profile.assigned_groups];
+    
+    // Add cell group if not already included
+    if (profile.cell_group_id && !groups.includes(profile.cell_group_id)) {
+      groups.push(profile.cell_group_id);
+    }
+    
+    return groups;
+  };
+
+  // Get user's accessible departments
+  const getUserDepartments = (): string[] => {
+    if (!profile) return [];
+    
+    if (hasPermission('view_all_departments')) {
+      // Return a special indicator that user can access all departments
+      return ['all_departments'];
+    }
+    
+    return [...profile.assigned_departments];
+  };
+
   // Check for existing session and set up auth listener
   useEffect(() => {
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      try {
+        setLoading(true);
+
+        // First check for stored username/PIN auth
+        const storedAuth = localStorage.getItem('username_pin_auth');
+        if (storedAuth) {
+          const authData = JSON.parse(storedAuth);
+          const timestamp = authData.timestamp;
+          const now = Date.now();
+          const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
+          
+          // If less than 24 hours old, restore the auth
+          if (hoursElapsed < 24 && mounted) {
+            setUser(authData.user);
+            setSession(authData.session);
+            setProfile(authData.profile);
+            console.log('🔄 Restored auth from localStorage');
+            setLoading(false);
+            return;
+          } else {
+            // Clear expired auth
+            localStorage.removeItem('username_pin_auth');
+          }
+        }
+
+        // Check for Supabase session
+        const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error getting session:', error);
+        }
+
+        if (mounted) {
+          setSession(supabaseSession);
+          setUser(supabaseSession?.user ?? null);
+          
+          if (supabaseSession?.user) {
+            await fetchUserProfile(supabaseSession.user.id);
+          } else {
+            setProfile(null);
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        if (mounted) {
+          setProfile(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+      async (event, supabaseSession) => {
+        if (!mounted) return;
+
+        console.log('Auth state changed:', event);
+        setSession(supabaseSession);
+        setUser(supabaseSession?.user ?? null);
         
-        if (session?.user) {
-          // Fetch user profile and role
-          setTimeout(() => {
-            fetchUserProfile(session.user.id);
-          }, 0);
+        if (supabaseSession?.user) {
+          await fetchUserProfile(supabaseSession.user.id);
         } else {
           setProfile(null);
+          // Clear stored auth on sign out
+          localStorage.removeItem('username_pin_auth');
         }
       }
     );
 
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      }
-      setLoading(false);
-    });
+    initializeAuth();
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
     try {
       console.log('🔍 Fetching user profile for:', userId);
       
-      // First try to fetch from members table (where your data is stored)
+      // First try to fetch from members table
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -131,25 +299,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.error('❌ Error fetching from members table:', memberError);
       }
 
-      console.log('📊 Raw member data from database:', memberData);
-
       if (memberData) {
-        // Debug: Check what role value actually comes from database
-        console.log('🎭 Database role value:', memberData.role);
-        console.log('🔑 Database permissions:', memberData.permissions);
-        console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
-        console.log('🏢 Database department_id:', memberData.department_id);
+        console.log('📊 Raw member data from database:', memberData);
 
-        // Create profile from member data with ALL required fields
+        // Create profile from member data
         const isAdmin = memberData.role === 'admin';
         
-        // FIXED: Better role mapping that handles various database values
-        let primaryRole: 'admin' | 'department_leader' | 'group_leader' | 'member' = 'member';
+        // Role mapping
+        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
         
         if (isAdmin) {
           primaryRole = 'admin';
-        } else if (memberData.role === 'department_leader') {
-          primaryRole = 'department_leader';
         } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
           primaryRole = 'group_leader';
         } else {
@@ -157,41 +317,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
 
         console.log('🎯 Mapped role:', primaryRole);
-        console.log('👑 Is admin:', isAdmin);
-        
-        // FIXED: Ensure permissions array is never undefined and includes basic permissions based on role
-        const basePermissions = [];
-        if (isAdmin) {
-          basePermissions.push(
-            'manage_departments',
-            'create_meetings', 
-            'manage_attendance',
-            'add_newcomers',
-            'create_reports',
-            'manage_members'
-          );
-        } else if (primaryRole === 'department_leader') {
-          basePermissions.push(
-            'create_meetings',
-            'manage_attendance',
-            'add_newcomers', 
-            'create_reports',
-            'manage_department'
-          );
-        } else if (primaryRole === 'group_leader') {
-          basePermissions.push(
-            'create_meetings',
-            'manage_attendance',
-            'add_newcomers'
-          );
-        }
-
-        const userPermissions = [
-          ...basePermissions,
-          ...(Array.isArray(memberData.permissions) ? memberData.permissions : [])
-        ];
-
-        console.log('🔐 Final permissions:', userPermissions);
         
         const userProfile: UserProfile = {
           id: userId,
@@ -200,12 +325,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
-          department_id: memberData.department_id || null, // ADDED
           role: primaryRole,
           isAdmin,
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
-          permissions: userPermissions, // UPDATED: Now includes base permissions
+          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
           assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
           assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
         };
@@ -215,7 +339,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // Fallback to profiles table if members table doesn't have the user
+      // Fallback to profiles table
       console.log('🔄 Trying profiles table as fallback...');
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
@@ -230,40 +354,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (profileData) {
         console.log('📊 Profile data found:', profileData);
         
-        // Fetch user roles
-        const { data: rolesData, error: rolesError } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', userId);
-
-        if (rolesError) {
-          console.error('❌ Error fetching roles:', rolesError);
-        }
-
-        const roles = rolesData?.map(r => r.role) || [];
-        console.log('🎭 User roles:', roles);
-        
-        const isAdmin = roles.includes('admin');
-        let primaryRole: 'admin' | 'department_leader' | 'group_leader' | 'member' = 'member';
-        
-        if (isAdmin) {
-          primaryRole = 'admin';
-        } else if (roles.includes('department_leader')) {
-          primaryRole = 'department_leader';
-        } else if (roles.includes('group_leader') || roles.includes('leader')) {
-          primaryRole = 'group_leader';
-        } else {
-          primaryRole = 'member';
-        }
-
-        console.log('🎯 Mapped role from profiles:', primaryRole);
-
-        // Add base permissions for fallback profile
-        const basePermissions = [];
-        if (isAdmin) {
-          basePermissions.push('manage_departments', 'create_meetings', 'manage_attendance', 'add_newcomers', 'create_reports');
-        }
-
+        // Create basic profile from profiles table
         const userProfile: UserProfile = {
           id: userId,
           name: profileData.name || null,
@@ -271,12 +362,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: profileData.email || null,
           phone: profileData.phone || null,
           cell_group_id: profileData.cell_group_id || null,
-          department_id: profileData.department_id || null, // ADDED
-          role: primaryRole,
-          isAdmin,
+          role: 'member', // Default role
+          isAdmin: false,
           login_username: null,
           login_pin: null,
-          permissions: basePermissions, // UPDATED: Include base permissions
+          permissions: [],
           assigned_groups: [],
           assigned_departments: []
         };
@@ -285,9 +375,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setProfile(userProfile);
       } else {
         console.log('❌ No user data found in members or profiles table');
+        setProfile(null);
       }
     } catch (error) {
       console.error('💥 Error fetching user profile:', error);
+      setProfile(null);
     }
   };
 
@@ -309,8 +401,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       console.log('✅ Member found:', memberData);
-      console.log('🎭 Database role:', memberData.role);
-      console.log('🔑 Database permissions:', memberData.permissions);
 
       // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
@@ -339,20 +429,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         provider_refresh_token: null
       } as Session;
 
-      // Set the user and session
-      setUser(mockUser);
-      setSession(mockSession);
-
-      // Create and set the profile with ALL required fields
+      // Create and set the profile
       const isAdmin = memberData.role === 'admin';
       
-      // FIXED: Better role mapping
-      let primaryRole: 'admin' | 'department_leader' | 'group_leader' | 'member' = 'member';
+      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
       
       if (isAdmin) {
         primaryRole = 'admin';
-      } else if (memberData.role === 'department_leader') {
-        primaryRole = 'department_leader';
       } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
         primaryRole = 'group_leader';
       } else {
@@ -361,40 +444,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('🎯 Final mapped role for login:', primaryRole);
       
-      // Add base permissions based on role
-      const basePermissions = [];
-      if (isAdmin) {
-        basePermissions.push(
-          'manage_departments',
-          'create_meetings',
-          'manage_attendance',
-          'add_newcomers',
-          'create_reports',
-          'manage_members'
-        );
-      } else if (primaryRole === 'department_leader') {
-        basePermissions.push(
-          'create_meetings',
-          'manage_attendance', 
-          'add_newcomers',
-          'create_reports',
-          'manage_department'
-        );
-      } else if (primaryRole === 'group_leader') {
-        basePermissions.push(
-          'create_meetings',
-          'manage_attendance',
-          'add_newcomers'
-        );
-      }
-
-      const userPermissions = [
-        ...basePermissions,
-        ...(Array.isArray(memberData.permissions) ? memberData.permissions : [])
-      ];
-
-      console.log('🔐 Final permissions for login:', userPermissions);
-      
       const userProfile: UserProfile = {
         id: memberData.id,
         name: memberData.name || null,
@@ -402,17 +451,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         email: memberData.email || null,
         phone: memberData.phone || null,
         cell_group_id: memberData.cell_group_id || null,
-        department_id: memberData.department_id || null, // ADDED
         role: primaryRole,
         isAdmin,
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
-        permissions: userPermissions, // UPDATED: Include base permissions
+        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
         assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
         assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
       };
 
       console.log('✅ Final profile for login:', userProfile);
+      
+      // Set state
+      setUser(mockUser);
+      setSession(mockSession);
       setProfile(userProfile);
       
       // Store in localStorage for persistence
@@ -491,47 +543,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Check for stored username/PIN auth on component mount
-  useEffect(() => {
-    const checkStoredAuth = () => {
-      try {
-        const storedAuth = localStorage.getItem('username_pin_auth');
-        if (storedAuth) {
-          const authData = JSON.parse(storedAuth);
-          const timestamp = authData.timestamp;
-          const now = Date.now();
-          const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
-          
-          // If less than 24 hours old, restore the auth
-          if (hoursElapsed < 24) {
-            setUser(authData.user);
-            setSession(authData.session);
-            setProfile(authData.profile);
-            console.log('🔄 Restored auth from localStorage');
-          } else {
-            // Clear expired auth
-            localStorage.removeItem('username_pin_auth');
-            console.log('🗑️ Cleared expired auth from localStorage');
-          }
-        }
-      } catch (error) {
-        console.error('💥 Error checking stored auth:', error);
-        localStorage.removeItem('username_pin_auth');
-      }
-    };
-
-    checkStoredAuth();
-  }, []);
-
-  const value = {
+  const value: AuthContextType = {
     user,
     session,
     profile,
     login,
     logout,
     loading,
-    hasPermission, // ADDED
-    canManageDepartment // ADDED
+    hasPermission,
+    canViewGroup,
+    canViewDepartment,
+    canManageGroup,
+    canManageDepartment,
+    getUserGroups,
+    getUserDepartments
   };
 
   return (
