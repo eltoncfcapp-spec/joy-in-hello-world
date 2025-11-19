@@ -9,12 +9,12 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  department_id: string | null;
+  ministry_group_id: string | null;
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
   cell_groups: { name: string } | null;
-  departments: { name: string } | null;
+  ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   status_date: string | null;
   not_attending_reason: string | null;
@@ -27,7 +27,7 @@ interface CellGroup {
   name: string;
 }
 
-interface Department {
+interface MinistryGroup {
   id: string;
   name: string;
 }
@@ -36,7 +36,7 @@ const Members = () => {
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingMember, setEditingMember] = useState<string | null>(null);
@@ -49,7 +49,7 @@ const Members = () => {
     phone: '',
     invited_by: '',
     cell_group_id: '',
-    department_id: '',
+    ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
   });
   const [editFormData, setEditFormData] = useState({
@@ -59,7 +59,7 @@ const Members = () => {
     phone: '',
     invited_by: '',
     cell_group_id: '',
-    department_id: '',
+    ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
     status_date: '',
@@ -69,7 +69,7 @@ const Members = () => {
   useEffect(() => {
     fetchMembers();
     fetchCellGroups();
-    fetchDepartments();
+    fetchMinistryGroups();
   }, []);
 
   const fetchMembers = async () => {
@@ -82,7 +82,7 @@ const Members = () => {
         .select(`
           *,
           cell_groups!fk_cell_group(name),
-          departments!fk_department(name)
+          ministry_groups(name)
         `)
         .order('created_at', { ascending: false });
 
@@ -117,10 +117,10 @@ const Members = () => {
     }
   };
 
-  const fetchDepartments = async () => {
+  const fetchMinistryGroups = async () => {
     try {
       const { data, error } = await supabase
-        .from('departments')
+        .from('ministry_groups')
         .select('id, name')
         .order('name');
 
@@ -128,10 +128,10 @@ const Members = () => {
         throw error;
       }
 
-      setDepartments(data || []);
+      setMinistryGroups(data || []);
     } catch (error: any) {
-      console.error('Error fetching departments:', error);
-      setError(error.message || 'Failed to load departments.');
+      console.error('Error fetching ministry groups:', error);
+      setError(error.message || 'Failed to load ministry groups.');
     }
   };
 
@@ -150,7 +150,7 @@ const Members = () => {
           email: formData.email.trim() || null,
           phone: formData.phone.trim() || null,
           cell_group_id: formData.cell_group_id || null,
-          department_id: formData.department_id || null,
+          ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
           status: 'newcomer',
@@ -170,7 +170,7 @@ const Members = () => {
         phone: '', 
         invited_by: '', 
         cell_group_id: '',
-        department_id: '',
+        ministry_group_id: '',
         gender: '',
       });
       setSuccess('Member added successfully!');
@@ -194,7 +194,7 @@ const Members = () => {
       phone: member.phone || '',
       invited_by: member.invited_by || '',
       cell_group_id: member.cell_group_id || '',
-      department_id: member.department_id || '',
+      ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
       status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
@@ -221,7 +221,7 @@ const Members = () => {
         email: editFormData.email.trim() || null,
         phone: editFormData.phone.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
-        department_id: editFormData.department_id || null,
+        ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
         status: editFormData.status,
@@ -265,7 +265,7 @@ const Members = () => {
       phone: '',
       invited_by: '',
       cell_group_id: '',
-      department_id: '',
+      ministry_group_id: '',
       gender: '',
       status: 'newcomer',
       status_date: '',
@@ -334,8 +334,7 @@ const Members = () => {
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.departments?.name.toLowerCase().includes(searchQuery.toLowerCase())
+      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string, surname: string) => {
@@ -350,7 +349,7 @@ const Members = () => {
       phone: '', 
       invited_by: '', 
       cell_group_id: '',
-      department_id: '',
+      ministry_group_id: '',
       gender: '',
     });
     setShowForm(false);
@@ -523,17 +522,17 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Department
+                    Ministry Group
                   </label>
                   <select
-                    value={formData.department_id}
-                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                    value={formData.ministry_group_id}
+                    onChange={(e) => setFormData({ ...formData, ministry_group_id: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   >
-                    <option value="">Select department</option>
-                    {departments.map((department) => (
-                      <option key={department.id} value={department.id}>
-                        {department.name}
+                    <option value="">Select ministry group</option>
+                    {ministryGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
                       </option>
                     ))}
                   </select>
@@ -566,7 +565,7 @@ const Members = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search members by name, email, phone, cell group, or department..."
+              placeholder="Search members by name, email, phone, or cell group..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -682,23 +681,6 @@ const Members = () => {
                           {cellGroups.map((group) => (
                             <option key={group.id} value={group.id}>
                               {group.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Department */}
-                      <div className="flex items-center gap-3">
-                        <User className="h-4 w-4 text-gray-400" />
-                        <select
-                          value={editFormData.department_id}
-                          onChange={(e) => setEditFormData({ ...editFormData, department_id: e.target.value })}
-                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                        >
-                          <option value="">Select department</option>
-                          {departments.map((department) => (
-                            <option key={department.id} value={department.id}>
-                              {department.name}
                             </option>
                           ))}
                         </select>
@@ -823,10 +805,10 @@ const Members = () => {
                               <MapPin className="h-4 w-4" />
                               <span className="font-medium">{member.cell_groups?.name || 'No Cell Group Assigned'}</span>
                             </div>
-                            {member.departments?.name && (
+                            {member.ministry_groups?.name && (
                               <div className="flex items-center gap-3">
                                 <User className="h-4 w-4" />
-                                <span className="font-medium">{member.departments.name}</span>
+                                <span className="font-medium">{member.ministry_groups.name}</span>
                               </div>
                             )}
                             {member.invited_by && (
@@ -919,8 +901,8 @@ const Members = () => {
             <div className="text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{departments.length}</div>
-            <div className="text-gray-600 dark:text-gray-400 font-medium">Departments</div>
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
           </div>
         </div>
       </div>

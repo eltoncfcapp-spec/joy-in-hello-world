@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -55,18 +55,8 @@ interface DepartmentAttendanceRecord {
   members?: Member;
 }
 
-// Department Meeting Creation Step Component
-interface DepartmentMeetingCreationStepProps {
-  department: Department;
-  onMeetingCreated: () => void;
-  onError: (message: string) => void;
-}
-
-const DepartmentMeetingCreationStep: React.FC<DepartmentMeetingCreationStepProps> = ({ 
-  department, 
-  onMeetingCreated, 
-  onError 
-}) => {
+// Department Meeting Creation Step
+const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -92,17 +82,17 @@ const DepartmentMeetingCreationStep: React.FC<DepartmentMeetingCreationStepProps
 
       if (error) throw error;
       setRecentMeetings(data || []);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to load recent meetings:', error);
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const createMeeting = async (e: React.FormEvent) => {
+  const createMeeting = async (e) => {
     e.preventDefault();
     
     if (!formData.meeting_date || !formData.meeting_time || !formData.location) {
@@ -140,7 +130,7 @@ const DepartmentMeetingCreationStep: React.FC<DepartmentMeetingCreationStepProps
 
       await loadRecentMeetings();
       onMeetingCreated();
-    } catch (error: any) {
+    } catch (error) {
       onError('Failed to create department meeting: ' + error.message);
     } finally {
       setLoading(false);
@@ -390,24 +380,41 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
         )}
 
         {currentStep === 2 && (
-          <div className="text-center py-12">
-            <h3 className="text-xl font-semibold text-gray-700 mb-4">Attendance Step</h3>
-            <p className="text-gray-600">Attendance functionality would go here</p>
-          </div>
+          <DepartmentAttendanceStep 
+            department={department}
+            meetings={meetings}
+            selectedMeeting={selectedMeeting}
+            onMeetingSelect={setSelectedMeeting}
+            onAttendanceSaved={() => {
+              onSuccess('Attendance saved successfully!');
+              setCurrentStep(3);
+            }}
+            onError={onError}
+          />
         )}
 
         {currentStep === 3 && (
-          <div className="text-center py-12">
-            <h3 className="text-xl font-semibold text-gray-700 mb-4">Newcomer Step</h3>
-            <p className="text-gray-600">Newcomer registration would go here</p>
-          </div>
+          <DepartmentNewcomerStep 
+            department={department}
+            selectedMeeting={selectedMeeting}
+            onNewcomerAdded={() => {
+              onSuccess('Newcomer added successfully!');
+              setCurrentStep(4);
+            }}
+            onError={onError}
+          />
         )}
 
         {currentStep === 4 && (
-          <div className="text-center py-12">
-            <h3 className="text-xl font-semibold text-gray-700 mb-4">Report Step</h3>
-            <p className="text-gray-600">Report generation would go here</p>
-          </div>
+          <DepartmentReportStep 
+            department={department}
+            selectedMeeting={selectedMeeting}
+            onReportCreated={() => {
+              onSuccess('Report created successfully!');
+              onClose();
+            }}
+            onError={onError}
+          />
         )}
       </div>
 
@@ -763,7 +770,7 @@ const Departments = () => {
                 </p>
               </div>
             ) : (
-              filteredDepartments.map((department) => {
+              filteredDepartments.map((department: any) => {
                 const canManage = canManageDepartment(department.id);
                 const canView = canViewDepartment(department.id);
                 
