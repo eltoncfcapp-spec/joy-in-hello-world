@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // Added useEffect import
+import { useState, useEffect } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
 import { Calendar, MapPin, Clock, FileText, Save } from 'lucide-react';
 
@@ -50,8 +50,7 @@ const DepartmentMeetingCreationStep: React.FC<DepartmentMeetingCreationStepProps
           location: formData.location,
           topic: formData.topic || null,
           notes: formData.notes || null,
-          status: 'scheduled',
-          created_at: new Date().toISOString()
+          status: 'scheduled'
         }]);
 
       if (error) throw error;
