@@ -54,7 +54,8 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       const memberData = departmentMembers?.map(dm => ({
         ...dm.member,
-        department_role: dm.role
+        department_role: dm.role,
+        department_member_id: dm.id
       })) || [];
       
       setMembers(memberData);
@@ -148,27 +149,28 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     try {
       setLoading(true);
 
-      // Prepare attendance records according to your schema
+      // Prepare attendance records
       const attendanceRecords = members.map(member => ({
         meeting_id: selectedMeeting.id,
         member_id: member.id,
         status: attendance[member.id] || 'absent',
         arrival_time: attendance[member.id] === 'late' ? arrivalTimes[member.id] || null : null,
-        notes: notes[member.id] || null,
-        created_at: new Date().toISOString()
+        notes: notes[member.id] || null
       }));
 
       // Delete existing attendance and insert new ones
-      await supabase
+      const { error: deleteError } = await supabase
         .from('department_attendance')
         .delete()
         .eq('meeting_id', selectedMeeting.id);
 
-      const { error } = await supabase
+      if (deleteError) throw deleteError;
+
+      const { error: insertError } = await supabase
         .from('department_attendance')
         .insert(attendanceRecords);
 
-      if (error) throw error;
+      if (insertError) throw insertError;
 
       onAttendanceSaved();
     } catch (error: any) {
