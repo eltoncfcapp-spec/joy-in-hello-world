@@ -55,9 +55,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
           email: formData.email.trim() || null,
           status: 'newcomer',
           first_time_visit_date: new Date().toISOString(),
-          invited_by: department.name,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          invited_by: department.name
         }])
         .select()
         .single();
@@ -70,8 +68,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         .insert([{
           department_id: department.id,
           member_id: memberData.id,
-          role: 'member',
-          assigned_at: new Date().toISOString()
+          role: 'member'
         }]);
 
       if (deptError) throw deptError;
@@ -84,8 +81,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
             meeting_id: selectedMeeting.id,
             member_id: memberData.id,
             status: 'present',
-            notes: 'First-time department visitor - ' + (formData.notes || 'No additional notes'),
-            created_at: new Date().toISOString()
+            notes: 'First-time department visitor - ' + (formData.notes || 'No additional notes')
           }]);
 
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
@@ -138,27 +134,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
           </div>
         </div>
       )}
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-center">
-          <User className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">1</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Newcomer Added</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-center">
-          <MapPin className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">{department.name}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Department</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-center">
-          <Calendar className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {selectedMeeting ? 'Yes' : 'No'}
-          </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Meeting Linked</div>
-        </div>
-      </div>
 
       {/* Add Newcomer Button */}
       {!showForm && (
