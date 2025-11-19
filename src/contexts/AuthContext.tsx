@@ -9,7 +9,8 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  role: 'admin' | 'group_leader' | 'member';
+  department_id: string | null; // ADDED: For department assignment
+  role: 'admin' | 'department_leader' | 'group_leader' | 'member'; // UPDATED: Added department_leader
   isAdmin: boolean;
   login_username: string | null;
   login_pin: string | null;
@@ -25,6 +26,8 @@ interface AuthContextType {
   login: (identifier: string, credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
+  hasPermission: (permission: string) => boolean; // ADDED: Permission check helper
+  canManageDepartment: (departmentId: string) => boolean; // ADDED: Department permission check
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -46,6 +49,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Permission check helper function
+  const hasPermission = (permission: string): boolean => {
+    if (!profile) return false;
+    
+    // Admins have all permissions
+    if (profile.isAdmin) return true;
+    
+    // Check if user has the specific permission
+    return profile.permissions?.includes(permission) || false;
+  };
+
+  // Department management permission check
+  const canManageDepartment = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    // Admin can manage all departments
+    if (profile.isAdmin) return true;
+    
+    // Department leaders can manage assigned departments and their own department
+    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
+      return profile.assigned_departments?.includes(departmentId) || 
+             profile.assigned_departments?.includes('all_departments') ||
+             profile.department_id === departmentId;
+    }
+    
+    // Regular members need specific permissions for their own department
+    if (profile.role === 'member') {
+      const isOwnDepartment = profile.department_id === departmentId;
+      return isOwnDepartment && hasPermission('manage_department');
+    }
+    
+    return false;
+  };
 
   // Check for existing session and set up auth listener
   useEffect(() => {
@@ -101,15 +138,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('🎭 Database role value:', memberData.role);
         console.log('🔑 Database permissions:', memberData.permissions);
         console.log('🏷️ Database assigned_groups:', memberData.assigned_groups);
+        console.log('🏢 Database department_id:', memberData.department_id);
 
         // Create profile from member data with ALL required fields
         const isAdmin = memberData.role === 'admin';
         
         // FIXED: Better role mapping that handles various database values
-        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        let primaryRole: 'admin' | 'department_leader' | 'group_leader' | 'member' = 'member';
         
         if (isAdmin) {
           primaryRole = 'admin';
+        } else if (memberData.role === 'department_leader') {
+          primaryRole = 'department_leader';
         } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
           primaryRole = 'group_leader';
         } else {
@@ -119,6 +159,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('🎯 Mapped role:', primaryRole);
         console.log('👑 Is admin:', isAdmin);
         
+        // FIXED: Ensure permissions array is never undefined and includes basic permissions based on role
+        const basePermissions = [];
+        if (isAdmin) {
+          basePermissions.push(
+            'manage_departments',
+            'create_meetings', 
+            'manage_attendance',
+            'add_newcomers',
+            'create_reports',
+            'manage_members'
+          );
+        } else if (primaryRole === 'department_leader') {
+          basePermissions.push(
+            'create_meetings',
+            'manage_attendance',
+            'add_newcomers', 
+            'create_reports',
+            'manage_department'
+          );
+        } else if (primaryRole === 'group_leader') {
+          basePermissions.push(
+            'create_meetings',
+            'manage_attendance',
+            'add_newcomers'
+          );
+        }
+
+        const userPermissions = [
+          ...basePermissions,
+          ...(Array.isArray(memberData.permissions) ? memberData.permissions : [])
+        ];
+
+        console.log('🔐 Final permissions:', userPermissions);
+        
         const userProfile: UserProfile = {
           id: userId,
           name: memberData.name || null,
@@ -126,11 +200,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
+          department_id: memberData.department_id || null, // ADDED
           role: primaryRole,
           isAdmin,
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
-          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
+          permissions: userPermissions, // UPDATED: Now includes base permissions
           assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
           assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
         };
@@ -169,17 +244,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('🎭 User roles:', roles);
         
         const isAdmin = roles.includes('admin');
-        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+        let primaryRole: 'admin' | 'department_leader' | 'group_leader' | 'member' = 'member';
         
         if (isAdmin) {
           primaryRole = 'admin';
-        } else if (roles.includes('leader' as any)) {
+        } else if (roles.includes('department_leader')) {
+          primaryRole = 'department_leader';
+        } else if (roles.includes('group_leader') || roles.includes('leader')) {
           primaryRole = 'group_leader';
         } else {
           primaryRole = 'member';
         }
 
         console.log('🎯 Mapped role from profiles:', primaryRole);
+
+        // Add base permissions for fallback profile
+        const basePermissions = [];
+        if (isAdmin) {
+          basePermissions.push('manage_departments', 'create_meetings', 'manage_attendance', 'add_newcomers', 'create_reports');
+        }
 
         const userProfile: UserProfile = {
           id: userId,
@@ -188,11 +271,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: profileData.email || null,
           phone: profileData.phone || null,
           cell_group_id: profileData.cell_group_id || null,
+          department_id: profileData.department_id || null, // ADDED
           role: primaryRole,
           isAdmin,
           login_username: null,
           login_pin: null,
-          permissions: [],
+          permissions: basePermissions, // UPDATED: Include base permissions
           assigned_groups: [],
           assigned_departments: []
         };
@@ -263,10 +347,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const isAdmin = memberData.role === 'admin';
       
       // FIXED: Better role mapping
-      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
+      let primaryRole: 'admin' | 'department_leader' | 'group_leader' | 'member' = 'member';
       
       if (isAdmin) {
         primaryRole = 'admin';
+      } else if (memberData.role === 'department_leader') {
+        primaryRole = 'department_leader';
       } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
         primaryRole = 'group_leader';
       } else {
@@ -275,6 +361,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       console.log('🎯 Final mapped role for login:', primaryRole);
       
+      // Add base permissions based on role
+      const basePermissions = [];
+      if (isAdmin) {
+        basePermissions.push(
+          'manage_departments',
+          'create_meetings',
+          'manage_attendance',
+          'add_newcomers',
+          'create_reports',
+          'manage_members'
+        );
+      } else if (primaryRole === 'department_leader') {
+        basePermissions.push(
+          'create_meetings',
+          'manage_attendance', 
+          'add_newcomers',
+          'create_reports',
+          'manage_department'
+        );
+      } else if (primaryRole === 'group_leader') {
+        basePermissions.push(
+          'create_meetings',
+          'manage_attendance',
+          'add_newcomers'
+        );
+      }
+
+      const userPermissions = [
+        ...basePermissions,
+        ...(Array.isArray(memberData.permissions) ? memberData.permissions : [])
+      ];
+
+      console.log('🔐 Final permissions for login:', userPermissions);
+      
       const userProfile: UserProfile = {
         id: memberData.id,
         name: memberData.name || null,
@@ -282,11 +402,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         email: memberData.email || null,
         phone: memberData.phone || null,
         cell_group_id: memberData.cell_group_id || null,
+        department_id: memberData.department_id || null, // ADDED
         role: primaryRole,
         isAdmin,
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
-        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
+        permissions: userPermissions, // UPDATED: Include base permissions
         assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
         assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : []
       };
@@ -408,7 +529,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading
+    loading,
+    hasPermission, // ADDED
+    canManageDepartment // ADDED
   };
 
   return (
