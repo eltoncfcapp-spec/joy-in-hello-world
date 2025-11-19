@@ -69,7 +69,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
       setAttendance(attendanceData);
 
-      // Calculate stats according to your schema (present, absent, late)
+      // Calculate stats
       const present = attendanceData.filter(a => a.status === 'present').length;
       const absent = attendanceData.filter(a => a.status === 'absent').length;
       const late = attendanceData.filter(a => a.status === 'late').length;
@@ -98,7 +98,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
     try {
       setLoading(true);
 
-      // Create department report according to your schema
+      // Create department report
       const { error } = await supabase
         .from('department_reports')
         .insert([{
@@ -106,9 +106,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
           report_text: reportData.report_text,
           decisions_made: reportData.decisions_made,
           action_items: reportData.action_items,
-          next_meeting_date: reportData.next_meeting_date || null,
-          created_by: null, // You can set this to current user ID if available
-          created_at: new Date().toISOString()
+          next_meeting_date: reportData.next_meeting_date || null
         }]);
 
       if (error) throw error;
@@ -396,15 +394,6 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
           </div>
         </div>
       </div>
-
-      {/* Print Styles */}
-      <style jsx>{`
-        @media print {
-          .print-hidden {
-            display: none !important;
-          }
-        }
-      `}</style>
     </div>
   );
 };
