@@ -4,7 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
   Shield, AlertCircle, CheckCircle, Plus, Printer,
-  Clock, FileText, Save, UserPlus, Mail, Phone
+  Clock, FileText, Save, UserPlus, Mail, Phone,
+  Edit, Trash2, CheckSquare, Square, Ban
 } from 'lucide-react';
 
 // Simple interfaces for departments
@@ -29,6 +30,7 @@ interface DepartmentMeeting {
   notes: string | null;
   status: string;
   created_at: string;
+  cancellation_reason?: string | null;
 }
 
 interface Member {
@@ -276,6 +278,388 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
   );
 };
 
+// Meeting Attendance Component
+const MeetingAttendance = ({ 
+  meeting, 
+  department, 
+  members, 
+  onAttendanceSaved, 
+  onError 
+}: {
+  meeting: DepartmentMeeting;
+  department: Department;
+  members: Member[];
+  onAttendanceSaved: () => void;
+  onError: (message: string) => void;
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadAttendanceRecords();
+  }, [meeting.id]);
+
+  const loadAttendanceRecords = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('department_attendance')
+        .select(`
+          *,
+          members:member_id (
+            id,
+            name,
+            surname,
+            email,
+            phone
+          )
+        `)
+        .eq('meeting_id', meeting.id);
+
+      if (error) throw error;
+      setAttendanceRecords(data || []);
+    } catch (error: any) {
+      onError('Failed to load attendance records: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAttendanceChange = async (memberId: string, status: 'present' | 'absent' | 'absent_with_reason', reason?: string) => {
+    try {
+      const existingRecord = attendanceRecords.find(record => record.member_id === memberId);
+      
+      if (existingRecord) {
+        // Update existing record
+        const { error } = await supabase
+          .from('department_attendance')
+          .update({ 
+            status, 
+            reason: status === 'absent_with_reason' ? reason : null 
+          })
+          .eq('id', existingRecord.id);
+
+        if (error) throw error;
+      } else {
+        // Create new record
+        const { error } = await supabase
+          .from('department_attendance')
+          .insert([{
+            meeting_id: meeting.id,
+            member_id: memberId,
+            status,
+            reason: status === 'absent_with_reason' ? reason : null
+          }]);
+
+        if (error) throw error;
+      }
+
+      // Reload attendance records
+      await loadAttendanceRecords();
+    } catch (error: any) {
+      onError('Failed to update attendance: ' + error.message);
+    }
+  };
+
+  const completeMeeting = async () => {
+    try {
+      setSaving(true);
+      
+      // Check if all members have attendance recorded
+      const membersWithAttendance = new Set(attendanceRecords.map(record => record.member_id));
+      const allMembersHaveAttendance = members.every(member => membersWithAttendance.has(member.id));
+      
+      if (!allMembersHaveAttendance) {
+        onError('Cannot complete meeting: Attendance must be recorded for all members');
+        return;
+      }
+
+      // Update meeting status to completed
+      const { error } = await supabase
+        .from('department_meetings')
+        .update({ status: 'completed' })
+        .eq('id', meeting.id);
+
+      if (error) throw error;
+
+      onAttendanceSaved();
+    } catch (error: any) {
+      onError('Failed to complete meeting: ' + error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const getMemberAttendanceStatus = (memberId: string) => {
+    const record = attendanceRecords.find(r => r.member_id === memberId);
+    return record?.status || null;
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+        <p className="mt-2 text-gray-600">Loading attendance...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Users className="h-8 w-8 text-green-600" />
+        </div>
+        <h3 className="text-2xl font-bold text-gray-900 mb-2">Take Attendance</h3>
+        <p className="text-gray-600">
+          Record attendance for {department.name} meeting on {new Date(meeting.meeting_date).toLocaleDateString()}
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-2 gap-4 mb-6">
+          <div>
+            <h4 className="font-semibold text-gray-900">Meeting Details</h4>
+            <p className="text-gray-600">
+              Date: {new Date(meeting.meeting_date).toLocaleDateString()}
+              {meeting.meeting_time && ` at ${meeting.meeting_time}`}
+            </p>
+            <p className="text-gray-600">Location: {meeting.location}</p>
+            {meeting.topic && <p className="text-gray-600">Topic: {meeting.topic}</p>}
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-900">Attendance Summary</h4>
+            <p className="text-gray-600">
+              Present: {attendanceRecords.filter(r => r.status === 'present').length}
+            </p>
+            <p className="text-gray-600">
+              Absent: {attendanceRecords.filter(r => r.status === 'absent').length}
+            </p>
+            <p className="text-gray-600">
+              Absent with Reason: {attendanceRecords.filter(r => r.status === 'absent_with_reason').length}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h4 className="font-semibold text-gray-900">Department Members</h4>
+          {members.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              No members found in this department
+            </div>
+          ) : (
+            members.map((member) => {
+              const status = getMemberAttendanceStatus(member.id);
+              const [showReasonInput, setShowReasonInput] = useState(false);
+              const [reason, setReason] = useState('');
+
+              const handleStatusChange = async (newStatus: 'present' | 'absent' | 'absent_with_reason') => {
+                if (newStatus === 'absent_with_reason') {
+                  if (!reason.trim()) {
+                    onError('Please provide a reason for absence');
+                    return;
+                  }
+                  await handleAttendanceChange(member.id, newStatus, reason);
+                  setShowReasonInput(false);
+                } else {
+                  await handleAttendanceChange(member.id, newStatus);
+                  setShowReasonInput(false);
+                }
+              };
+
+              return (
+                <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                      <User className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {member.name} {member.surname}
+                      </div>
+                      {member.email && (
+                        <div className="text-sm text-gray-600">{member.email}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Present Button */}
+                    <button
+                      onClick={() => handleStatusChange('present')}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                        status === 'present'
+                          ? 'bg-green-100 text-green-700 border border-green-300'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <CheckSquare className="h-4 w-4" />
+                      Present
+                    </button>
+
+                    {/* Absent Button */}
+                    <button
+                      onClick={() => handleStatusChange('absent')}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                        status === 'absent'
+                          ? 'bg-red-100 text-red-700 border border-red-300'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <Square className="h-4 w-4" />
+                      Absent
+                    </button>
+
+                    {/* Absent with Reason Button */}
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          if (status === 'absent_with_reason') {
+                            setShowReasonInput(false);
+                            handleStatusChange('absent');
+                          } else {
+                            setShowReasonInput(!showReasonInput);
+                          }
+                        }}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          status === 'absent_with_reason'
+                            ? 'bg-yellow-100 text-yellow-700 border border-yellow-300'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        <AlertCircle className="h-4 w-4" />
+                        Absent with Reason
+                      </button>
+
+                      {showReasonInput && (
+                        <div className="absolute top-full right-0 mt-2 p-4 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-64">
+                          <input
+                            type="text"
+                            placeholder="Enter reason for absence..."
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-2"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleStatusChange('absent_with_reason')}
+                              className="flex-1 px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setShowReasonInput(false)}
+                              className="flex-1 px-3 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="mt-6 pt-6 border-t border-gray-200">
+          <button
+            onClick={completeMeeting}
+            disabled={saving || attendanceRecords.length !== members.length}
+            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+          >
+            <CheckCircle className="h-4 w-4" />
+            {saving ? 'Completing Meeting...' : `Complete Meeting (${attendanceRecords.length}/${members.length} recorded)`}
+          </button>
+          {attendanceRecords.length !== members.length && (
+            <p className="text-sm text-red-600 mt-2 text-center">
+              Please record attendance for all members before completing the meeting
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Cancel Meeting Component
+const CancelMeetingModal = ({ 
+  meeting, 
+  onCancel, 
+  onClose 
+}: {
+  meeting: DepartmentMeeting;
+  onCancel: (reason: string) => void;
+  onClose: () => void;
+}) => {
+  const [reason, setReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancel = async () => {
+    if (!reason.trim()) {
+      alert('Please provide a reason for cancellation');
+      return;
+    }
+
+    setCancelling(true);
+    try {
+      await onCancel(reason);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+            <Ban className="h-6 w-6 text-red-600" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">Cancel Meeting</h3>
+            <p className="text-gray-600">
+              {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
+            </p>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Reason for Cancellation *
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+            placeholder="Please provide the reason for cancelling this meeting..."
+          />
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Close
+          </button>
+          <button
+            onClick={handleCancel}
+            disabled={cancelling || !reason.trim()}
+            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelling...' : 'Cancel Meeting'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Department Management Workflow Component
 interface DepartmentWorkflowProps {
   department: Department;
@@ -364,19 +748,70 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
         )}
 
         {currentStep === 2 && (
-          <div className="text-center py-16">
-            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Attendance Step</h3>
-            <p className="text-gray-600">Attendance functionality would go here</p>
-            <button
-              onClick={() => {
-                onSuccess('Attendance saved successfully!');
-                setCurrentStep(3);
-              }}
-              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Mark Attendance Complete
-            </button>
+          <div>
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Users className="h-8 w-8 text-green-600" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Take Attendance</h3>
+              <p className="text-gray-600">Select a meeting to record attendance</p>
+            </div>
+
+            {meetings.length === 0 ? (
+              <div className="text-center py-8 bg-white rounded-xl border border-gray-200">
+                <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600">No meetings scheduled for this department</p>
+                <button
+                  onClick={() => setCurrentStep(1)}
+                  className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Schedule a Meeting
+                </button>
+              </div>
+            ) : (
+              <div className="grid gap-4 max-w-2xl mx-auto">
+                {meetings
+                  .filter(meeting => meeting.status === 'scheduled')
+                  .map((meeting) => (
+                    <div key={meeting.id} className="bg-white border border-gray-200 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {meeting.topic || 'No topic specified'} • {meeting.location}
+                          </div>
+                        </div>
+                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                          {meeting.status}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setSelectedMeeting(meeting)}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      >
+                        <Users className="h-4 w-4" />
+                        Take Attendance
+                      </button>
+                    </div>
+                  ))}
+                
+                {selectedMeeting && (
+                  <MeetingAttendance
+                    meeting={selectedMeeting}
+                    department={department}
+                    members={members}
+                    onAttendanceSaved={() => {
+                      onSuccess('Attendance recorded successfully!');
+                      setSelectedMeeting(null);
+                      setCurrentStep(3);
+                    }}
+                    onError={onError}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -418,11 +853,17 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
       {/* Navigation */}
       <div className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-600">
         <button 
-          onClick={() => setCurrentStep(prev => prev - 1)}
-          disabled={currentStep === 1}
+          onClick={() => {
+            if (selectedMeeting) {
+              setSelectedMeeting(null);
+            } else {
+              setCurrentStep(prev => prev - 1);
+            }
+          }}
+          disabled={currentStep === 1 && !selectedMeeting}
           className="px-6 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition-all duration-200 font-medium disabled:opacity-50"
         >
-          Previous
+          {selectedMeeting ? 'Back to Meetings' : 'Previous'}
         </button>
         
         <div className="flex gap-3">
@@ -435,12 +876,185 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
           
           <button 
             onClick={() => setCurrentStep(prev => prev + 1)}
-            disabled={currentStep === 4 || !canAccessStep(currentStep + 1)}
+            disabled={currentStep === 4 || !canAccessStep(currentStep + 1) || selectedMeeting !== null}
             className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium disabled:opacity-50"
           >
             Next
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// Enhanced Meetings Modal Component
+const EnhancedMeetingsModal = ({ 
+  department, 
+  meetings, 
+  members, 
+  onClose, 
+  onSuccess, 
+  onError 
+}: {
+  department: Department;
+  meetings: DepartmentMeeting[];
+  members: Member[];
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}) => {
+  const { canManageDepartmentAttendance, canCancelDepartmentMeetings } = useAuth();
+  const [selectedMeeting, setSelectedMeeting] = useState<DepartmentMeeting | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [meetingToCancel, setMeetingToCancel] = useState<DepartmentMeeting | null>(null);
+
+  const canManageAttendance = canManageDepartmentAttendance(department.id);
+  const canCancelMeetings = canCancelDepartmentMeetings(department.id);
+
+  const handleCancelMeeting = async (reason: string) => {
+    if (!meetingToCancel) return;
+
+    try {
+      const { error } = await supabase
+        .from('department_meetings')
+        .update({ 
+          status: 'cancelled',
+          cancellation_reason: reason 
+        })
+        .eq('id', meetingToCancel.id);
+
+      if (error) throw error;
+
+      onSuccess('Meeting cancelled successfully!');
+      setShowCancelModal(false);
+      setMeetingToCancel(null);
+      // Reload meetings or update local state
+    } catch (error: any) {
+      onError('Failed to cancel meeting: ' + error.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+            {department.name} - Meetings
+            {selectedMeeting && ` - Attendance`}
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {selectedMeeting ? (
+          <MeetingAttendance
+            meeting={selectedMeeting}
+            department={department}
+            members={members}
+            onAttendanceSaved={() => {
+              onSuccess('Attendance recorded successfully!');
+              setSelectedMeeting(null);
+            }}
+            onError={onError}
+          />
+        ) : (
+          <div className="space-y-4">
+            {meetings.length === 0 ? (
+              <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+                <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600 dark:text-gray-400">No meetings scheduled</p>
+              </div>
+            ) : (
+              meetings.map((meeting) => (
+                <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-white">
+                        {new Date(meeting.meeting_date).toLocaleDateString()}
+                        {meeting.meeting_time && ` at ${meeting.meeting_time}`}
+                      </div>
+                      {meeting.topic && (
+                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                          Topic: {meeting.topic}
+                        </div>
+                      )}
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        Location: {meeting.location}
+                      </div>
+                      {meeting.status === 'cancelled' && meeting.cancellation_reason && (
+                        <div className="text-sm text-red-600 dark:text-red-400 mt-1">
+                          Cancellation Reason: {meeting.cancellation_reason}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        meeting.status === 'completed' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : meeting.status === 'cancelled'
+                          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                          : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                      }`}>
+                        {meeting.status}
+                      </span>
+                      
+                      {canManageAttendance && meeting.status === 'scheduled' && (
+                        <button
+                          onClick={() => setSelectedMeeting(meeting)}
+                          className="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs font-medium flex items-center gap-1"
+                        >
+                          <Users className="h-3 w-3" />
+                          Take Attendance
+                        </button>
+                      )}
+                      
+                      {canCancelMeetings && meeting.status === 'scheduled' && (
+                        <button
+                          onClick={() => {
+                            setMeetingToCancel(meeting);
+                            setShowCancelModal(true);
+                          }}
+                          className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium flex items-center gap-1"
+                        >
+                          <Ban className="h-3 w-3" />
+                          Cancel
+                        </button>
+                      )}
+                      
+                      {meeting.status === 'completed' && (
+                        <button
+                          onClick={() => {
+                            // Open report view
+                            onSuccess('Report view would open here');
+                          }}
+                          className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
+                        >
+                          <Printer className="h-3 w-3" />
+                          View Report
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {showCancelModal && meetingToCancel && (
+          <CancelMeetingModal
+            meeting={meetingToCancel}
+            onCancel={handleCancelMeeting}
+            onClose={() => {
+              setShowCancelModal(false);
+              setMeetingToCancel(null);
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -807,70 +1421,23 @@ const Departments = () => {
           </div>
         )}
 
-        {/* Meetings Modal */}
+        {/* Enhanced Meetings Modal */}
         {showMeetingsModal && selectedDepartment && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {selectedDepartment.name} - Meetings
-                </h3>
-                <button
-                  onClick={closeAllModals}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {meetings.length === 0 ? (
-                  <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                    <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 dark:text-gray-400">No meetings scheduled</p>
-                  </div>
-                ) : (
-                  meetings.map((meeting) => (
-                    <div key={meeting.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600/50 transition-colors">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {new Date(meeting.meeting_date).toLocaleDateString()}
-                            {meeting.meeting_time && ` at ${meeting.meeting_time}`}
-                          </div>
-                          {meeting.topic && (
-                            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                              Topic: {meeting.topic}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            meeting.status === 'completed' 
-                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                              : meeting.status === 'cancelled'
-                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                              : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                          }`}>
-                            {meeting.status}
-                          </span>
-                          {meeting.status === 'completed' && (
-                            <button
-                              onClick={() => openReportModal(meeting)}
-                              className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
-                            >
-                              <Printer className="h-3 w-3" />
-                              View Report
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
+          <EnhancedMeetingsModal
+            department={selectedDepartment}
+            meetings={meetings}
+            members={members.filter(member => member.department_id === selectedDepartment.id)}
+            onClose={closeAllModals}
+            onSuccess={(message) => {
+              setSuccess(message);
+              setTimeout(() => setSuccess(null), 3000);
+              loadMeetings(selectedDepartment.id); // Reload meetings
+            }}
+            onError={(message) => {
+              setError(message);
+              setTimeout(() => setError(null), 3000);
+            }}
+          />
         )}
 
         {/* Report Modal with Print Feature */}
@@ -1153,7 +1720,7 @@ const Departments = () => {
               <DepartmentManagementWorkflow 
                 department={selectedDepartment}
                 meetings={meetings}
-                members={members}
+                members={members.filter(member => member.department_id === selectedDepartment.id)}
                 onClose={closeAllModals}
                 onSuccess={(message) => {
                   setSuccess(message);
