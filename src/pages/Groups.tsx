@@ -3,7 +3,8 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus, Printer
+  Shield, AlertCircle, CheckCircle, Plus, Printer,
+  Save
 } from 'lucide-react';
 
 // Import the step components
@@ -223,6 +224,192 @@ const GroupManagementWorkflow: React.FC<WorkflowProps> = ({
   );
 };
 
+// Member Assignment Component
+interface MemberAssignmentProps {
+  group: CellGroup;
+  members: Member[];
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}
+
+const MemberAssignment: React.FC<MemberAssignmentProps> = ({
+  group,
+  members,
+  onSuccess,
+  onError
+}) => {
+  const [assignedMembers, setAssignedMembers] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Load currently assigned members
+  useEffect(() => {
+    loadAssignedMembers();
+  }, [group.id]);
+
+  const loadAssignedMembers = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('members')
+        .select('id')
+        .eq('cell_group_id', group.id);
+
+      if (error) throw error;
+
+      const assignedIds = data?.map(member => member.id) || [];
+      setAssignedMembers(assignedIds);
+    } catch (error: any) {
+      onError('Failed to load assigned members: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMemberToggle = (memberId: string) => {
+    setAssignedMembers(prev => 
+      prev.includes(memberId)
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
+
+  const handleSaveAssignments = async () => {
+    try {
+      setSaving(true);
+
+      // First, remove all members from this group
+      const { error: removeError } = await supabase
+        .from('members')
+        .update({ cell_group_id: null })
+        .eq('cell_group_id', group.id);
+
+      if (removeError) throw removeError;
+
+      // Then assign the selected members to this group
+      if (assignedMembers.length > 0) {
+        const { error: assignError } = await supabase
+          .from('members')
+          .update({ cell_group_id: group.id })
+          .in('id', assignedMembers);
+
+        if (assignError) throw assignError;
+      }
+
+      onSuccess(`Successfully assigned ${assignedMembers.length} members to ${group.name}`);
+    } catch (error: any) {
+      onError('Failed to save member assignments: ' + error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSelectAll = () => {
+    const allMemberIds = members.map(member => member.id);
+    setAssignedMembers(allMemberIds);
+  };
+
+  const handleDeselectAll = () => {
+    setAssignedMembers([]);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <span className="ml-2">Loading members...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+          Assign Members to {group.name}
+        </h3>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSelectAll}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          >
+            Select All
+          </button>
+          <button
+            onClick={handleDeselectAll}
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium"
+          >
+            Deselect All
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 max-h-96 overflow-y-auto">
+        {members.length === 0 ? (
+          <div className="text-center py-8">
+            <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-600 dark:text-gray-400">No members available</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {members.map((member) => (
+              <div key={member.id} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={assignedMembers.includes(member.id)}
+                      onChange={() => handleMemberToggle(member.id)}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                    />
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-white">
+                        {member.name} {member.surname}
+                      </div>
+                      {member.email && (
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {member.email}
+                        </div>
+                      )}
+                      {member.phone && (
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {member.phone}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    assignedMembers.includes(member.id)
+                      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                      : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                  }`}>
+                    {assignedMembers.includes(member.id) ? 'Assigned' : 'Not Assigned'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Save Button */}
+      <div className="flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-600">
+        <span className="text-sm text-gray-600 dark:text-gray-400">
+          {assignedMembers.length} member{assignedMembers.length !== 1 ? 's' : ''} selected
+        </span>
+        <button
+          onClick={handleSaveAssignments}
+          disabled={saving}
+          className="px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all duration-200 font-medium disabled:opacity-50 flex items-center gap-2"
+        >
+          <Save className="h-4 w-4" />
+          {saving ? 'Saving...' : 'Save Assignments'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // Main Groups Component
 const Groups = () => {
   const { profile } = useAuth();
@@ -239,6 +426,7 @@ const Groups = () => {
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   
   // Data states
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -346,6 +534,16 @@ const Groups = () => {
     setShowReportModal(true);
   };
 
+  const openAssignmentModal = async (group: CellGroup) => {
+    if (!canManageGroup(group.id)) {
+      setError('You do not have permission to manage this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setShowAssignmentModal(true);
+  };
+
   const handlePrintReport = () => {
     window.print();
   };
@@ -425,6 +623,7 @@ const Groups = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
+    setShowAssignmentModal(false);
     setSelectedGroup(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
@@ -615,12 +814,20 @@ const Groups = () => {
                           View Meetings
                         </button>
                         {canManage && (
-                          <button
-                            onClick={() => openWorkflowModal(group)}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-                          >
-                            Manage Group
-                          </button>
+                          <>
+                            <button
+                              onClick={() => openAssignmentModal(group)}
+                              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
+                            >
+                              Assign Members
+                            </button>
+                            <button
+                              onClick={() => openWorkflowModal(group)}
+                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                            >
+                              Manage Group
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -693,6 +900,40 @@ const Groups = () => {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Member Assignment Modal */}
+        {showAssignmentModal && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Assign Members to {selectedGroup.name}
+                </h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <MemberAssignment 
+                group={selectedGroup}
+                members={members}
+                onSuccess={(message) => {
+                  setSuccess(message);
+                  setTimeout(() => setSuccess(null), 3000);
+                  closeAllModals();
+                  loadGroups(); // Refresh groups to update member counts
+                }}
+                onError={(message) => {
+                  setError(message);
+                  setTimeout(() => setError(null), 3000);
+                }}
+              />
             </div>
           </div>
         )}
