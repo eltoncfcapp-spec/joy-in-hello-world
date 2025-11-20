@@ -9,7 +9,7 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  admin_role: string; // Changed to match your schema
+  admin_role: string; // This is your main role field
   pastor_role: boolean | null;
   deacon_role: boolean | null;
   group_leader: boolean | null;
@@ -25,7 +25,7 @@ interface Member {
   cell_group_id: string | null;
   status: string | null;
   created_at: string | null;
-  is_admin: boolean | null; // Added this field
+  // Removed is_admin since it doesn't exist in your schema
 }
 
 interface Group {
@@ -39,9 +39,12 @@ interface Group {
 const getRolesFromMember = (member: Member): string[] => {
   const roles: string[] = [];
   
+  // Add admin_role as the primary role
   if (member.admin_role && member.admin_role !== 'member') {
     roles.push(member.admin_role);
   }
+  
+  // Add boolean roles
   if (member.pastor_role) roles.push('pastor');
   if (member.deacon_role) roles.push('deacon');
   if (member.group_leader) roles.push('group_leader');
@@ -55,6 +58,13 @@ const getRolesFromMember = (member: Member): string[] => {
   return roles;
 };
 
+// Helper function to check if user is admin based on your schema
+const isUserAdmin = (member: Member): boolean => {
+  return member.admin_role === 'admin' || 
+         getRolesFromMember(member).includes('admin') ||
+         member.pastor_role === true; // Pastors also have admin-like access
+};
+
 // Helper function to set roles to individual boolean fields
 const setRolesToMember = (roles: string[]): Partial<Member> => {
   const updateData: Partial<Member> = {
@@ -62,14 +72,13 @@ const setRolesToMember = (roles: string[]): Partial<Member> => {
     deacon_role: false,
     group_leader: false,
     department_leader: false,
-    is_admin: false
+    admin_role: 'member' // Default to member
   };
 
   roles.forEach(role => {
     switch (role) {
       case 'admin':
         updateData.admin_role = 'admin';
-        updateData.is_admin = true;
         break;
       case 'pastor':
         updateData.pastor_role = true;
@@ -88,11 +97,6 @@ const setRolesToMember = (roles: string[]): Partial<Member> => {
         break;
     }
   });
-
-  // If no admin role specified, default to member
-  if (!roles.includes('admin')) {
-    updateData.admin_role = 'member';
-  }
 
   return updateData;
 };
@@ -122,7 +126,6 @@ const cloudService = {
         deacon_role: member.deacon_role || false,
         group_leader: member.group_leader || false,
         department_leader: member.department_leader || false,
-        is_admin: member.is_admin || false,
         permissions: Array.isArray(member.permissions) ? member.permissions : [],
         login_username: member.login_username || null,
         login_pin: member.login_pin || null,
@@ -204,7 +207,6 @@ const cloudService = {
       if (updates.deacon_role !== undefined) updateData.deacon_role = updates.deacon_role;
       if (updates.group_leader !== undefined) updateData.group_leader = updates.group_leader;
       if (updates.department_leader !== undefined) updateData.department_leader = updates.department_leader;
-      if (updates.is_admin !== undefined) updateData.is_admin = updates.is_admin;
 
       console.log('Update data being sent:', updateData);
 
@@ -235,7 +237,6 @@ const cloudService = {
         deacon_role: data.deacon_role || false,
         group_leader: data.group_leader || false,
         department_leader: data.department_leader || false,
-        is_admin: data.is_admin || false,
         permissions: Array.isArray(data.permissions) ? data.permissions : [],
         login_username: data.login_username || null,
         login_pin: data.login_pin || null,
@@ -305,7 +306,7 @@ const hasAnyRole = (member: Member, targetRoles: string[]): boolean => {
 
 // Check if user is admin or pastor
 const isAdminOrPastor = (member: Member): boolean => {
-  return hasAnyRole(member, ['admin', 'pastor']) || member.is_admin === true;
+  return isUserAdmin(member) || member.pastor_role === true || hasAnyRole(member, ['admin', 'pastor']);
 };
 
 // Check if user can manage groups
@@ -344,7 +345,7 @@ const Admin = () => {
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
-    roles: string[]; // Array of role strings
+    roles: string[];
     permissions: string[];
     assigned_groups: string[];
     assigned_departments: string[];
@@ -354,7 +355,7 @@ const Admin = () => {
     login_username: string;
     login_pin: string;
   }>({
-    roles: ['member'], // Default to array with 'member'
+    roles: ['member'],
     permissions: [],
     assigned_groups: [],
     assigned_departments: [],
@@ -376,7 +377,6 @@ const Admin = () => {
       admin: ['admin_access']
     };
 
-    // Combine permissions from all roles
     const combinedPermissions = new Set<string>();
     roles.forEach(role => {
       const permissions = rolePermissions[role] || [];
@@ -407,7 +407,6 @@ const Admin = () => {
         deacon_role: profile.deacon_role || false,
         group_leader: profile.group_leader || false,
         department_leader: profile.department_leader || false,
-        is_admin: profile.is_admin || false,
         permissions: profile.permissions || [],
         login_username: profile.login_username || null,
         login_pin: profile.login_pin || null,
@@ -558,7 +557,6 @@ const Admin = () => {
       deacon_role: profile!.deacon_role || false,
       group_leader: profile!.group_leader || false,
       department_leader: profile!.department_leader || false,
-      is_admin: profile!.is_admin || false,
       permissions: profile!.permissions || [],
       login_username: profile!.login_username || null,
       login_pin: profile!.login_pin || null,
@@ -610,38 +608,39 @@ const Admin = () => {
   };
 
   const openModal = (modalType: string, user?: Member) => {
+    if (!profile) return;
+    
     // Convert profile to Member-like structure for permission checking
     const currentUser: Member = {
-      id: profile!.id,
-      name: profile!.name || '',
-      surname: profile!.surname || '',
-      email: profile!.email,
-      phone: profile!.phone || null,
-      admin_role: profile!.admin_role || 'member',
-      pastor_role: profile!.pastor_role || false,
-      deacon_role: profile!.deacon_role || false,
-      group_leader: profile!.group_leader || false,
-      department_leader: profile!.department_leader || false,
-      is_admin: profile!.is_admin || false,
-      permissions: profile!.permissions || [],
-      login_username: profile!.login_username || null,
-      login_pin: profile!.login_pin || null,
-      assigned_groups: profile!.assigned_groups || [],
-      assigned_departments: profile!.assigned_departments || [],
-      can_add_members: profile!.can_add_members || false,
-      can_edit_members: profile!.can_edit_members || false,
-      can_view_own_data: profile!.can_view_own_data || false,
-      cell_group_id: profile!.cell_group_id,
-      status: profile!.status,
-      created_at: profile!.created_at
+      id: profile.id,
+      name: profile.name || '',
+      surname: profile.surname || '',
+      email: profile.email,
+      phone: profile.phone || null,
+      admin_role: profile.admin_role || 'member',
+      pastor_role: profile.pastor_role || false,
+      deacon_role: profile.deacon_role || false,
+      group_leader: profile.group_leader || false,
+      department_leader: profile.department_leader || false,
+      permissions: profile.permissions || [],
+      login_username: profile.login_username || null,
+      login_pin: profile.login_pin || null,
+      assigned_groups: profile.assigned_groups || [],
+      assigned_departments: profile.assigned_departments || [],
+      can_add_members: profile.can_add_members || false,
+      can_edit_members: profile.can_edit_members || false,
+      can_view_own_data: profile.can_view_own_data || false,
+      cell_group_id: profile.cell_group_id,
+      status: profile.status,
+      created_at: profile.created_at
     };
 
-    if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions, 'view_members')) {
+    if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions, 'view_members')) {
       setError('You do not have permission to view user management');
       return;
     }
     
-    if (user && !isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions, 'edit_members')) {
+    if (user && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions, 'edit_members')) {
       setError('You do not have permission to edit users');
       return;
     }
@@ -688,35 +687,34 @@ const Admin = () => {
   };
 
   const handleUserUpdate = async () => {
-    if (!selectedUser) return;
+    if (!selectedUser || !profile) return;
 
     // Convert profile to Member-like structure for permission checking
     const currentUser: Member = {
-      id: profile!.id,
-      name: profile!.name || '',
-      surname: profile!.surname || '',
-      email: profile!.email,
-      phone: profile!.phone || null,
-      admin_role: profile!.admin_role || 'member',
-      pastor_role: profile!.pastor_role || false,
-      deacon_role: profile!.deacon_role || false,
-      group_leader: profile!.group_leader || false,
-      department_leader: profile!.department_leader || false,
-      is_admin: profile!.is_admin || false,
-      permissions: profile!.permissions || [],
-      login_username: profile!.login_username || null,
-      login_pin: profile!.login_pin || null,
-      assigned_groups: profile!.assigned_groups || [],
-      assigned_departments: profile!.assigned_departments || [],
-      can_add_members: profile!.can_add_members || false,
-      can_edit_members: profile!.can_edit_members || false,
-      can_view_own_data: profile!.can_view_own_data || false,
-      cell_group_id: profile!.cell_group_id,
-      status: profile!.status,
-      created_at: profile!.created_at
+      id: profile.id,
+      name: profile.name || '',
+      surname: profile.surname || '',
+      email: profile.email,
+      phone: profile.phone || null,
+      admin_role: profile.admin_role || 'member',
+      pastor_role: profile.pastor_role || false,
+      deacon_role: profile.deacon_role || false,
+      group_leader: profile.group_leader || false,
+      department_leader: profile.department_leader || false,
+      permissions: profile.permissions || [],
+      login_username: profile.login_username || null,
+      login_pin: profile.login_pin || null,
+      assigned_groups: profile.assigned_groups || [],
+      assigned_departments: profile.assigned_departments || [],
+      can_add_members: profile.can_add_members || false,
+      can_edit_members: profile.can_edit_members || false,
+      can_view_own_data: profile.can_view_own_data || false,
+      cell_group_id: profile.cell_group_id,
+      status: profile.status,
+      created_at: profile.created_at
     };
 
-    if (!isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions, 'edit_members')) {
+    if (!isAdminOrPastor(currentUser) && !hasPermission(profile.permissions, 'edit_members')) {
       setError('You do not have permission to update users');
       return;
     }
@@ -826,30 +824,31 @@ const Admin = () => {
       );
     }
 
+    if (!profile) return [];
+
     // Convert profile to Member-like structure for permission checking
     const currentUser: Member = {
-      id: profile!.id,
-      name: profile!.name || '',
-      surname: profile!.surname || '',
-      email: profile!.email,
-      phone: profile!.phone || null,
-      admin_role: profile!.admin_role || 'member',
-      pastor_role: profile!.pastor_role || false,
-      deacon_role: profile!.deacon_role || false,
-      group_leader: profile!.group_leader || false,
-      department_leader: profile!.department_leader || false,
-      is_admin: profile!.is_admin || false,
-      permissions: profile!.permissions || [],
-      login_username: profile!.login_username || null,
-      login_pin: profile!.login_pin || null,
-      assigned_groups: profile!.assigned_groups || [],
-      assigned_departments: profile!.assigned_departments || [],
-      can_add_members: profile!.can_add_members || false,
-      can_edit_members: profile!.can_edit_members || false,
-      can_view_own_data: profile!.can_view_own_data || false,
-      cell_group_id: profile!.cell_group_id,
-      status: profile!.status,
-      created_at: profile!.created_at
+      id: profile.id,
+      name: profile.name || '',
+      surname: profile.surname || '',
+      email: profile.email,
+      phone: profile.phone || null,
+      admin_role: profile.admin_role || 'member',
+      pastor_role: profile.pastor_role || false,
+      deacon_role: profile.deacon_role || false,
+      group_leader: profile.group_leader || false,
+      department_leader: profile.department_leader || false,
+      permissions: profile.permissions || [],
+      login_username: profile.login_username || null,
+      login_pin: profile.login_pin || null,
+      assigned_groups: profile.assigned_groups || [],
+      assigned_departments: profile.assigned_departments || [],
+      can_add_members: profile.can_add_members || false,
+      can_edit_members: profile.can_edit_members || false,
+      can_view_own_data: profile.can_view_own_data || false,
+      cell_group_id: profile.cell_group_id,
+      status: profile.status,
+      created_at: profile.created_at
     };
 
     // Admin and Pastor can see everyone
@@ -858,19 +857,19 @@ const Admin = () => {
     }
 
     // Users with manage_groups permission can see everyone
-    if (canManageAllGroups(profile!.permissions)) {
+    if (canManageAllGroups(profile.permissions)) {
       return filtered;
     }
 
     // Group Leader: Only see members in their assigned groups
-    if (isGroupLeader(currentUser) && profile!.assigned_groups && profile!.assigned_groups.length > 0) {
+    if (isGroupLeader(currentUser) && profile.assigned_groups && profile.assigned_groups.length > 0) {
       filtered = filtered.filter(member => {
         // Check if member's cell_group_id matches any of the leader's assigned groups
-        if (member.cell_group_id && profile!.assigned_groups.includes(member.cell_group_id)) {
+        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
           return true;
         }
         // Also check assigned_groups array
-        if (member.assigned_groups && member.assigned_groups.some(group => profile!.assigned_groups.includes(group))) {
+        if (member.assigned_groups && member.assigned_groups.some(group => profile.assigned_groups.includes(group))) {
           return true;
         }
         return false;
@@ -879,9 +878,9 @@ const Admin = () => {
     }
 
     // Department Leader: Only see members in their assigned departments
-    if (isDepartmentLeader(currentUser) && profile!.assigned_departments && profile!.assigned_departments.length > 0) {
+    if (isDepartmentLeader(currentUser) && profile.assigned_departments && profile.assigned_departments.length > 0) {
       filtered = filtered.filter(member => {
-        if (member.assigned_departments && member.assigned_departments.some(dept => profile!.assigned_departments.includes(dept))) {
+        if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
           return true;
         }
         return false;
@@ -890,15 +889,15 @@ const Admin = () => {
     }
 
     // Regular Member: Only see members from their own cell group
-    if (hasAnyRole(currentUser, ['member']) && currentUserCellGroup) {
+    if (hasAnyRole(currentUser, ['member']) && profile.cell_group_id) {
       filtered = filtered.filter(member => 
-        member.cell_group_id === profile!.cell_group_id
+        member.cell_group_id === profile.cell_group_id
       );
       return filtered;
     }
 
     // If no specific rules apply and user has view_members permission, they can see all
-    if (hasPermission(profile!.permissions, 'view_members')) {
+    if (hasPermission(profile.permissions, 'view_members')) {
       return filtered;
     }
 
@@ -963,7 +962,6 @@ const Admin = () => {
               deacon_role: profile.deacon_role || false,
               group_leader: profile.group_leader || false,
               department_leader: profile.department_leader || false,
-              is_admin: profile.is_admin || false,
               permissions: profile.permissions || [],
               login_username: profile.login_username || null,
               login_pin: profile.login_pin || null,
@@ -1003,7 +1001,6 @@ const Admin = () => {
                   deacon_role: profile.deacon_role || false,
                   group_leader: profile.group_leader || false,
                   department_leader: profile.department_leader || false,
-                  is_admin: profile.is_admin || false,
                   permissions: profile.permissions || [],
                   login_username: profile.login_username || null,
                   login_pin: profile.login_pin || null,
@@ -1050,32 +1047,33 @@ const Admin = () => {
         {/* Admin Sections Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
+            if (!profile) return null;
+            
             const currentUser: Member = {
-              id: profile!.id,
-              name: profile!.name || '',
-              surname: profile!.surname || '',
-              email: profile!.email,
-              phone: profile!.phone || null,
-              admin_role: profile!.admin_role || 'member',
-              pastor_role: profile!.pastor_role || false,
-              deacon_role: profile!.deacon_role || false,
-              group_leader: profile!.group_leader || false,
-              department_leader: profile!.department_leader || false,
-              is_admin: profile!.is_admin || false,
-              permissions: profile!.permissions || [],
-              login_username: profile!.login_username || null,
-              login_pin: profile!.login_pin || null,
-              assigned_groups: profile!.assigned_groups || [],
-              assigned_departments: profile!.assigned_departments || [],
-              can_add_members: profile!.can_add_members || false,
-              can_edit_members: profile!.can_edit_members || false,
-              can_view_own_data: profile!.can_view_own_data || false,
-              cell_group_id: profile!.cell_group_id,
-              status: profile!.status,
-              created_at: profile!.created_at
+              id: profile.id,
+              name: profile.name || '',
+              surname: profile.surname || '',
+              email: profile.email,
+              phone: profile.phone || null,
+              admin_role: profile.admin_role || 'member',
+              pastor_role: profile.pastor_role || false,
+              deacon_role: profile.deacon_role || false,
+              group_leader: profile.group_leader || false,
+              department_leader: profile.department_leader || false,
+              permissions: profile.permissions || [],
+              login_username: profile.login_username || null,
+              login_pin: profile.login_pin || null,
+              assigned_groups: profile.assigned_groups || [],
+              assigned_departments: profile.assigned_departments || [],
+              can_add_members: profile.can_add_members || false,
+              can_edit_members: profile.can_edit_members || false,
+              can_view_own_data: profile.can_view_own_data || false,
+              cell_group_id: profile.cell_group_id,
+              status: profile.status,
+              created_at: profile.created_at
             };
             
-            const sectionHasAccess = isAdminOrPastor(currentUser) || hasPermission(profile!.permissions, section.permission);
+            const sectionHasAccess = isAdminOrPastor(currentUser) || hasPermission(profile.permissions, section.permission);
             
             return (
               <button
@@ -1114,7 +1112,6 @@ const Admin = () => {
             deacon_role: profile.deacon_role || false,
             group_leader: profile.group_leader || false,
             department_leader: profile.department_leader || false,
-            is_admin: profile.is_admin || false,
             permissions: profile.permissions || [],
             login_username: profile.login_username || null,
             login_pin: profile.login_pin || null,
@@ -1242,7 +1239,6 @@ const Admin = () => {
             deacon_role: profile.deacon_role || false,
             group_leader: profile.group_leader || false,
             department_leader: profile.department_leader || false,
-            is_admin: profile.is_admin || false,
             permissions: profile.permissions || [],
             login_username: profile.login_username || null,
             login_pin: profile.login_pin || null,
@@ -1319,7 +1315,6 @@ const Admin = () => {
             deacon_role: profile.deacon_role || false,
             group_leader: profile.group_leader || false,
             department_leader: profile.department_leader || false,
-            is_admin: profile.is_admin || false,
             permissions: profile.permissions || [],
             login_username: profile.login_username || null,
             login_pin: profile.login_pin || null,
@@ -1402,7 +1397,6 @@ const Admin = () => {
             deacon_role: profile.deacon_role || false,
             group_leader: profile.group_leader || false,
             department_leader: profile.department_leader || false,
-            is_admin: profile.is_admin || false,
             permissions: profile.permissions || [],
             login_username: profile.login_username || null,
             login_pin: profile.login_pin || null,
@@ -1666,87 +1660,7 @@ const Admin = () => {
           );
         })()}
 
-        {/* Other modals for admin only */}
-        {activeModal === 'data' && profile && (() => {
-          const currentUser: Member = {
-            id: profile.id,
-            name: profile.name || '',
-            surname: profile.surname || '',
-            email: profile.email,
-            phone: profile.phone || null,
-            admin_role: profile.admin_role || 'member',
-            pastor_role: profile.pastor_role || false,
-            deacon_role: profile.deacon_role || false,
-            group_leader: profile.group_leader || false,
-            department_leader: profile.department_leader || false,
-            is_admin: profile.is_admin || false,
-            permissions: profile.permissions || [],
-            login_username: profile.login_username || null,
-            login_pin: profile.login_pin || null,
-            assigned_groups: profile.assigned_groups || [],
-            assigned_departments: profile.assigned_departments || [],
-            can_add_members: profile.can_add_members || false,
-            can_edit_members: profile.can_edit_members || false,
-            can_view_own_data: profile.can_view_own_data || false,
-            cell_group_id: profile.cell_group_id,
-            status: profile.status,
-            created_at: profile.created_at
-          };
-
-          return isAdminOrPastor(currentUser) && (
-            <Modal title="Data Management">
-              <div className="space-y-6">
-                <div className="text-center py-8">
-                  <Database className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Data Management</h3>
-                  <p className="text-gray-600">Import, export, and manage church data</p>
-                </div>
-              </div>
-            </Modal>
-          );
-        })()}
-
-        {/* Similar pattern for other admin-only modals */}
-        {activeModal === 'security' && profile && (() => {
-          const currentUser: Member = {
-            id: profile.id,
-            name: profile.name || '',
-            surname: profile.surname || '',
-            email: profile.email,
-            phone: profile.phone || null,
-            admin_role: profile.admin_role || 'member',
-            pastor_role: profile.pastor_role || false,
-            deacon_role: profile.deacon_role || false,
-            group_leader: profile.group_leader || false,
-            department_leader: profile.department_leader || false,
-            is_admin: profile.is_admin || false,
-            permissions: profile.permissions || [],
-            login_username: profile.login_username || null,
-            login_pin: profile.login_pin || null,
-            assigned_groups: profile.assigned_groups || [],
-            assigned_departments: profile.assigned_departments || [],
-            can_add_members: profile.can_add_members || false,
-            can_edit_members: profile.can_edit_members || false,
-            can_view_own_data: profile.can_view_own_data || false,
-            cell_group_id: profile.cell_group_id,
-            status: profile.status,
-            created_at: profile.created_at
-          };
-
-          return isAdminOrPastor(currentUser) && (
-            <Modal title="Security Settings">
-              <div className="space-y-6">
-                <div className="text-center py-8">
-                  <Shield className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Security Settings</h3>
-                  <p className="text-gray-600">Configure security preferences and audit logs</p>
-                </div>
-              </div>
-            </Modal>
-          );
-        })()}
-
-        {/* Add similar patterns for notifications, communication, and general modals */}
+        {/* Other modals would follow similar pattern */}
       </div>
     </div>
   );
