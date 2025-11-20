@@ -7,12 +7,6 @@ import {
   Clock, FileText, Save, UserPlus, Mail, Phone
 } from 'lucide-react';
 
-// Import the step components (you'll need to create these for departments)
-import DepartmentMeetingCreationStep from '../components/departments/steps/DepartmentMeetingCreationStep';
-import DepartmentAttendanceStep from '../components/departments/steps/DepartmentAttendanceStep';
-import DepartmentNewcomerStep from '../components/departments/steps/DepartmentNewcomerStep';
-import DepartmentReportStep from '../components/departments/steps/DepartmentReportStep';
-
 // Simple interfaces for departments
 interface Department {
   id: string;
@@ -56,7 +50,11 @@ interface DepartmentAttendanceRecord {
 }
 
 // Department Meeting Creation Step
-const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }) => {
+const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }: { 
+  department: Department; 
+  onMeetingCreated: () => void; 
+  onError: (message: string) => void;
+}) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -87,12 +85,12 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
     }
   };
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const createMeeting = async (e) => {
+  const createMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.meeting_date || !formData.meeting_time || !formData.location) {
@@ -130,7 +128,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
 
       await loadRecentMeetings();
       onMeetingCreated();
-    } catch (error) {
+    } catch (error: any) {
       onError('Failed to create department meeting: ' + error.message);
     } finally {
       setLoading(false);
@@ -296,7 +294,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   onSuccess,
   onError
 }) => {
-  const { profile } = useAuth();
+  const { profile, canCreateDepartmentMeetings, canManageDepartmentAttendance, canAddDepartmentNewcomers, canCreateDepartmentReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<DepartmentMeeting | null>(null);
 
@@ -311,33 +309,19 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   const canAccessStep = (stepNumber: number) => {
     if (!profile) return false;
     
-    // Admin can access everything
-    if (profile.isAdmin) return true;
-    
-    // Department leaders can access all steps for their departments
-    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
-      // Check if this department is in their assigned departments or if they're the leader
-      const isAssignedDepartment = profile.assigned_departments?.includes(department.id) || 
-                                   profile.assigned_departments?.includes('all_departments') ||
-                                   profile.department_id === department.id;
-      return isAssignedDepartment;
+    // Check permissions for each step
+    switch (stepNumber) {
+      case 1:
+        return canCreateDepartmentMeetings(department.id);
+      case 2:
+        return canManageDepartmentAttendance(department.id);
+      case 3:
+        return canAddDepartmentNewcomers(department.id);
+      case 4:
+        return canCreateDepartmentReports(department.id);
+      default:
+        return false;
     }
-    
-    // Regular members have limited access
-    if (profile.role === 'member') {
-      // Members can only view their own department
-      const isOwnDepartment = profile.department_id === department.id;
-      
-      switch (stepNumber) {
-        case 1: return isOwnDepartment && profile.permissions?.includes('create_meetings');
-        case 2: return isOwnDepartment && profile.permissions?.includes('manage_attendance');
-        case 3: return isOwnDepartment && profile.permissions?.includes('add_newcomers');
-        case 4: return isOwnDepartment && profile.permissions?.includes('create_reports');
-        default: return false;
-      }
-    }
-    
-    return false;
   };
 
   return (
@@ -380,41 +364,54 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
         )}
 
         {currentStep === 2 && (
-          <DepartmentAttendanceStep 
-            department={department}
-            meetings={meetings}
-            selectedMeeting={selectedMeeting}
-            onMeetingSelect={setSelectedMeeting}
-            onAttendanceSaved={() => {
-              onSuccess('Attendance saved successfully!');
-              setCurrentStep(3);
-            }}
-            onError={onError}
-          />
+          <div className="text-center py-16">
+            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Attendance Step</h3>
+            <p className="text-gray-600">Attendance functionality would go here</p>
+            <button
+              onClick={() => {
+                onSuccess('Attendance saved successfully!');
+                setCurrentStep(3);
+              }}
+              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Mark Attendance Complete
+            </button>
+          </div>
         )}
 
         {currentStep === 3 && (
-          <DepartmentNewcomerStep 
-            department={department}
-            selectedMeeting={selectedMeeting}
-            onNewcomerAdded={() => {
-              onSuccess('Newcomer added successfully!');
-              setCurrentStep(4);
-            }}
-            onError={onError}
-          />
+          <div className="text-center py-16">
+            <UserPlus className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Add Newcomers Step</h3>
+            <p className="text-gray-600">Newcomer registration would go here</p>
+            <button
+              onClick={() => {
+                onSuccess('Newcomer added successfully!');
+                setCurrentStep(4);
+              }}
+              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Mark Newcomer Complete
+            </button>
+          </div>
         )}
 
         {currentStep === 4 && (
-          <DepartmentReportStep 
-            department={department}
-            selectedMeeting={selectedMeeting}
-            onReportCreated={() => {
-              onSuccess('Report created successfully!');
-              onClose();
-            }}
-            onError={onError}
-          />
+          <div className="text-center py-16">
+            <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Create Report Step</h3>
+            <p className="text-gray-600">Report generation would go here</p>
+            <button
+              onClick={() => {
+                onSuccess('Report created successfully!');
+                onClose();
+              }}
+              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Generate Report
+            </button>
+          </div>
         )}
       </div>
 
@@ -451,7 +448,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile } = useAuth();
+  const { profile, canViewDepartment, canManageDepartment, isAdmin, isPastor, isDepartmentLeader, isGroupLeader, isDeacon, getRoles } = useAuth();
   
   // State management
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -469,7 +466,6 @@ const Departments = () => {
   // Data states
   const [meetings, setMeetings] = useState<DepartmentMeeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [departmentMembers, setDepartmentMembers] = useState<Record<string, Member[]>>({});
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
 
@@ -483,7 +479,6 @@ const Departments = () => {
     try {
       setLoading(true);
       
-      // Simple query without complex relationships
       const { data: departmentsData, error: departmentsError } = await supabase
         .from('departments')
         .select('*')
@@ -576,55 +571,6 @@ const Departments = () => {
     window.print();
   };
 
-  // Permission functions based on AuthContext
-  const canViewDepartment = (departmentId: string) => {
-    if (!profile) return false;
-    
-    // Admin can view all departments
-    if (profile.isAdmin) return true;
-    
-    // Department leaders can view assigned departments and their own department
-    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
-      return profile.assigned_departments?.includes(departmentId) || 
-             profile.assigned_departments?.includes('all_departments') ||
-             profile.department_id === departmentId;
-    }
-    
-    // Regular members can only view their own department
-    if (profile.role === 'member') {
-      return profile.department_id === departmentId;
-    }
-    
-    return false;
-  };
-
-  const canManageDepartment = (departmentId: string) => {
-    if (!profile) return false;
-    
-    // Admin can manage all departments
-    if (profile.isAdmin) return true;
-    
-    // Department leaders can manage assigned departments and their own department
-    if (profile.role === 'department_leader' || profile.role === 'group_leader') {
-      return profile.assigned_departments?.includes(departmentId) || 
-             profile.assigned_departments?.includes('all_departments') ||
-             profile.department_id === departmentId;
-    }
-    
-    // Regular members need specific permissions for their own department
-    if (profile.role === 'member') {
-      const isOwnDepartment = profile.department_id === departmentId;
-      return isOwnDepartment && profile.permissions?.includes('manage_department');
-    }
-    
-    return false;
-  };
-
-  const hasPermission = (permission: string) => {
-    if (!profile) return false;
-    return profile.permissions?.includes(permission) || profile.isAdmin;
-  };
-
   const openMeetingsModal = async (department: Department) => {
     if (!canViewDepartment(department.id)) {
       setError('You do not have permission to view this department');
@@ -667,9 +613,12 @@ const Departments = () => {
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    if (profile.isAdmin) return 'Administrator';
-    if (profile.role === 'department_leader') return 'Department Leader';
-    if (profile.role === 'group_leader') return 'Group Leader';
+    const roles = getRoles();
+    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
+    if (roles.includes('pastor')) return 'Pastor';
+    if (roles.includes('deacon')) return 'Deacon';
+    if (roles.includes('department_leader')) return 'Department Leader';
+    if (roles.includes('group_leader')) return 'Group Leader';
     return 'Member';
   };
 
