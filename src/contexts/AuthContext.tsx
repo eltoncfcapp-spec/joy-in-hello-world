@@ -9,8 +9,12 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  role: 'admin' | 'group_leader' | 'member';
+  department_id: string | null;
+  role: 'pastor' | 'administrator' | 'deacon' | 'department_leader' | 'member';
   isAdmin: boolean;
+  isPastor: boolean;
+  isDeacon: boolean;
+  isDepartmentLeader: boolean;
   login_username: string | null;
   login_pin: string | null;
   permissions: string[];
@@ -30,7 +34,11 @@ export type Permission =
   | 'manage_own_department'
   | 'edit_users'
   | 'view_reports'
-  | 'manage_system';
+  | 'manage_system'
+  | 'create_meetings'
+  | 'manage_attendance'
+  | 'add_newcomers'
+  | 'create_reports';
 
 interface AuthContextType {
   user: SupabaseUser | null;
@@ -46,6 +54,11 @@ interface AuthContextType {
   canManageDepartment: (departmentId: string) => boolean;
   getUserGroups: () => string[];
   getUserDepartments: () => string[];
+  // New department-specific methods
+  canCreateDepartmentMeetings: (departmentId: string) => boolean;
+  canManageDepartmentAttendance: (departmentId: string) => boolean;
+  canAddDepartmentNewcomers: (departmentId: string) => boolean;
+  canCreateDepartmentReports: (departmentId: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -68,12 +81,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Permission check function
+  // Enhanced permission check function
   const hasPermission = (permission: Permission): boolean => {
     if (!profile) return false;
     
-    // Admin has all permissions
-    if (profile.role === 'admin') return true;
+    // Pastor and Administrator have all permissions
+    if (profile.role === 'pastor' || profile.role === 'administrator') return true;
     
     // Check specific permissions based on role
     switch (permission) {
@@ -83,18 +96,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       case 'manage_all_departments':
       case 'edit_users':
       case 'manage_system':
-        return profile.role === 'admin';
+        return profile.role === 'pastor' || profile.role === 'administrator';
         
       case 'view_own_group':
       case 'view_own_department':
-        return profile.role === 'admin' || profile.role === 'group_leader' || profile.role === 'member';
+        return profile.role === 'pastor' || profile.role === 'administrator' || 
+               profile.role === 'deacon' || profile.role === 'department_leader' || 
+               profile.role === 'member';
         
       case 'manage_own_group':
       case 'manage_own_department':
-        return profile.role === 'admin' || profile.role === 'group_leader';
+        return profile.role === 'pastor' || profile.role === 'administrator' || 
+               profile.role === 'department_leader';
         
       case 'view_reports':
-        return profile.role === 'admin' || profile.role === 'group_leader';
+        return profile.role === 'pastor' || profile.role === 'administrator' || 
+               profile.role === 'deacon' || profile.role === 'department_leader';
+        
+      case 'create_meetings':
+      case 'manage_attendance':
+      case 'add_newcomers':
+      case 'create_reports':
+        return profile.role === 'pastor' || profile.role === 'administrator' || 
+               profile.role === 'department_leader';
         
       default:
         return false;
@@ -107,7 +131,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
     if (hasPermission('view_all_groups')) return true;
     
-    // Group leaders and members can only view their assigned groups
+    // Members can only view their assigned groups
     if (hasPermission('view_own_group')) {
       // Check if user is assigned to this group
       const isAssigned = profile.assigned_groups.includes(groupId);
@@ -126,9 +150,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
     if (hasPermission('view_all_departments')) return true;
     
-    // Group leaders and members can only view their assigned departments
+    // Deacon can view all departments
+    if (profile.role === 'deacon') return true;
+    
+    // Department leaders and members can only view their assigned departments
     if (hasPermission('view_own_department')) {
-      return profile.assigned_departments.includes(departmentId);
+      // Check if user is assigned to this department
+      const isAssigned = profile.assigned_departments.includes(departmentId);
+      // Check if user's department matches
+      const isUserDepartment = profile.department_id === departmentId;
+      
+      return isAssigned || isUserDepartment;
     }
     
     return false;
@@ -159,11 +191,78 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
     if (hasPermission('manage_all_departments')) return true;
     
-    // Group leaders can only manage their assigned departments
+    // Department leaders can only manage their assigned departments
     if (hasPermission('manage_own_department')) {
-      return profile.assigned_departments.includes(departmentId);
+      // Check if user is assigned to this department
+      const isAssigned = profile.assigned_departments.includes(departmentId);
+      // Check if user's department matches
+      const isUserDepartment = profile.department_id === departmentId;
+      
+      return isAssigned || isUserDepartment;
     }
     
+    return false;
+  };
+
+  // Department-specific permission checks
+  const canCreateDepartmentMeetings = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    // Pastor and Administrator can create meetings for any department
+    if (profile.role === 'pastor' || profile.role === 'administrator') return true;
+    
+    // Department leaders can create meetings for their departments
+    if (profile.role === 'department_leader') {
+      return profile.department_id === departmentId || 
+             profile.assigned_departments.includes(departmentId);
+    }
+    
+    return false;
+  };
+
+  const canManageDepartmentAttendance = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    // Pastor and Administrator can manage attendance for any department
+    if (profile.role === 'pastor' || profile.role === 'administrator') return true;
+    
+    // Department leaders can manage attendance for their departments
+    if (profile.role === 'department_leader') {
+      return profile.department_id === departmentId || 
+             profile.assigned_departments.includes(departmentId);
+    }
+    
+    return false;
+  };
+
+  const canAddDepartmentNewcomers = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    // Pastor and Administrator can add newcomers to any department
+    if (profile.role === 'pastor' || profile.role === 'administrator') return true;
+    
+    // Department leaders can add newcomers to their departments
+    if (profile.role === 'department_leader') {
+      return profile.department_id === departmentId || 
+             profile.assigned_departments.includes(departmentId);
+    }
+    
+    return false;
+  };
+
+  const canCreateDepartmentReports = (departmentId: string): boolean => {
+    if (!profile) return false;
+    
+    // Pastor and Administrator can create reports for any department
+    if (profile.role === 'pastor' || profile.role === 'administrator') return true;
+    
+    // Department leaders can create reports for their departments
+    if (profile.role === 'department_leader') {
+      return profile.department_id === departmentId || 
+             profile.assigned_departments.includes(departmentId);
+    }
+    
+    // Deacon can view reports but not necessarily create them
     return false;
   };
 
@@ -172,7 +271,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!profile) return [];
     
     if (hasPermission('view_all_groups')) {
-      // Return a special indicator that user can access all groups
       return ['all_groups'];
     }
     
@@ -191,11 +289,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!profile) return [];
     
     if (hasPermission('view_all_departments')) {
-      // Return a special indicator that user can access all departments
       return ['all_departments'];
     }
     
-    return [...profile.assigned_departments];
+    // Deacon can view all departments
+    if (profile.role === 'deacon') {
+      return ['all_departments'];
+    }
+    
+    const departments = [...profile.assigned_departments];
+    
+    // Add user's primary department if not already included
+    if (profile.department_id && !departments.includes(profile.department_id)) {
+      departments.push(profile.department_id);
+    }
+    
+    return departments;
   };
 
   // Check for existing session and set up auth listener
@@ -288,7 +397,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       console.log('🔍 Fetching user profile for:', userId);
       
-      // First try to fetch from members table
+      // Fetch from members table
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -297,23 +406,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (memberError) {
         console.error('❌ Error fetching from members table:', memberError);
+        throw memberError;
       }
 
       if (memberData) {
         console.log('📊 Raw member data from database:', memberData);
 
-        // Create profile from member data
-        const isAdmin = memberData.role === 'admin';
+        // Enhanced role mapping with new roles
+        let primaryRole: 'pastor' | 'administrator' | 'deacon' | 'department_leader' | 'member' = 'member';
         
-        // Role mapping
-        let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
-        
-        if (isAdmin) {
-          primaryRole = 'admin';
-        } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
-          primaryRole = 'group_leader';
-        } else {
-          primaryRole = 'member';
+        switch (memberData.role?.toLowerCase()) {
+          case 'pastor':
+            primaryRole = 'pastor';
+            break;
+          case 'administrator':
+          case 'admin':
+            primaryRole = 'administrator';
+            break;
+          case 'deacon':
+            primaryRole = 'deacon';
+            break;
+          case 'department_leader':
+          case 'leader':
+            primaryRole = 'department_leader';
+            break;
+          default:
+            primaryRole = 'member';
         }
 
         console.log('🎯 Mapped role:', primaryRole);
@@ -325,8 +443,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
+          department_id: memberData.department_id || null,
           role: primaryRole,
-          isAdmin,
+          isAdmin: primaryRole === 'administrator',
+          isPastor: primaryRole === 'pastor',
+          isDeacon: primaryRole === 'deacon',
+          isDepartmentLeader: primaryRole === 'department_leader',
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
           permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
@@ -339,44 +461,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // Fallback to profiles table
-      console.log('🔄 Trying profiles table as fallback...');
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (profileError) {
-        console.error('❌ Error fetching from profiles table:', profileError);
-      }
-
-      if (profileData) {
-        console.log('📊 Profile data found:', profileData);
-        
-        // Create basic profile from profiles table
-        const userProfile: UserProfile = {
-          id: userId,
-          name: profileData.name || null,
-          surname: profileData.surname || null,
-          email: profileData.email || null,
-          phone: profileData.phone || null,
-          cell_group_id: profileData.cell_group_id || null,
-          role: 'member', // Default role
-          isAdmin: false,
-          login_username: null,
-          login_pin: null,
-          permissions: [],
-          assigned_groups: [],
-          assigned_departments: []
-        };
-
-        console.log('✅ Final profile from profiles table:', userProfile);
-        setProfile(userProfile);
-      } else {
-        console.log('❌ No user data found in members or profiles table');
-        setProfile(null);
-      }
+      throw new Error('No user data found in members table');
     } catch (error) {
       console.error('💥 Error fetching user profile:', error);
       setProfile(null);
@@ -429,17 +514,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         provider_refresh_token: null
       } as Session;
 
-      // Create and set the profile
-      const isAdmin = memberData.role === 'admin';
+      // Enhanced role mapping for login
+      let primaryRole: 'pastor' | 'administrator' | 'deacon' | 'department_leader' | 'member' = 'member';
       
-      let primaryRole: 'admin' | 'group_leader' | 'member' = 'member';
-      
-      if (isAdmin) {
-        primaryRole = 'admin';
-      } else if (memberData.role === 'group_leader' || memberData.role === 'leader') {
-        primaryRole = 'group_leader';
-      } else {
-        primaryRole = 'member';
+      switch (memberData.role?.toLowerCase()) {
+        case 'pastor':
+          primaryRole = 'pastor';
+          break;
+        case 'administrator':
+        case 'admin':
+          primaryRole = 'administrator';
+          break;
+        case 'deacon':
+          primaryRole = 'deacon';
+          break;
+        case 'department_leader':
+        case 'leader':
+          primaryRole = 'department_leader';
+          break;
+        default:
+          primaryRole = 'member';
       }
 
       console.log('🎯 Final mapped role for login:', primaryRole);
@@ -451,8 +545,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         email: memberData.email || null,
         phone: memberData.phone || null,
         cell_group_id: memberData.cell_group_id || null,
+        department_id: memberData.department_id || null,
         role: primaryRole,
-        isAdmin,
+        isAdmin: primaryRole === 'administrator',
+        isPastor: primaryRole === 'pastor',
+        isDeacon: primaryRole === 'deacon',
+        isDepartmentLeader: primaryRole === 'department_leader',
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
         permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
@@ -556,7 +654,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     canManageGroup,
     canManageDepartment,
     getUserGroups,
-    getUserDepartments
+    getUserDepartments,
+    canCreateDepartmentMeetings,
+    canManageDepartmentAttendance,
+    canAddDepartmentNewcomers,
+    canCreateDepartmentReports
   };
 
   return (
