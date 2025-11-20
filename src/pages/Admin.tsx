@@ -9,7 +9,7 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  role: string | null;
+  role: string[]; // Changed from string to string[]
   permissions: string[];
   login_username: string | null;
   login_pin: string | null;
@@ -50,7 +50,7 @@ const cloudService = {
         surname: member.surname || '',
         email: member.email,
         phone: member.phone,
-        role: member.role,
+        role: Array.isArray(member.role) ? member.role : [member.role || 'member'], // Handle both array and string
         permissions: Array.isArray(member.permissions) ? member.permissions : [],
         login_username: member.login_username || null,
         login_pin: member.login_pin || null,
@@ -109,7 +109,7 @@ const cloudService = {
       console.log('Updating member:', memberId, updates);
 
       const updateData: any = {
-        role: updates.role,
+        role: updates.role || ['member'], // Ensure role is always an array
         permissions: updates.permissions || [],
         assigned_groups: updates.assigned_groups || [],
         assigned_departments: updates.assigned_departments || [],
@@ -145,7 +145,7 @@ const cloudService = {
         surname: data.surname || '',
         email: data.email,
         phone: data.phone,
-        role: data.role,
+        role: Array.isArray(data.role) ? data.role : [data.role || 'member'],
         permissions: Array.isArray(data.permissions) ? data.permissions : [],
         login_username: data.login_username || null,
         login_pin: data.login_pin || null,
@@ -207,14 +207,34 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
+// Check if user has any of the target roles
+const hasAnyRole = (userRoles: string[], targetRoles: string[]): boolean => {
+  return userRoles.some(role => targetRoles.includes(role));
+};
+
 // Check if user is admin or pastor
-const isAdminOrPastor = (role: string): boolean => {
-  return role === 'admin' || role === 'pastor';
+const isAdminOrPastor = (roles: string[]): boolean => {
+  return hasAnyRole(roles, ['admin', 'pastor']);
 };
 
 // Check if user can manage groups
 const canManageAllGroups = (permissions: string[] = []): boolean => {
   return hasPermission(permissions, 'manage_groups');
+};
+
+// Check if user is group leader
+const isGroupLeader = (roles: string[]): boolean => {
+  return roles.includes('group_leader');
+};
+
+// Check if user is department leader
+const isDepartmentLeader = (roles: string[]): boolean => {
+  return roles.includes('department_leader');
+};
+
+// Check if user is deacon
+const isDeacon = (roles: string[]): boolean => {
+  return roles.includes('deacon');
 };
 
 const Admin = () => {
@@ -233,7 +253,7 @@ const Admin = () => {
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
-    role: string;
+    role: string[]; // Changed to array
     permissions: string[];
     assigned_groups: string[];
     assigned_departments: string[];
@@ -243,7 +263,7 @@ const Admin = () => {
     login_username: string;
     login_pin: string;
   }>({
-    role: 'member',
+    role: ['member'], // Default to array with 'member'
     permissions: [],
     assigned_groups: [],
     assigned_departments: [],
@@ -253,6 +273,27 @@ const Admin = () => {
     login_username: '',
     login_pin: ''
   });
+
+  // Get role permissions for multiple roles
+  const getRolePermissions = (roles: string[]): string[] => {
+    const rolePermissions: Record<string, string[]> = {
+      member: ['view_members', 'view_events', 'view_groups'],
+      group_leader: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
+      department_leader: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
+      deacon: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups', 'view_donations'],
+      pastor: ['view_members', 'add_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'view_reports'],
+      admin: ['admin_access']
+    };
+
+    // Combine permissions from all roles
+    const combinedPermissions = new Set<string>();
+    roles.forEach(role => {
+      const permissions = rolePermissions[role] || [];
+      permissions.forEach(permission => combinedPermissions.add(permission));
+    });
+
+    return Array.from(combinedPermissions);
+  };
 
   // Check permissions and load data
   useEffect(() => {
@@ -271,7 +312,7 @@ const Admin = () => {
 
       // Admin, Pastor, or users with manage_groups permission have full access
       const userHasAccess = 
-        isAdminOrPastor(profile.role) || 
+        isAdminOrPastor(profile.roles) || 
         canManageAllGroups(profile.permissions) ||
         hasPermission(profile.permissions, 'view_members');
       
@@ -388,7 +429,7 @@ const Admin = () => {
   const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
     
-    if (!isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
+    if (!isAdminOrPastor(profile?.roles || []) && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to generate credentials');
       return;
     }
@@ -426,12 +467,12 @@ const Admin = () => {
   };
 
   const openModal = (modalType: string, user?: Member) => {
-    if (modalType === 'users' && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'view_members')) {
+    if (modalType === 'users' && !isAdminOrPastor(profile?.roles || []) && !hasPermission(profile?.permissions, 'view_members')) {
       setError('You do not have permission to view user management');
       return;
     }
     
-    if (user && !isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
+    if (user && !isAdminOrPastor(profile?.roles || []) && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to edit users');
       return;
     }
@@ -442,7 +483,7 @@ const Admin = () => {
     if (user) {
       setSelectedUser(user);
       setUserFormData({
-        role: user.role || 'member',
+        role: Array.isArray(user.role) ? user.role : [user.role || 'member'], // Handle both array and string
         permissions: user.permissions || [],
         assigned_groups: user.assigned_groups || [],
         assigned_departments: user.assigned_departments || [],
@@ -461,7 +502,7 @@ const Admin = () => {
     setActiveModal(null);
     setSelectedUser(null);
     setUserFormData({
-      role: 'member',
+      role: ['member'],
       permissions: [],
       assigned_groups: [],
       assigned_departments: [],
@@ -479,7 +520,7 @@ const Admin = () => {
   const handleUserUpdate = async () => {
     if (!selectedUser) return;
 
-    if (!isAdminOrPastor(profile?.role || '') && !hasPermission(profile?.permissions, 'edit_members')) {
+    if (!isAdminOrPastor(profile?.roles || []) && !hasPermission(profile?.permissions, 'edit_members')) {
       setError('You do not have permission to update users');
       return;
     }
@@ -545,16 +586,32 @@ const Admin = () => {
     }));
   };
 
-  const getRolePermissions = (role: string): string[] => {
-    const rolePermissions: Record<string, string[]> = {
-      member: ['view_members', 'view_events', 'view_groups'],
-      group_leader: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-      department_leader: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups'],
-      deacon: ['view_members', 'add_members', 'edit_members', 'view_events', 'view_groups', 'manage_groups', 'view_donations'],
-      pastor: ['view_members', 'add_members', 'edit_members', 'view_events', 'manage_events', 'view_groups', 'manage_groups', 'view_donations', 'view_reports'],
-      admin: ['admin_access']
-    };
-    return rolePermissions[role] || [];
+  const handleRoleToggle = (roleValue: string) => {
+    setUserFormData(prev => {
+      let newRoles: string[];
+      
+      if (prev.role.includes(roleValue)) {
+        // Remove role, but ensure at least one role remains
+        if (prev.role.length > 1) {
+          newRoles = prev.role.filter(r => r !== roleValue);
+        } else {
+          alert('User must have at least one role');
+          return prev;
+        }
+      } else {
+        // Add role
+        newRoles = [...prev.role, roleValue];
+      }
+
+      // Update permissions based on new roles
+      const newPermissions = getRolePermissions(newRoles);
+
+      return {
+        ...prev,
+        role: newRoles,
+        permissions: newPermissions
+      };
+    });
   };
 
   // CRITICAL: Filter members based on role and permissions
@@ -566,12 +623,12 @@ const Admin = () => {
       filtered = filtered.filter(member =>
         `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (member.role && member.role.toLowerCase().includes(searchTerm.toLowerCase()))
+        (Array.isArray(member.role) && member.role.some(role => role.toLowerCase().includes(searchTerm.toLowerCase())))
       );
     }
 
     // Admin and Pastor can see everyone
-    if (isAdminOrPastor(profile?.role || '')) {
+    if (isAdminOrPastor(profile?.roles || [])) {
       return filtered;
     }
 
@@ -581,7 +638,7 @@ const Admin = () => {
     }
 
     // Group Leader: Only see members in their assigned groups
-    if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
+    if (isGroupLeader(profile?.roles || []) && profile?.assigned_groups && profile.assigned_groups.length > 0) {
       filtered = filtered.filter(member => {
         // Check if member's cell_group_id matches any of the leader's assigned groups
         if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
@@ -596,12 +653,9 @@ const Admin = () => {
       return filtered;
     }
 
-    // Group Leader: Only see members in their assigned groups
-    if (profile?.role === 'group_leader' && profile?.assigned_groups && profile.assigned_groups.length > 0) {
+    // Department Leader: Only see members in their assigned departments
+    if (isDepartmentLeader(profile?.roles || []) && profile?.assigned_departments && profile.assigned_departments.length > 0) {
       filtered = filtered.filter(member => {
-        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
-          return true;
-        }
         if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
           return true;
         }
@@ -611,7 +665,7 @@ const Admin = () => {
     }
 
     // Regular Member: Only see members from their own cell group
-    if (profile?.role === 'member' && currentUserCellGroup) {
+    if (hasAnyRole(profile?.roles || [], ['member']) && currentUserCellGroup) {
       filtered = filtered.filter(member => 
         member.cell_group_id === currentUserCellGroup
       );
@@ -673,7 +727,7 @@ const Admin = () => {
             You don't have permission to access the admin panel. Please contact an administrator.
           </p>
           <p className="text-sm text-gray-500">
-            Your role: {profile?.role || 'member'}
+            Your roles: {profile?.roles?.join(', ') || 'member'}
           </p>
         </div>
       </div>
@@ -689,15 +743,17 @@ const Admin = () => {
               Admin Panel
             </h1>
             <p className="text-gray-600">
-              {isAdminOrPastor(profile?.role || '') 
+              {isAdminOrPastor(profile?.roles || []) 
                 ? 'Full administrative access' 
                 : canManageAllGroups(profile?.permissions)
                 ? 'Can manage all groups and members'
-                : profile?.role === 'group_leader'
+                : isGroupLeader(profile?.roles || [])
                 ? `Group Leader - Managing ${profile?.assigned_groups?.length || 0} group(s)`
-                : profile?.role === 'member'
+                : isDepartmentLeader(profile?.roles || [])
+                ? `Department Leader - Managing ${profile?.assigned_departments?.length || 0} department(s)`
+                : hasAnyRole(profile?.roles || [], ['member'])
                 ? `Viewing members in your cell group${currentUserCellGroup ? `: ${currentUserCellGroup}` : ''}`
-                : `Limited access - ${profile?.role} role`
+                : `Limited access - ${profile?.roles?.join(', ') || 'member'} role`
               }
             </p>
           </div>
@@ -725,7 +781,7 @@ const Admin = () => {
         {/* Admin Sections Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
-            const sectionHasAccess = isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, section.permission);
+            const sectionHasAccess = isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, section.permission);
             
             return (
               <button
@@ -752,11 +808,11 @@ const Admin = () => {
         </div>
 
         {/* User Management Section */}
-        {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'view_members')) && (
+        {(isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, 'view_members')) && (
           <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-              {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'add_members')) && (
+              {(isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, 'add_members')) && (
                 <button
                   onClick={() => openModal('users')}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -789,7 +845,7 @@ const Admin = () => {
                 <p className="text-gray-600">
                   {searchTerm 
                     ? 'No users found matching your search' 
-                    : profile?.role === 'member'
+                    : hasAnyRole(profile?.roles || [], ['member'])
                     ? 'No members found in your cell group'
                     : 'No users found in your assigned groups/departments'}
                 </p>
@@ -810,7 +866,10 @@ const Admin = () => {
                           {member.name} {member.surname}
                         </h4>
                         <p className="text-sm text-gray-500">
-                          {member.email} • {roles.find(r => r.value === member.role)?.label || member.role || 'member'}
+                          {member.email} • {Array.isArray(member.role) 
+                            ? member.role.map(role => roles.find(r => r.value === role)?.label || role).join(', ')
+                            : roles.find(r => r.value === member.role)?.label || member.role || 'member'
+                          }
                         </p>
                         {member.cell_group_id && (
                           <p className="text-xs text-gray-500">
@@ -836,7 +895,7 @@ const Admin = () => {
                           {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
                         </span>
                       )}
-                      {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'edit_members')) && (
+                      {(isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, 'edit_members')) && (
                         <button
                           onClick={() => openModal('userDetails', member)}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -853,13 +912,15 @@ const Admin = () => {
         )}
 
         {/* Stats Section */}
-        {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'view_reports')) && (
+        {(isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, 'view_reports')) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white border border-gray-200 rounded-2xl p-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
               <div className="space-y-4">
                 {roles.map(role => {
-                  const count = filteredMembers.filter(m => m.role === role.value).length;
+                  const count = filteredMembers.filter(m => 
+                    Array.isArray(m.role) ? m.role.includes(role.value) : m.role === role.value
+                  ).length;
                   return (
                     <div key={role.value} className="flex justify-between items-center">
                       <span className="text-gray-600">{role.label}</span>
@@ -936,11 +997,14 @@ const Admin = () => {
                             {member.name} {member.surname}
                           </h4>
                           <p className="text-sm text-gray-500">
-                            {member.email} • {roles.find(r => r.value === member.role)?.label || member.role || 'member'}
+                            {member.email} • {Array.isArray(member.role) 
+                              ? member.role.map(role => roles.find(r => r.value === role)?.label || role).join(', ')
+                              : roles.find(r => r.value === member.role)?.label || member.role || 'member'
+                            }
                           </p>
                         </div>
                       </div>
-                      {(isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'edit_members')) && (
+                      {(isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, 'edit_members')) && (
                         <button
                           onClick={() => openModal('userDetails', member)}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
@@ -957,7 +1021,7 @@ const Admin = () => {
         )}
 
         {/* User Details Modal */}
-        {activeModal === 'userDetails' && selectedUser && (isAdminOrPastor(profile?.role || '') || hasPermission(profile?.permissions, 'edit_members')) && (
+        {activeModal === 'userDetails' && selectedUser && (isAdminOrPastor(profile?.roles || []) || hasPermission(profile?.permissions, 'edit_members')) && (
           <Modal title={`Manage User - ${selectedUser.name} ${selectedUser.surname}`}>
             <div className="space-y-6">
               {error && (
@@ -985,30 +1049,34 @@ const Admin = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* User Roles Section - Replaced single select with checkboxes */}
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700">
-                    User Role
+                    User Roles
                   </label>
-                  <select
-                    value={userFormData.role}
-                    onChange={(e) => {
-                      const newRole = e.target.value;
-                      setUserFormData({
-                        ...userFormData,
-                        role: newRole,
-                        permissions: getRolePermissions(newRole)
-                      });
-                    }}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
+                  <div className="grid grid-cols-1 gap-3">
                     {roles.map(role => (
-                      <option key={role.value} value={role.value}>
-                        {role.label}
-                      </option>
+                      <label
+                        key={role.value}
+                        className="flex items-start gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={userFormData.role.includes(role.value)}
+                          onChange={() => handleRoleToggle(role.value)}
+                          className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <span className="font-medium text-gray-900">{role.label}</span>
+                          <p className="text-sm text-gray-500 mt-1">{role.description}</p>
+                        </div>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                   <p className="text-sm text-gray-500">
-                    {roles.find(r => r.value === userFormData.role)?.description}
+                    Selected: {userFormData.role.map(role => 
+                      roles.find(r => r.value === role)?.label || role
+                    ).join(', ')}
                   </p>
                 </div>
 
@@ -1052,7 +1120,7 @@ const Admin = () => {
                 </div>
               </div>
 
-              {(userFormData.role === 'group_leader' || userFormData.role === 'department_leader') && (
+              {(userFormData.role.includes('group_leader') || userFormData.role.includes('department_leader')) && (
                 <div className="space-y-6">
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                     <h4 className="font-semibold text-blue-900 mb-2">Leadership Permissions</h4>
@@ -1102,7 +1170,7 @@ const Admin = () => {
                     </div>
                   </div>
 
-                  {userFormData.role === 'group_leader' && (
+                  {userFormData.role.includes('group_leader') && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-3">
                         Assigned Cell Groups
@@ -1129,7 +1197,7 @@ const Admin = () => {
                     </div>
                   )}
 
-                  {userFormData.role === 'department_leader' && (
+                  {userFormData.role.includes('department_leader') && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-3">
                         Assigned Departments
@@ -1203,7 +1271,7 @@ const Admin = () => {
         )}
 
         {/* Other modals for admin only */}
-        {activeModal === 'data' && isAdminOrPastor(profile?.role || '') && (
+        {activeModal === 'data' && isAdminOrPastor(profile?.roles || []) && (
           <Modal title="Data Management">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1215,7 +1283,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'security' && isAdminOrPastor(profile?.role || '') && (
+        {activeModal === 'security' && isAdminOrPastor(profile?.roles || []) && (
           <Modal title="Security Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1227,7 +1295,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'notifications' && isAdminOrPastor(profile?.role || '') && (
+        {activeModal === 'notifications' && isAdminOrPastor(profile?.roles || []) && (
           <Modal title="Notification Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1239,7 +1307,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'communication' && isAdminOrPastor(profile?.role || '') && (
+        {activeModal === 'communication' && isAdminOrPastor(profile?.roles || []) && (
           <Modal title="Communication Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
@@ -1251,7 +1319,7 @@ const Admin = () => {
           </Modal>
         )}
 
-        {activeModal === 'general' && isAdminOrPastor(profile?.role || '') && (
+        {activeModal === 'general' && isAdminOrPastor(profile?.roles || []) && (
           <Modal title="General Settings">
             <div className="space-y-6">
               <div className="text-center py-8">
