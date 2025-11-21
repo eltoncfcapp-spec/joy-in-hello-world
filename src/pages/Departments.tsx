@@ -376,31 +376,32 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   };
 
   const loadExistingAttendance = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('department_attendance')
-        .select('*')
-        .eq('meeting_id', selectedMeeting?.id);
+  try {
+    const { data, error } = await supabase
+      .from('meeting_attendance') // Changed to your actual table name
+      .select('*')
+      .eq('meeting_id', selectedMeeting?.id);
 
-      if (error) throw error;
+    if (error) throw error;
 
-      const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
-      const existingReasons: Record<string, string> = {};
+    const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
+    const existingReasons: Record<string, string> = {};
 
-      data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.reason) {
-          existingReasons[record.member_id] = record.reason;
-        }
-      });
+    data?.forEach(record => {
+      // Map 'excused' status back to 'absent_with_reason' for the UI
+      const status = record.status === 'excused' ? 'absent_with_reason' : record.status;
+      existingAttendance[record.member_id] = status as 'present' | 'absent' | 'absent_with_reason';
+      if (record.notes) {
+        existingReasons[record.member_id] = record.notes;
+      }
+    });
 
-      setAttendance(existingAttendance);
-      setReasons(existingReasons);
-    } catch (error: any) {
-      console.error('Failed to load existing attendance:', error);
-    }
-  };
-
+    setAttendance(existingAttendance);
+    setReasons(existingReasons);
+  } catch (error: any) {
+    console.error('Failed to load existing attendance:', error);
+  }
+};
   const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
     setAttendance(prev => ({
       ...prev,
@@ -466,45 +467,44 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     }
   };
 
-  const saveAttendance = async () => {
-    if (!selectedMeeting) {
-      onError('Please select a department meeting first');
-      return;
-    }
+ const saveAttendance = async () => {
+  if (!selectedMeeting) {
+    onError('Please select a department meeting first');
+    return;
+  }
 
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
 
-      // Prepare attendance records
-      const attendanceRecords = departmentMembers.map(member => ({
-        meeting_id: selectedMeeting.id,
-        member_id: member.id,
-        status: attendance[member.id] || 'absent',
-        reason: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
-      }));
+    // Prepare attendance records - using your actual table structure
+    const attendanceRecords = departmentMembers.map(member => ({
+      meeting_id: selectedMeeting.id,
+      member_id: member.id,
+      status: attendance[member.id] === 'absent_with_reason' ? 'excused' : attendance[member.id] || 'absent',
+      notes: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
+    }));
 
-      // Delete existing attendance and insert new ones
-      const { error: deleteError } = await supabase
-        .from('department_attendance')
-        .delete()
-        .eq('meeting_id', selectedMeeting.id);
+    // Delete existing attendance and insert new ones
+    const { error: deleteError } = await supabase
+      .from('meeting_attendance') // Changed to your actual table name
+      .delete()
+      .eq('meeting_id', selectedMeeting.id);
 
-      if (deleteError) throw deleteError;
+    if (deleteError) throw deleteError;
 
-      const { error: insertError } = await supabase
-        .from('department_attendance')
-        .insert(attendanceRecords);
+    const { error: insertError } = await supabase
+      .from('meeting_attendance') // Changed to your actual table name
+      .insert(attendanceRecords);
 
-      if (insertError) throw insertError;
+    if (insertError) throw insertError;
 
-      onAttendanceSaved();
-    } catch (error: any) {
-      onError('Failed to save department attendance: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+    onAttendanceSaved();
+  } catch (error: any) {
+    onError('Failed to save department attendance: ' + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'leader':
@@ -816,28 +816,35 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   }, [selectedMeeting]);
 
   const loadAttendanceData = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('department_attendance')
-        .select(`
-          *,
-          members:member_id (
-            id,
-            name,
-            surname,
-            email,
-            phone
-          )
-        `)
-        .eq('meeting_id', selectedMeeting?.id);
+  try {
+    const { data, error } = await supabase
+      .from('meeting_attendance') // Changed to your actual table name
+      .select(`
+        *,
+        members:member_id (
+          id,
+          name,
+          surname,
+          email,
+          phone
+        )
+      `)
+      .eq('meeting_id', selectedMeeting?.id);
 
-      if (error) throw error;
-      setAttendance(data || []);
-    } catch (error: any) {
-      onError('Failed to load attendance data: ' + error.message);
-    }
-  };
-
+    if (error) throw error;
+    
+    // Map the data to match your interface
+    const mappedData = (data || []).map(record => ({
+      ...record,
+      status: record.status === 'excused' ? 'absent_with_reason' : record.status,
+      reason: record.notes || null
+    }));
+    
+    setAttendance(mappedData);
+  } catch (error: any) {
+    onError('Failed to load attendance data: ' + error.message);
+  }
+};
   const loadExistingReport = async () => {
     try {
       const { data, error } = await supabase
@@ -1610,28 +1617,35 @@ const Departments = () => {
   };
 
   const loadAttendanceForMeeting = async (meetingId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('department_attendance')
-        .select(`
-          *,
-          members:member_id (
-            id,
-            name,
-            surname,
-            email,
-            phone
-          )
-        `)
-        .eq('meeting_id', meetingId);
+  try {
+    const { data, error } = await supabase
+      .from('meeting_attendance') // Changed to your actual table name
+      .select(`
+        *,
+        members:member_id (
+          id,
+          name,
+          surname,
+          email,
+          phone
+        )
+      `)
+      .eq('meeting_id', meetingId);
 
-      if (error) throw error;
-      setAttendanceRecords(data || []);
-    } catch (error: any) {
-      setError('Failed to load attendance: ' + error.message);
-    }
-  };
-
+    if (error) throw error;
+    
+    // Map the data to match your interface
+    const mappedData = (data || []).map(record => ({
+      ...record,
+      status: record.status === 'excused' ? 'absent_with_reason' : record.status,
+      reason: record.notes || null
+    }));
+    
+    setAttendanceRecords(mappedData);
+  } catch (error: any) {
+    setError('Failed to load attendance: ' + error.message);
+  }
+};
   const openReportModal = async (meeting: DepartmentMeeting) => {
     setSelectedMeetingForReport(meeting);
     await loadAttendanceForMeeting(meeting.id);
