@@ -46,8 +46,8 @@ interface DepartmentAttendanceRecord {
   id: string;
   meeting_id: string;
   member_id: string;
-  status: 'present' | 'absent' | 'absent_with_reason';
-  reason?: string | null;
+  status: 'present' | 'absent' | 'excused';
+  notes?: string | null;
   members?: Member;
 }
 
@@ -309,7 +309,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   const [loading, setLoading] = useState(false);
   const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
+  const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'excused'>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
   const [searchMemberTerm, setSearchMemberTerm] = useState('');
@@ -376,39 +376,38 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   };
 
   const loadExistingAttendance = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('meeting_attendance') // Changed to your actual table name
-      .select('*')
-      .eq('meeting_id', selectedMeeting?.id);
+    try {
+      const { data, error } = await supabase
+        .from('meeting_attendance')
+        .select('*')
+        .eq('meeting_id', selectedMeeting?.id);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
-    const existingReasons: Record<string, string> = {};
+      const existingAttendance: Record<string, 'present' | 'absent' | 'excused'> = {};
+      const existingReasons: Record<string, string> = {};
 
-    data?.forEach(record => {
-      // Map 'excused' status back to 'absent_with_reason' for the UI
-      const status = record.status === 'excused' ? 'absent_with_reason' : record.status;
-      existingAttendance[record.member_id] = status as 'present' | 'absent' | 'absent_with_reason';
-      if (record.notes) {
-        existingReasons[record.member_id] = record.notes;
-      }
-    });
+      data?.forEach(record => {
+        existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'excused';
+        if (record.notes) {
+          existingReasons[record.member_id] = record.notes;
+        }
+      });
 
-    setAttendance(existingAttendance);
-    setReasons(existingReasons);
-  } catch (error: any) {
-    console.error('Failed to load existing attendance:', error);
-  }
-};
-  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
+      setAttendance(existingAttendance);
+      setReasons(existingReasons);
+    } catch (error: any) {
+      console.error('Failed to load existing attendance:', error);
+    }
+  };
+
+  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'excused') => {
     setAttendance(prev => ({
       ...prev,
       [memberId]: status
     }));
 
-    if (status !== 'absent_with_reason') {
+    if (status !== 'excused') {
       setReasons(prev => {
         const newReasons = { ...prev };
         delete newReasons[memberId];
@@ -467,44 +466,45 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     }
   };
 
- const saveAttendance = async () => {
-  if (!selectedMeeting) {
-    onError('Please select a department meeting first');
-    return;
-  }
+  const saveAttendance = async () => {
+    if (!selectedMeeting) {
+      onError('Please select a department meeting first');
+      return;
+    }
 
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    // Prepare attendance records - using your actual table structure
-    const attendanceRecords = departmentMembers.map(member => ({
-      meeting_id: selectedMeeting.id,
-      member_id: member.id,
-      status: attendance[member.id] === 'absent_with_reason' ? 'excused' : attendance[member.id] || 'absent',
-      notes: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
-    }));
+      // Prepare attendance records - using your actual table structure
+      const attendanceRecords = departmentMembers.map(member => ({
+        meeting_id: selectedMeeting.id,
+        member_id: member.id,
+        status: attendance[member.id] || 'absent',
+        notes: attendance[member.id] === 'excused' ? reasons[member.id] || null : null
+      }));
 
-    // Delete existing attendance and insert new ones
-    const { error: deleteError } = await supabase
-      .from('meeting_attendance') // Changed to your actual table name
-      .delete()
-      .eq('meeting_id', selectedMeeting.id);
+      // Delete existing attendance and insert new ones
+      const { error: deleteError } = await supabase
+        .from('meeting_attendance')
+        .delete()
+        .eq('meeting_id', selectedMeeting.id);
 
-    if (deleteError) throw deleteError;
+      if (deleteError) throw deleteError;
 
-    const { error: insertError } = await supabase
-      .from('meeting_attendance') // Changed to your actual table name
-      .insert(attendanceRecords);
+      const { error: insertError } = await supabase
+        .from('meeting_attendance')
+        .insert(attendanceRecords);
 
-    if (insertError) throw insertError;
+      if (insertError) throw insertError;
 
-    onAttendanceSaved();
-  } catch (error: any) {
-    onError('Failed to save department attendance: ' + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
+      onAttendanceSaved();
+    } catch (error: any) {
+      onError('Failed to save department attendance: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'leader':
@@ -532,7 +532,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
           <Users className="h-8 w-8 text-green-600" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Record Department Attendance</h3>
-        <p className="text-gray-600 dark:text-gray-400">Mark department members as present, absent, or absent with reason</p>
+        <p className="text-gray-600 dark:text-gray-400">Mark department members as present, absent, or excused</p>
       </div>
 
       {/* Meeting Selection */}
@@ -664,23 +664,23 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           Absent
                         </button>
 
-                        {/* Absent with Reason Button */}
+                        {/* Excused Button */}
                         <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                          onClick={() => handleAttendanceChange(member.id, 'excused')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'absent_with_reason'
+                            attendance[member.id] === 'excused'
                               ? 'bg-orange-600 text-white shadow-lg'
                               : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
                           <FileText className="h-4 w-4" />
-                          Absent with Reason
+                          Excused
                         </button>
                       </div>
                     </div>
 
-                    {/* Reason Input for absent with reason */}
-                    {attendance[member.id] === 'absent_with_reason' && (
+                    {/* Reason Input for excused */}
+                    {attendance[member.id] === 'excused' && (
                       <div className="mt-3">
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                           Reason for Absence
@@ -816,35 +816,28 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   }, [selectedMeeting]);
 
   const loadAttendanceData = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('meeting_attendance') // Changed to your actual table name
-      .select(`
-        *,
-        members:member_id (
-          id,
-          name,
-          surname,
-          email,
-          phone
-        )
-      `)
-      .eq('meeting_id', selectedMeeting?.id);
+    try {
+      const { data, error } = await supabase
+        .from('meeting_attendance')
+        .select(`
+          *,
+          members:member_id (
+            id,
+            name,
+            surname,
+            email,
+            phone
+          )
+        `)
+        .eq('meeting_id', selectedMeeting?.id);
 
-    if (error) throw error;
-    
-    // Map the data to match your interface
-    const mappedData = (data || []).map(record => ({
-      ...record,
-      status: record.status === 'excused' ? 'absent_with_reason' : record.status,
-      reason: record.notes || null
-    }));
-    
-    setAttendance(mappedData);
-  } catch (error: any) {
-    onError('Failed to load attendance data: ' + error.message);
-  }
-};
+      if (error) throw error;
+      setAttendance(data || []);
+    } catch (error: any) {
+      onError('Failed to load attendance data: ' + error.message);
+    }
+  };
+
   const loadExistingReport = async () => {
     try {
       const { data, error } = await supabase
@@ -952,7 +945,7 @@ ATTENDANCE SUMMARY
 Total Members: ${stats.total}
 Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
 Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
-Absent with Reason: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
+Excused: ${stats.excused} (${stats.total > 0 ? Math.round((stats.excused / stats.total) * 100) : 0}%)
 Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
 
 MEETING REPORT
@@ -978,7 +971,7 @@ ${reportData.additional_notes || 'No additional notes'}
 DETAILED ATTENDANCE
 ===================
 ${attendance.map(record => `
-${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.reason ? ` (Reason: ${record.reason})` : ''}
+${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.notes ? ` (Reason: ${record.notes})` : ''}
 `).join('')}
 
 ${selectedMeeting?.notes ? `
@@ -1004,10 +997,10 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
   const getAttendanceStats = () => {
     const present = attendance.filter(a => a.status === 'present').length;
     const absent = attendance.filter(a => a.status === 'absent').length;
-    const absentWithReason = attendance.filter(a => a.status === 'absent_with_reason').length;
+    const excused = attendance.filter(a => a.status === 'excused').length;
     const total = attendance.length;
 
-    return { present, absent, absentWithReason, total };
+    return { present, absent, excused, total };
   };
 
   const stats = getAttendanceStats();
@@ -1161,10 +1154,10 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                   <div className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="h-5 w-5 text-yellow-600" />
-                      <span className="text-yellow-800 dark:text-yellow-200">Absent with Reason</span>
+                      <span className="text-yellow-800 dark:text-yellow-200">Excused</span>
                     </div>
                     <span className="text-lg font-bold text-yellow-800 dark:text-yellow-200">
-                      {stats.absentWithReason}
+                      {stats.excused}
                     </span>
                   </div>
 
@@ -1228,11 +1221,11 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                               ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                               : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
                           }`}>
-                            {record.status.replace('_', ' ')}
+                            {record.status}
                           </div>
-                          {record.reason && (
+                          {record.notes && (
                             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                              Reason: {record.reason}
+                              Reason: {record.notes}
                             </p>
                           )}
                         </div>
@@ -1378,7 +1371,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   onSuccess,
   onError
 }) => {
-  const { profile, canCreateDepartmentMeetings, canManageDepartmentAttendance, canAddDepartmentNewcomers, canCreateDepartmentReports } = useAuth();
+  const { profile } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<DepartmentMeeting | null>(null);
 
@@ -1393,19 +1386,33 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   const canAccessStep = (stepNumber: number) => {
     if (!profile) return false;
     
-    // Check permissions for each step
-    switch (stepNumber) {
-      case 1:
-        return canCreateDepartmentMeetings(department.id);
-      case 2:
-        return canManageDepartmentAttendance(department.id);
-      case 3:
-        return canAddDepartmentNewcomers(department.id);
-      case 4:
-        return canCreateDepartmentReports(department.id);
-      default:
-        return false;
+    // Admin can access everything
+    if (profile.isAdmin) return true;
+    
+    // Department leaders can access all steps for their departments
+    if (profile.role === 'department_leader') {
+      // Check if this department is in their assigned departments or if they're the leader
+      const isAssignedDepartment = profile.assigned_departments.includes(department.id) || 
+                                   profile.assigned_departments.includes('all_departments') ||
+                                   profile.department_id === department.id;
+      return isAssignedDepartment;
     }
+    
+    // Regular members have limited access
+    if (profile.role === 'member') {
+      // Members can only view their own department
+      const isOwnDepartment = profile.department_id === department.id;
+      
+      switch (stepNumber) {
+        case 1: return isOwnDepartment && profile.permissions.includes('create_meetings');
+        case 2: return isOwnDepartment && profile.permissions.includes('manage_attendance');
+        case 3: return isOwnDepartment && profile.permissions.includes('add_newcomers');
+        case 4: return isOwnDepartment && profile.permissions.includes('create_reports');
+        default: return false;
+      }
+    }
+    
+    return false;
   };
 
   return (
@@ -1526,7 +1533,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile, canViewDepartment, canManageDepartment, isAdmin, isPastor, isDepartmentLeader, isGroupLeader, isDeacon, getRoles } = useAuth();
+  const { profile } = useAuth();
   
   // State management
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -1617,35 +1624,28 @@ const Departments = () => {
   };
 
   const loadAttendanceForMeeting = async (meetingId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('meeting_attendance') // Changed to your actual table name
-      .select(`
-        *,
-        members:member_id (
-          id,
-          name,
-          surname,
-          email,
-          phone
-        )
-      `)
-      .eq('meeting_id', meetingId);
+    try {
+      const { data, error } = await supabase
+        .from('meeting_attendance')
+        .select(`
+          *,
+          members:member_id (
+            id,
+            name,
+            surname,
+            email,
+            phone
+          )
+        `)
+        .eq('meeting_id', meetingId);
 
-    if (error) throw error;
-    
-    // Map the data to match your interface
-    const mappedData = (data || []).map(record => ({
-      ...record,
-      status: record.status === 'excused' ? 'absent_with_reason' : record.status,
-      reason: record.notes || null
-    }));
-    
-    setAttendanceRecords(mappedData);
-  } catch (error: any) {
-    setError('Failed to load attendance: ' + error.message);
-  }
-};
+      if (error) throw error;
+      setAttendanceRecords(data || []);
+    } catch (error: any) {
+      setError('Failed to load attendance: ' + error.message);
+    }
+  };
+
   const openReportModal = async (meeting: DepartmentMeeting) => {
     setSelectedMeetingForReport(meeting);
     await loadAttendanceForMeeting(meeting.id);
@@ -1654,6 +1654,50 @@ const Departments = () => {
 
   const handlePrintReport = () => {
     window.print();
+  };
+
+  // Permission functions based on AuthContext
+  const canViewDepartment = (departmentId: string) => {
+    if (!profile) return false;
+    
+    // Admin can view all departments
+    if (profile.isAdmin) return true;
+    
+    // Department leaders can view assigned departments and their own department
+    if (profile.role === 'department_leader') {
+      return profile.assigned_departments.includes(departmentId) || 
+             profile.assigned_departments.includes('all_departments') ||
+             profile.department_id === departmentId;
+    }
+    
+    // Regular members can only view their own department
+    if (profile.role === 'member') {
+      return profile.department_id === departmentId;
+    }
+    
+    return false;
+  };
+
+  const canManageDepartment = (departmentId: string) => {
+    if (!profile) return false;
+    
+    // Admin can manage all departments
+    if (profile.isAdmin) return true;
+    
+    // Department leaders can manage assigned departments and their own department
+    if (profile.role === 'department_leader') {
+      return profile.assigned_departments.includes(departmentId) || 
+             profile.assigned_departments.includes('all_departments') ||
+             profile.department_id === departmentId;
+    }
+    
+    // Regular members need specific permissions for their own department
+    if (profile.role === 'member') {
+      const isOwnDepartment = profile.department_id === departmentId;
+      return isOwnDepartment && profile.permissions.includes('manage_department');
+    }
+    
+    return false;
   };
 
   const openMeetingsModal = async (department: Department) => {
@@ -1698,12 +1742,9 @@ const Departments = () => {
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    const roles = getRoles();
-    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
-    if (roles.includes('pastor')) return 'Pastor';
-    if (roles.includes('deacon')) return 'Deacon';
-    if (roles.includes('department_leader')) return 'Department Leader';
-    if (roles.includes('group_leader')) return 'Group Leader';
+    if (profile.isAdmin) return 'Administrator';
+    if (profile.role === 'department_leader') return 'Department Leader';
+    if (profile.role === 'group_leader') return 'Group Leader';
     return 'Member';
   };
 
@@ -1711,10 +1752,10 @@ const Departments = () => {
   const getAttendanceStats = () => {
     const attended = attendanceRecords.filter(r => r.status === 'present').length;
     const absent = attendanceRecords.filter(r => r.status === 'absent').length;
-    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+    const excused = attendanceRecords.filter(r => r.status === 'excused').length;
     const total = attendanceRecords.length;
 
-    return { attended, absent, absentWithReason, total };
+    return { attended, absent, excused, total };
   };
 
   return (
@@ -2048,7 +2089,7 @@ const Departments = () => {
                   <div className="bg-green-50 dark:bg-green-900/20 print:bg-green-50 border border-green-200 dark:border-green-800 print:border-green-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-green-600 dark:text-green-400 print:text-green-700 font-medium">Attended</p>
+                        <p className="text-sm text-green-600 dark:text-green-400 print:text-green-700 font-medium">Present</p>
                         <p className="text-3xl font-bold text-green-700 dark:text-green-300 print:text-green-900">
                           {getAttendanceStats().attended}
                         </p>
@@ -2082,16 +2123,16 @@ const Departments = () => {
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-yellow-600 dark:text-yellow-400 print:text-yellow-700 font-medium">Absent w/ Reason</p>
+                        <p className="text-sm text-yellow-600 dark:text-yellow-400 print:text-yellow-700 font-medium">Excused</p>
                         <p className="text-3xl font-bold text-yellow-700 dark:text-yellow-300 print:text-yellow-900">
-                          {getAttendanceStats().absentWithReason}
+                          {getAttendanceStats().excused}
                         </p>
                       </div>
                       <AlertCircle className="h-10 w-10 text-yellow-400 dark:text-yellow-500 print:text-yellow-600" />
                     </div>
                     <p className="text-xs text-yellow-600 dark:text-yellow-400 print:text-yellow-700 mt-2">
                       {getAttendanceStats().total > 0 
-                        ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%`
+                        ? `${Math.round((getAttendanceStats().excused / getAttendanceStats().total) * 100)}%`
                         : '0%'}
                     </p>
                   </div>
@@ -2161,17 +2202,17 @@ const Departments = () => {
                       </div>
                     )}
 
-                    {/* Absent with Reason */}
-                    {getAttendanceStats().absentWithReason > 0 && (
+                    {/* Excused Members */}
+                    {getAttendanceStats().excused > 0 && (
                       <div className="mb-6">
                         <h5 className="text-lg font-semibold text-yellow-700 dark:text-yellow-400 print:text-yellow-800 mb-3 flex items-center gap-2">
                           <AlertCircle className="h-5 w-5" />
-                          Absent with Reason ({getAttendanceStats().absentWithReason})
+                          Excused ({getAttendanceStats().excused})
                         </h5>
                         <div className="bg-yellow-50 dark:bg-yellow-900/10 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
                           <div className="space-y-3">
                             {attendanceRecords
-                              .filter(record => record.status === 'absent_with_reason')
+                              .filter(record => record.status === 'excused')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
                                   <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
@@ -2179,9 +2220,9 @@ const Departments = () => {
                                     <span className="text-gray-900 dark:text-white print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
                                     </span>
-                                    {record.reason && (
+                                    {record.notes && (
                                       <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
-                                        Reason: {record.reason}
+                                        Reason: {record.notes}
                                       </p>
                                     )}
                                   </div>
