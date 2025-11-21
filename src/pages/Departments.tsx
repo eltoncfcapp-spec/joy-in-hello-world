@@ -4,7 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
   Shield, AlertCircle, CheckCircle, Plus, Printer,
-  Clock, FileText, Save, UserPlus, Mail, Phone
+  Clock, FileText, Save, UserPlus, Mail, Phone,
+  Download, FileDown
 } from 'lucide-react';
 
 // Simple interfaces for departments
@@ -29,6 +30,7 @@ interface DepartmentMeeting {
   notes: string | null;
   status: string;
   created_at: string;
+  cancellation_reason?: string | null;
 }
 
 interface Member {
@@ -49,251 +51,252 @@ interface DepartmentAttendanceRecord {
   members?: Member;
 }
 
-// Department Attendance Step Component
-interface DepartmentAttendanceStepProps {
+interface DepartmentReport {
+  id: string;
+  meeting_id: string;
+  report_text: string;
+  decisions_made: string | null;
+  action_items: string | null;
+  next_meeting_date: string | null;
+  created_at: string;
+}
+
+// Department Report Step Component
+interface DepartmentReportStepProps {
   department: Department;
   meetings: DepartmentMeeting[];
   selectedMeeting: DepartmentMeeting | null;
   onMeetingSelect: (meeting: DepartmentMeeting) => void;
-  onAttendanceSaved: () => void;
+  onReportCreated: () => void;
   onError: (message: string) => void;
 }
 
-const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
+const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   department,
   meetings,
   selectedMeeting,
   onMeetingSelect,
-  onAttendanceSaved,
+  onReportCreated,
   onError
 }) => {
   const [loading, setLoading] = useState(false);
-  const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
-  const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
-  const [searchMemberTerm, setSearchMemberTerm] = useState('');
+  const [attendance, setAttendance] = useState<DepartmentAttendanceRecord[]>([]);
+  const [existingReport, setExistingReport] = useState<DepartmentReport | null>(null);
+  const [reportData, setReportData] = useState({
+    report_text: '',
+    decisions_made: '',
+    action_items: '',
+    next_meeting_date: '',
+    additional_notes: ''
+  });
 
-  // Load department members and all church members
-  useEffect(() => {
-    loadDepartmentMembers();
-    loadAllChurchMembers();
-  }, [department.id]);
-
-  // Load existing attendance when meeting is selected
   useEffect(() => {
     if (selectedMeeting) {
-      loadExistingAttendance();
+      loadAttendanceData();
+      loadExistingReport();
     }
   }, [selectedMeeting]);
 
-  const loadDepartmentMembers = async () => {
-    try {
-      // Get department members through department_members table
-      const { data: departmentMembers, error: deptError } = await supabase
-        .from('department_members')
-        .select(`
-          id,
-          role,
-          member:members (*)
-        `)
-        .eq('department_id', department.id)
-        .order('role', { ascending: false });
-
-      if (deptError) throw deptError;
-
-      const memberData = departmentMembers?.map(dm => ({
-        ...dm.member,
-        department_role: dm.role,
-        department_member_id: dm.id
-      })) || [];
-      
-      setDepartmentMembers(memberData);
-      
-      // Initialize all as present
-      const initialAttendance: Record<string, 'present'> = {};
-      memberData?.forEach(member => {
-        initialAttendance[member.id] = 'present';
-      });
-      setAttendance(initialAttendance);
-    } catch (error: any) {
-      onError('Failed to load department members: ' + error.message);
-    }
-  };
-
-  const loadAllChurchMembers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select('*')
-        .order('name');
-      
-      if (error) throw error;
-      setAllChurchMembers(data || []);
-    } catch (error: any) {
-      console.error('Failed to load all church members:', error);
-    }
-  };
-
-  const loadExistingAttendance = async () => {
+  const loadAttendanceData = async () => {
     try {
       const { data, error } = await supabase
         .from('department_attendance')
-        .select('*')
+        .select(`
+          *,
+          members:member_id (
+            id,
+            name,
+            surname,
+            email,
+            phone
+          )
+        `)
         .eq('meeting_id', selectedMeeting?.id);
 
       if (error) throw error;
-
-      const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
-      const existingReasons: Record<string, string> = {};
-
-      data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.reason) {
-          existingReasons[record.member_id] = record.reason;
-        }
-      });
-
-      setAttendance(existingAttendance);
-      setReasons(existingReasons);
+      setAttendance(data || []);
     } catch (error: any) {
-      console.error('Failed to load existing attendance:', error);
+      onError('Failed to load attendance data: ' + error.message);
     }
   };
 
-  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
-    setAttendance(prev => ({
-      ...prev,
-      [memberId]: status
-    }));
-
-    if (status !== 'absent_with_reason') {
-      setReasons(prev => {
-        const newReasons = { ...prev };
-        delete newReasons[memberId];
-        return newReasons;
-      });
-    }
-  };
-
-  const handleReasonChange = (memberId: string, reason: string) => {
-    setReasons(prev => ({
-      ...prev,
-      [memberId]: reason
-    }));
-  };
-
-  const addMemberToDepartment = async (member: Member) => {
+  const loadExistingReport = async () => {
     try {
-      setLoading(true);
+      const { data, error } = await supabase
+        .from('department_reports')
+        .select('*')
+        .eq('meeting_id', selectedMeeting?.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
       
-      // Check if member is already in department
-      const isAlreadyMember = departmentMembers.some(dm => dm.id === member.id);
-      if (isAlreadyMember) {
-        onError('Member is already in this department');
-        return;
+      if (data) {
+        setExistingReport(data);
+        setReportData({
+          report_text: data.report_text || '',
+          decisions_made: data.decisions_made || '',
+          action_items: data.action_items || '',
+          next_meeting_date: data.next_meeting_date || '',
+          additional_notes: ''
+        });
       }
-
-      // Add member to department
-      const { error } = await supabase
-        .from('department_members')
-        .insert([
-          {
-            department_id: department.id,
-            member_id: member.id,
-            role: 'member'
-          }
-        ]);
-
-      if (error) throw error;
-
-      // Reload department members
-      await loadDepartmentMembers();
-      setShowAddAttendeeModal(false);
-      setSearchMemberTerm('');
-      
-      // Add new member to attendance with default 'present' status
-      setAttendance(prev => ({
-        ...prev,
-        [member.id]: 'present'
-      }));
-
-      onError('Member added to department successfully!');
     } catch (error: any) {
-      onError('Failed to add member to department: ' + error.message);
-    } finally {
-      setLoading(false);
+      console.error('Failed to load existing report:', error);
     }
   };
 
-  const saveAttendance = async () => {
+  const handleReportChange = (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setReportData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const generateReport = async () => {
     if (!selectedMeeting) {
-      onError('Please select a department meeting first');
+      onError('Please select a meeting first');
       return;
     }
 
     try {
       setLoading(true);
 
-      // Prepare attendance records
-      const attendanceRecords = departmentMembers.map(member => ({
+      const reportPayload = {
         meeting_id: selectedMeeting.id,
-        member_id: member.id,
-        status: attendance[member.id] || 'absent',
-        reason: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
-      }));
+        report_text: reportData.report_text,
+        decisions_made: reportData.decisions_made || null,
+        action_items: reportData.action_items || null,
+        next_meeting_date: reportData.next_meeting_date || null
+      };
 
-      // Delete existing attendance and insert new ones
-      const { error: deleteError } = await supabase
-        .from('department_attendance')
-        .delete()
-        .eq('meeting_id', selectedMeeting.id);
+      let error;
+      
+      if (existingReport) {
+        // Update existing report
+        const { error: updateError } = await supabase
+          .from('department_reports')
+          .update(reportPayload)
+          .eq('id', existingReport.id);
+        error = updateError;
+      } else {
+        // Create new report
+        const { error: insertError } = await supabase
+          .from('department_reports')
+          .insert([reportPayload]);
+        error = insertError;
+      }
 
-      if (deleteError) throw deleteError;
+      if (error) throw error;
 
-      const { error: insertError } = await supabase
-        .from('department_attendance')
-        .insert(attendanceRecords);
+      // Update meeting status to completed
+      await supabase
+        .from('department_meetings')
+        .update({ status: 'completed' })
+        .eq('id', selectedMeeting.id);
 
-      if (insertError) throw insertError;
-
-      onAttendanceSaved();
+      onReportCreated();
     } catch (error: any) {
-      onError('Failed to save department attendance: ' + error.message);
+      onError('Failed to generate department report: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const getRoleBadgeColor = (role: string) => {
-    switch (role) {
-      case 'leader':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
-      case 'assistant':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
-    }
+  const handlePrint = () => {
+    window.print();
   };
 
-  // Filter church members for add attendee modal
-  const filteredChurchMembers = allChurchMembers.filter(member =>
-    !departmentMembers.some(dm => dm.id === member.id) && (
-      member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
-    )
-  );
+  const downloadReport = () => {
+    const stats = getAttendanceStats();
+    const reportContent = `
+DEPARTMENT MEETING REPORT
+=========================
+
+Department: ${department.name}
+Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'}
+Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
+Location: ${selectedMeeting?.location || department.location || 'N/A'}
+Topic: ${selectedMeeting?.topic || 'General Department Meeting'}
+Status: ${selectedMeeting?.status || 'N/A'}
+
+${selectedMeeting?.status === 'cancelled' ? `CANCELLATION REASON: ${selectedMeeting.cancellation_reason || 'No reason provided'}` : ''}
+
+ATTENDANCE SUMMARY
+==================
+Total Members: ${stats.total}
+Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
+Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
+Absent with Reason: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
+Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
+
+MEETING REPORT
+==============
+${reportData.report_text || 'No report text recorded'}
+
+DECISIONS MADE
+===============
+${reportData.decisions_made || 'No decisions recorded'}
+
+ACTION ITEMS
+============
+${reportData.action_items || 'No action items recorded'}
+
+NEXT MEETING
+============
+${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString()}` : 'No next meeting date set'}
+
+ADDITIONAL NOTES
+================
+${reportData.additional_notes || 'No additional notes'}
+
+DETAILED ATTENDANCE
+===================
+${attendance.map(record => `
+${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.reason ? ` (Reason: ${record.reason})` : ''}
+`).join('')}
+
+${selectedMeeting?.notes ? `
+MEETING NOTES
+=============
+${selectedMeeting.notes}
+` : ''}
+
+Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
+    `.trim();
+
+    const blob = new Blob([reportContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `department-report-${department.name.replace(/\s+/g, '-').toLowerCase()}-${selectedMeeting?.meeting_date || 'unknown'}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const getAttendanceStats = () => {
+    const present = attendance.filter(a => a.status === 'present').length;
+    const absent = attendance.filter(a => a.status === 'absent').length;
+    const absentWithReason = attendance.filter(a => a.status === 'absent_with_reason').length;
+    const total = attendance.length;
+
+    return { present, absent, absentWithReason, total };
+  };
+
+  const stats = getAttendanceStats();
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Users className="h-8 w-8 text-green-600" />
+        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <FileText className="h-8 w-8 text-blue-600" />
         </div>
-        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Record Department Attendance</h3>
-        <p className="text-gray-600 dark:text-gray-400">Mark department members as present, absent, or absent with reason</p>
+        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Create Department Report</h3>
+        <p className="text-gray-600 dark:text-gray-400">
+          Generate a comprehensive report for the {department.name} department meeting
+        </p>
       </div>
 
       {/* Meeting Selection */}
@@ -330,6 +333,8 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
                 meeting.status === 'completed' 
                   ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                  : meeting.status === 'cancelled'
+                  ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                   : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
               }`}>
                 {meeting.status}
@@ -339,432 +344,297 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         </div>
         {meetings.length === 0 && (
           <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-            No department meetings scheduled. Please create a department meeting first.
+            No department meetings available for reporting.
           </div>
         )}
       </div>
 
-      {/* Attendance Form */}
       {selectedMeeting && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Department Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-            </h4>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {departmentMembers.length} department members
-              </span>
-              <button
-                onClick={() => setShowAddAttendeeModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-              >
-                <UserPlus className="h-4 w-4" />
-                Add Attendee
-              </button>
+        <>
+          {/* Meeting Information */}
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 mb-6">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Meeting Information</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="flex items-center gap-3">
+                <Calendar className="h-5 w-5 text-gray-400" />
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Date</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <MapPin className="h-5 w-5 text-gray-400" />
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Location</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {selectedMeeting.location || department.location || 'Not specified'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <FileText className="h-5 w-5 text-gray-400" />
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Topic</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {selectedMeeting.topic || 'General Department Meeting'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Users className="h-5 w-5 text-gray-400" />
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Status</p>
+                  <p className="font-medium text-gray-900 dark:text-white capitalize">
+                    {selectedMeeting.status}
+                  </p>
+                </div>
+              </div>
             </div>
+            
+            {selectedMeeting.status === 'cancelled' && selectedMeeting.cancellation_reason && (
+              <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-red-800 dark:text-red-300">Cancellation Reason</p>
+                    <p className="text-sm text-red-700 dark:text-red-400">{selectedMeeting.cancellation_reason}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {departmentMembers.length === 0 ? (
-            <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-              <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600 dark:text-gray-400">No members found in this department.</p>
-              <button
-                onClick={() => setShowAddAttendeeModal(true)}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Add Members
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {departmentMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </div>
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${getRoleBadgeColor(member.department_role)}`}>
-                            {member.department_role}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {member.email} • {member.phone}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {/* Present Button */}
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'present')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'present'
-                              ? 'bg-green-600 text-white shadow-lg'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                          }`}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                          Present
-                        </button>
-
-                        {/* Absent Button */}
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'absent'
-                              ? 'bg-red-600 text-white shadow-lg'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                          }`}
-                        >
-                          <X className="h-4 w-4" />
-                          Absent
-                        </button>
-
-                        {/* Absent with Reason Button */}
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'absent_with_reason'
-                              ? 'bg-orange-600 text-white shadow-lg'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                          }`}
-                        >
-                          <FileText className="h-4 w-4" />
-                          Absent with Reason
-                        </button>
-                      </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Attendance Summary */}
+            <div className="lg:col-span-1">
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6">
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Attendance Summary</h4>
+                
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                      <span className="text-green-800 dark:text-green-200">Present</span>
                     </div>
-
-                    {/* Reason Input for absent with reason */}
-                    {attendance[member.id] === 'absent_with_reason' && (
-                      <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Reason for Absence
-                        </label>
-                        <input
-                          type="text"
-                          value={reasons[member.id] || ''}
-                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
-                          placeholder="Enter reason for absence..."
-                          className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        />
-                      </div>
-                    )}
+                    <span className="text-lg font-bold text-green-800 dark:text-green-200">
+                      {stats.present}
+                    </span>
                   </div>
-                ))}
-              </div>
 
-              <div className="flex justify-center pt-6">
-                <button
-                  onClick={saveAttendance}
-                  disabled={loading}
-                  className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 flex items-center gap-2"
-                >
-                  {loading ? 'Saving Department Attendance...' : 'Save Department Attendance'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+                  <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <X className="h-5 w-5 text-red-600" />
+                      <span className="text-red-800 dark:text-red-200">Absent</span>
+                    </div>
+                    <span className="text-lg font-bold text-red-800 dark:text-red-200">
+                      {stats.absent}
+                    </span>
+                  </div>
 
-      {/* Add Attendee Modal */}
-      {showAddAttendeeModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                Add Attendee to {department.name}
-              </h3>
-              <button
-                onClick={() => setShowAddAttendeeModal(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+                  <div className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-5 w-5 text-yellow-600" />
+                      <span className="text-yellow-800 dark:text-yellow-200">Absent with Reason</span>
+                    </div>
+                    <span className="text-lg font-bold text-yellow-800 dark:text-yellow-200">
+                      {stats.absentWithReason}
+                    </span>
+                  </div>
 
-            {/* Search Bar */}
-            <div className="mb-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                <input
-                  type="text"
-                  placeholder="Search church members..."
-                  value={searchMemberTerm}
-                  onChange={(e) => setSearchMemberTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Church Members List */}
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {filteredChurchMembers.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                  {searchMemberTerm ? 'No members found matching your search' : 'No church members available to add'}
+                  <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-5 w-5 text-blue-600" />
+                      <span className="text-blue-800 dark:text-blue-200">Total</span>
+                    </div>
+                    <span className="text-lg font-bold text-blue-800 dark:text-blue-200">
+                      {stats.total}
+                    </span>
+                  </div>
                 </div>
-              ) : (
-                filteredChurchMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {member.name} {member.surname}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {member.email} • {member.phone}
-                        </div>
+
+                {/* Attendance Rate */}
+                {stats.total > 0 && (
+                  <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                        {Math.round((stats.present / stats.total) * 100)}%
                       </div>
-                      <button
-                        onClick={() => addMemberToDepartment(member)}
-                        disabled={loading}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
-                      >
-                        Add to Department
-                      </button>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Attendance Rate</div>
                     </div>
                   </div>
-                ))
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 mt-4 print:hidden">
+                  <button
+                    onClick={downloadReport}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </button>
+                  <button
+                    onClick={handlePrint}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print
+                  </button>
+                </div>
+              </div>
+
+              {/* Detailed Attendance */}
+              {attendance.length > 0 && (
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 mt-4">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Attendance Details</h4>
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                    {attendance.map((record) => (
+                      <div key={record.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {record.members?.name} {record.members?.surname}
+                          </div>
+                          <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
+                            record.status === 'present'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : record.status === 'absent'
+                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                          }`}>
+                            {record.status.replace('_', ' ')}
+                          </div>
+                          {record.reason && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                              Reason: {record.reason}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Report Form */}
+            <div className="lg:col-span-2">
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Department Meeting Report</h4>
+                  {existingReport && (
+                    <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-full text-sm font-medium">
+                      Report Exists
+                    </span>
+                  )}
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Meeting Report *
+                    </label>
+                    <textarea
+                      name="report_text"
+                      value={reportData.report_text}
+                      onChange={handleReportChange}
+                      rows={4}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Detailed report of what was discussed and accomplished..."
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Decisions Made
+                    </label>
+                    <textarea
+                      name="decisions_made"
+                      value={reportData.decisions_made}
+                      onChange={handleReportChange}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Important decisions, approvals, or resolutions..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Action Items
+                    </label>
+                    <textarea
+                      name="action_items"
+                      value={reportData.action_items}
+                      onChange={handleReportChange}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Tasks assigned, follow-ups, or next steps..."
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Next Meeting Date
+                      </label>
+                      <input
+                        type="date"
+                        name="next_meeting_date"
+                        value={reportData.next_meeting_date}
+                        onChange={handleReportChange}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Additional Notes
+                    </label>
+                    <textarea
+                      name="additional_notes"
+                      value={reportData.additional_notes}
+                      onChange={handleReportChange}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Any other relevant information..."
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-6">
+                  <button
+                    onClick={generateReport}
+                    disabled={loading || !selectedMeeting || !reportData.report_text.trim()}
+                    className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+                  >
+                    <FileDown className="h-4 w-4" />
+                    {loading ? 'Generating Report...' : existingReport ? 'Update Department Report' : 'Generate Department Report'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Meeting Notes */}
+              {selectedMeeting.notes && (
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 mt-4">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Meeting Notes</h4>
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                      {selectedMeeting.notes}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
 };
-
-// Department Meeting Creation Step
-const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }: { 
-  department: Department; 
-  onMeetingCreated: () => void; 
-  onError: (message: string) => void;
-}) => {
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    meeting_date: '',
-    meeting_time: '',
-    location: department.location || '',
-    topic: '',
-    notes: ''
-  });
-  const [recentMeetings, setRecentMeetings] = useState<DepartmentMeeting[]>([]);
-
-  useEffect(() => {
-    loadRecentMeetings();
-  }, [department.id]);
-
-  const loadRecentMeetings = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('department_meetings')
-        .select('*')
-        .eq('department_id', department.id)
-        .order('meeting_date', { ascending: false })
-        .limit(5);
-
-      if (error) throw error;
-      setRecentMeetings(data || []);
-    } catch (error) {
-      console.error('Failed to load recent meetings:', error);
-    }
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const createMeeting = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.meeting_date || !formData.meeting_time || !formData.location) {
-      onError('Please fill in all required fields');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const newMeeting = {
-        department_id: department.id,
-        meeting_date: formData.meeting_date,
-        meeting_time: formData.meeting_time,
-        location: formData.location,
-        topic: formData.topic || null,
-        notes: formData.notes || null,
-        status: 'scheduled'
-      };
-
-      const { data, error } = await supabase
-        .from('department_meetings')
-        .insert([newMeeting])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setFormData({
-        meeting_date: '',
-        meeting_time: '',
-        location: department.location || '',
-        topic: '',
-        notes: ''
-      });
-
-      await loadRecentMeetings();
-      onMeetingCreated();
-    } catch (error: any) {
-      onError('Failed to create department meeting: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="max-w-2xl mx-auto">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Calendar className="h-8 w-8 text-blue-600" />
-        </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Schedule Department Meeting</h3>
-        <p className="text-gray-600">Create a new meeting schedule for {department.name}</p>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
-        <form onSubmit={createMeeting} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Date *
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="date"
-                  name="meeting_date"
-                  value={formData.meeting_date}
-                  onChange={handleInputChange}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Time *
-              </label>
-              <div className="relative">
-                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="time"
-                  name="meeting_time"
-                  value={formData.meeting_time}
-                  onChange={handleInputChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Location *
-            </label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                name="location"
-                value={formData.location}
-                onChange={handleInputChange}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter meeting location"
-                required
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Meeting Topic/Agenda
-            </label>
-            <input
-              type="text"
-              name="topic"
-              value={formData.topic}
-              onChange={handleInputChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="What will be discussed in this meeting?"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Additional Notes
-            </label>
-            <div className="relative">
-              <FileText className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-              <textarea
-                name="notes"
-                value={formData.notes}
-                onChange={handleInputChange}
-                rows={4}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Any additional information about this meeting..."
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
-          >
-            <Save className="h-4 w-4" />
-            {loading ? 'Creating Meeting...' : 'Schedule Department Meeting'}
-          </button>
-        </form>
-      </div>
-
-      {recentMeetings.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-2xl p-6">
-          <h4 className="text-lg font-semibold text-gray-900 mb-4">Recent Department Meetings</h4>
-          <div className="space-y-3">
-            {recentMeetings.map((meeting) => (
-              <div key={meeting.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                <div className="flex-1">
-                  <div className="font-medium text-gray-900">
-                    {new Date(meeting.meeting_date).toLocaleDateString()} at {meeting.meeting_time}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    {meeting.topic || 'No topic specified'} • {meeting.location}
-                  </div>
-                </div>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  meeting.status === 'completed' 
-                    ? 'bg-green-100 text-green-800'
-                    : meeting.status === 'cancelled'
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-blue-100 text-blue-800'
-                }`}>
-                  {meeting.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
+//////////////////////////////////////////////////////////
 // Department Management Workflow Component
 interface DepartmentWorkflowProps {
   department: Department;
@@ -883,16 +753,19 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
           </div>
         )}
 
-        {currentStep === 4 && (
-          <div className="text-center py-16">
-            <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Create Report Step</h3>
-            <p className="text-gray-600">Report generation would go here</p>
-            <button
-              onClick={() => {
-                onSuccess('Report created successfully!');
-                onClose();
-              }}
+{currentStep === 4 && (
+  <DepartmentReportStep
+    department={department}
+    meetings={meetings}
+    selectedMeeting={selectedMeeting}
+    onMeetingSelect={setSelectedMeeting}
+    onReportCreated={() => {
+      onSuccess('Department report generated successfully!');
+      onClose();
+    }}
+    onError={onError}
+  />
+)}
               className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
               Generate Report
