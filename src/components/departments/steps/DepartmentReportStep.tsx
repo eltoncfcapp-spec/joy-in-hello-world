@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
-import { FileText, Users, CheckCircle, XCircle, AlertCircle, Download, Printer, Calendar, MapPin, Clock } from 'lucide-react';
+import { FileText, Users, CheckCircle, XCircle, AlertCircle, Download, Printer, Calendar, MapPin } from 'lucide-react';
 
 interface DepartmentReportStepProps {
   department: any;
@@ -9,20 +9,6 @@ interface DepartmentReportStepProps {
   onMeetingSelect: (meeting: any) => void;
   onReportCreated: () => void;
   onError: (message: string) => void;
-}
-
-interface AttendanceStats {
-  present: number;
-  absent: number;
-  late: number;
-  total: number;
-}
-
-interface MemberAttendance {
-  member: any;
-  status: string;
-  arrival_time?: string;
-  notes?: string;
 }
 
 const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
@@ -34,8 +20,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   onError
 }) => {
   const [loading, setLoading] = useState(false);
-  const [attendance, setAttendance] = useState<MemberAttendance[]>([]);
-  const [stats, setStats] = useState<AttendanceStats>({ present: 0, absent: 0, late: 0, total: 0 });
+  const [attendance, setAttendance] = useState<any[]>([]);
   const [reportData, setReportData] = useState({
     report_text: '',
     decisions_made: '',
@@ -63,22 +48,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
         .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
-
-      const attendanceData: MemberAttendance[] = (data || []).map(record => ({
-        member: record.member,
-        status: record.status,
-        arrival_time: record.arrival_time || undefined,
-        notes: record.notes || undefined
-      }));
-
-      setAttendance(attendanceData);
-
-      const present = attendanceData.filter(a => a.status === 'present').length;
-      const absent = attendanceData.filter(a => a.status === 'absent').length;
-      const late = attendanceData.filter(a => a.status === 'late').length;
-      const total = attendanceData.length;
-
-      setStats({ present, absent, late, total });
+      setAttendance(data || []);
     } catch (error: any) {
       onError('Failed to load attendance data: ' + error.message);
     }
@@ -101,6 +71,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
     try {
       setLoading(true);
 
+      // Create department report
       const { error } = await supabase
         .from('department_reports')
         .insert([{
@@ -113,6 +84,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
       if (error) throw error;
 
+      // Update meeting status to completed
       await supabase
         .from('department_meetings')
         .update({ status: 'completed' })
@@ -131,6 +103,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   };
 
   const downloadReport = () => {
+    const stats = getAttendanceStats();
     const reportContent = `
 Department Meeting Report
 ${department.name}
@@ -176,11 +149,22 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
     URL.revokeObjectURL(url);
   };
 
+  const getAttendanceStats = () => {
+    const present = attendance.filter(a => a.status === 'present').length;
+    const absent = attendance.filter(a => a.status === 'absent').length;
+    const late = attendance.filter(a => a.status === 'late').length;
+    const total = attendance.length;
+
+    return { present, absent, late, total };
+  };
+
+  const stats = getAttendanceStats();
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-          <FileText className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <FileText className="h-8 w-8 text-blue-600" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Create Department Report</h3>
         <p className="text-gray-600 dark:text-gray-400">
@@ -188,6 +172,7 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
         </p>
       </div>
 
+      {/* Meeting Selection */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
           Select Department Meeting *
@@ -237,6 +222,7 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
 
       {selectedMeeting && (
         <>
+          {/* Meeting Information */}
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 mb-6">
             <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Meeting Information</h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -271,6 +257,7 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Attendance Summary */}
             <div className="lg:col-span-1">
               <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6">
                 <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Attendance Summary</h4>
@@ -317,6 +304,7 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
                   </div>
                 </div>
 
+                {/* Attendance Rate */}
                 {stats.total > 0 && (
                   <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <div className="text-center">
@@ -329,6 +317,7 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
                 )}
               </div>
 
+              {/* Action Buttons */}
               <div className="flex gap-2 mt-4 print:hidden">
                 <button
                   onClick={downloadReport}
@@ -347,6 +336,7 @@ ${a.member.name} ${a.member.surname} - ${a.status.toUpperCase()}${a.arrival_time
               </div>
             </div>
 
+            {/* Report Form */}
             <div className="lg:col-span-2">
               <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6">
                 <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Department Meeting Report</h4>
