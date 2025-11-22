@@ -808,6 +808,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
     additional_notes: ''
   });
 
+  // Load attendance data and existing report when meeting is selected
   useEffect(() => {
     if (selectedMeeting) {
       loadAttendanceData();
@@ -817,6 +818,8 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
   const loadAttendanceData = async () => {
     try {
+      if (!selectedMeeting) return;
+      
       const { data, error } = await supabase
         .from('department_attendance')
         .select(`
@@ -829,21 +832,24 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
             phone
           )
         `)
-        .eq('meeting_id', selectedMeeting?.id);
+        .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
       setAttendance(data || []);
     } catch (error: any) {
+      console.error('Failed to load attendance data:', error);
       onError('Failed to load attendance data: ' + error.message);
     }
   };
 
   const loadExistingReport = async () => {
     try {
+      if (!selectedMeeting) return;
+      
       const { data, error } = await supabase
         .from('department_reports')
         .select('*')
-        .eq('meeting_id', selectedMeeting?.id)
+        .eq('meeting_id', selectedMeeting.id)
         .single();
 
       if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
@@ -855,6 +861,15 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
           decisions_made: data.decisions_made || '',
           action_items: data.action_items || '',
           next_meeting_date: data.next_meeting_date || '',
+          additional_notes: ''
+        });
+      } else {
+        // Reset form if no existing report
+        setReportData({
+          report_text: '',
+          decisions_made: '',
+          action_items: '',
+          next_meeting_date: '',
           additional_notes: ''
         });
       }
@@ -1083,6 +1098,15 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <Clock className="h-5 w-5 text-gray-400" />
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Time</p>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    {selectedMeeting.meeting_time || 'Not specified'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
                 <MapPin className="h-5 w-5 text-gray-400" />
                 <div>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Location</p>
@@ -1097,15 +1121,6 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                   <p className="text-sm text-gray-600 dark:text-gray-400">Topic</p>
                   <p className="font-medium text-gray-900 dark:text-white">
                     {selectedMeeting.topic || 'General Department Meeting'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Users className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Status</p>
-                  <p className="font-medium text-gray-900 dark:text-white capitalize">
-                    {selectedMeeting.status}
                   </p>
                 </div>
               </div>
