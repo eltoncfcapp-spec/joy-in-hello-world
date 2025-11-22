@@ -1,10 +1,21 @@
 import { useState } from 'react';
-import { supabase } from '../../../integrations/supabase/client';
+import { supabase } from '../integrations/supabase/client';
 import { UserPlus, User, Phone, Mail, MapPin, Calendar, Save } from 'lucide-react';
 
+interface Department {
+  id: string;
+  name: string;
+}
+
+interface DepartmentMeeting {
+  id: string;
+  meeting_date: string;
+  topic: string | null;
+}
+
 interface DepartmentNewcomerStepProps {
-  department: any;
-  selectedMeeting: any;
+  department: Department;
+  selectedMeeting: DepartmentMeeting | null;
   onNewcomerAdded: () => void;
   onError: (message: string) => void;
 }
@@ -45,7 +56,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
     try {
       setLoading(true);
 
-      // First, create the member
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .insert([{
@@ -62,7 +72,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
       if (memberError) throw memberError;
 
-      // Then, add them to the department
       const { error: deptError } = await supabase
         .from('department_members')
         .insert([{
@@ -73,7 +82,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
       if (deptError) throw deptError;
 
-      // Record their attendance if a meeting is selected
       if (selectedMeeting) {
         const { error: attendanceError } = await supabase
           .from('department_attendance')
@@ -87,7 +95,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
 
-      // Reset form and show success
       setFormData({
         name: '',
         surname: '',
@@ -112,22 +119,21 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <UserPlus className="h-8 w-8 text-purple-600" />
         </div>
-        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Add Department Newcomer</h3>
-        <p className="text-gray-600 dark:text-gray-400">
+        <h3 className="text-2xl font-bold text-gray-900 mb-2">Add Department Newcomer</h3>
+        <p className="text-gray-600">
           Register first-time visitors to the {department.name} department
         </p>
       </div>
 
-      {/* Current Meeting Info */}
       {selectedMeeting && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
           <div className="flex items-center gap-3">
-            <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <Calendar className="h-5 w-5 text-blue-600" />
             <div>
-              <p className="font-medium text-blue-900 dark:text-blue-100">
+              <p className="font-medium text-blue-900">
                 Recording for: {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
               </p>
-              <p className="text-sm text-blue-700 dark:text-blue-300">
+              <p className="text-sm text-blue-700">
                 {selectedMeeting.topic || 'Department Meeting'}
               </p>
             </div>
@@ -135,7 +141,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         </div>
       )}
 
-      {/* Add Newcomer Button */}
       {!showForm && (
         <div className="text-center">
           <button
@@ -145,23 +150,22 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
             <UserPlus className="h-5 w-5" />
             Add Department Newcomer
           </button>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-3">
+          <p className="text-sm text-gray-500 mt-3">
             Register first-time visitors who attended the department meeting
           </p>
         </div>
       )}
 
-      {/* Newcomer Form */}
       {showForm && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6">
-          <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <div className="bg-white border border-gray-200 rounded-2xl p-6">
+          <h4 className="text-lg font-semibold text-gray-900 mb-4">
             Newcomer Information
           </h4>
           
           <form onSubmit={addNewcomer} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   First Name *
                 </label>
                 <div className="relative">
@@ -171,7 +175,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                     name="name"
                     value={formData.name}
                     onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="Enter first name"
                     required
                   />
@@ -179,7 +183,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Last Name *
                 </label>
                 <input
@@ -187,7 +191,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                   name="surname"
                   value={formData.surname}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   placeholder="Enter last name"
                   required
                 />
@@ -196,7 +200,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Phone Number
                 </label>
                 <div className="relative">
@@ -206,14 +210,14 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                     name="phone"
                     value={formData.phone}
                     onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="Enter phone number"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Email Address
                 </label>
                 <div className="relative">
@@ -223,7 +227,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                     name="email"
                     value={formData.email}
                     onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="Enter email address"
                   />
                 </div>
@@ -231,7 +235,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Address
               </label>
               <div className="relative">
@@ -241,14 +245,14 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                   name="address"
                   value={formData.address}
                   onChange={handleInputChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   placeholder="Enter home address"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Notes
               </label>
               <textarea
@@ -256,7 +260,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                 value={formData.notes}
                 onChange={handleInputChange}
                 rows={3}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 placeholder="Any additional notes about the newcomer..."
               />
             </div>
@@ -283,7 +287,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                     notes: ''
                   });
                 }}
-                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
@@ -292,9 +296,8 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         </div>
       )}
 
-      {/* Help Text */}
       <div className="mt-6 text-center">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-gray-500">
           Newcomers will be added as members of the {department.name} department
           {selectedMeeting && ' and marked as present for the current meeting'}.
         </p>
