@@ -109,8 +109,8 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
   return (
     <div className="max-w-4xl mx-auto">
       <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-          <UserPlus className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+        <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <UserPlus className="h-8 w-8 text-purple-600" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Add Department Newcomer</h3>
         <p className="text-gray-600 dark:text-gray-400">
@@ -118,6 +118,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         </p>
       </div>
 
+      {/* Current Meeting Info */}
       {selectedMeeting && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
           <div className="flex items-center gap-3">
@@ -134,6 +135,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         </div>
       )}
 
+      {/* Add Newcomer Button */}
       {!showForm && (
         <div className="text-center">
           <button
@@ -149,6 +151,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         </div>
       )}
 
+      {/* Newcomer Form */}
       {showForm && (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6">
           <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -289,6 +292,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         </div>
       )}
 
+      {/* Help Text */}
       <div className="mt-6 text-center">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Newcomers will be added as members of the {department.name} department
