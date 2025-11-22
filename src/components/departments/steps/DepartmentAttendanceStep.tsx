@@ -1,34 +1,12 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../integrations/supabase/client';
-import { Users, CheckCircle, X, FileText, Calendar, Clock, UserPlus, Search } from 'lucide-react';
-
-interface Department {
-  id: string;
-  name: string;
-}
-
-interface DepartmentMeeting {
-  id: string;
-  meeting_date: string;
-  meeting_time: string | null;
-  topic: string | null;
-  status: string;
-}
-
-interface Member {
-  id: string;
-  name: string;
-  surname: string;
-  email: string | null;
-  phone: string | null;
-  department_role?: string;
-}
+import { supabase } from '../../../integrations/supabase/client';
+import { Users, CheckCircle, XCircle, Calendar, Clock, AlertCircle } from 'lucide-react';
 
 interface DepartmentAttendanceStepProps {
-  department: Department;
-  meetings: DepartmentMeeting[];
-  selectedMeeting: DepartmentMeeting | null;
-  onMeetingSelect: (meeting: DepartmentMeeting) => void;
+  department: any;
+  meetings: any[];
+  selectedMeeting: any;
+  onMeetingSelect: (meeting: any) => void;
   onAttendanceSaved: () => void;
   onError: (message: string) => void;
 }
@@ -42,18 +20,17 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   onError
 }) => {
   const [loading, setLoading] = useState(false);
-  const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
-  const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
-  const [searchMemberTerm, setSearchMemberTerm] = useState('');
+  const [members, setMembers] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'late'>>({});
+  const [arrivalTimes, setArrivalTimes] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
+  // Load department members
   useEffect(() => {
     loadDepartmentMembers();
-    loadAllChurchMembers();
   }, [department.id]);
 
+  // Load existing attendance when meeting is selected
   useEffect(() => {
     if (selectedMeeting) {
       loadExistingAttendance();
@@ -62,6 +39,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const loadDepartmentMembers = async () => {
     try {
+      // Get department members through department_members table
       const { data: departmentMembers, error: deptError } = await supabase
         .from('department_members')
         .select(`
@@ -80,29 +58,19 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         department_member_id: dm.id
       })) || [];
       
-      setDepartmentMembers(memberData);
+      setMembers(memberData);
       
+      // Initialize all as present
       const initialAttendance: Record<string, 'present'> = {};
+      const initialArrivalTimes: Record<string, string> = {};
       memberData?.forEach(member => {
         initialAttendance[member.id] = 'present';
+        initialArrivalTimes[member.id] = selectedMeeting?.meeting_time || '';
       });
       setAttendance(initialAttendance);
+      setArrivalTimes(initialArrivalTimes);
     } catch (error: any) {
       onError('Failed to load department members: ' + error.message);
-    }
-  };
-
-  const loadAllChurchMembers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select('*')
-        .order('name');
-      
-      if (error) throw error;
-      setAllChurchMembers(data || []);
-    } catch (error: any) {
-      console.error('Failed to load all church members:', error);
     }
   };
 
@@ -111,67 +79,65 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       const { data, error } = await supabase
         .from('department_attendance')
         .select('*')
-        .eq('meeting_id', selectedMeeting?.id);
+        .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
 
-      const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
-      const existingReasons: Record<string, string> = {};
+      const existingAttendance: Record<string, 'present' | 'absent' | 'late'> = {};
+      const existingArrivalTimes: Record<string, string> = {};
+      const existingNotes: Record<string, string> = {};
 
       data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.reason) {
-          existingReasons[record.member_id] = record.reason;
+        existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'late';
+        if (record.arrival_time) {
+          existingArrivalTimes[record.member_id] = record.arrival_time;
+        }
+        if (record.notes) {
+          existingNotes[record.member_id] = record.notes;
         }
       });
 
       setAttendance(existingAttendance);
-      setReasons(existingReasons);
+      setArrivalTimes(existingArrivalTimes);
+      setNotes(existingNotes);
     } catch (error: any) {
       console.error('Failed to load existing attendance:', error);
     }
   };
 
-  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
-    setAttendance(prev => ({ ...prev, [memberId]: status }));
-    if (status !== 'absent_with_reason') {
-      setReasons(prev => {
-        const newReasons = { ...prev };
-        delete newReasons[memberId];
-        return newReasons;
+  const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'late') => {
+    setAttendance(prev => ({
+      ...prev,
+      [memberId]: status
+    }));
+
+    if (status !== 'late') {
+      setArrivalTimes(prev => {
+        const newTimes = { ...prev };
+        delete newTimes[memberId];
+        return newTimes;
       });
+    } else {
+      // Set default arrival time for late members
+      setArrivalTimes(prev => ({
+        ...prev,
+        [memberId]: prev[memberId] || selectedMeeting?.meeting_time || ''
+      }));
     }
   };
 
-  const handleReasonChange = (memberId: string, reason: string) => {
-    setReasons(prev => ({ ...prev, [memberId]: reason }));
+  const handleArrivalTimeChange = (memberId: string, time: string) => {
+    setArrivalTimes(prev => ({
+      ...prev,
+      [memberId]: time
+    }));
   };
 
-  const addMemberToDepartment = async (member: Member) => {
-    try {
-      setLoading(true);
-      const isAlreadyMember = departmentMembers.some(dm => dm.id === member.id);
-      if (isAlreadyMember) {
-        onError('Member is already in this department');
-        return;
-      }
-
-      const { error } = await supabase
-        .from('department_members')
-        .insert([{ department_id: department.id, member_id: member.id, role: 'member' }]);
-
-      if (error) throw error;
-
-      await loadDepartmentMembers();
-      setShowAddAttendeeModal(false);
-      setSearchMemberTerm('');
-      setAttendance(prev => ({ ...prev, [member.id]: 'present' }));
-      onError('Member added to department successfully!');
-    } catch (error: any) {
-      onError('Failed to add member to department: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
+  const handleNotesChange = (memberId: string, note: string) => {
+    setNotes(prev => ({
+      ...prev,
+      [memberId]: note
+    }));
   };
 
   const saveAttendance = async () => {
@@ -182,13 +148,17 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
     try {
       setLoading(true);
-      const attendanceRecords = departmentMembers.map(member => ({
+
+      // Prepare attendance records
+      const attendanceRecords = members.map(member => ({
         meeting_id: selectedMeeting.id,
         member_id: member.id,
         status: attendance[member.id] || 'absent',
-        reason: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
+        arrival_time: attendance[member.id] === 'late' ? arrivalTimes[member.id] || null : null,
+        notes: notes[member.id] || null
       }));
 
+      // Delete existing attendance and insert new ones
       const { error: deleteError } = await supabase
         .from('department_attendance')
         .delete()
@@ -201,6 +171,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         .insert(attendanceRecords);
 
       if (insertError) throw insertError;
+
       onAttendanceSaved();
     } catch (error: any) {
       onError('Failed to save department attendance: ' + error.message);
@@ -211,19 +182,14 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'leader': return 'bg-yellow-100 text-yellow-800';
-      case 'assistant': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'leader':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+      case 'assistant':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
   };
-
-  const filteredChurchMembers = allChurchMembers.filter(member =>
-    !departmentMembers.some(dm => dm.id === member.id) && (
-      member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
-    )
-  );
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -231,12 +197,15 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <Users className="h-8 w-8 text-green-600" />
         </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Record Department Attendance</h3>
-        <p className="text-gray-600">Mark department members as present, absent, or absent with reason</p>
+        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Record Department Attendance</h3>
+        <p className="text-gray-600 dark:text-gray-400">Mark department members as present, absent, or late</p>
       </div>
 
+      {/* Meeting Selection */}
       <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-3">Select Department Meeting *</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+          Select Department Meeting *
+        </label>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {meetings.filter(m => m.status === 'scheduled' || m.status === 'completed').map((meeting) => (
             <button
@@ -244,27 +213,29 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               onClick={() => onMeetingSelect(meeting)}
               className={`p-4 border rounded-xl text-left transition-all duration-200 ${
                 selectedMeeting?.id === meeting.id
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-300 hover:border-gray-400'
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                  : 'border-gray-300 dark:border-gray-600 hover:border-gray-400'
               }`}
             >
               <div className="flex items-center gap-2 mb-2">
                 <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="font-medium text-gray-900">
+                <span className="font-medium text-gray-900 dark:text-white">
                   {new Date(meeting.meeting_date).toLocaleDateString()}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+              <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
                 <Clock className="h-3 w-3" />
                 {meeting.meeting_time}
               </div>
               {meeting.topic && (
-                <p className="text-sm text-gray-600 truncate">{meeting.topic}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
+                  {meeting.topic}
+                </p>
               )}
               <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
                 meeting.status === 'completed' 
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-blue-100 text-blue-800'
+                  ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                  : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
               }`}>
                 {meeting.status}
               </div>
@@ -272,109 +243,130 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
           ))}
         </div>
         {meetings.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             No department meetings scheduled. Please create a department meeting first.
           </div>
         )}
       </div>
 
+      {/* Attendance Form */}
       {selectedMeeting && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-lg font-semibold text-gray-900">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
               Department Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
             </h4>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">{departmentMembers.length} department members</span>
-              <button
-                onClick={() => setShowAddAttendeeModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-              >
-                <UserPlus className="h-4 w-4" />
-                Add Attendee
-              </button>
-            </div>
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {members.length} department members
+            </span>
           </div>
 
-          {departmentMembers.length === 0 ? (
-            <div className="text-center py-8 bg-gray-50 rounded-xl">
+          {members.length === 0 ? (
+            <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
               <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No members found in this department.</p>
-              <button
-                onClick={() => setShowAddAttendeeModal(true)}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Add Members
-              </button>
+              <p className="text-gray-600 dark:text-gray-400">No members found in this department.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-500">Add members to the department first.</p>
             </div>
           ) : (
             <>
               <div className="space-y-3 max-h-96 overflow-y-auto">
-                {departmentMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 rounded-lg bg-white">
+                {members.map((member) => (
+                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="font-medium text-gray-900">
+                          <div className="font-medium text-gray-900 dark:text-white">
                             {member.name} {member.surname}
                           </div>
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${getRoleBadgeColor(member.department_role || 'member')}`}>
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${getRoleBadgeColor(member.department_role)}`}>
                             {member.department_role}
                           </span>
                         </div>
-                        <div className="text-sm text-gray-600">
-                          {member.email} • {member.phone}
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {member.phone} 
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-2">
+                        {/* Present Button */}
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'present')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                             attendance[member.id] === 'present'
                               ? 'bg-green-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
                           <CheckCircle className="h-4 w-4" />
                           Present
                         </button>
 
+                        {/* Absent Button */}
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'absent')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                             attendance[member.id] === 'absent'
                               ? 'bg-red-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
-                          <X className="h-4 w-4" />
+                          <XCircle className="h-4 w-4" />
                           Absent
                         </button>
 
+                        {/* Late Button */}
                         <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                          onClick={() => handleAttendanceChange(member.id, 'late')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'absent_with_reason'
+                            attendance[member.id] === 'late'
                               ? 'bg-orange-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
                           }`}
                         >
-                          <FileText className="h-4 w-4" />
-                          Absent with Reason
+                          <Clock className="h-4 w-4" />
+                          Late
                         </button>
                       </div>
                     </div>
 
-                    {attendance[member.id] === 'absent_with_reason' && (
+                    {/* Late Arrival Time Input */}
+                    {attendance[member.id] === 'late' && (
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Arrival Time
+                          </label>
+                          <input
+                            type="time"
+                            value={arrivalTimes[member.id] || ''}
+                            onChange={(e) => handleArrivalTimeChange(member.id, e.target.value)}
+                            className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Notes
+                          </label>
+                          <input
+                            type="text"
+                            value={notes[member.id] || ''}
+                            onChange={(e) => handleNotesChange(member.id, e.target.value)}
+                            placeholder="Reason for being late..."
+                            className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Notes for present/absent members */}
+                    {(attendance[member.id] === 'present' || attendance[member.id] === 'absent') && (
                       <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Absence</label>
                         <input
                           type="text"
-                          value={reasons[member.id] || ''}
-                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
-                          placeholder="Enter reason for absence..."
-                          className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          value={notes[member.id] || ''}
+                          onChange={(e) => handleNotesChange(member.id, e.target.value)}
+                          placeholder="Additional notes..."
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-600 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
                     )}
@@ -393,58 +385,6 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               </div>
             </>
           )}
-        </div>
-      )}
-
-      {showAddAttendeeModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-900">Add Attendee to {department.name}</h3>
-              <button onClick={() => setShowAddAttendeeModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                <input
-                  type="text"
-                  placeholder="Search church members..."
-                  value={searchMemberTerm}
-                  onChange={(e) => setSearchMemberTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {filteredChurchMembers.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  {searchMemberTerm ? 'No members found matching your search' : 'No church members available to add'}
-                </div>
-              ) : (
-                filteredChurchMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium text-gray-900">{member.name} {member.surname}</div>
-                        <div className="text-sm text-gray-600">{member.email} • {member.phone}</div>
-                      </div>
-                      <button
-                        onClick={() => addMemberToDepartment(member)}
-                        disabled={loading}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
-                      >
-                        Add to Department
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
         </div>
       )}
     </div>
