@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import DepartmentMeetingCreationStep from './DepartmentMeetingCreationStep';
 import DepartmentAttendanceStep from './DepartmentAttendanceStep';
+import DepartmentNewcomerStep from './DepartmentNewcomerStep';
 import DepartmentReportStep from './DepartmentReportStep';
-import { UserPlus } from 'lucide-react';
 
 interface DepartmentManagementWorkflowProps {
   department: any;
@@ -96,20 +96,15 @@ const DepartmentManagementWorkflow: React.FC<DepartmentManagementWorkflowProps> 
         )}
 
         {currentStep === 3 && (
-          <div className="text-center py-16">
-            <UserPlus className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Add Newcomers Step</h3>
-            <p className="text-gray-600">Newcomer registration would go here</p>
-            <button
-              onClick={() => {
-                onSuccess('Newcomer added successfully!');
-                setCurrentStep(4);
-              }}
-              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Mark Newcomer Complete
-            </button>
-          </div>
+          <DepartmentNewcomerStep
+            department={department}
+            selectedMeeting={selectedMeeting}
+            onNewcomerAdded={() => {
+              onSuccess('Newcomer added successfully!');
+              setCurrentStep(4);
+            }}
+            onError={onError}
+          />
         )}
 
         {currentStep === 4 && (
