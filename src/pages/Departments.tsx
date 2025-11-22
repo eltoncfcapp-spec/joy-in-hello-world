@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../../../integrations/supabase/client';
-import { FileText, Users, CheckCircle, XCircle, AlertCircle, Download, Printer, Calendar, MapPin, Clock } from 'lucide-react';
+import { supabase } from '../../integrations/supabase/client';
+import { useAuth } from '../../contexts/AuthContext';
+import { 
+  Users, MapPin, Calendar, User, Search, X, 
+  Shield, AlertCircle, CheckCircle, Printer
+} from 'lucide-react';
+
+// Import step components
+import DepartmentMeetingCreationStep from '../../components/departments/DepartmentMeetingCreationStep';
+import DepartmentAttendanceStep from '../../components/departments/DepartmentAttendanceStep';
+import DepartmentNewcomerStep from '../../components/departments/DepartmentNewcomerStep';
+import DepartmentReportStep from '../../components/departments/DepartmentReportStep';
 
 interface DepartmentReportStepProps {
   department: any;
