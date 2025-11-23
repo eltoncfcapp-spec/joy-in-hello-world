@@ -71,137 +71,226 @@ const CellGroups = () => {
 
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  // Get user's role from profile
+  // Get user's role from profile - FIXED LOGIC
   const getUserRole = (): string => {
     if (!profile) return 'member';
     
+    console.log('🔍 Profile data for role detection:', {
+      admin_role: profile.admin_role,
+      pastor_role: profile.pastor_role,
+      deacon_role: profile.deacon_role,
+      group_leader: profile.group_leader,
+      department_leader: profile.department_leader
+    });
+
     // Check admin_role first (text field)
     if (profile.admin_role && profile.admin_role !== 'member') {
+      console.log('✅ Detected role from admin_role:', profile.admin_role);
       return profile.admin_role;
     }
     
-    // Check boolean roles
-    if (profile.pastor_role) return 'pastor';
-    if (profile.deacon_role) return 'deacon';
-    if (profile.group_leader) return 'group_leader';
-    if (profile.department_leader) return 'department_leader';
+    // Check boolean roles - these should override admin_role if true
+    if (profile.pastor_role === true) {
+      console.log('✅ Detected pastor role');
+      return 'pastor';
+    }
+    if (profile.deacon_role === true) {
+      console.log('✅ Detected deacon role');
+      return 'deacon';
+    }
+    if (profile.group_leader === true) {
+      console.log('✅ Detected group_leader role');
+      return 'group_leader';
+    }
+    if (profile.department_leader === true) {
+      console.log('✅ Detected department_leader role');
+      return 'department_leader';
+    }
     
+    console.log('✅ Defaulting to member role');
     return 'member';
   };
 
-  // Check if user has specific permission
+  // Check if user has specific permission - FIXED LOGIC
   const hasPermission = (requiredPermission: string): boolean => {
-    if (!profile?.permissions) return false;
-    return profile.permissions.includes(requiredPermission) || profile.permissions.includes('admin_access');
+    if (!profile?.permissions) {
+      console.log('❌ No permissions array found');
+      return false;
+    }
+    
+    const hasPerm = profile.permissions.includes(requiredPermission) || 
+                   profile.permissions.includes('admin_access');
+    console.log(`🔐 Permission check for "${requiredPermission}":`, hasPerm);
+    return hasPerm;
   };
 
-  // Check if user is admin or pastor
+  // Check if user is admin or pastor - FIXED LOGIC
   const isAdminOrPastor = (): boolean => {
     const role = getUserRole();
-    return role === 'admin' || role === 'pastor';
+    const isAdminPastor = role === 'admin' || role === 'pastor';
+    console.log('👑 Is Admin or Pastor:', isAdminPastor, 'Role:', role);
+    return isAdminPastor;
   };
 
-  // Check if user can create cell groups
+  // Check if user can create cell groups - FIXED LOGIC
   const canCreateGroups = (): boolean => {
     if (!profile) return false;
-    return isAdminOrPastor() || hasPermission('manage_groups');
+    
+    const canCreate = isAdminOrPastor() || hasPermission('manage_groups');
+    console.log('📝 Can create groups:', canCreate);
+    return canCreate;
   };
 
-  // Check if user can manage specific cell group
+  // Check if user can manage specific cell group - COMPLETELY REWRITTEN
   const canManageGroup = (group: CellGroup): boolean => {
-    if (!profile) return false;
-    
-    // Admin and Pastor can manage all groups
-    if (isAdminOrPastor()) {
-      return true;
+    if (!profile) {
+      console.log('❌ No profile for manage check');
+      return false;
     }
-    
-    // Users with manage_groups permission can manage all groups
-    if (hasPermission('manage_groups')) {
-      return true;
-    }
-    
-    // Group leaders can only manage their assigned groups
+
     const role = getUserRole();
-    if (role === 'group_leader' && profile.assigned_groups) {
+    console.log(`🛠️ Manage check for group "${group.name}" - User role: ${role}`);
+
+    // 1. Admin and Pastor can manage ALL groups
+    if (isAdminOrPastor()) {
+      console.log('✅ Admin/Pastor can manage all groups');
+      return true;
+    }
+
+    // 2. Users with manage_groups permission can manage ALL groups
+    if (hasPermission('manage_groups')) {
+      console.log('✅ User has manage_groups permission');
+      return true;
+    }
+
+    // 3. Group Leaders can manage their assigned groups
+    if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
       const canManage = profile.assigned_groups.some((assignedGroup: string) => {
-        // Check if assigned group matches by name or ID
-        return assignedGroup.toLowerCase() === group.name.toLowerCase() || 
-               assignedGroup === group.id;
+        const canManageGroup = assignedGroup === group.id || 
+                              assignedGroup.toLowerCase() === group.name.toLowerCase();
+        if (canManageGroup) {
+          console.log(`✅ Group leader can manage - assigned group match: ${assignedGroup}`);
+        }
+        return canManageGroup;
       });
-      return canManage;
+      
+      if (canManage) return true;
     }
-    
-    // Check if user is the leader of this group (from leader_id)
+
+    // 4. Deacons can ONLY manage groups where they are the leader (leader_id or is_leader)
+    if (role === 'deacon') {
+      // Check if deacon is the leader of this specific group
+      const isLeaderOfThisGroup = group.leader_id === profile.id || 
+                                 (profile.cell_group_id === group.id && profile.is_leader === true);
+      
+      console.log(`🎯 Deacon manage check - is leader of this group:`, isLeaderOfThisGroup, {
+        groupLeaderId: group.leader_id,
+        profileId: profile.id,
+        profileCellGroup: profile.cell_group_id,
+        groupId: group.id,
+        profileIsLeader: profile.is_leader
+      });
+      
+      if (isLeaderOfThisGroup) {
+        console.log('✅ Deacon can manage this group (is leader)');
+        return true;
+      }
+    }
+
+    // 5. Check if user is the leader of this group (any role)
     if (group.leader_id === profile.id) {
+      console.log('✅ User is leader of this group (by leader_id)');
       return true;
     }
 
-    // Check if user is marked as leader in this group via is_leader field
-    if (profile.cell_group_id === group.id && profile.is_leader) {
+    // 6. Check if user is marked as leader in this group via is_leader field
+    if (profile.cell_group_id === group.id && profile.is_leader === true) {
+      console.log('✅ User is leader of this group (by is_leader field)');
       return true;
     }
 
+    console.log('❌ User cannot manage this group');
     return false;
   };
 
-  // Check if user can view specific cell group
+  // Check if user can view specific cell group - COMPLETELY REWRITTEN
   const canViewGroup = (group: CellGroup): boolean => {
-    if (!profile) return false;
-    
-    // Admin and Pastor can view all groups
-    if (isAdminOrPastor()) {
-      return true;
+    if (!profile) {
+      console.log('❌ No profile for view check');
+      return false;
     }
-    
-    // Users with view_groups or manage_groups permission can view all groups
-    if (hasPermission('view_groups') || hasPermission('manage_groups')) {
-      return true;
-    }
-    
-    // Group leaders can view their assigned groups
+
     const role = getUserRole();
-    if (role === 'group_leader' && profile.assigned_groups) {
+    console.log(`👀 View check for group "${group.name}" - User role: ${role}`);
+
+    // 1. Admin and Pastor can view ALL groups
+    if (isAdminOrPastor()) {
+      console.log('✅ Admin/Pastor can view all groups');
+      return true;
+    }
+
+    // 2. Users with view_groups or manage_groups permission can view ALL groups
+    if (hasPermission('view_groups') || hasPermission('manage_groups')) {
+      console.log('✅ User has view_groups or manage_groups permission');
+      return true;
+    }
+
+    // 3. Deacons can view ALL groups (read-only access to all)
+    if (role === 'deacon') {
+      console.log('✅ Deacon can view all groups');
+      return true;
+    }
+
+    // 4. Department Leaders can view ALL groups
+    if (role === 'department_leader') {
+      console.log('✅ Department leader can view all groups');
+      return true;
+    }
+
+    // 5. Group Leaders can view their assigned groups
+    if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
       const canView = profile.assigned_groups.some((assignedGroup: string) => {
-        return assignedGroup.toLowerCase() === group.name.toLowerCase() || 
-               assignedGroup === group.id;
+        return assignedGroup === group.id || 
+               assignedGroup.toLowerCase() === group.name.toLowerCase();
+      });
+      
+      if (canView) {
+        console.log('✅ Group leader can view this assigned group');
+        return true;
+      }
+    }
+
+    // 6. Regular members can only view groups they are members of
+    if (role === 'member') {
+      const canView = profile.cell_group_id === group.id;
+      console.log(`✅ Member view check - same cell group: ${canView}`, {
+        profileCellGroup: profile.cell_group_id,
+        groupId: group.id
       });
       return canView;
     }
-    
-    // Regular members can only view groups they are members of
-    if (role === 'member') {
-      // Check if member belongs to this group via cell_group_id
-      const isMemberByCellGroupId = profile.cell_group_id === group.id;
-      
-      return isMemberByCellGroupId || false;
-    }
-    
-    // Deacons and department leaders can view all groups
-    if (role === 'deacon' || role === 'department_leader') {
-      return true;
-    }
-    
+
+    console.log('❌ User cannot view this group');
     return false;
   };
 
-  // Filter cell groups based on user permissions
+  // Filter cell groups based on user permissions - FIXED
   const getFilteredCellGroups = (): CellGroup[] => {
-    if (!profile) return [];
-
-    // Admin and Pastor can see all cell groups
-    if (isAdminOrPastor()) {
-      return allCellGroups;
+    if (!profile) {
+      console.log('❌ No profile for filtering');
+      return [];
     }
 
-    // Users with view_groups or manage_groups permission can see all groups
-    if (hasPermission('view_groups') || hasPermission('manage_groups')) {
-      return allCellGroups;
-    }
-
-    // Deacons and department leaders can see all groups
     const role = getUserRole();
-    if (role === 'deacon' || role === 'department_leader') {
+    console.log(`🔍 Filtering groups for role: ${role}`);
+
+    // Admin, Pastor, Deacon, Department Leader, and users with view permissions see ALL groups
+    if (isAdminOrPastor() || 
+        role === 'deacon' || 
+        role === 'department_leader' || 
+        hasPermission('view_groups') || 
+        hasPermission('manage_groups')) {
+      console.log('✅ User can see ALL groups');
       return allCellGroups;
     }
 
@@ -209,21 +298,24 @@ const CellGroups = () => {
 
     // Group leaders can see their assigned groups
     if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
+      console.log('🔍 Group leader filtering by assigned groups:', profile.assigned_groups);
       userGroups = allCellGroups.filter(group => 
         profile.assigned_groups?.some((assignedGroup: string) => 
-          assignedGroup.toLowerCase() === group.name.toLowerCase() ||
-          assignedGroup === group.id
+          assignedGroup === group.id ||
+          assignedGroup.toLowerCase() === group.name.toLowerCase()
         )
       );
+      console.log(`✅ Group leader can see ${userGroups.length} assigned groups`);
     }
 
-    // Regular members can see groups they are members of
+    // Regular members can only see their own group
     if (role === 'member' && profile.cell_group_id) {
-      const memberGroups = allCellGroups.filter(group => {
-        // Check via cell_group_id field
-        return profile.cell_group_id === group.id;
-      });
+      console.log('🔍 Member filtering by cell_group_id:', profile.cell_group_id);
+      const memberGroups = allCellGroups.filter(group => 
+        profile.cell_group_id === group.id
+      );
       userGroups = [...userGroups, ...memberGroups];
+      console.log(`✅ Member can see ${memberGroups.length} groups`);
     }
 
     // Remove duplicates
@@ -231,6 +323,7 @@ const CellGroups = () => {
       index === self.findIndex(g => g.id === group.id)
     );
 
+    console.log(`🎯 Final filtered groups: ${uniqueGroups.length}`);
     return uniqueGroups;
   };
 
@@ -265,6 +358,7 @@ const CellGroups = () => {
       if (error) throw error;
       
       const cellGroupsData = data || [];
+      console.log('📋 Loaded cell groups:', cellGroupsData.length);
       setAllCellGroups(cellGroupsData as CellGroup[]);
       
     } catch (error) {
@@ -282,6 +376,7 @@ const CellGroups = () => {
 
       if (error) throw error;
       setMembers(data || []);
+      console.log('👥 Loaded members:', data?.length);
     } catch (error) {
       console.error('Error fetching members:', error);
       throw error;
@@ -310,10 +405,20 @@ const CellGroups = () => {
   useEffect(() => {
     const checkAccessAndLoadData = async () => {
       if (!profile) {
+        console.log('❌ No profile - denying access');
         setHasAccess(false);
         setInitialLoad(false);
         return;
       }
+
+      console.log('🔐 Checking access for profile:', {
+        id: profile.id,
+        name: profile.name,
+        role: getUserRole(),
+        permissions: profile.permissions,
+        cell_group_id: profile.cell_group_id,
+        assigned_groups: profile.assigned_groups
+      });
 
       // Determine access based on role and permissions
       let userHasAccess = false;
@@ -322,24 +427,30 @@ const CellGroups = () => {
       // Admin and Pastor always have access
       if (isAdminOrPastor()) {
         userHasAccess = true;
+        console.log('✅ Admin/Pastor - full access');
       }
       // Users with view_groups or manage_groups permission
       else if (hasPermission('view_groups') || hasPermission('manage_groups')) {
         userHasAccess = true;
+        console.log('✅ Has view_groups or manage_groups permission');
       }
       // Deacons and department leaders have access
       else if (role === 'deacon' || role === 'department_leader') {
         userHasAccess = true;
+        console.log('✅ Deacon or department leader - view access');
       }
       // Group leaders with assigned groups
       else if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
         userHasAccess = true;
+        console.log('✅ Group leader with assigned groups');
       }
       // Regular members who belong to a cell group
       else if (role === 'member' && profile.cell_group_id) {
         userHasAccess = true;
+        console.log('✅ Member with cell group');
       }
       
+      console.log('🎯 Final access decision:', userHasAccess);
       setHasAccess(userHasAccess);
 
       if (userHasAccess) {
@@ -653,7 +764,9 @@ const CellGroups = () => {
                 ? 'Can manage all cell groups and members'
                 : getUserRole() === 'group_leader'
                 ? `Managing ${profile?.assigned_groups?.length || 0} assigned group(s)`
-                : getUserRole() === 'deacon' || getUserRole() === 'department_leader'
+                : getUserRole() === 'deacon'
+                ? 'Can view all cell groups, manage only your assigned groups'
+                : getUserRole() === 'department_leader'
                 ? 'Can view all cell groups'
                 : `Viewing your cell group - ${getUserRole()} access`
               }
@@ -664,7 +777,9 @@ const CellGroups = () => {
                   ? 'You have full access to manage all cell groups'
                   : getUserRole() === 'group_leader' 
                   ? 'You can only view and manage cell groups assigned to you'
-                  : getUserRole() === 'deacon' || getUserRole() === 'department_leader'
+                  : getUserRole() === 'deacon'
+                  ? 'You can view all cell groups but only manage groups where you are the leader'
+                  : getUserRole() === 'department_leader'
                   ? 'You can view all cell groups but cannot manage them'
                   : 'You can only view the cell group you belong to'
                 }
