@@ -13,7 +13,7 @@ interface Department {
   id: string;
   name: string;
   location: string | null;
-  meeting_day: string | null;
+  meeting_day: string | null;//
   meeting_time: string | null;
   leader_id: string | null;
   description?: string | null;
