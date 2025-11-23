@@ -56,111 +56,38 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
     try {
       setLoading(true);
 
-      // First, check if member already exists with same email or phone
-      let existingMember = null;
-      
-      if (formData.email.trim()) {
-        const { data: emailMatch } = await supabase
-          .from('members')
-          .select('*')
-          .eq('email', formData.email.trim())
-          .single();
-        
-        existingMember = emailMatch;
-      }
-
-      if (!existingMember && formData.phone.trim()) {
-        const { data: phoneMatch } = await supabase
-          .from('members')
-          .select('*')
-          .eq('phone', formData.phone.trim())
-          .single();
-        
-        existingMember = phoneMatch;
-      }
-
-      let memberId;
-
-      if (existingMember) {
-        // Use existing member
-        memberId = existingMember.id;
-        
-        // Update member status if needed
-        if (existingMember.status !== 'newcomer') {
-          await supabase
-            .from('members')
-            .update({ 
-              status: 'newcomer',
-              invited_by: department.name,
-              first_time_visit_date: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', existingMember.id);
-        }
-      } else {
-        // Create new member with proper schema compliance
-        const memberPayload = {
+      const { data: memberData, error: memberError } = await supabase
+        .from('members')
+        .insert([{
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
           email: formData.email.trim() || null,
           status: 'newcomer',
           first_time_visit_date: new Date().toISOString(),
-          invited_by: department.name,
-          // Set default values for required schema fields
-          is_permanent_member: false,
-          is_leader: false,
-          admin_role: 'member',
-          // Set timestamps
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          status_date: new Date().toISOString()
-        };
-
-        const { data: memberData, error: memberError } = await supabase
-          .from('members')
-          .insert([memberPayload])
-          .select()
-          .single();
-
-        if (memberError) {
-          // Handle unique constraint violation for email
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            onError('A member with this email already exists');
-            return;
-          }
-          throw memberError;
-        }
-        memberId = memberData.id;
-      }
-
-      // Add to department members if not already a member
-      const { data: existingDeptMember } = await supabase
-        .from('department_members')
-        .select('*')
-        .eq('department_id', department.id)
-        .eq('member_id', memberId)
+          invited_by: department.name
+        }])
+        .select()
         .single();
 
-      if (!existingDeptMember) {
-        const { error: deptError } = await supabase
-          .from('department_members')
-          .insert([{
-            department_id: department.id,
-            member_id: memberId,
-            role: 'member'
-          }]);
+      if (memberError) throw memberError;
 
-        if (deptError) throw deptError;
-      }
+      const { error: deptError } = await supabase
+        .from('department_members')
+        .insert([{
+          department_id: department.id,
+          member_id: memberData.id,
+          role: 'member'
+        }]);
 
-      // Record attendance for selected meeting
+      if (deptError) throw deptError;
+
       if (selectedMeeting) {
         const { error: attendanceError } = await supabase
           .from('department_attendance')
           .insert([{
             meeting_id: selectedMeeting.id,
-            member_id: memberId,
+            member_id: memberData.id,
             status: 'present',
             notes: 'First-time department visitor - ' + (formData.notes || 'No additional notes')
           }]);
@@ -180,8 +107,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
       onNewcomerAdded();
       
     } catch (error: any) {
-      console.error('Error adding newcomer:', error);
-      onError('Failed to add newcomer: ' + (error.message || 'Unknown error'));
+      onError('Failed to add newcomer: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -252,7 +178,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="Enter first name"
                     required
-                    minLength={1}
                   />
                 </div>
               </div>
@@ -269,7 +194,6 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   placeholder="Enter last name"
                   required
-                  minLength={1}
                 />
               </div>
             </div>
@@ -312,7 +236,24 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Additional Notes
+                Address
+              </label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  name="address"
+                  value={formData.address}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Enter home address"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Notes
               </label>
               <textarea
                 name="notes"
