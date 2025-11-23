@@ -41,12 +41,13 @@ interface Member {
   phone: string | null;
   department_id?: string | null;
 }
+
 interface DepartmentAttendanceRecord {
   id: string;
   meeting_id: string;
   member_id: string;
   status: 'present' | 'absent' | 'absent_with_reason';
-  notes?: string | null;
+  reason?: string | null;
   members?: Member;
 }
 
@@ -309,7 +310,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
-  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
   const [searchMemberTerm, setSearchMemberTerm] = useState('');
 
@@ -384,17 +385,17 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       if (error) throw error;
 
       const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
-      const existingNotes: Record<string, string> = {};
+      const existingReasons: Record<string, string> = {};
 
-  data?.forEach(record => {
-  existingAttendance[record.member_id] = record.status;
-  if (record.notes) {
-    existingNotes[record.member_id] = record.notes;
-  }
-});
+      data?.forEach(record => {
+        existingAttendance[record.member_id] = record.status;
+        if (record.reason) {
+          existingReasons[record.member_id] = record.reason;
+        }
+      });
 
-setAttendance(existingAttendance);
-setNotes(existingNotes);
+      setAttendance(existingAttendance);
+      setReasons(existingReasons);
     } catch (error: any) {
       console.error('Failed to load existing attendance:', error);
     }
@@ -406,21 +407,21 @@ setNotes(existingNotes);
       [memberId]: status
     }));
 
-if (status !== 'absent_with_reason') {
-  setNotes(prev => {
-    const newNotes = { ...prev };
-    delete newNotes[memberId];
-    return newNotes;
-  });
-}
+    if (status !== 'absent_with_reason') {
+      setReasons(prev => {
+        const newReasons = { ...prev };
+        delete newReasons[memberId];
+        return newReasons;
+      });
+    }
   };
 
-const handleNotesChange = (memberId: string, note: string) => {
-  setNotes(prev => ({
-    ...prev,
-    [memberId]: note
-  }));
-};
+  const handleReasonChange = (memberId: string, reason: string) => {
+    setReasons(prev => ({
+      ...prev,
+      [memberId]: reason
+    }));
+  };
 
   const addMemberToDepartment = async (member: Member) => {
     try {
@@ -479,7 +480,7 @@ const handleNotesChange = (memberId: string, note: string) => {
         meeting_id: selectedMeeting.id,
         member_id: member.id,
         status: attendance[member.id] || 'absent',
-        notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
+        reason: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
       }));
 
       // Delete existing attendance and insert new ones
@@ -531,7 +532,7 @@ const handleNotesChange = (memberId: string, note: string) => {
           <Users className="h-8 w-8 text-green-600" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Record Department Attendance</h3>
-        <p className="text-gray-600 dark:text-gray-400">Mark department members as present, absent, or Absent with Notes</p>
+        <p className="text-gray-600 dark:text-gray-400">Mark department members as present, absent, or absent with reason</p>
       </div>
 
       {/* Meeting Selection */}
@@ -663,7 +664,7 @@ const handleNotesChange = (memberId: string, note: string) => {
                           Absent
                         </button>
 
-                        {/* Absent with Notes Button */}
+                        {/* Absent with Reason Button */}
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
@@ -673,28 +674,26 @@ const handleNotesChange = (memberId: string, note: string) => {
                           }`}
                         >
                           <FileText className="h-4 w-4" />
-                          Absent with Notes
+                          Absent with Reason
                         </button>
                       </div>
                     </div>
 
-                    {/* Reason Input for Absent with Notes */}
+                    {/* Reason Input for absent with reason */}
                     {attendance[member.id] === 'absent_with_reason' && (
-               <div className="mt-3">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-             Notes for Absence
-          </label>
-           <input
-            type="text"
-            value={notes[member.id] || ''}
-             onChange={(e) => handleNotesChange(member.id, e.target.value)}
-               placeholder="Enter notes for absence..."
-                  className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-                 </div>
-                )}
-     
-               )}
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Reason for Absence
+                        </label>
+                        <input
+                          type="text"
+                          value={reasons[member.id] || ''}
+                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
+                          placeholder="Enter reason for absence..."
+                          className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -961,7 +960,7 @@ ATTENDANCE SUMMARY
 Total Members: ${stats.total}
 Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
 Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
-Absent with Notes: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
+Absent with Reason: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
 Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
 
 MEETING REPORT
@@ -987,7 +986,7 @@ ${reportData.additional_notes || 'No additional notes'}
 DETAILED ATTENDANCE
 ===================
 ${attendance.map(record => `
-${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}
+${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.reason ? ` (Reason: ${record.reason})` : ''}
 `).join('')}
 
 ${selectedMeeting?.notes ? `
@@ -1170,7 +1169,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                   <div className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="h-5 w-5 text-yellow-600" />
-                      <span className="text-yellow-800 dark:text-yellow-200">Absent with Notes</span>
+                      <span className="text-yellow-800 dark:text-yellow-200">Absent with Reason</span>
                     </div>
                     <span className="text-lg font-bold text-yellow-800 dark:text-yellow-200">
                       {stats.absentWithReason}
@@ -1239,11 +1238,10 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                           }`}>
                             {record.status.replace('_', ' ')}
                           </div>
-                          {record.notes && (
-  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-    Notes: {record.notes}
-  </p>
-)}
+                          {record.reason && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                              Reason: {record.reason}
+                            </p>
                           )}
                         </div>
                       </div>
@@ -2164,12 +2162,12 @@ const Departments = () => {
                       </div>
                     )}
 
-                    {/* Absent with Notes */}
+                    {/* Absent with Reason */}
                     {getAttendanceStats().absentWithReason > 0 && (
                       <div className="mb-6">
                         <h5 className="text-lg font-semibold text-yellow-700 dark:text-yellow-400 print:text-yellow-800 mb-3 flex items-center gap-2">
                           <AlertCircle className="h-5 w-5" />
-                          Absent with Notes ({getAttendanceStats().absentWithReason})
+                          Absent with Reason ({getAttendanceStats().absentWithReason})
                         </h5>
                         <div className="bg-yellow-50 dark:bg-yellow-900/10 print:bg-yellow-50 border border-yellow-200 dark:border-yellow-800 print:border-yellow-300 rounded-lg p-4">
                           <div className="space-y-3">
@@ -2182,11 +2180,11 @@ const Departments = () => {
                                     <span className="text-gray-900 dark:text-white print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
                                     </span>
-                                    {record.notes && (
-  <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
-    Notes: {record.notes}
-  </p>
-)}
+                                    {record.reason && (
+                                      <p className="text-sm text-gray-600 dark:text-gray-400 print:text-gray-700 mt-1">
+                                        Reason: {record.reason}
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
                               ))}
