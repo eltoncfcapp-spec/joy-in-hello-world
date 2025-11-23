@@ -124,7 +124,7 @@ const CellGroups = () => {
     // Group leaders can only manage their assigned groups
     const role = getUserRole();
     if (role === 'group_leader' && profile.assigned_groups) {
-      const canManage = profile.assigned_groups.some(assignedGroup => {
+      const canManage = profile.assigned_groups.some((assignedGroup: string) => {
         // Check if assigned group matches by name or ID
         return assignedGroup.toLowerCase() === group.name.toLowerCase() || 
                assignedGroup === group.id;
@@ -162,7 +162,7 @@ const CellGroups = () => {
     // Group leaders can view their assigned groups
     const role = getUserRole();
     if (role === 'group_leader' && profile.assigned_groups) {
-      const canView = profile.assigned_groups.some(assignedGroup => {
+      const canView = profile.assigned_groups.some((assignedGroup: string) => {
         return assignedGroup.toLowerCase() === group.name.toLowerCase() || 
                assignedGroup === group.id;
       });
@@ -210,7 +210,7 @@ const CellGroups = () => {
     // Group leaders can see their assigned groups
     if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
       userGroups = allCellGroups.filter(group => 
-        profile.assigned_groups?.some(assignedGroup => 
+        profile.assigned_groups?.some((assignedGroup: string) => 
           assignedGroup.toLowerCase() === group.name.toLowerCase() ||
           assignedGroup === group.id
         )
