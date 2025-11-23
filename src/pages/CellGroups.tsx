@@ -29,10 +29,19 @@ interface Member {
   surname: string;
   email: string | null;
   phone: string | null;
-  role?: string | null;
-  permissions?: string[] | null;
-  assigned_groups?: string[] | null;
-  cell_group_id?: string | null;
+  cell_group_id: string | null;
+  is_leader: boolean | null;
+  admin_role: string | null;
+  pastor_role: boolean | null;
+  deacon_role: boolean | null;
+  group_leader: boolean | null;
+  department_leader: boolean | null;
+  permissions: string[] | null;
+  assigned_groups: string[] | null;
+  assigned_departments: string[] | null;
+  can_add_members: boolean | null;
+  can_edit_members: boolean | null;
+  can_view_own_data: boolean | null;
 }
 
 const CellGroups = () => {
@@ -66,7 +75,7 @@ const CellGroups = () => {
   const getUserRole = (): string => {
     if (!profile) return 'member';
     
-    // Check admin_role first
+    // Check admin_role first (text field)
     if (profile.admin_role && profile.admin_role !== 'member') {
       return profile.admin_role;
     }
@@ -123,8 +132,13 @@ const CellGroups = () => {
       return canManage;
     }
     
-    // Check if user is the leader of this group
+    // Check if user is the leader of this group (from leader_id)
     if (group.leader_id === profile.id) {
+      return true;
+    }
+
+    // Check if user is marked as leader in this group via is_leader field
+    if (profile.cell_group_id === group.id && profile.is_leader) {
       return true;
     }
 
@@ -163,6 +177,11 @@ const CellGroups = () => {
       return isMemberByCellGroupId || false;
     }
     
+    // Deacons and department leaders can view all groups
+    if (role === 'deacon' || role === 'department_leader') {
+      return true;
+    }
+    
     return false;
   };
 
@@ -180,10 +199,15 @@ const CellGroups = () => {
       return allCellGroups;
     }
 
+    // Deacons and department leaders can see all groups
+    const role = getUserRole();
+    if (role === 'deacon' || role === 'department_leader') {
+      return allCellGroups;
+    }
+
     let userGroups: CellGroup[] = [];
 
     // Group leaders can see their assigned groups
-    const role = getUserRole();
     if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
       userGroups = allCellGroups.filter(group => 
         profile.assigned_groups?.some(assignedGroup => 
@@ -303,6 +327,10 @@ const CellGroups = () => {
       else if (hasPermission('view_groups') || hasPermission('manage_groups')) {
         userHasAccess = true;
       }
+      // Deacons and department leaders have access
+      else if (role === 'deacon' || role === 'department_leader') {
+        userHasAccess = true;
+      }
       // Group leaders with assigned groups
       else if (role === 'group_leader' && profile.assigned_groups && profile.assigned_groups.length > 0) {
         userHasAccess = true;
@@ -337,7 +365,7 @@ const CellGroups = () => {
     
     // Check permission
     if (!canCreateGroups()) {
-      setError('You do not have permission to create cell groups. Only administrators and pastors can create new cell groups.');
+      setError('You do not have permission to create cell groups. Only administrators, pastors, or users with manage_groups permission can create new cell groups.');
       return;
     }
 
@@ -434,7 +462,7 @@ const CellGroups = () => {
       return;
     }
 
-    if (!confirm('Are you sure you want to delete this cell group? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete this cell group? This will remove all member associations and cannot be undone.')) {
       return;
     }
 
@@ -442,6 +470,15 @@ const CellGroups = () => {
       setLoading(true);
       setError(null);
       
+      // First, remove all members from this group
+      const { error: updateError } = await supabase
+        .from('members')
+        .update({ cell_group_id: null })
+        .eq('cell_group_id', groupId);
+
+      if (updateError) throw updateError;
+
+      // Then delete the group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -450,6 +487,7 @@ const CellGroups = () => {
       if (error) throw error;
 
       await fetchCellGroups();
+      await fetchMembers(); // Refresh members to show updated group assignments
     } catch (error: any) {
       console.error('Error deleting cell group:', error);
       setError(`Error deleting cell group: ${error.message}`);
@@ -505,6 +543,7 @@ const CellGroups = () => {
 
       if (selectedGroup) {
         await fetchGroupMembers(selectedGroup.id);
+        await fetchMembers(); // Refresh the members list
       }
     } catch (error: any) {
       console.error('Error removing member from cell group:', error);
@@ -544,11 +583,12 @@ const CellGroups = () => {
   };
 
   const getInitials = (name: string, surname: string) => {
-    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
+    return `${name?.charAt(0) || ''}${surname?.charAt(0) || ''}`.toUpperCase();
   };
 
   const availableMembers = members.filter(member => 
     !selectedGroup?.members?.some((m: any) => m.id === member.id) &&
+    member.cell_group_id !== selectedGroup?.id && // Not already in this group
     (member.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
      member.surname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
      member.email?.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -568,6 +608,7 @@ const CellGroups = () => {
 
   // Show access denied if user doesn't have permission to access cell groups
   if (hasAccess === false) {
+    const role = getUserRole();
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
         <div className="text-center max-w-md">
@@ -579,14 +620,14 @@ const CellGroups = () => {
             You don't have permission to access the cell groups section.
           </p>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Your role: {getUserRole()}
+            Your role: {role}
           </p>
-          {getUserRole() === 'member' && !profile?.cell_group_id && (
+          {role === 'member' && !profile?.cell_group_id && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
               You are not assigned to any cell group. Please contact an administrator.
             </p>
           )}
-          {getUserRole() === 'group_leader' && (!profile?.assigned_groups || profile.assigned_groups.length === 0) && (
+          {role === 'group_leader' && (!profile?.assigned_groups || profile.assigned_groups.length === 0) && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
               You don't have any assigned groups to manage. Please contact an administrator.
             </p>
@@ -612,6 +653,8 @@ const CellGroups = () => {
                 ? 'Can manage all cell groups and members'
                 : getUserRole() === 'group_leader'
                 ? `Managing ${profile?.assigned_groups?.length || 0} assigned group(s)`
+                : getUserRole() === 'deacon' || getUserRole() === 'department_leader'
+                ? 'Can view all cell groups'
                 : `Viewing your cell group - ${getUserRole()} access`
               }
             </p>
@@ -621,6 +664,8 @@ const CellGroups = () => {
                   ? 'You have full access to manage all cell groups'
                   : getUserRole() === 'group_leader' 
                   ? 'You can only view and manage cell groups assigned to you'
+                  : getUserRole() === 'deacon' || getUserRole() === 'department_leader'
+                  ? 'You can view all cell groups but cannot manage them'
                   : 'You can only view the cell group you belong to'
                 }
               </p>
@@ -764,6 +809,8 @@ const CellGroups = () => {
                   ? 'No cell groups available'
                   : getUserRole() === 'group_leader'
                   ? 'You are not assigned to any cell groups as a leader'
+                  : getUserRole() === 'deacon' || getUserRole() === 'department_leader'
+                  ? 'No cell groups available'
                   : 'You are not a member of any cell groups'
                 }
               </p>
@@ -1040,6 +1087,11 @@ const CellGroups = () => {
                               <div className="text-sm text-gray-500 dark:text-gray-400">
                                 {member.email || 'No email'} • {member.phone || 'No phone'}
                               </div>
+                              {member.cell_group_id && (
+                                <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                                  Currently in another group
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -1090,8 +1142,13 @@ const CellGroups = () => {
                               {member.name} {member.surname}
                             </div>
                             <div className="text-sm text-gray-500 dark:text-gray-400">
-                              {member.phone || 'No phone'} • {member.role || 'member'}
+                              {member.phone || 'No phone'} • {member.is_leader ? 'Leader' : 'Member'}
                             </div>
+                            {member.is_leader && (
+                              <div className="text-xs text-green-600 dark:text-green-400 font-medium mt-1">
+                                Group Leader
+                              </div>
+                            )}
                           </div>
                         </div>
                         
