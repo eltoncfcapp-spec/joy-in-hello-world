@@ -24,7 +24,7 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Protecte
         navigate('/unauthorized');
         return;
       }
-      
+
       // Check permission requirement (admins and pastors have all permissions)
       if (requiredPermission && !profile.pastor_role && profile.admin_role !== 'admin') {
         navigate('/unauthorized');
