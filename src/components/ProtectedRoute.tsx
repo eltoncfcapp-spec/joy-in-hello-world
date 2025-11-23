@@ -21,13 +21,13 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Protecte
 
     if (!loading && user && profile) {
       // Check role requirement
-      if (requiredRole && profile.role !== requiredRole && !profile.isAdmin) {
+      if (requiredRole && profile.admin_role !== requiredRole && !profile.pastor_role) {
         navigate('/unauthorized');
         return;
       }
-
-      // Check permission requirement (admins have all permissions)
-      if (requiredPermission && !profile.isAdmin) {
+      
+      // Check permission requirement (admins and pastors have all permissions)
+      if (requiredPermission && !profile.pastor_role && profile.admin_role !== 'admin') {
         navigate('/unauthorized');
         return;
       }
@@ -36,11 +36,8 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Protecte
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Loading...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
