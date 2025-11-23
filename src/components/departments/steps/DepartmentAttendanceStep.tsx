@@ -45,7 +45,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
-  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
   const [searchMemberTerm, setSearchMemberTerm] = useState('');
 
@@ -116,17 +116,17 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       if (error) throw error;
 
       const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
-      const existingNotes: Record<string, string> = {};
+      const existingReasons: Record<string, string> = {};
 
       data?.forEach(record => {
         existingAttendance[record.member_id] = record.status;
-        if (record.notes) {
-          existingNotes[record.member_id] = record.notes;
+        if (record.reason) {
+          existingReasons[record.member_id] = record.reason;
         }
       });
 
       setAttendance(existingAttendance);
-      setNotes(existingNotes);
+      setReasons(existingReasons);
     } catch (error: any) {
       console.error('Failed to load existing attendance:', error);
     }
@@ -135,16 +135,16 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
     setAttendance(prev => ({ ...prev, [memberId]: status }));
     if (status !== 'absent_with_reason') {
-      setNotes(prev => {
-        const newNotes = { ...prev };
-        delete newNotes[memberId];
-        return newNotes;
+      setReasons(prev => {
+        const newReasons = { ...prev };
+        delete newReasons[memberId];
+        return newReasons;
       });
     }
   };
 
-  const handleNotesChange = (memberId: string, note: string) => {
-    setNotes(prev => ({ ...prev, [memberId]: note }));
+  const handleReasonChange = (memberId: string, reason: string) => {
+    setReasons(prev => ({ ...prev, [memberId]: reason }));
   };
 
   const addMemberToDepartment = async (member: Member) => {
@@ -186,7 +186,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         meeting_id: selectedMeeting.id,
         member_id: member.id,
         status: attendance[member.id] || 'absent',
-        notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
+        reason: attendance[member.id] === 'absent_with_reason' ? reasons[member.id] || null : null
       }));
 
       const { error: deleteError } = await supabase
@@ -361,19 +361,19 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           }`}
                         >
                           <FileText className="h-4 w-4" />
-                          Absent with Notes
+                          Absent with Reason
                         </button>
                       </div>
                     </div>
 
                     {attendance[member.id] === 'absent_with_reason' && (
                       <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Notes for Absence</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Absence</label>
                         <input
                           type="text"
-                          value={notes[member.id] || ''}
-                          onChange={(e) => handleNotesChange(member.id, e.target.value)}
-                          placeholder="Enter notes for absence..."
+                          value={reasons[member.id] || ''}
+                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
+                          placeholder="Enter reason for absence..."
                           className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
                       </div>
