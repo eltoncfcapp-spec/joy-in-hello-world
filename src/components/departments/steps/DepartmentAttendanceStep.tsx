@@ -232,7 +232,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
           <Users className="h-8 w-8 text-green-600" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 mb-2">Record Department Attendance</h3>
-        <p className="text-gray-600">Mark department members as present, absent, or absent with reason</p>
+        <p className="text-gray-600">Mark department members as present, absent, or absent with notes</p>
       </div>
 
       <div className="mb-6">
