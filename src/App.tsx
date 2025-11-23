@@ -5,7 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import Events from './pages/Events';
 import Groups from './pages/Groups';
-import Departments from './pages/Departments';//
+import Departments from './pages/Departments';
 import Trends from './pages/Trends';
 import Analytics from './pages/Analytics';
 import Admin from './pages/Admin';
@@ -28,7 +28,7 @@ import { useState, useEffect } from 'react';
 // Layout component with responsive sidebar
 const Layout = () => {
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, profile } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -62,6 +62,15 @@ const Layout = () => {
     if (isMobile) {
       setSidebarOpen(false);
     }
+  };
+
+  const getUserRoleDisplay = () => {
+    if (!profile) return 'Guest';
+    if (profile.admin_role === 'admin' || profile.pastor_role) return 'Administrator';
+    if (profile.deacon_role) return 'Deacon';
+    if (profile.group_leader) return 'Group Leader';
+    if (profile.department_leader) return 'Department Leader';
+    return 'Member';
   };
 
   return (
@@ -102,6 +111,19 @@ const Layout = () => {
             Church App
           </Link>
         </div>
+
+        {/* User Info */}
+        {profile && (
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="text-sm text-gray-600 dark:text-gray-400">Welcome back,</div>
+            <div className="font-medium text-gray-900 dark:text-white">
+              {profile.name} {profile.surname}
+            </div>
+            <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+              {getUserRoleDisplay()}
+            </div>
+          </div>
+        )}
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-6 space-y-2">
