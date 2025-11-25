@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +17,20 @@ interface Event {
   is_completed: boolean;
   completed_at: string | null;
   pamphlet_url: string | null;
+}
+
+interface SermonSummary {
+  id: string;
+  event_id: string;
+  summary: string;
+  pastor_name: string;
+  sermon_date: string;
+  created_at: string;
+  updated_at: string;
+  events: {
+    name: string;
+    topic: string | null;
+  };
 }
 
 interface Member {
@@ -62,11 +76,13 @@ const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
+  const [showSermonModal, setShowSermonModal] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [attendees, setAttendees] = useState<EventAttendee[]>([]);
+  const [sermonSummaries, setSermonSummaries] = useState<SermonSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -97,6 +113,12 @@ const Events = () => {
     invitedById: '',
   });
 
+  const [sermonFormData, setSermonFormData] = useState({
+    summary: '',
+    pastorName: '',
+    sermonDate: '',
+  });
+
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
   const hasAccess = () => {
@@ -109,6 +131,7 @@ const Events = () => {
       fetchMembers();
       fetchCellGroups();
       fetchMinistryGroups();
+      fetchSermonSummaries();
     }
   }, [user, authLoading]);
 
@@ -246,6 +269,144 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
     }
+  };
+
+  const fetchSermonSummaries = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('sermon_summaries')
+        .select(`
+          *,
+          events (
+            name,
+            topic
+          )
+        `)
+        .order('sermon_date', { ascending: false });
+
+      if (error) throw error;
+      setSermonSummaries(data || []);
+    } catch (error: any) {
+      console.error('Error fetching sermon summaries:', error);
+    }
+  };
+
+  const getSermonSummaryForEvent = (eventId: string) => {
+    return sermonSummaries.find(summary => summary.event_id === eventId);
+  };
+
+  const handleSermonSubmit = async (e: React.FormEvent, eventId: string) => {
+    e.preventDefault();
+    
+    if (!hasAccess()) {
+      setError('You do not have permission to add sermon summaries');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (!sermonFormData.pastorName.trim()) {
+      setError('Please enter the pastor name');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      const existingSummary = getSermonSummaryForEvent(eventId);
+      
+      const sermonData = {
+        event_id: eventId,
+        summary: sermonFormData.summary.trim(),
+        pastor_name: sermonFormData.pastorName.trim(),
+        sermon_date: sermonFormData.sermonDate || event.event_date,
+        updated_at: new Date().toISOString()
+      };
+
+      let error;
+      if (existingSummary) {
+        // Update existing summary
+        const { error: updateError } = await supabase
+          .from('sermon_summaries')
+          .update(sermonData)
+          .eq('id', existingSummary.id);
+        error = updateError;
+      } else {
+        // Create new summary
+        const { error: insertError } = await supabase
+          .from('sermon_summaries')
+          .insert([{ ...sermonData, created_at: new Date().toISOString() }]);
+        error = insertError;
+      }
+
+      if (error) throw error;
+
+      setShowSermonModal(null);
+      setSermonFormData({ summary: '', pastorName: '', sermonDate: '' });
+      await fetchSermonSummaries();
+      setSuccess(existingSummary ? 'Sermon summary updated successfully!' : 'Sermon summary added successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error saving sermon summary:', error);
+      setError(error.message || 'Failed to save sermon summary. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSermonSummary = async (eventId: string) => {
+    if (!confirm('Are you sure you want to delete this sermon summary?')) return;
+
+    try {
+      setError(null);
+      
+      const { error } = await supabase
+        .from('sermon_summaries')
+        .delete()
+        .eq('event_id', eventId);
+
+      if (error) throw error;
+
+      await fetchSermonSummaries();
+      setSuccess('Sermon summary deleted successfully!');
+      
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting sermon summary:', error);
+      setError(error.message || 'Failed to delete sermon summary.');
+    }
+  };
+
+  const openSermonModal = (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    const existingSummary = getSermonSummaryForEvent(eventId);
+    
+    if (existingSummary) {
+      setSermonFormData({
+        summary: existingSummary.summary,
+        pastorName: existingSummary.pastor_name,
+        sermonDate: existingSummary.sermon_date
+      });
+    } else {
+      setSermonFormData({
+        summary: '',
+        pastorName: '',
+        sermonDate: event?.event_date || ''
+      });
+    }
+    
+    setShowSermonModal(eventId);
+  };
+
+  const closeSermonModal = () => {
+    setShowSermonModal(null);
+    setSermonFormData({ summary: '', pastorName: '', sermonDate: '' });
   };
 
   // Upload pamphlet function
@@ -1007,6 +1168,7 @@ const Events = () => {
               const statusBadge = getEventStatusBadge(event);
               const ScopeIcon = scopeBadge.icon;
               const StatusIcon = statusBadge.icon;
+              const sermonSummary = getSermonSummaryForEvent(event.id);
               
               return (
                 <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
@@ -1027,6 +1189,12 @@ const Events = () => {
                               <ScopeIcon className="h-3 w-3" />
                               {scopeBadge.text}
                             </span>
+                            {sermonSummary && (
+                              <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                                <BookOpen className="h-3 w-3" />
+                                Sermon Summary
+                              </span>
+                            )}
                           </div>
                           {event.topic && (
                             <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
@@ -1050,6 +1218,32 @@ const Events = () => {
                           </div>
                         )}
                       </div>
+
+                      {/* Sermon Summary Preview */}
+                      {sermonSummary && (
+                        <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <BookOpen className="h-5 w-5 text-blue-600" />
+                              <div>
+                                <div className="font-medium text-gray-900 dark:text-white">
+                                  Sermon by {sermonSummary.pastor_name}
+                                </div>
+                                <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                                  {sermonSummary.summary}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => openSermonModal(event.id)}
+                              className="flex items-center gap-2 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 text-sm"
+                            >
+                              <Eye className="h-3 w-3" />
+                              View
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Pamphlet Display Section */}
                       {event.pamphlet_url && (
@@ -1153,6 +1347,13 @@ const Events = () => {
                           )}
                         </>
                       )}
+                      <button
+                        onClick={() => openSermonModal(event.id)}
+                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                      >
+                        <BookOpen className="h-4 w-4" />
+                        {sermonSummary ? 'Edit Sermon' : 'Add Sermon'}
+                      </button>
                       <button
                         onClick={() => togglePresentList(event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
@@ -1342,6 +1543,101 @@ const Events = () => {
           )}
         </div>
       </div>
+
+      {/* Sermon Summary Modal */}
+      {showSermonModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                {getSermonSummaryForEvent(showSermonModal) ? 'Edit Sermon Summary' : 'Add Sermon Summary'}
+              </h3>
+              <button
+                onClick={closeSermonModal}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              >
+                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+            <form onSubmit={(e) => handleSermonSubmit(e, showSermonModal)} className="p-6 space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Sermon Summary *
+                  </label>
+                  <textarea
+                    value={sermonFormData.summary}
+                    onChange={(e) => setSermonFormData({ ...sermonFormData, summary: e.target.value })}
+                    rows={6}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
+                    placeholder="Enter the sermon summary, key points, scriptures, and main message..."
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Pastor Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={sermonFormData.pastorName}
+                      onChange={(e) => setSermonFormData({ ...sermonFormData, pastorName: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      placeholder="Enter pastor's name"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Sermon Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={sermonFormData.sermonDate}
+                      onChange={(e) => setSermonFormData({ ...sermonFormData, sermonDate: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-4">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    {loading ? 'Saving...' : (getSermonSummaryForEvent(showSermonModal) ? 'Update Summary' : 'Save Summary')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeSermonModal}
+                    className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {getSermonSummaryForEvent(showSermonModal) && hasAccess() && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSermonSummary(showSermonModal)}
+                    className="px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200 font-medium text-sm"
+                  >
+                    Delete Summary
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Pamphlet Modal */}
       {viewingPamphlet && (
