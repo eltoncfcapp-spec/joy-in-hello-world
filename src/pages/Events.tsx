@@ -1,4 +1,5 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle } from 'lucide-react';
+on this page event not averyone must have access on it only pastors and admin 
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -18,6 +19,7 @@ interface Event {
   target_departments: string[] | null;
   is_completed: boolean;
   completed_at: string | null;
+  pamphlet_url: string | null;
 }
 
 interface Member {
@@ -65,6 +67,12 @@ interface AttendeeFormData {
   invitedById: string;
 }
 
+interface UserRole {
+  id: string;
+  user_id: string;
+  role: 'admin' | 'pastor' | 'member';
+}
+
 const Events = () => {
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
@@ -80,6 +88,8 @@ const Events = () => {
   const [inviterSearchTerm, setInviterSearchTerm] = useState('');
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
+  const [userRole, setUserRole] = useState<'admin' | 'pastor' | 'member' | null>(null);
+  const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   
   // State for toggling lists
   const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
@@ -105,11 +115,44 @@ const Events = () => {
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
   useEffect(() => {
+    checkUserRole();
     fetchEvents();
     fetchMembers();
     fetchCellGroups();
     fetchMinistryGroups();
   }, []);
+
+  // Check user role
+  const checkUserRole = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError('Please log in to access events');
+        return;
+      }
+
+      const { data, error } = await db
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', user.id)
+        .single();
+
+      if (error) {
+        console.error('Error fetching user role:', error);
+        setUserRole('member');
+      } else {
+        setUserRole(data.role);
+      }
+    } catch (error: any) {
+      console.error('Error checking user role:', error);
+      setUserRole('member');
+    }
+  };
+
+  // Check if user has access (pastor or admin)
+  const hasAccess = () => {
+    return userRole === 'admin' || userRole === 'pastor';
+  };
 
   const fetchEvents = async () => {
     try {
@@ -131,7 +174,8 @@ const Events = () => {
         target_groups: event.target_groups ?? null,
         target_departments: event.target_departments ?? null,
         is_completed: event.is_completed ?? false,
-        completed_at: event.completed_at ?? null
+        completed_at: event.completed_at ?? null,
+        pamphlet_url: event.pamphlet_url ?? null
       }));
 
       setEvents(eventsWithDefaults);
@@ -259,6 +303,108 @@ const Events = () => {
     }
   };
 
+  // Upload pamphlet function
+  const uploadPamphlet = async (eventId: string, file: File) => {
+    try {
+      setUploadingPamphlet(eventId);
+      setError(null);
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${eventId}/pamphlet.${fileExt}`;
+      const filePath = `event-pamphlets/${fileName}`;
+
+      // Upload file to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('event-pamphlets')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('event-pamphlets')
+        .getPublicUrl(filePath);
+
+      // Update event with pamphlet URL
+      const { error: updateError } = await db
+        .from('events')
+        .update({ pamphlet_url: publicUrl })
+        .eq('id', eventId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Update local state
+      setEvents(prev => prev.map(event => 
+        event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
+      ));
+
+      setSuccess('Pamphlet uploaded successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error uploading pamphlet:', error);
+      setError(error.message || 'Failed to upload pamphlet.');
+    } finally {
+      setUploadingPamphlet(null);
+    }
+  };
+
+  // Delete pamphlet function
+  const deletePamphlet = async (eventId: string) => {
+    try {
+      if (!confirm('Are you sure you want to delete this pamphlet?')) {
+        return;
+      }
+
+      setError(null);
+
+      // Get event to find file path
+      const event = events.find(e => e.id === eventId);
+      if (!event?.pamphlet_url) return;
+
+      // Extract file path from URL
+      const urlParts = event.pamphlet_url.split('/');
+      const fileName = urlParts[urlParts.length - 2];
+      const filePath = `event-pamphlets/${fileName}/pamphlet.pdf`;
+
+      // Delete file from storage
+      const { error: deleteError } = await supabase.storage
+        .from('event-pamphlets')
+        .remove([filePath]);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      // Update event to remove pamphlet URL
+      const { error: updateError } = await db
+        .from('events')
+        .update({ pamphlet_url: null })
+        .eq('id', eventId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Update local state
+      setEvents(prev => prev.map(event => 
+        event.id === eventId ? { ...event, pamphlet_url: null } : event
+      ));
+
+      setSuccess('Pamphlet deleted successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting pamphlet:', error);
+      setError(error.message || 'Failed to delete pamphlet.');
+    }
+  };
+
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
       const absentRecords = absentMemberIds.map(memberId => {
@@ -365,6 +511,13 @@ const Events = () => {
 
   const handleEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!hasAccess()) {
+      setError('You do not have permission to create events');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -379,6 +532,7 @@ const Events = () => {
         is_whole_church: eventFormData.isWholeChurch,
         is_completed: false,
         completed_at: null,
+        pamphlet_url: null,
         target_groups: !eventFormData.isWholeChurch && eventFormData.targetCellGroups.length > 0 ? eventFormData.targetCellGroups : null,
         target_departments: !eventFormData.isWholeChurch && eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null,
       };
@@ -655,6 +809,38 @@ const Events = () => {
     }
   };
 
+  // Show access denied message if user doesn't have permission
+  if (userRole && !hasAccess()) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
+        <div className="max-w-md text-center">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-8">
+            <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Access Denied</h1>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              You need to be a pastor or administrator to access the events page.
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-500">
+              Current role: {userRole}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading while checking authentication
+  if (userRole === null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Checking permissions...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
       <div className="max-w-7xl mx-auto">
@@ -665,6 +851,11 @@ const Events = () => {
               Events Calendar
             </h1>
             <p className="text-gray-600 dark:text-gray-400">Manage church events and track attendance</p>
+            <div className="mt-2">
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                {userRole === 'admin' ? 'Administrator' : 'Pastor'}
+              </span>
+            </div>
           </div>
           <button 
             onClick={() => setShowEventForm(!showEventForm)}
@@ -932,6 +1123,51 @@ const Events = () => {
                         )}
                       </div>
 
+                      {/* Pamphlet Section */}
+                      {event.pamphlet_url && (
+                        <div className="mt-4">
+                          <a
+                            href={event.pamphlet_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                          >
+                            <FileText className="h-4 w-4" />
+                            View Event Pamphlet
+                          </a>
+                          {hasAccess() && (
+                            <button
+                              onClick={() => deletePamphlet(event.id)}
+                              className="ml-2 inline-flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200"
+                            >
+                              <X className="h-4 w-4" />
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Upload Pamphlet Button (Only for pastors/admins) */}
+                      {hasAccess() && !event.pamphlet_url && (
+                        <div className="mt-4">
+                          <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
+                            <Upload className="h-4 w-4" />
+                            Upload Pamphlet
+                            <input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  uploadPamphlet(event.id, file);
+                                }
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      )}
+
                       {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
@@ -962,13 +1198,15 @@ const Events = () => {
                             <Plus className="h-4 w-4" />
                             Add Attendee
                           </button>
-                          <button
-                            onClick={() => handleCompleteEvent(event.id)}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                            Complete Event
-                          </button>
+                          {hasAccess() && (
+                            <button
+                              onClick={() => handleCompleteEvent(event.id)}
+                              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                              Complete Event
+                            </button>
+                          )}
                         </>
                       )}
                       <button
