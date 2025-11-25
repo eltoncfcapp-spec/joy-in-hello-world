@@ -1,10 +1,7 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../contexts/AuthContext'; // Adjust import path as needed
-
-// Type-safe wrapper for events-related queries
-const db = supabase as any;
+import { useAuth } from '../contexts/AuthContext';
 
 interface Event {
   id: string;
@@ -84,8 +81,8 @@ const Events = () => {
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
+  const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   
-  // State for toggling lists
   const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
   const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
 
@@ -108,7 +105,6 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
-  // Check if user has access (pastor or admin)
   const hasAccess = () => {
     return isAdmin() || isPastor();
   };
@@ -127,14 +123,12 @@ const Events = () => {
       setLoading(true);
       setError(null);
       
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('events')
         .select('*')
         .order('event_date', { ascending: true });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       const eventsWithDefaults = (data || []).map((event: any) => ({
         ...event,
@@ -163,7 +157,7 @@ const Events = () => {
     try {
       setError(null);
       
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('members')
         .select(`
           id,
@@ -179,10 +173,7 @@ const Events = () => {
         `)
         .order('name');
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setMembers(data || []);
     } catch (error: any) {
       console.error('Error fetching members:', error);
@@ -192,15 +183,12 @@ const Events = () => {
 
   const fetchCellGroups = async () => {
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('cell_groups')
         .select('id, name')
         .order('name');
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setCellGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
@@ -210,15 +198,12 @@ const Events = () => {
 
   const fetchMinistryGroups = async () => {
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('ministry_groups')
         .select('id, name')
         .order('name');
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
@@ -228,7 +213,7 @@ const Events = () => {
 
   const fetchEventAttendees = async (eventId: string) => {
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('event_attendees')
         .select(`
           *,
@@ -253,9 +238,7 @@ const Events = () => {
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       const attendeesWithDefaults = (data || []).map((attendee: any) => ({
         ...attendee,
@@ -264,14 +247,13 @@ const Events = () => {
 
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...attendeesWithDefaults as EventAttendee[]];
+        return [...filtered, ...attendeesWithDefaults];
       });
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
     }
   };
 
-  // Upload pamphlet function
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
       setUploadingPamphlet(eventId);
@@ -281,7 +263,6 @@ const Events = () => {
       const fileName = `${eventId}/pamphlet.${fileExt}`;
       const filePath = `event-pamphlets/${fileName}`;
 
-      // Upload file to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('event-pamphlets')
         .upload(filePath, file, {
@@ -289,26 +270,19 @@ const Events = () => {
           upsert: true
         });
 
-      if (uploadError) {
-        throw uploadError;
-      }
+      if (uploadError) throw uploadError;
 
-      // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('event-pamphlets')
         .getPublicUrl(filePath);
 
-      // Update event with pamphlet URL
-      const { error: updateError } = await db
+      const { error: updateError } = await supabase
         .from('events')
         .update({ pamphlet_url: publicUrl })
         .eq('id', eventId);
 
-      if (updateError) {
-        throw updateError;
-      }
+      if (updateError) throw updateError;
 
-      // Update local state
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
@@ -323,45 +297,32 @@ const Events = () => {
     }
   };
 
-  // Delete pamphlet function
   const deletePamphlet = async (eventId: string) => {
     try {
-      if (!confirm('Are you sure you want to delete this pamphlet?')) {
-        return;
-      }
+      if (!confirm('Are you sure you want to delete this pamphlet?')) return;
 
       setError(null);
-
-      // Get event to find file path
       const event = events.find(e => e.id === eventId);
       if (!event?.pamphlet_url) return;
 
-      // Extract file path from URL
       const urlParts = event.pamphlet_url.split('/');
       const fileName = urlParts[urlParts.length - 2];
       const fileExt = urlParts[urlParts.length - 1].split('.').pop();
       const filePath = `event-pamphlets/${fileName}/pamphlet.${fileExt}`;
 
-      // Delete file from storage
       const { error: deleteError } = await supabase.storage
         .from('event-pamphlets')
         .remove([filePath]);
 
-      if (deleteError) {
-        throw deleteError;
-      }
+      if (deleteError) throw deleteError;
 
-      // Update event to remove pamphlet URL
-      const { error: updateError } = await db
+      const { error: updateError } = await supabase
         .from('events')
         .update({ pamphlet_url: null })
         .eq('id', eventId);
 
-      if (updateError) {
-        throw updateError;
-      }
+      if (updateError) throw updateError;
 
-      // Update local state
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: null } : event
       ));
@@ -372,6 +333,14 @@ const Events = () => {
       console.error('Error deleting pamphlet:', error);
       setError(error.message || 'Failed to delete pamphlet.');
     }
+  };
+
+  const viewPamphlet = (pamphletUrl: string) => {
+    setViewingPamphlet(pamphletUrl);
+  };
+
+  const closePamphletModal = () => {
+    setViewingPamphlet(null);
   };
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
@@ -393,10 +362,7 @@ const Events = () => {
         .from('event_attendees')
         .insert(absentRecords);
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       await fetchEventAttendees(eventId);
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
@@ -415,9 +381,7 @@ const Events = () => {
 
     try {
       const event = events.find(e => e.id === eventId);
-      if (!event) {
-        throw new Error('Event not found');
-      }
+      if (!event) throw new Error('Event not found');
 
       const eventAttendees = getEventAttendees(eventId);
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
@@ -433,11 +397,9 @@ const Events = () => {
           const inTargetCellGroup = event.target_groups?.some(groupId => 
             member.cell_group_id === groupId
           );
-          
           const inTargetMinistryGroup = event.target_departments?.some(deptId => 
             member.ministry_group_id === deptId
           );
-
           return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
         });
       }
@@ -450,17 +412,15 @@ const Events = () => {
         await markMembersAsAbsent(eventId, absentMemberIds);
       }
 
-      const { error } = await db
+      const { error } = await supabase
         .from('events')
         .update({
           is_completed: true,
           completed_at: new Date().toISOString()
-        } as any)
+        })
         .eq('id', eventId);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       setEvents(prev => prev.map(event => 
         event.id === eventId 
@@ -506,11 +466,9 @@ const Events = () => {
         target_departments: !eventFormData.isWholeChurch && eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null,
       };
 
-      const { error } = await db.from('events').insert([eventData]);
+      const { error } = await supabase.from('events').insert([eventData]);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       setShowEventForm(false);
       setEventFormData({ 
@@ -560,10 +518,7 @@ const Events = () => {
 
     try {
       const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
-      
-      if (!selectedMember) {
-        throw new Error('Selected member not found');
-      }
+      if (!selectedMember) throw new Error('Selected member not found');
 
       const attendeeData = {
         event_id: eventId,
@@ -575,11 +530,9 @@ const Events = () => {
         invited_by_id: attendeeFormData.invitedById || null
       };
 
-      const { error } = await db.from('event_attendees').insert([attendeeData]);
+      const { error } = await supabase.from('event_attendees').insert([attendeeData]);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       resetAttendeeForm();
       await fetchEventAttendees(eventId);
@@ -595,9 +548,7 @@ const Events = () => {
   };
 
   const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
-    if (!confirm('Are you sure you want to remove this attendee?')) {
-      return;
-    }
+    if (!confirm('Are you sure you want to remove this attendee?')) return;
 
     try {
       setError(null);
@@ -608,9 +559,7 @@ const Events = () => {
         .delete()
         .eq('id', attendeeId);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       await fetchEventAttendees(eventId);
       setSuccess('Attendee removed successfully!');
@@ -778,7 +727,6 @@ const Events = () => {
     }
   };
 
-  // Show access denied message if user doesn't have permission
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -797,9 +745,7 @@ const Events = () => {
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-8">
             <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Authentication Required</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Please log in to access the events page.
-            </p>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">Please log in to access the events page.</p>
           </div>
         </div>
       </div>
@@ -813,9 +759,7 @@ const Events = () => {
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-8">
             <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Access Denied</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              You need to be a pastor or administrator to access the events page.
-            </p>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">You need to be a pastor or administrator to access the events page.</p>
             <p className="text-sm text-gray-500 dark:text-gray-500">
               Current role: {profile?.admin_role === 'admin' ? 'Admin' : profile?.pastor_role ? 'Pastor' : 'Member'}
             </p>
@@ -864,8 +808,8 @@ const Events = () => {
           </div>
         )}
 
-        {/* Event Creation Form - Only show if user has access */}
-        {showEventForm && hasAccess() && (
+        {/* Event Creation Form */}
+        {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
             <form onSubmit={handleEventSubmit} className="space-y-6">
@@ -1109,29 +1053,42 @@ const Events = () => {
 
                       {/* Pamphlet Section */}
                       {event.pamphlet_url && (
-                        <div className="mt-4">
-                          <a
-                            href={event.pamphlet_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
-                          >
-                            <FileText className="h-4 w-4" />
-                            View Event Pamphlet
-                          </a>
-                          {hasAccess() && (
+                        <div className="mt-4 flex items-center gap-3 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-5 w-5 text-green-600" />
+                            <span className="font-medium text-gray-700 dark:text-gray-300">Event Pamphlet:</span>
+                          </div>
+                          <div className="flex items-center gap-2">
                             <button
-                              onClick={() => deletePamphlet(event.id)}
-                              className="ml-2 inline-flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200"
+                              onClick={() => viewPamphlet(event.pamphlet_url!)}
+                              className="inline-flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
                             >
-                              <X className="h-4 w-4" />
-                              Remove
+                              <Eye className="h-4 w-4" />
+                              View Pamphlet
                             </button>
-                          )}
+                            <a
+                              href={event.pamphlet_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
+                            >
+                              <FileText className="h-4 w-4" />
+                              Download
+                            </a>
+                            {hasAccess() && (
+                              <button
+                                onClick={() => deletePamphlet(event.id)}
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200"
+                              >
+                                <X className="h-4 w-4" />
+                                Remove
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
 
-                      {/* Upload Pamphlet Button (Only for pastors/admins) */}
+                      {/* Upload Pamphlet Button */}
                       {hasAccess() && !event.pamphlet_url && (
                         <div className="mt-4">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
@@ -1531,6 +1488,47 @@ const Events = () => {
           )}
         </div>
       </div>
+
+      {/* Pamphlet Modal */}
+      {viewingPamphlet && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Event Pamphlet</h3>
+              <button
+                onClick={closePamphletModal}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              >
+                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+            <div className="p-6 max-h-[70vh] overflow-auto">
+              <iframe
+                src={viewingPamphlet}
+                className="w-full h-96 rounded-lg border border-gray-200 dark:border-gray-700"
+                title="Event Pamphlet"
+              />
+              <div className="mt-4 flex justify-between items-center">
+                <a
+                  href={viewingPamphlet}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200"
+                >
+                  <FileText className="h-4 w-4" />
+                  Open in New Tab
+                </a>
+                <button
+                  onClick={closePamphletModal}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
