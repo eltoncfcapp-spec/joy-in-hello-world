@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -309,21 +309,29 @@ const Events = () => {
   const uploadSermonFile = async (file: File, type: 'audio' | 'video' | 'document'): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `sermons/${type}/${fileName}`;
+    const filePath = `${type}/${fileName}`;
 
-    const { error: uploadError } = await supabase.storage
+    console.log(`Uploading ${type} file:`, file.name, 'to path:', filePath);
+
+    const { error: uploadError, data } = await supabase.storage
       .from('sermon-files')
       .upload(filePath, file, {
         cacheControl: '3600',
         upsert: false
       });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      throw uploadError;
+    }
+
+    console.log('Upload successful:', data);
 
     const { data: { publicUrl } } = supabase.storage
       .from('sermon-files')
       .getPublicUrl(filePath);
 
+    console.log('Public URL:', publicUrl);
     return publicUrl;
   };
 
@@ -342,6 +350,18 @@ const Events = () => {
       return;
     }
 
+    if (!sermonFormData.title.trim()) {
+      setError('Please enter a sermon title');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (!sermonFormData.summary.trim()) {
+      setError('Please enter a sermon summary');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -353,12 +373,15 @@ const Events = () => {
 
       // Upload files if provided
       if (sermonFormData.audioFile) {
+        setUploadingSermonFile({ type: 'audio' });
         audioUrl = await uploadSermonFile(sermonFormData.audioFile, 'audio');
       }
       if (sermonFormData.videoFile) {
+        setUploadingSermonFile({ type: 'video' });
         videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
       }
       if (sermonFormData.documentFile) {
+        setUploadingSermonFile({ type: 'document' });
         documentUrl = await uploadSermonFile(sermonFormData.documentFile, 'document');
       }
 
@@ -374,11 +397,16 @@ const Events = () => {
         updated_at: new Date().toISOString()
       };
 
+      console.log('Saving sermon data:', sermonData);
+
       const { error } = await supabase
         .from('sermons')
         .insert([{ ...sermonData, created_at: new Date().toISOString() }]);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
 
       setShowSermonModal(null);
       setSermonFormData({ 
@@ -1802,16 +1830,28 @@ const Events = () => {
                   </div>
                 </div>
 
-                {/* File Uploads */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* File Uploads with Warnings */}
+                <div className="space-y-4">
+                  {/* Audio Upload with Warning */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Audio File
-                    </label>
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <PlayCircle className="h-8 w-8 text-gray-400 mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Upload Audio</p>
+                    <div className="flex items-center gap-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Audio File
+                      </label>
+                      <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs">
+                        <AlertTriangle className="h-3 w-3" />
+                        <span>Development - Large Storage</span>
+                      </div>
+                    </div>
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center pt-3 pb-4">
+                        <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {sermonFormData.audioFile ? sermonFormData.audioFile.name : 'Upload Audio'}
+                        </p>
+                        {uploadingSermonFile?.type === 'audio' && (
+                          <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                        )}
                       </div>
                       <input
                         type="file"
@@ -1822,14 +1862,26 @@ const Events = () => {
                     </label>
                   </div>
 
+                  {/* Video Upload with Warning */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Video File
-                    </label>
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <PlayCircle className="h-8 w-8 text-gray-400 mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Upload Video</p>
+                    <div className="flex items-center gap-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Video File
+                      </label>
+                      <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs">
+                        <AlertTriangle className="h-3 w-3" />
+                        <span>Development - Large Storage</span>
+                      </div>
+                    </div>
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center pt-3 pb-4">
+                        <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {sermonFormData.videoFile ? sermonFormData.videoFile.name : 'Upload Video'}
+                        </p>
+                        {uploadingSermonFile?.type === 'video' && (
+                          <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                        )}
                       </div>
                       <input
                         type="file"
@@ -1840,14 +1892,20 @@ const Events = () => {
                     </label>
                   </div>
 
+                  {/* Document Upload */}
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Sermon Notes
+                      Sermon Notes (PDF/DOC)
                     </label>
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <FileText className="h-8 w-8 text-gray-400 mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Upload Notes</p>
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center pt-3 pb-4">
+                        <FileText className="h-6 w-6 text-gray-400 mb-1" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {sermonFormData.documentFile ? sermonFormData.documentFile.name : 'Upload Notes'}
+                        </p>
+                        {uploadingSermonFile?.type === 'document' && (
+                          <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                        )}
                       </div>
                       <input
                         type="file"
