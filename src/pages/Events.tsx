@@ -26,7 +26,6 @@ interface Sermon {
   pastor_name: string;
   sermon_date: string;
   event_id: string | null;
-  audio_url: string | null;
   video_url: string | null;
   document_url: string | null;
   created_at: string;
@@ -125,7 +124,6 @@ const Events = () => {
     pastorName: '',
     sermonDate: '',
     eventId: '',
-    audioFile: null as File | null,
     videoFile: null as File | null,
     documentFile: null as File | null,
   });
@@ -306,14 +304,14 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
-  const uploadSermonFile = async (file: File, type: 'audio' | 'video' | 'document'): Promise<string> => {
+  const uploadSermonFile = async (file: File, type: 'video' | 'document'): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     const filePath = `${type}/${fileName}`;
 
     console.log(`Uploading ${type} file:`, file.name, 'to path:', filePath);
 
-    const { error: uploadError, data } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('sermon-files')
       .upload(filePath, file, {
         cacheControl: '3600',
@@ -324,8 +322,6 @@ const Events = () => {
       console.error('Upload error:', uploadError);
       throw uploadError;
     }
-
-    console.log('Upload successful:', data);
 
     const { data: { publicUrl } } = supabase.storage
       .from('sermon-files')
@@ -367,15 +363,10 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      let audioUrl = null;
       let videoUrl = null;
       let documentUrl = null;
 
       // Upload files if provided
-      if (sermonFormData.audioFile) {
-        setUploadingSermonFile({ type: 'audio' });
-        audioUrl = await uploadSermonFile(sermonFormData.audioFile, 'audio');
-      }
       if (sermonFormData.videoFile) {
         setUploadingSermonFile({ type: 'video' });
         videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
@@ -391,7 +382,6 @@ const Events = () => {
         pastor_name: sermonFormData.pastorName.trim(),
         sermon_date: sermonFormData.sermonDate,
         event_id: sermonFormData.eventId || null,
-        audio_url: audioUrl,
         video_url: videoUrl,
         document_url: documentUrl,
         updated_at: new Date().toISOString()
@@ -415,7 +405,6 @@ const Events = () => {
         pastorName: '', 
         sermonDate: '', 
         eventId: '',
-        audioFile: null,
         videoFile: null,
         documentFile: null,
       });
@@ -464,7 +453,6 @@ const Events = () => {
       pastorName: '',
       sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
       eventId: eventId || '',
-      audioFile: null,
       videoFile: null,
       documentFile: null,
     });
@@ -480,7 +468,6 @@ const Events = () => {
       pastorName: '', 
       sermonDate: '', 
       eventId: '',
-      audioFile: null,
       videoFile: null,
       documentFile: null,
     });
@@ -1112,17 +1099,6 @@ const Events = () => {
                     </p>
 
                     <div className="flex flex-wrap gap-2">
-                      {sermon.audio_url && (
-                        <a
-                          href={sermon.audio_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-sm hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
-                        >
-                          <PlayCircle className="h-3 w-3" />
-                          Audio
-                        </a>
-                      )}
                       {sermon.video_url && (
                         <a
                           href={sermon.video_url}
@@ -1419,17 +1395,6 @@ const Events = () => {
                               </div>
                             </div>
                             <div className="flex gap-2">
-                              {sermon.audio_url && (
-                                <a
-                                  href={sermon.audio_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-xs hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
-                                >
-                                  <PlayCircle className="h-3 w-3" />
-                                  Audio
-                                </a>
-                              )}
                               {sermon.video_url && (
                                 <a
                                   href={sermon.video_url}
@@ -1832,36 +1797,6 @@ const Events = () => {
 
                 {/* File Uploads with Warnings */}
                 <div className="space-y-4">
-                  {/* Audio Upload with Warning */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Audio File
-                      </label>
-                      <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs">
-                        <AlertTriangle className="h-3 w-3" />
-                        <span>Development - Large Storage</span>
-                      </div>
-                    </div>
-                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center pt-3 pb-4">
-                        <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          {sermonFormData.audioFile ? sermonFormData.audioFile.name : 'Upload Audio'}
-                        </p>
-                        {uploadingSermonFile?.type === 'audio' && (
-                          <p className="text-xs text-blue-500 mt-1">Uploading...</p>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept="audio/*"
-                        onChange={(e) => setSermonFormData({ ...sermonFormData, audioFile: e.target.files?.[0] || null })}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
                   {/* Video Upload with Warning */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
