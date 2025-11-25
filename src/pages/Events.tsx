@@ -1,7 +1,7 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../contexts/AuthContext';//
+import { useAuth } from '../contexts/AuthContext';
 
 interface Event {
   id: string;
@@ -19,15 +19,19 @@ interface Event {
   pamphlet_url: string | null;
 }
 
-interface SermonSummary {
+interface Sermon {
   id: string;
-  event_id: string;
+  title: string;
   summary: string;
   pastor_name: string;
   sermon_date: string;
+  event_id: string | null;
+  audio_url: string | null;
+  video_url: string | null;
+  document_url: string | null;
   created_at: string;
   updated_at: string;
-  events: {
+  events?: {
     name: string;
     topic: string | null;
   };
@@ -77,12 +81,13 @@ const Events = () => {
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
   const [showSermonModal, setShowSermonModal] = useState<string | null>(null);
+  const [showSermonList, setShowSermonList] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
+  const [sermons, setSermons] = useState<Sermon[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [attendees, setAttendees] = useState<EventAttendee[]>([]);
-  const [sermonSummaries, setSermonSummaries] = useState<SermonSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -92,6 +97,7 @@ const Events = () => {
   const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
+  const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
   
   const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
   const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
@@ -114,9 +120,14 @@ const Events = () => {
   });
 
   const [sermonFormData, setSermonFormData] = useState({
+    title: '',
     summary: '',
     pastorName: '',
     sermonDate: '',
+    eventId: '',
+    audioFile: null as File | null,
+    videoFile: null as File | null,
+    documentFile: null as File | null,
   });
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -128,10 +139,10 @@ const Events = () => {
   useEffect(() => {
     if (user && !authLoading) {
       fetchEvents();
+      fetchSermons();
       fetchMembers();
       fetchCellGroups();
       fetchMinistryGroups();
-      fetchSermonSummaries();
     }
   }, [user, authLoading]);
 
@@ -167,6 +178,26 @@ const Events = () => {
       setError(error.message || 'Failed to load events.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSermons = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('sermons')
+        .select(`
+          *,
+          events (
+            name,
+            topic
+          )
+        `)
+        .order('sermon_date', { ascending: false });
+
+      if (error) throw error;
+      setSermons(data || []);
+    } catch (error: any) {
+      console.error('Error fetching sermons:', error);
     }
   };
 
@@ -271,35 +302,36 @@ const Events = () => {
     }
   };
 
-  const fetchSermonSummaries = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('sermon_summaries')
-        .select(`
-          *,
-          events (
-            name,
-            topic
-          )
-        `)
-        .order('sermon_date', { ascending: false });
-
-      if (error) throw error;
-      setSermonSummaries(data || []);
-    } catch (error: any) {
-      console.error('Error fetching sermon summaries:', error);
-    }
+  const getSermonForEvent = (eventId: string) => {
+    return sermons.find(sermon => sermon.event_id === eventId);
   };
 
-  const getSermonSummaryForEvent = (eventId: string) => {
-    return sermonSummaries.find(summary => summary.event_id === eventId);
+  const uploadSermonFile = async (file: File, type: 'audio' | 'video' | 'document'): Promise<string> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `sermons/${type}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('sermon-files')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('sermon-files')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
   };
 
-  const handleSermonSubmit = async (e: React.FormEvent, eventId: string) => {
+  const handleSermonSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!hasAccess()) {
-      setError('You do not have permission to add sermon summaries');
+      setError('You do not have permission to add sermons');
       setTimeout(() => setError(null), 3000);
       return;
     }
@@ -315,98 +347,115 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
+      let audioUrl = null;
+      let videoUrl = null;
+      let documentUrl = null;
 
-      const existingSummary = getSermonSummaryForEvent(eventId);
-      
+      // Upload files if provided
+      if (sermonFormData.audioFile) {
+        audioUrl = await uploadSermonFile(sermonFormData.audioFile, 'audio');
+      }
+      if (sermonFormData.videoFile) {
+        videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
+      }
+      if (sermonFormData.documentFile) {
+        documentUrl = await uploadSermonFile(sermonFormData.documentFile, 'document');
+      }
+
       const sermonData = {
-        event_id: eventId,
+        title: sermonFormData.title.trim(),
         summary: sermonFormData.summary.trim(),
         pastor_name: sermonFormData.pastorName.trim(),
-        sermon_date: sermonFormData.sermonDate || event.event_date,
+        sermon_date: sermonFormData.sermonDate,
+        event_id: sermonFormData.eventId || null,
+        audio_url: audioUrl,
+        video_url: videoUrl,
+        document_url: documentUrl,
         updated_at: new Date().toISOString()
       };
 
-      let error;
-      if (existingSummary) {
-        // Update existing summary
-        const { error: updateError } = await supabase
-          .from('sermon_summaries')
-          .update(sermonData)
-          .eq('id', existingSummary.id);
-        error = updateError;
-      } else {
-        // Create new summary
-        const { error: insertError } = await supabase
-          .from('sermon_summaries')
-          .insert([{ ...sermonData, created_at: new Date().toISOString() }]);
-        error = insertError;
-      }
+      const { error } = await supabase
+        .from('sermons')
+        .insert([{ ...sermonData, created_at: new Date().toISOString() }]);
 
       if (error) throw error;
 
       setShowSermonModal(null);
-      setSermonFormData({ summary: '', pastorName: '', sermonDate: '' });
-      await fetchSermonSummaries();
-      setSuccess(existingSummary ? 'Sermon summary updated successfully!' : 'Sermon summary added successfully!');
+      setSermonFormData({ 
+        title: '', 
+        summary: '', 
+        pastorName: '', 
+        sermonDate: '', 
+        eventId: '',
+        audioFile: null,
+        videoFile: null,
+        documentFile: null,
+      });
+      await fetchSermons();
+      setSuccess('Sermon added successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
-      console.error('Error saving sermon summary:', error);
-      setError(error.message || 'Failed to save sermon summary. Please try again.');
+      console.error('Error saving sermon:', error);
+      setError(error.message || 'Failed to save sermon. Please try again.');
     } finally {
       setLoading(false);
+      setUploadingSermonFile(null);
     }
   };
 
-  const handleDeleteSermonSummary = async (eventId: string) => {
-    if (!confirm('Are you sure you want to delete this sermon summary?')) return;
+  const handleDeleteSermon = async (sermonId: string) => {
+    if (!confirm('Are you sure you want to delete this sermon?')) return;
 
     try {
       setError(null);
       
       const { error } = await supabase
-        .from('sermon_summaries')
+        .from('sermons')
         .delete()
-        .eq('event_id', eventId);
+        .eq('id', sermonId);
 
       if (error) throw error;
 
-      await fetchSermonSummaries();
-      setSuccess('Sermon summary deleted successfully!');
+      await fetchSermons();
+      setSuccess('Sermon deleted successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
-      console.error('Error deleting sermon summary:', error);
-      setError(error.message || 'Failed to delete sermon summary.');
+      console.error('Error deleting sermon:', error);
+      setError(error.message || 'Failed to delete sermon.');
     }
   };
 
-  const openSermonModal = (eventId: string) => {
-    const event = events.find(e => e.id === eventId);
-    const existingSummary = getSermonSummaryForEvent(eventId);
+  const openSermonModal = (eventId?: string) => {
+    const event = eventId ? events.find(e => e.id === eventId) : null;
     
-    if (existingSummary) {
-      setSermonFormData({
-        summary: existingSummary.summary,
-        pastorName: existingSummary.pastor_name,
-        sermonDate: existingSummary.sermon_date
-      });
-    } else {
-      setSermonFormData({
-        summary: '',
-        pastorName: '',
-        sermonDate: event?.event_date || ''
-      });
-    }
+    setSermonFormData({
+      title: event?.name || '',
+      summary: '',
+      pastorName: '',
+      sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
+      eventId: eventId || '',
+      audioFile: null,
+      videoFile: null,
+      documentFile: null,
+    });
     
-    setShowSermonModal(eventId);
+    setShowSermonModal(eventId || 'new');
   };
 
   const closeSermonModal = () => {
     setShowSermonModal(null);
-    setSermonFormData({ summary: '', pastorName: '', sermonDate: '' });
+    setSermonFormData({ 
+      title: '', 
+      summary: '', 
+      pastorName: '', 
+      sermonDate: '', 
+      eventId: '',
+      audioFile: null,
+      videoFile: null,
+      documentFile: null,
+    });
   };
 
   // Upload pamphlet function
@@ -937,22 +986,31 @@ const Events = () => {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Events Calendar
+              Events & Sermons
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Manage church events and track attendance</p>
+            <p className="text-gray-600 dark:text-gray-400">Manage church events and sermons</p>
             <div className="mt-2">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                 {isAdmin() ? 'Administrator' : isPastor() ? 'Pastor' : 'Member'}
               </span>
             </div>
           </div>
-          <button 
-            onClick={() => setShowEventForm(!showEventForm)}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-          >
-            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-            {showEventForm ? 'Cancel' : 'Create Event'}
-          </button>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => setShowSermonList(!showSermonList)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              <BookOpen className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+              {showSermonList ? 'Hide Sermons' : 'View Sermons'}
+            </button>
+            <button 
+              onClick={() => setShowEventForm(!showEventForm)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+              {showEventForm ? 'Cancel' : 'Create Event'}
+            </button>
+          </div>
         </div>
 
         {/* Success Message */}
@@ -966,6 +1024,104 @@ const Events = () => {
         {error && (
           <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
             {error}
+          </div>
+        )}
+
+        {/* Sermons List */}
+        {showSermonList && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sermons</h2>
+              <button
+                onClick={() => openSermonModal()}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+              >
+                <Plus className="h-4 w-4" />
+                Add Sermon
+              </button>
+            </div>
+
+            {sermons.length === 0 ? (
+              <div className="text-center py-12">
+                <BookOpen className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Sermons Yet</h3>
+                <p className="text-gray-500 dark:text-gray-500">Add your first sermon to get started</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {sermons.map((sermon) => (
+                  <div key={sermon.id} className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl p-6 hover:shadow-lg transition-all duration-300">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold text-gray-900 dark:text-white text-lg mb-1">
+                          {sermon.title}
+                        </h3>
+                        <p className="text-blue-600 dark:text-blue-400 text-sm">
+                          {sermon.events?.name || 'Standalone Sermon'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteSermon(sermon.id)}
+                        className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                      >
+                        <X className="h-4 w-4 text-red-500" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                        <User className="h-3 w-3" />
+                        <span>By {sermon.pastor_name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                        <CalendarIcon className="h-3 w-3" />
+                        <span>{formatDate(sermon.sermon_date)}</span>
+                      </div>
+                    </div>
+
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3">
+                      {sermon.summary}
+                    </p>
+
+                    <div className="flex flex-wrap gap-2">
+                      {sermon.audio_url && (
+                        <a
+                          href={sermon.audio_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-sm hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
+                        >
+                          <PlayCircle className="h-3 w-3" />
+                          Audio
+                        </a>
+                      )}
+                      {sermon.video_url && (
+                        <a
+                          href={sermon.video_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
+                        >
+                          <PlayCircle className="h-3 w-3" />
+                          Video
+                        </a>
+                      )}
+                      {sermon.document_url && (
+                        <a
+                          href={sermon.document_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                        >
+                          <Download className="h-3 w-3" />
+                          Notes
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1168,7 +1324,7 @@ const Events = () => {
               const statusBadge = getEventStatusBadge(event);
               const ScopeIcon = scopeBadge.icon;
               const StatusIcon = statusBadge.icon;
-              const sermonSummary = getSermonSummaryForEvent(event.id);
+              const sermon = getSermonForEvent(event.id);
               
               return (
                 <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
@@ -1189,10 +1345,10 @@ const Events = () => {
                               <ScopeIcon className="h-3 w-3" />
                               {scopeBadge.text}
                             </span>
-                            {sermonSummary && (
+                            {sermon && (
                               <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                                 <BookOpen className="h-3 w-3" />
-                                Sermon Summary
+                                Has Sermon
                               </span>
                             )}
                           </div>
@@ -1219,28 +1375,56 @@ const Events = () => {
                         )}
                       </div>
 
-                      {/* Sermon Summary Preview */}
-                      {sermonSummary && (
+                      {/* Sermon Preview */}
+                      {sermon && (
                         <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <BookOpen className="h-5 w-5 text-blue-600" />
                               <div>
                                 <div className="font-medium text-gray-900 dark:text-white">
-                                  Sermon by {sermonSummary.pastor_name}
+                                  {sermon.title} by {sermon.pastor_name}
                                 </div>
                                 <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                                  {sermonSummary.summary}
+                                  {sermon.summary}
                                 </div>
                               </div>
                             </div>
-                            <button
-                              onClick={() => openSermonModal(event.id)}
-                              className="flex items-center gap-2 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 text-sm"
-                            >
-                              <Eye className="h-3 w-3" />
-                              View
-                            </button>
+                            <div className="flex gap-2">
+                              {sermon.audio_url && (
+                                <a
+                                  href={sermon.audio_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-xs hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
+                                >
+                                  <PlayCircle className="h-3 w-3" />
+                                  Audio
+                                </a>
+                              )}
+                              {sermon.video_url && (
+                                <a
+                                  href={sermon.video_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-xs hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
+                                >
+                                  <PlayCircle className="h-3 w-3" />
+                                  Video
+                                </a>
+                              )}
+                              {sermon.document_url && (
+                                <a
+                                  href={sermon.document_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-xs hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                                >
+                                  <Download className="h-3 w-3" />
+                                  Notes
+                                </a>
+                              )}
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1352,7 +1536,7 @@ const Events = () => {
                         className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
                       >
                         <BookOpen className="h-4 w-4" />
-                        {sermonSummary ? 'Edit Sermon' : 'Add Sermon'}
+                        {sermon ? 'Edit Sermon' : 'Add Sermon'}
                       </button>
                       <button
                         onClick={() => togglePresentList(event.id)}
@@ -1544,13 +1728,13 @@ const Events = () => {
         </div>
       </div>
 
-      {/* Sermon Summary Modal */}
+      {/* Sermon Modal */}
       {showSermonModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {getSermonSummaryForEvent(showSermonModal) ? 'Edit Sermon Summary' : 'Add Sermon Summary'}
+                {showSermonModal === 'new' ? 'Add New Sermon' : 'Add Sermon to Event'}
               </h3>
               <button
                 onClick={closeSermonModal}
@@ -1559,8 +1743,22 @@ const Events = () => {
                 <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
               </button>
             </div>
-            <form onSubmit={(e) => handleSermonSubmit(e, showSermonModal)} className="p-6 space-y-6">
+            <form onSubmit={handleSermonSubmit} className="p-6 space-y-6">
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Sermon Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={sermonFormData.title}
+                    onChange={(e) => setSermonFormData({ ...sermonFormData, title: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter sermon title"
+                    required
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Sermon Summary *
@@ -1568,7 +1766,7 @@ const Events = () => {
                   <textarea
                     value={sermonFormData.summary}
                     onChange={(e) => setSermonFormData({ ...sermonFormData, summary: e.target.value })}
-                    rows={6}
+                    rows={4}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
                     placeholder="Enter the sermon summary, key points, scriptures, and main message..."
                     required
@@ -1603,36 +1801,81 @@ const Events = () => {
                     />
                   </div>
                 </div>
+
+                {/* File Uploads */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Audio File
+                    </label>
+                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-blue-500 dark:hover:border-blue-400 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <PlayCircle className="h-8 w-8 text-gray-400 mb-2" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Upload Audio</p>
+                      </div>
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        onChange={(e) => setSermonFormData({ ...sermonFormData, audioFile: e.target.files?.[0] || null })}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Video File
+                    </label>
+                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <PlayCircle className="h-8 w-8 text-gray-400 mb-2" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Upload Video</p>
+                      </div>
+                      <input
+                        type="file"
+                        accept="video/*"
+                        onChange={(e) => setSermonFormData({ ...sermonFormData, videoFile: e.target.files?.[0] || null })}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Sermon Notes
+                    </label>
+                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <FileText className="h-8 w-8 text-gray-400 mb-2" />
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Upload Notes</p>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.txt"
+                        onChange={(e) => setSermonFormData({ ...sermonFormData, documentFile: e.target.files?.[0] || null })}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-4">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <BookOpen className="h-4 w-4" />
-                    {loading ? 'Saving...' : (getSermonSummaryForEvent(showSermonModal) ? 'Update Summary' : 'Save Summary')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closeSermonModal}
-                    className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                  >
-                    Cancel
-                  </button>
-                </div>
-
-                {getSermonSummaryForEvent(showSermonModal) && hasAccess() && (
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSermonSummary(showSermonModal)}
-                    className="px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200 font-medium text-sm"
-                  >
-                    Delete Summary
-                  </button>
-                )}
+              <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <BookOpen className="h-4 w-4" />
+                  {loading ? 'Saving...' : 'Save Sermon'}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeSermonModal}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
               </div>
             </form>
           </div>
