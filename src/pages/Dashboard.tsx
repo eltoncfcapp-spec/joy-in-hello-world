@@ -21,7 +21,10 @@ import {
   RefreshCw,
   Edit,
   Save,
-  Trash2
+  Trash2,
+  FileText,
+  Download,
+  Upload
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -61,6 +64,7 @@ interface Event {
   location: string | null;
   topic: string | null;
   created_at: string | null;
+  pamphlet_url: string | null;
 }
 
 interface StatCard {
@@ -113,7 +117,10 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
+  const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -181,7 +188,7 @@ const Dashboard = () => {
       if (cellGroupsError) throw cellGroupsError;
       setCellGroups(cellGroupsData || []);
 
-      // Load events
+      // Load events with pamphlet URLs
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('*')
@@ -382,6 +389,61 @@ const Dashboard = () => {
     if (diffInHours < 24) return `${diffInHours} hours ago`;
     if (diffInHours < 168) return `${Math.floor(diffInHours / 24)} days ago`;
     return `${Math.floor(diffInHours / 168)} weeks ago`;
+  };
+
+  // Upload pamphlet function
+  const uploadPamphlet = async (eventId: string, file: File) => {
+    try {
+      setUploadingPamphlet(eventId);
+      setError(null);
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${eventId}/pamphlet.${fileExt}`;
+      const filePath = `event-pamphlets/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('event-pamphlets')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('event-pamphlets')
+        .getPublicUrl(filePath);
+
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ pamphlet_url: publicUrl })
+        .eq('id', eventId);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setUpcomingEvents(prev => prev.map(event => 
+        event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
+      ));
+
+      setSuccess('Pamphlet uploaded successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error uploading pamphlet:', error);
+      setError(error.message || 'Failed to upload pamphlet.');
+    } finally {
+      setUploadingPamphlet(null);
+    }
+  };
+
+  // View pamphlet in modal
+  const viewPamphlet = (pamphletUrl: string) => {
+    setViewingPamphlet(pamphletUrl);
+  };
+
+  // Close pamphlet modal
+  const closePamphletModal = () => {
+    setViewingPamphlet(null);
   };
 
   useEffect(() => {
@@ -617,6 +679,17 @@ const Dashboard = () => {
         </div>
       )}
 
+      {success && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <p className="text-green-700 font-medium">{success}</p>
+            <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Stats Grid - All users can see */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat) => (
@@ -740,6 +813,12 @@ const Dashboard = () => {
                       <MapPin className="h-3 w-3" />
                       {event.location || 'No location'}
                     </p>
+                    {event.pamphlet_url && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <FileText className="h-3 w-3 text-green-600" />
+                        <span className="text-xs text-green-600 font-medium">Pamphlet Available</span>
+                      </div>
+                    )}
                   </button>
                 ))}
                 {filteredEvents.length === 0 && (
@@ -1039,6 +1118,102 @@ const Dashboard = () => {
         </Modal>
       )}
 
+      {/* Event Detail Modal with Pamphlet Display */}
+      {activeModal === 'eventDetail' && selectedEvent && (
+        <Modal title="Event Details" size="max-w-2xl">
+          <div className="space-y-6">
+            <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white">
+                  <Calendar className="h-8 w-8" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900">{selectedEvent.name}</h3>
+                  <p className="text-gray-600">{selectedEvent.topic || 'No topic specified'}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center gap-3">
+                  <Calendar className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Date</p>
+                    <p className="font-medium text-gray-900">{selectedEvent.event_date}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Clock className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Time</p>
+                    <p className="font-medium text-gray-900">{selectedEvent.event_time}</p>
+                  </div>
+                </div>
+              </div>
+              
+              {selectedEvent.location && (
+                <div className="flex items-center gap-3">
+                  <MapPin className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Location</p>
+                    <p className="font-medium text-gray-900">{selectedEvent.location}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Pamphlet Display Section */}
+              {selectedEvent.pamphlet_url && (
+                <div className="border-t pt-4 mt-4">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Event Pamphlet</h4>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={() => viewPamphlet(selectedEvent.pamphlet_url!)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Pamphlet
+                    </button>
+                    <a
+                      href={selectedEvent.pamphlet_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Upload Pamphlet Section (for authorized users) */}
+              {currentUserCanEdit && !selectedEvent.pamphlet_url && (
+                <div className="border-t pt-4 mt-4">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Upload Pamphlet</h4>
+                  <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium cursor-pointer w-fit">
+                    <Upload className="h-4 w-4" />
+                    {uploadingPamphlet === selectedEvent.id ? 'Uploading...' : 'Upload Pamphlet'}
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          uploadPamphlet(selectedEvent.id, file);
+                        }
+                      }}
+                      className="hidden"
+                      disabled={uploadingPamphlet === selectedEvent.id}
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Add Member Modal */}
       {activeModal === 'addMember' && (
         <Modal title="Add New Member">
@@ -1225,6 +1400,47 @@ const Dashboard = () => {
             </div>
           </form>
         </Modal>
+      )}
+
+      {/* Pamphlet Viewer Modal */}
+      {viewingPamphlet && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-xl font-bold text-gray-900">Event Pamphlet</h3>
+              <button
+                onClick={closePamphletModal}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-6 max-h-[70vh] overflow-auto">
+              <iframe
+                src={viewingPamphlet}
+                className="w-full h-96 rounded-lg border border-gray-200"
+                title="Event Pamphlet"
+              />
+              <div className="mt-4 flex justify-between items-center">
+                <a
+                  href={viewingPamphlet}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200"
+                >
+                  <FileText className="h-4 w-4" />
+                  Open in New Tab
+                </a>
+                <button
+                  onClick={closePamphletModal}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Other modals (viewEvents, viewAbsentMembers, viewGroups) remain view-only for all users */}
