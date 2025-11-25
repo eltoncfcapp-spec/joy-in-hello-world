@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -97,6 +97,7 @@ const Events = () => {
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
+  const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
   
   const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
   const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
@@ -126,6 +127,8 @@ const Events = () => {
     eventId: '',
     videoFile: null as File | null,
     documentFile: null as File | null,
+    existingVideoUrl: '',
+    existingDocumentUrl: '',
   });
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -331,11 +334,36 @@ const Events = () => {
     return publicUrl;
   };
 
+  const deleteSermonFile = async (fileUrl: string, type: 'video' | 'document') => {
+    try {
+      // Extract file path from URL
+      const urlParts = fileUrl.split('/');
+      const fileName = urlParts[urlParts.length - 1];
+      const filePath = `${type}/${fileName}`;
+
+      console.log(`Deleting ${type} file:`, filePath);
+
+      const { error: deleteError } = await supabase.storage
+        .from('sermon-files')
+        .remove([filePath]);
+
+      if (deleteError) {
+        console.error('Delete error:', deleteError);
+        throw deleteError;
+      }
+
+      console.log('File deleted successfully');
+    } catch (error: any) {
+      console.error('Error deleting file:', error);
+      throw error;
+    }
+  };
+
   const handleSermonSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!hasAccess()) {
-      setError('You do not have permission to add sermons');
+      setError('You do not have permission to manage sermons');
       setTimeout(() => setError(null), 3000);
       return;
     }
@@ -363,10 +391,10 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      let videoUrl = null;
-      let documentUrl = null;
+      let videoUrl = sermonFormData.existingVideoUrl;
+      let documentUrl = sermonFormData.existingDocumentUrl;
 
-      // Upload files if provided
+      // Upload new files if provided
       if (sermonFormData.videoFile) {
         setUploadingSermonFile({ type: 'video' });
         videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
@@ -389,9 +417,21 @@ const Events = () => {
 
       console.log('Saving sermon data:', sermonData);
 
-      const { error } = await supabase
-        .from('sermons')
-        .insert([{ ...sermonData, created_at: new Date().toISOString() }]);
+      let error;
+      if (editingSermon) {
+        // Update existing sermon
+        const { error: updateError } = await supabase
+          .from('sermons')
+          .update(sermonData)
+          .eq('id', editingSermon.id);
+        error = updateError;
+      } else {
+        // Create new sermon
+        const { error: insertError } = await supabase
+          .from('sermons')
+          .insert([{ ...sermonData, created_at: new Date().toISOString() }]);
+        error = insertError;
+      }
 
       if (error) {
         console.error('Database error:', error);
@@ -399,6 +439,7 @@ const Events = () => {
       }
 
       setShowSermonModal(null);
+      setEditingSermon(null);
       setSermonFormData({ 
         title: '', 
         summary: '', 
@@ -407,14 +448,16 @@ const Events = () => {
         eventId: '',
         videoFile: null,
         documentFile: null,
+        existingVideoUrl: '',
+        existingDocumentUrl: '',
       });
       await fetchSermons();
-      setSuccess('Sermon added successfully!');
+      setSuccess(editingSermon ? 'Sermon updated successfully!' : 'Sermon added successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error saving sermon:', error);
-      setError(error.message || 'Failed to save sermon. Please try again.');
+      setError(error.message || `Failed to ${editingSermon ? 'update' : 'save'} sermon. Please try again.`);
     } finally {
       setLoading(false);
       setUploadingSermonFile(null);
@@ -422,11 +465,25 @@ const Events = () => {
   };
 
   const handleDeleteSermon = async (sermonId: string) => {
-    if (!confirm('Are you sure you want to delete this sermon?')) return;
+    if (!confirm('Are you sure you want to delete this sermon? This action cannot be undone.')) return;
 
     try {
       setError(null);
-      
+      setLoading(true);
+
+      // Get sermon data first to delete associated files
+      const sermonToDelete = sermons.find(s => s.id === sermonId);
+      if (!sermonToDelete) throw new Error('Sermon not found');
+
+      // Delete associated files from storage
+      if (sermonToDelete.video_url) {
+        await deleteSermonFile(sermonToDelete.video_url, 'video');
+      }
+      if (sermonToDelete.document_url) {
+        await deleteSermonFile(sermonToDelete.document_url, 'document');
+      }
+
+      // Delete sermon from database
       const { error } = await supabase
         .from('sermons')
         .delete()
@@ -441,27 +498,49 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error deleting sermon:', error);
       setError(error.message || 'Failed to delete sermon.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const openSermonModal = (eventId?: string) => {
-    const event = eventId ? events.find(e => e.id === eventId) : null;
+  const openSermonModal = (eventId?: string, sermonToEdit?: Sermon) => {
+    if (sermonToEdit) {
+      // Edit existing sermon
+      setEditingSermon(sermonToEdit);
+      setSermonFormData({
+        title: sermonToEdit.title,
+        summary: sermonToEdit.summary,
+        pastorName: sermonToEdit.pastor_name,
+        sermonDate: sermonToEdit.sermon_date,
+        eventId: sermonToEdit.event_id || '',
+        videoFile: null,
+        documentFile: null,
+        existingVideoUrl: sermonToEdit.video_url || '',
+        existingDocumentUrl: sermonToEdit.document_url || '',
+      });
+    } else {
+      // Create new sermon
+      const event = eventId ? events.find(e => e.id === eventId) : null;
+      setEditingSermon(null);
+      setSermonFormData({
+        title: event?.name || '',
+        summary: '',
+        pastorName: '',
+        sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
+        eventId: eventId || '',
+        videoFile: null,
+        documentFile: null,
+        existingVideoUrl: '',
+        existingDocumentUrl: '',
+      });
+    }
     
-    setSermonFormData({
-      title: event?.name || '',
-      summary: '',
-      pastorName: '',
-      sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
-      eventId: eventId || '',
-      videoFile: null,
-      documentFile: null,
-    });
-    
-    setShowSermonModal(eventId || 'new');
+    setShowSermonModal(eventId || sermonToEdit?.id || 'new');
   };
 
   const closeSermonModal = () => {
     setShowSermonModal(null);
+    setEditingSermon(null);
     setSermonFormData({ 
       title: '', 
       summary: '', 
@@ -470,7 +549,48 @@ const Events = () => {
       eventId: '',
       videoFile: null,
       documentFile: null,
+      existingVideoUrl: '',
+      existingDocumentUrl: '',
     });
+  };
+
+  const removeSermonFile = async (sermonId: string, fileType: 'video' | 'document') => {
+    if (!confirm(`Are you sure you want to remove the ${fileType} file?`)) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const sermon = sermons.find(s => s.id === sermonId);
+      if (!sermon) throw new Error('Sermon not found');
+
+      const fileUrl = fileType === 'video' ? sermon.video_url : sermon.document_url;
+      if (!fileUrl) return;
+
+      // Delete file from storage
+      await deleteSermonFile(fileUrl, fileType);
+
+      // Update sermon record
+      const updateData = fileType === 'video' 
+        ? { video_url: null } 
+        : { document_url: null };
+
+      const { error } = await supabase
+        .from('sermons')
+        .update(updateData)
+        .eq('id', sermonId);
+
+      if (error) throw error;
+
+      await fetchSermons();
+      setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error(`Error removing ${fileType}:`, error);
+      setError(error.message || `Failed to remove ${fileType}.`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Upload pamphlet function
@@ -1075,12 +1195,22 @@ const Events = () => {
                           {sermon.events?.name || 'Standalone Sermon'}
                         </p>
                       </div>
-                      <button
-                        onClick={() => handleDeleteSermon(sermon.id)}
-                        className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                      >
-                        <X className="h-4 w-4 text-red-500" />
-                      </button>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => openSermonModal(undefined, sermon)}
+                          className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
+                          title="Edit Sermon"
+                        >
+                          <Edit className="h-4 w-4 text-blue-500" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSermon(sermon.id)}
+                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                          title="Delete Sermon"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-2 mb-4">
@@ -1100,26 +1230,48 @@ const Events = () => {
 
                     <div className="flex flex-wrap gap-2">
                       {sermon.video_url && (
-                        <a
-                          href={sermon.video_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
-                        >
-                          <PlayCircle className="h-3 w-3" />
-                          Video
-                        </a>
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={sermon.video_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
+                          >
+                            <PlayCircle className="h-3 w-3" />
+                            Video
+                          </a>
+                          {hasAccess() && (
+                            <button
+                              onClick={() => removeSermonFile(sermon.id, 'video')}
+                              className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
+                              title="Remove Video"
+                            >
+                              <X className="h-3 w-3 text-red-500" />
+                            </button>
+                          )}
+                        </div>
                       )}
                       {sermon.document_url && (
-                        <a
-                          href={sermon.document_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
-                        >
-                          <Download className="h-3 w-3" />
-                          Notes
-                        </a>
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={sermon.document_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                          >
+                            <Download className="h-3 w-3" />
+                            Notes
+                          </a>
+                          {hasAccess() && (
+                            <button
+                              onClick={() => removeSermonFile(sermon.id, 'document')}
+                              className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
+                              title="Remove Document"
+                            >
+                              <X className="h-3 w-3 text-red-500" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1727,7 +1879,7 @@ const Events = () => {
           <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {showSermonModal === 'new' ? 'Add New Sermon' : 'Add Sermon to Event'}
+                {editingSermon ? 'Edit Sermon' : showSermonModal === 'new' ? 'Add New Sermon' : 'Add Sermon to Event'}
               </h3>
               <button
                 onClick={closeSermonModal}
@@ -1808,6 +1960,27 @@ const Events = () => {
                         <span>Development - Large Storage</span>
                       </div>
                     </div>
+                    
+                    {/* Existing Video Display */}
+                    {sermonFormData.existingVideoUrl && (
+                      <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <PlayCircle className="h-4 w-4 text-purple-600" />
+                            <span className="text-sm text-purple-700">Video file already uploaded</span>
+                          </div>
+                          <a
+                            href={sermonFormData.existingVideoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-purple-600 hover:text-purple-700 text-sm"
+                          >
+                            View
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
                     <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
                       <div className="flex flex-col items-center justify-center pt-3 pb-4">
                         <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
@@ -1832,6 +2005,27 @@ const Events = () => {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Sermon Notes (PDF/DOC)
                     </label>
+                    
+                    {/* Existing Document Display */}
+                    {sermonFormData.existingDocumentUrl && (
+                      <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-green-600" />
+                            <span className="text-sm text-green-700">Document file already uploaded</span>
+                          </div>
+                          <a
+                            href={sermonFormData.existingDocumentUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-600 hover:text-green-700 text-sm"
+                          >
+                            View
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
                     <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
                       <div className="flex flex-col items-center justify-center pt-3 pb-4">
                         <FileText className="h-6 w-6 text-gray-400 mb-1" />
@@ -1860,7 +2054,7 @@ const Events = () => {
                   className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <BookOpen className="h-4 w-4" />
-                  {loading ? 'Saving...' : 'Save Sermon'}
+                  {loading ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
                 </button>
                 <button
                   type="button"
