@@ -88,6 +88,7 @@ const Events = () => {
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [attendees, setAttendees] = useState<EventAttendee[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sermonLoading, setSermonLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -336,6 +337,8 @@ const Events = () => {
 
   const deleteSermonFile = async (fileUrl: string, type: 'video' | 'document') => {
     try {
+      if (!fileUrl) return;
+      
       // Extract file path from URL
       const urlParts = fileUrl.split('/');
       const fileName = urlParts[urlParts.length - 1];
@@ -349,13 +352,15 @@ const Events = () => {
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
-        throw deleteError;
+        // Don't throw error for file deletion - we can still proceed with database deletion
+        console.warn('File deletion failed, but continuing with database deletion');
+      } else {
+        console.log('File deleted successfully');
       }
-
-      console.log('File deleted successfully');
     } catch (error: any) {
       console.error('Error deleting file:', error);
-      throw error;
+      // Don't throw error - we can still proceed with database deletion
+      console.warn('File deletion failed, but continuing with database deletion');
     }
   };
 
@@ -386,7 +391,7 @@ const Events = () => {
       return;
     }
 
-    setLoading(true);
+    setSermonLoading('saving');
     setError(null);
     setSuccess(null);
 
@@ -397,11 +402,19 @@ const Events = () => {
       // Upload new files if provided
       if (sermonFormData.videoFile) {
         setUploadingSermonFile({ type: 'video' });
-        videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
+        try {
+          videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
+        } catch (error: any) {
+          throw new Error(`Failed to upload video: ${error.message}`);
+        }
       }
       if (sermonFormData.documentFile) {
         setUploadingSermonFile({ type: 'document' });
-        documentUrl = await uploadSermonFile(sermonFormData.documentFile, 'document');
+        try {
+          documentUrl = await uploadSermonFile(sermonFormData.documentFile, 'document');
+        } catch (error: any) {
+          throw new Error(`Failed to upload document: ${error.message}`);
+        }
       }
 
       const sermonData = {
@@ -459,7 +472,7 @@ const Events = () => {
       console.error('Error saving sermon:', error);
       setError(error.message || `Failed to ${editingSermon ? 'update' : 'save'} sermon. Please try again.`);
     } finally {
-      setLoading(false);
+      setSermonLoading(null);
       setUploadingSermonFile(null);
     }
   };
@@ -469,18 +482,20 @@ const Events = () => {
 
     try {
       setError(null);
-      setLoading(true);
+      setSermonLoading(sermonId);
 
       // Get sermon data first to delete associated files
       const sermonToDelete = sermons.find(s => s.id === sermonId);
       if (!sermonToDelete) throw new Error('Sermon not found');
 
-      // Delete associated files from storage
+      console.log('Deleting sermon:', sermonToDelete.title);
+
+      // Delete associated files from storage (non-blocking)
       if (sermonToDelete.video_url) {
-        await deleteSermonFile(sermonToDelete.video_url, 'video');
+        deleteSermonFile(sermonToDelete.video_url, 'video');
       }
       if (sermonToDelete.document_url) {
-        await deleteSermonFile(sermonToDelete.document_url, 'document');
+        deleteSermonFile(sermonToDelete.document_url, 'document');
       }
 
       // Delete sermon from database
@@ -489,17 +504,27 @@ const Events = () => {
         .delete()
         .eq('id', sermonId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database deletion error:', error);
+        throw error;
+      }
 
-      await fetchSermons();
+      console.log('Sermon deleted from database');
+
+      // Update local state immediately for better UX
+      setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
+      
       setSuccess('Sermon deleted successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting sermon:', error);
       setError(error.message || 'Failed to delete sermon.');
+      
+      // Refresh sermons list to ensure consistency
+      await fetchSermons();
     } finally {
-      setLoading(false);
+      setSermonLoading(null);
     }
   };
 
@@ -552,13 +577,14 @@ const Events = () => {
       existingVideoUrl: '',
       existingDocumentUrl: '',
     });
+    setError(null);
   };
 
   const removeSermonFile = async (sermonId: string, fileType: 'video' | 'document') => {
     if (!confirm(`Are you sure you want to remove the ${fileType} file?`)) return;
 
     try {
-      setLoading(true);
+      setSermonLoading(`remove-${fileType}-${sermonId}`);
       setError(null);
 
       const sermon = sermons.find(s => s.id === sermonId);
@@ -589,7 +615,7 @@ const Events = () => {
       console.error(`Error removing ${fileType}:`, error);
       setError(error.message || `Failed to remove ${fileType}.`);
     } finally {
-      setLoading(false);
+      setSermonLoading(null);
     }
   };
 
@@ -1200,6 +1226,7 @@ const Events = () => {
                           onClick={() => openSermonModal(undefined, sermon)}
                           className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
                           title="Edit Sermon"
+                          disabled={sermonLoading === sermon.id}
                         >
                           <Edit className="h-4 w-4 text-blue-500" />
                         </button>
@@ -1207,8 +1234,13 @@ const Events = () => {
                           onClick={() => handleDeleteSermon(sermon.id)}
                           className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
                           title="Delete Sermon"
+                          disabled={sermonLoading === sermon.id}
                         >
-                          <Trash2 className="h-4 w-4 text-red-500" />
+                          {sermonLoading === sermon.id ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500" />
+                          ) : (
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1245,8 +1277,13 @@ const Events = () => {
                               onClick={() => removeSermonFile(sermon.id, 'video')}
                               className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
                               title="Remove Video"
+                              disabled={sermonLoading === `remove-video-${sermon.id}`}
                             >
-                              <X className="h-3 w-3 text-red-500" />
+                              {sermonLoading === `remove-video-${sermon.id}` ? (
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
+                              ) : (
+                                <X className="h-3 w-3 text-red-500" />
+                              )}
                             </button>
                           )}
                         </div>
@@ -1267,8 +1304,13 @@ const Events = () => {
                               onClick={() => removeSermonFile(sermon.id, 'document')}
                               className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
                               title="Remove Document"
+                              disabled={sermonLoading === `remove-document-${sermon.id}`}
                             >
-                              <X className="h-3 w-3 text-red-500" />
+                              {sermonLoading === `remove-document-${sermon.id}` ? (
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
+                              ) : (
+                                <X className="h-3 w-3 text-red-500" />
+                              )}
                             </button>
                           )}
                         </div>
@@ -2050,11 +2092,11 @@ const Events = () => {
               <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={sermonLoading === 'saving'}
                   className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <BookOpen className="h-4 w-4" />
-                  {loading ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
+                  {sermonLoading === 'saving' ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
                 </button>
                 <button
                   type="button"
