@@ -25,7 +25,9 @@ import {
   FileText,
   Download,
   Upload,
-  ExternalLink
+  ExternalLink,
+  BookOpen,
+  PlayCircle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -66,6 +68,23 @@ interface Event {
   topic: string | null;
   created_at: string | null;
   pamphlet_url: string | null;
+}
+
+interface Sermon {
+  id: string;
+  title: string;
+  summary: string;
+  pastor_name: string;
+  sermon_date: string;
+  event_id: string | null;
+  video_url: string | null;
+  document_url: string | null;
+  created_at: string;
+  updated_at: string;
+  events?: {
+    name: string;
+    topic: string | null;
+  };
 }
 
 interface StatCard {
@@ -111,12 +130,15 @@ const Dashboard = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
-    activity: true
+    activity: true,
+    sermons: true
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sermonSearchTerm, setSermonSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
@@ -131,6 +153,7 @@ const Dashboard = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
+  const [sermons, setSermons] = useState<Sermon[]>([]);
 
   // Form states
   const [newMember, setNewMember] = useState({
@@ -164,6 +187,28 @@ const Dashboard = () => {
 
   const getFilteredAbsentMembers = () => {
     return absentMembers;
+  };
+
+  const getFilteredSermons = () => {
+    if (!sermonSearchTerm) return sermons;
+    
+    return sermons.filter(sermon => 
+      sermon.title.toLowerCase().includes(sermonSearchTerm.toLowerCase()) ||
+      sermon.pastor_name.toLowerCase().includes(sermonSearchTerm.toLowerCase()) ||
+      sermon.summary.toLowerCase().includes(sermonSearchTerm.toLowerCase()) ||
+      sermon.events?.name?.toLowerCase().includes(sermonSearchTerm.toLowerCase())
+    );
+  };
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
 
   // Load dashboard data from Supabase
@@ -200,11 +245,26 @@ const Dashboard = () => {
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
 
+      // Load sermons
+      const { data: sermonsData, error: sermonsError } = await supabase
+        .from('sermons')
+        .select(`
+          *,
+          events (
+            name,
+            topic
+          )
+        `)
+        .order('sermon_date', { ascending: false });
+
+      if (sermonsError) throw sermonsError;
+      setSermons(sermonsData || []);
+
       // Calculate stats with all data (everyone can see)
-      calculateStats(membersData || [], eventsData || []);
+      calculateStats(membersData || [], eventsData || [], sermonsData || []);
 
       // Generate recent activities with all data
-      generateRecentActivities(membersData || [], eventsData || []);
+      generateRecentActivities(membersData || [], eventsData || [], sermonsData || []);
 
       // Load absent members
       await loadAbsentMembers();
@@ -285,11 +345,12 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (allMembers: Member[], events: Event[]) => {
+  const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const totalMembers = allMembers.length;
     const newcomers = allMembers.filter(m => m.status === 'newcomer').length;
     const signedMembers = allMembers.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
+    const totalSermons = allSermons.length;
     
     const uniqueGroups = [...new Set(allMembers.map(m => m.cell_group_id).filter(Boolean))].length;
 
@@ -315,6 +376,16 @@ const Dashboard = () => {
         action: 'viewEvents'
       },
       { 
+        icon: BookOpen, 
+        label: 'Sermons', 
+        value: totalSermons.toString(), 
+        change: `${totalSermons} messages available`, 
+        changeType: 'positive',
+        color: 'from-orange-500 to-orange-600',
+        bgColor: 'bg-orange-50 dark:bg-orange-950/20',
+        action: 'viewSermons'
+      },
+      { 
         icon: UserPlus, 
         label: 'Newcomers', 
         value: newcomers.toString(), 
@@ -330,8 +401,8 @@ const Dashboard = () => {
         value: uniqueGroups.toString(), 
         change: `${uniqueGroups} cell groups`, 
         changeType: 'positive',
-        color: 'from-orange-500 to-orange-600',
-        bgColor: 'bg-orange-50 dark:bg-orange-950/20',
+        color: 'from-indigo-500 to-indigo-600',
+        bgColor: 'bg-indigo-50 dark:bg-indigo-950/20',
         action: 'viewGroups'
       },
       { 
@@ -349,11 +420,11 @@ const Dashboard = () => {
     setStats(statsData);
   };
 
-  const generateRecentActivities = (allMembers: Member[], events: Event[]) => {
+  const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
     // Add recent member joins
-    const recentMembers = allMembers.slice(0, 3);
+    const recentMembers = allMembers.slice(0, 2);
     recentMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
@@ -366,8 +437,22 @@ const Dashboard = () => {
       });
     });
 
+    // Add recent sermons
+    const recentSermons = allSermons.slice(0, 2);
+    recentSermons.forEach(sermon => {
+      activities.push({
+        id: activities.length + 1,
+        type: 'sermon',
+        message: `New sermon: ${sermon.title} by ${sermon.pastor_name}`,
+        time: formatTimeAgo(new Date(sermon.sermon_date)),
+        color: 'bg-orange-500',
+        icon: BookOpen,
+        action: () => openSermonDetail(sermon)
+      });
+    });
+
     // Add recent events
-    const recentEvents = events.slice(0, 3);
+    const recentEvents = events.slice(0, 2);
     recentEvents.forEach(event => {
       activities.push({
         id: activities.length + 1,
@@ -457,6 +542,12 @@ const Dashboard = () => {
     setQuickViewEvent(null);
   };
 
+  // Open sermon detail modal
+  const openSermonDetail = (sermon: Sermon) => {
+    setSelectedSermon(sermon);
+    setActiveModal('sermonDetail');
+  };
+
   useEffect(() => {
     loadDashboardData();
   }, []);
@@ -476,6 +567,7 @@ const Dashboard = () => {
     setActiveModal(null);
     setSelectedMember(null);
     setSelectedEvent(null);
+    setSelectedSermon(null);
     setEditingMember(null);
     // Reset form states
     setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '' });
@@ -643,6 +735,7 @@ const Dashboard = () => {
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
   const filteredAbsentMembers = getFilteredAbsentMembers();
+  const filteredSermons = getFilteredSermons();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
@@ -702,7 +795,7 @@ const Dashboard = () => {
       )}
 
       {/* Stats Grid - All users can see */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6 mb-8">
         {stats.map((stat) => (
           <button
             key={stat.label}
@@ -742,7 +835,7 @@ const Dashboard = () => {
       </div>
 
       {/* Content Grid - All users can see */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Activity */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
@@ -888,6 +981,97 @@ const Dashboard = () => {
             </div>
           )}
         </div>
+
+        {/* Recent Sermons */}
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
+          <button 
+            onClick={() => toggleSection('sermons')}
+            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+          >
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Recent Sermons</h2>
+            {expandedSections.sermons ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+          </button>
+          
+          {expandedSections.sermons && (
+            <div className="p-6 pt-0">
+              <div className="space-y-4">
+                {filteredSermons.slice(0, 5).map((sermon) => (
+                  <div
+                    key={sermon.id}
+                    className="w-full border-l-4 border-orange-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
+                    onClick={() => openSermonDetail(sermon)}
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors line-clamp-2">
+                        {sermon.title}
+                      </h3>
+                    </div>
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">
+                      By {sermon.pastor_name}
+                    </p>
+                    <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1 mb-2">
+                      <Calendar className="h-3 w-3" />
+                      {formatDate(sermon.sermon_date)}
+                    </p>
+                    
+                    {/* Sermon Files Section */}
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="h-4 w-4 text-orange-600" />
+                        <span className="text-xs text-orange-600 font-medium">Sermon Available</span>
+                      </div>
+                      <div className="flex gap-1">
+                        {sermon.document_url && (
+                          <a
+                            href={sermon.document_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
+                            title="Download Notes"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Download className="h-3 w-3" />
+                          </a>
+                        )}
+                        {sermon.video_url && (
+                          <a
+                            href={sermon.video_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 bg-purple-100 hover:bg-purple-200 text-purple-600 rounded-lg transition-colors duration-200"
+                            title="Watch Video"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <PlayCircle className="h-3 w-3" />
+                          </a>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openSermonDetail(sermon);
+                          }}
+                          className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-lg transition-colors duration-200"
+                          title="View Details"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {filteredSermons.length === 0 && (
+                  <p className="text-gray-500 dark:text-gray-400 text-center py-4">No sermons available</p>
+                )}
+              </div>
+              <button 
+                onClick={() => openModal('viewSermons')}
+                className="w-full mt-4 text-center text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium transition-colors py-2"
+              >
+                View All Sermons
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Quick Actions - Only show if user has edit permissions */}
@@ -969,7 +1153,166 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Rest of the modals (member detail, event detail, etc.) remain the same */}
+      {/* Sermons Modal */}
+      {activeModal === 'viewSermons' && (
+        <Modal title="All Sermons" size="max-w-4xl">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">
+              Browse all available sermons
+            </p>
+            
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search sermons by title, pastor, or content..."
+                value={sermonSearchTerm}
+                onChange={(e) => setSermonSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {filteredSermons.map((sermon) => (
+                <div 
+                  key={sermon.id}
+                  className="border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors duration-200 cursor-pointer"
+                  onClick={() => openSermonDetail(sermon)}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-lg text-gray-900 mb-1">{sermon.title}</h4>
+                      <p className="text-orange-600 font-medium text-sm">
+                        {sermon.events?.name || 'Standalone Sermon'}
+                      </p>
+                    </div>
+                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                      {formatDate(sermon.sermon_date)}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-2 mb-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <Users className="h-3 w-3" />
+                      <span>By {sermon.pastor_name}</span>
+                    </div>
+                    <p className="text-gray-600 text-sm line-clamp-2">
+                      {sermon.summary}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {sermon.document_url && (
+                      <a
+                        href={sermon.document_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-sm transition-colors duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Download className="h-3 w-3" />
+                        Download Notes
+                      </a>
+                    )}
+                    {sermon.video_url && (
+                      <a
+                        href={sermon.video_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg text-sm transition-colors duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <PlayCircle className="h-3 w-3" />
+                        Watch Video
+                      </a>
+                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openSermonDetail(sermon);
+                      }}
+                      className="flex items-center gap-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm transition-colors duration-200"
+                    >
+                      <Eye className="h-3 w-3" />
+                      View Details
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredSermons.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
+                  {sermonSearchTerm ? 'No sermons found matching your search' : 'No sermons available'}
+                </p>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Sermon Detail Modal */}
+      {activeModal === 'sermonDetail' && selectedSermon && (
+        <Modal title="Sermon Details" size="max-w-2xl">
+          <div className="space-y-6">
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">{selectedSermon.title}</h3>
+              <div className="space-y-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  <span><strong>Pastor:</strong> {selectedSermon.pastor_name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  <span><strong>Date:</strong> {formatDate(selectedSermon.sermon_date)}</span>
+                </div>
+                {selectedSermon.events?.name && (
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="h-4 w-4" />
+                    <span><strong>Event:</strong> {selectedSermon.events.name}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-gray-900 mb-2">Sermon Summary</h4>
+              <p className="text-gray-600 leading-relaxed">{selectedSermon.summary}</p>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-gray-900 mb-3">Available Resources</h4>
+              <div className="flex flex-wrap gap-3">
+                {selectedSermon.document_url && (
+                  <a
+                    href={selectedSermon.document_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download Sermon Notes (PDF)
+                  </a>
+                )}
+                {selectedSermon.video_url && (
+                  <a
+                    href={selectedSermon.video_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium"
+                  >
+                    <PlayCircle className="h-4 w-4" />
+                    Watch Sermon Video
+                  </a>
+                )}
+                {!selectedSermon.document_url && !selectedSermon.video_url && (
+                  <p className="text-gray-500">No additional resources available for this sermon.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Members Modal */}
       {activeModal === 'viewMembers' && (
         <Modal title="Members" size="max-w-4xl">
           <div className="space-y-4">
