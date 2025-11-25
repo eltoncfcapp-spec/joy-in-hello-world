@@ -7,7 +7,6 @@ interface Sermon {
   summary: string;
   pastor_name: string;
   sermon_date: string;
-  audio_url: string | null;
   video_url: string | null;
   document_url: string | null;
   events?: {
@@ -81,17 +80,6 @@ const DashboardSermons = ({ sermons }: DashboardSermonsProps) => {
             </p>
             
             <div className="flex flex-wrap gap-1">
-              {sermon.audio_url && (
-                <a
-                  href={sermon.audio_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-xs hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
-                >
-                  <PlayCircle className="h-3 w-3" />
-                  Audio
-                </a>
-              )}
               {sermon.video_url && (
                 <a
                   href={sermon.video_url}
