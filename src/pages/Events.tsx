@@ -47,6 +47,12 @@ interface Member {
   ministry_group_id: string | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  department_members?: {
+    departments: {
+      id: string;
+      name: string;
+    };
+  }[];
 }
 
 interface CellGroup {
@@ -225,11 +231,15 @@ const Events = () => {
           phone,
           cell_group_id,
           ministry_group_id,
-          department_id,
           status,
           cell_groups!fk_cell_group(name),
           ministry_groups(name),
-          departments(name)
+          department_members!inner (
+            departments (
+              id,
+              name
+            )
+          )
         `)
         .order('name');
 
@@ -301,10 +311,14 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            department_id,
             cell_groups!fk_cell_group(name),
             ministry_groups(name),
-            departments(name)
+            department_members!inner (
+              departments (
+                id,
+                name
+              )
+            )
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -333,6 +347,11 @@ const Events = () => {
 
   const getSermonForEvent = (eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
+  };
+
+  // Helper function to check if member belongs to department
+  const isMemberInDepartment = (member: Member, departmentId: string) => {
+    return member.department_members?.some(dm => dm.departments.id === departmentId) || false;
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -809,7 +828,7 @@ const Events = () => {
             member.ministry_group_id === deptId
           );
           const inTargetDepartment = event.target_departments?.some(deptId => 
-            member.department_id === deptId
+            isMemberInDepartment(member, deptId)
           );
           return (inTargetCellGroup || inTargetMinistryGroup || inTargetDepartment) && member.status !== 'not_attending';
         });
