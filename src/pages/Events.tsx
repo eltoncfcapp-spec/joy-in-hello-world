@@ -308,6 +308,140 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
+  // FIXED: Pamphlet Upload Function - Using your working Dashboard model
+  const uploadPamphlet = async (eventId: string, file: File) => {
+    try {
+      setUploadingPamphlet(eventId);
+      setError(null);
+
+      // Validate file type
+      const allowedTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+      
+      if (!allowedTypes.includes(fileExtension)) {
+        throw new Error('Invalid file type. Please upload PDF, image, or document files.');
+      }
+
+      // Validate file size (5MB max)
+      const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+      if (file.size > maxSize) {
+        throw new Error('File size too large. Please upload files smaller than 5MB.');
+      }
+
+      // Create unique file name using the same pattern as your Dashboard
+      const fileExt = file.name.split('.').pop();
+      const fileName = `pamphlet-${eventId}-${Date.now()}.${fileExt}`;
+      const filePath = `event-pamphlets/${fileName}`;
+
+      console.log('Uploading pamphlet:', file.name, 'to path:', filePath);
+
+      // Upload file to storage - using the same bucket name as your Dashboard
+      const { error: uploadError } = await supabase.storage
+        .from('event-pamphlets')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw new Error(`Upload failed: ${uploadError.message}`);
+      }
+
+      console.log('Upload successful, getting public URL...');
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('event-pamphlets')
+        .getPublicUrl(filePath);
+
+      console.log('Public URL:', publicUrl);
+
+      // Update event record with pamphlet URL
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ 
+          pamphlet_url: publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', eventId);
+
+      if (updateError) {
+        console.error('Update error:', updateError);
+        throw updateError;
+      }
+
+      // Update local state
+      setEvents(prev => prev.map(event => 
+        event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
+      ));
+
+      setSuccess('Pamphlet uploaded successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error uploading pamphlet:', error);
+      setError(error.message || 'Failed to upload pamphlet.');
+    } finally {
+      setUploadingPamphlet(null);
+    }
+  };
+
+  // FIXED: Delete pamphlet function
+  const deletePamphlet = async (eventId: string) => {
+    try {
+      if (!confirm('Are you sure you want to delete this pamphlet?')) return;
+
+      setError(null);
+      const event = events.find(e => e.id === eventId);
+      if (!event?.pamphlet_url) return;
+
+      // Extract file name from URL using the same pattern as upload
+      const urlParts = event.pamphlet_url.split('/');
+      const fileName = urlParts[urlParts.length - 1];
+      const filePath = `event-pamphlets/${fileName}`;
+
+      console.log('Deleting pamphlet:', filePath);
+
+      const { error: deleteError } = await supabase.storage
+        .from('event-pamphlets')
+        .remove([filePath]);
+
+      if (deleteError) {
+        console.error('Delete error:', deleteError);
+        // Continue with database update even if file deletion fails
+        console.warn('File deletion failed, but continuing with database update');
+      }
+
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ pamphlet_url: null })
+        .eq('id', eventId);
+
+      if (updateError) throw updateError;
+
+      setEvents(prev => prev.map(event => 
+        event.id === eventId ? { ...event, pamphlet_url: null } : event
+      ));
+
+      setSuccess('Pamphlet deleted successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting pamphlet:', error);
+      setError(error.message || 'Failed to delete pamphlet.');
+    }
+  };
+
+  // View pamphlet in modal
+  const viewPamphlet = (pamphletUrl: string) => {
+    setViewingPamphlet(pamphletUrl);
+  };
+
+  // Close pamphlet modal
+  const closePamphletModal = () => {
+    setViewingPamphlet(null);
+  };
+
+  // Rest of your existing functions (sermon upload, event creation, etc.) remain the same
   const uploadSermonFile = async (file: File, type: 'video' | 'document'): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
@@ -352,14 +486,12 @@ const Events = () => {
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
-        // Don't throw error for file deletion - we can still proceed with database deletion
         console.warn('File deletion failed, but continuing with database deletion');
       } else {
         console.log('File deleted successfully');
       }
     } catch (error: any) {
       console.error('Error deleting file:', error);
-      // Don't throw error - we can still proceed with database deletion
       console.warn('File deletion failed, but continuing with database deletion');
     }
   };
@@ -619,101 +751,7 @@ const Events = () => {
     }
   };
 
-  // Upload pamphlet function
-  const uploadPamphlet = async (eventId: string, file: File) => {
-    try {
-      setUploadingPamphlet(eventId);
-      setError(null);
-
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${eventId}/pamphlet.${fileExt}`;
-      const filePath = `event-pamphlets/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('event-pamphlets')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('event-pamphlets')
-        .getPublicUrl(filePath);
-
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ pamphlet_url: publicUrl })
-        .eq('id', eventId);
-
-      if (updateError) throw updateError;
-
-      setEvents(prev => prev.map(event => 
-        event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
-      ));
-
-      setSuccess('Pamphlet uploaded successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error uploading pamphlet:', error);
-      setError(error.message || 'Failed to upload pamphlet.');
-    } finally {
-      setUploadingPamphlet(null);
-    }
-  };
-
-  // Delete pamphlet function
-  const deletePamphlet = async (eventId: string) => {
-    try {
-      if (!confirm('Are you sure you want to delete this pamphlet?')) return;
-
-      setError(null);
-      const event = events.find(e => e.id === eventId);
-      if (!event?.pamphlet_url) return;
-
-      // Extract file path from URL
-      const urlParts = event.pamphlet_url.split('/');
-      const fileName = urlParts[urlParts.length - 2];
-      const fileExt = urlParts[urlParts.length - 1].split('.').pop();
-      const filePath = `event-pamphlets/${fileName}/pamphlet.${fileExt}`;
-
-      const { error: deleteError } = await supabase.storage
-        .from('event-pamphlets')
-        .remove([filePath]);
-
-      if (deleteError) throw deleteError;
-
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ pamphlet_url: null })
-        .eq('id', eventId);
-
-      if (updateError) throw updateError;
-
-      setEvents(prev => prev.map(event => 
-        event.id === eventId ? { ...event, pamphlet_url: null } : event
-      ));
-
-      setSuccess('Pamphlet deleted successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error deleting pamphlet:', error);
-      setError(error.message || 'Failed to delete pamphlet.');
-    }
-  };
-
-  // View pamphlet in modal
-  const viewPamphlet = (pamphletUrl: string) => {
-    setViewingPamphlet(pamphletUrl);
-  };
-
-  // Close pamphlet modal
-  const closePamphletModal = () => {
-    setViewingPamphlet(null);
-  };
-
-  // Rest of your existing functions...
+  // Rest of your existing event and attendee functions...
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
       const absentRecords = absentMemberIds.map(memberId => {
@@ -1616,7 +1654,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Pamphlet Display Section */}
+                      {/* FIXED: Pamphlet Display Section */}
                       {event.pamphlet_url && (
                         <div className="mt-4">
                           <div className="flex items-center gap-3 flex-wrap">
@@ -1655,7 +1693,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Upload Pamphlet Button */}
+                      {/* FIXED: Upload Pamphlet Button */}
                       {hasAccess() && !event.pamphlet_url && (
                         <div className="mt-4">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
