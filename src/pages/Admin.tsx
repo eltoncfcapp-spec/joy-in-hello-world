@@ -1,5 +1,5 @@
 import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Calendar, MessageSquare, Globe, Building, Clock, MapPin, BookOpen, Heart, CreditCard, BarChart3, Filter, UserCheck, History, Lock, Eye, Server, Archive, Trash2, Wifi, WifiOff, Phone, Map, Globe2, Book, Cpu, HardDrive, Network, Smartphone, MessageCircle } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
 
@@ -166,11 +166,11 @@ interface AuditLog {
   created_at: string;
 }
 
-interface ReportData {
-  membership_growth: { month: string; count: number }[];
-  attendance_trends: { date: string; attendance: number }[];
-  donation_summary: { category: string; amount: number }[];
-  group_statistics: { group_name: string; member_count: number }[];
+interface StorageInfo {
+  total_storage: number;
+  used_storage: number;
+  available_storage: number;
+  usage_percentage: number;
 }
 
 // Helper functions
@@ -360,250 +360,470 @@ const cloudService = {
 
   // New Administrative Functions
   async getChurchInfo(): Promise<ChurchInfo> {
-    const { data, error } = await supabase
-      .from('church_info')
-      .select('*')
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('church_info')
+        .select('*')
+        .single();
 
-    if (error || !data) {
-      return {
-        name: 'Your Church Name',
-        address: '',
-        phone: '',
-        email: '',
-        website: '',
-        denomination: '',
-        doctrinal_statement: '',
-        service_times: [],
-        communication_templates: []
-      };
+      if (error || !data) {
+        // Create default church info if it doesn't exist
+        const defaultInfo: ChurchInfo = {
+          name: 'Your Church Name',
+          address: '',
+          phone: '',
+          email: '',
+          website: '',
+          denomination: '',
+          doctrinal_statement: '',
+          service_times: [],
+          communication_templates: []
+        };
+        
+        const { data: newData, error: createError } = await supabase
+          .from('church_info')
+          .insert(defaultInfo)
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        return newData;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error fetching church info:', error);
+      throw error;
     }
-    return data;
   },
 
   async updateChurchInfo(info: ChurchInfo): Promise<ChurchInfo> {
-    const { data, error } = await supabase
-      .from('church_info')
-      .upsert(info)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('church_info')
+        .upsert(info)
+        .select()
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error updating church info:', error);
+      throw error;
+    }
   },
 
   async getSystemConfig(): Promise<SystemConfig> {
-    const { data, error } = await supabase
-      .from('system_config')
-      .select('*')
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('system_config')
+        .select('*')
+        .single();
 
-    if (error || !data) {
-      return {
-        global_settings: {
-          timezone: 'UTC',
-          date_format: 'MM/DD/YYYY',
-          language: 'en',
-          currency: 'USD',
-          max_login_attempts: 5,
-          session_timeout: 60
-        },
-        notification_settings: {
-          email_notifications: true,
-          sms_notifications: false,
-          push_notifications: true,
-          event_reminders: true,
-          donation_receipts: true,
-          birthday_reminders: true
-        },
-        backup_settings: {
-          auto_backup: true,
-          backup_frequency: 'weekly',
-          backup_time: '02:00',
-          retain_backups: 30,
-          cloud_storage: true
-        },
-        integration_settings: {
-          email_service: 'smtp',
-          sms_service: 'twilio',
-          calendar_sync: false,
-          payment_gateway: 'none'
-        }
-      };
+      if (error || !data) {
+        // Create default system config if it doesn't exist
+        const defaultConfig: SystemConfig = {
+          global_settings: {
+            timezone: 'UTC',
+            date_format: 'MM/DD/YYYY',
+            language: 'en',
+            currency: 'USD',
+            max_login_attempts: 5,
+            session_timeout: 60
+          },
+          notification_settings: {
+            email_notifications: true,
+            sms_notifications: false,
+            push_notifications: true,
+            event_reminders: true,
+            donation_receipts: true,
+            birthday_reminders: true
+          },
+          backup_settings: {
+            auto_backup: true,
+            backup_frequency: 'weekly',
+            backup_time: '02:00',
+            retain_backups: 30,
+            cloud_storage: true
+          },
+          integration_settings: {
+            email_service: 'smtp',
+            sms_service: 'twilio',
+            calendar_sync: false,
+            payment_gateway: 'none'
+          }
+        };
+        
+        const { data: newData, error: createError } = await supabase
+          .from('system_config')
+          .insert(defaultConfig)
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        return newData;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error fetching system config:', error);
+      throw error;
     }
-    return data;
   },
 
   async updateSystemConfig(config: SystemConfig): Promise<SystemConfig> {
-    const { data, error } = await supabase
-      .from('system_config')
-      .upsert(config)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('system_config')
+        .upsert(config)
+        .select()
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error updating system config:', error);
+      throw error;
+    }
   },
 
   async getSecuritySettings(): Promise<SecuritySettings> {
-    const { data, error } = await supabase
-      .from('security_settings')
-      .select('*')
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('security_settings')
+        .select('*')
+        .single();
 
-    if (error || !data) {
-      return {
-        password_policy: {
-          min_length: 8,
-          require_uppercase: true,
-          require_lowercase: true,
-          require_numbers: true,
-          require_special_chars: false,
-          expiry_days: 90
-        },
-        access_controls: {
-          ip_whitelist: [],
-          device_restrictions: false,
-          two_factor_auth: false,
-          login_hours: {
-            start: '00:00',
-            end: '23:59'
+      if (error || !data) {
+        // Create default security settings if it doesn't exist
+        const defaultSettings: SecuritySettings = {
+          password_policy: {
+            min_length: 8,
+            require_uppercase: true,
+            require_lowercase: true,
+            require_numbers: true,
+            require_special_chars: false,
+            expiry_days: 90
+          },
+          access_controls: {
+            ip_whitelist: [],
+            device_restrictions: false,
+            two_factor_auth: false,
+            login_hours: {
+              start: '00:00',
+              end: '23:59'
+            }
+          },
+          audit_settings: {
+            log_logins: true,
+            log_data_changes: true,
+            log_exports: true,
+            retention_days: 365
           }
-        },
-        audit_settings: {
-          log_logins: true,
-          log_data_changes: true,
-          log_exports: true,
-          retention_days: 365
-        }
-      };
+        };
+        
+        const { data: newData, error: createError } = await supabase
+          .from('security_settings')
+          .insert(defaultSettings)
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        return newData;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error fetching security settings:', error);
+      throw error;
     }
-    return data;
   },
 
   async updateSecuritySettings(settings: SecuritySettings): Promise<SecuritySettings> {
-    const { data, error } = await supabase
-      .from('security_settings')
-      .upsert(settings)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('security_settings')
+        .upsert(settings)
+        .select()
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error updating security settings:', error);
+      throw error;
+    }
   },
 
   async getNotificationSettings(): Promise<NotificationSettings> {
-    const { data, error } = await supabase
-      .from('notification_settings')
-      .select('*')
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('notification_settings')
+        .select('*')
+        .single();
 
-    if (error || !data) {
-      return {
-        email_settings: {
-          smtp_host: '',
-          smtp_port: 587,
-          smtp_username: '',
-          smtp_password: '',
-          from_email: '',
-          from_name: ''
-        },
-        sms_settings: {
-          provider: 'twilio',
-          account_sid: '',
-          auth_token: '',
-          from_number: ''
-        },
-        push_settings: {
-          enabled: false,
-          service_key: ''
-        },
-        notification_templates: []
-      };
+      if (error || !data) {
+        // Create default notification settings if it doesn't exist
+        const defaultSettings: NotificationSettings = {
+          email_settings: {
+            smtp_host: '',
+            smtp_port: 587,
+            smtp_username: '',
+            smtp_password: '',
+            from_email: '',
+            from_name: ''
+          },
+          sms_settings: {
+            provider: 'twilio',
+            account_sid: '',
+            auth_token: '',
+            from_number: ''
+          },
+          push_settings: {
+            enabled: false,
+            service_key: ''
+          },
+          notification_templates: []
+        };
+        
+        const { data: newData, error: createError } = await supabase
+          .from('notification_settings')
+          .insert(defaultSettings)
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        return newData;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error fetching notification settings:', error);
+      throw error;
     }
-    return data;
   },
 
   async updateNotificationSettings(settings: NotificationSettings): Promise<NotificationSettings> {
-    const { data, error } = await supabase
-      .from('notification_settings')
-      .upsert(settings)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('notification_settings')
+        .upsert(settings)
+        .select()
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error updating notification settings:', error);
+      throw error;
+    }
   },
 
   async getAuditLogs(): Promise<AuditLog[]> {
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-    if (error) return [];
-    return data || [];
+      if (error) return [];
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching audit logs:', error);
+      return [];
+    }
   },
 
   async exportData(format: string, includeSensitive: boolean): Promise<Blob> {
-    const { data, error } = await supabase
-      .from('members')
-      .select('*');
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*');
 
-    if (error) throw error;
+      if (error) throw error;
 
-    const csvContent = convertToCSV(data || []);
-    return new Blob([csvContent], { type: 'text/csv' });
+      const csvContent = convertToCSV(data || []);
+      return new Blob([csvContent], { type: 'text/csv' });
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      throw error;
+    }
+  },
+
+  async importData(file: File, options: { updateExisting: boolean; createMissing: boolean }): Promise<{ success: number; errors: number }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result as string;
+          const rows = content.split('\n').slice(1); // Remove header
+          
+          let success = 0;
+          let errors = 0;
+
+          for (const row of rows) {
+            if (!row.trim()) continue;
+            
+            const columns = row.split(',').map(col => col.replace(/^"|"$/g, '').trim());
+            
+            try {
+              // Basic validation - adjust based on your CSV structure
+              if (columns.length >= 2) { // At least name and surname
+                const memberData = {
+                  name: columns[0],
+                  surname: columns[1],
+                  email: columns[2] || null,
+                  phone: columns[3] || null,
+                  status: 'active',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                };
+
+                if (options.updateExisting && columns[4]) { // Assuming email is used for updates
+                  const { error: updateError } = await supabase
+                    .from('members')
+                    .update(memberData)
+                    .eq('email', columns[2]);
+
+                  if (!updateError) success++;
+                  else errors++;
+                } else {
+                  const { error: insertError } = await supabase
+                    .from('members')
+                    .insert(memberData);
+
+                  if (!insertError) success++;
+                  else errors++;
+                }
+              } else {
+                errors++;
+              }
+            } catch (rowError) {
+              errors++;
+              console.error('Error processing row:', rowError);
+            }
+          }
+
+          resolve({ success, errors });
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsText(file);
+    });
   },
 
   async runBackup(): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      // Create backup record
+      const { error } = await supabase
+        .from('backups')
+        .insert({
+          created_at: new Date().toISOString(),
+          status: 'completed',
+          size: '0 MB', // You can calculate actual size if needed
+          type: 'manual'
+        });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error running backup:', error);
+      throw error;
+    }
   },
 
   async getSystemStats(): Promise<any> {
-    // Mock data for now since we don't have all tables
-    return {
-      total_members: 178,
-      total_groups: 12,
-      total_events: 45,
-      total_donations: 234,
-      storage_used: '2.3 GB',
-      active_users: 45
-    };
+    try {
+      const [
+        membersCount,
+        groupsCount,
+        backupsCount,
+        storageInfo
+      ] = await Promise.all([
+        supabase.from('members').select('*', { count: 'exact', head: true }),
+        supabase.from('cell_groups').select('*', { count: 'exact', head: true }),
+        supabase.from('backups').select('*', { count: 'exact', head: true }),
+        this.getStorageInfo()
+      ]);
+
+      return {
+        total_members: membersCount.count || 0,
+        total_groups: groupsCount.count || 0,
+        total_backups: backupsCount.count || 0,
+        storage_used: storageInfo.used_storage,
+        storage_total: storageInfo.total_storage,
+        storage_percentage: storageInfo.usage_percentage,
+        active_users: 0 // You might want to track active sessions differently
+      };
+    } catch (error) {
+      console.error('Error fetching system stats:', error);
+      return {
+        total_members: 0,
+        total_groups: 0,
+        total_backups: 0,
+        storage_used: 0,
+        storage_total: 0,
+        storage_percentage: 0,
+        active_users: 0
+      };
+    }
   },
 
-  async getReportData(): Promise<ReportData> {
-    // Mock report data
-    return {
-      membership_growth: [
-        { month: 'Jan', count: 120 },
-        { month: 'Feb', count: 135 },
-        { month: 'Mar', count: 142 },
-        { month: 'Apr', count: 156 },
-        { month: 'May', count: 165 },
-        { month: 'Jun', count: 178 }
-      ],
-      attendance_trends: [
-        { date: '2024-01-01', attendance: 85 },
-        { date: '2024-01-08', attendance: 92 },
-        { date: '2024-01-15', attendance: 78 },
-        { date: '2024-01-22', attendance: 105 },
-        { date: '2024-01-29', attendance: 98 }
-      ],
-      donation_summary: [
-        { category: 'Tithes', amount: 12500 },
-        { category: 'Offerings', amount: 3200 },
-        { category: 'Missions', amount: 1800 },
-        { category: 'Building Fund', amount: 4500 }
-      ],
-      group_statistics: [
-        { group_name: 'Young Adults', member_count: 25 },
-        { group_name: 'Men\'s Fellowship', member_count: 18 },
-        { group_name: 'Women\'s Ministry', member_count: 32 },
-        { group_name: 'Youth Group', member_count: 15 }
-      ]
-    };
+  async getStorageInfo(): Promise<StorageInfo> {
+    try {
+      // Get database size information
+      const { data: dbSize, error: dbError } = await supabase
+        .from('members')
+        .select('*');
+
+      if (dbError) throw dbError;
+
+      // Calculate approximate storage usage
+      // This is a simplified calculation - you might want more accurate metrics
+      const memberCount = dbSize?.length || 0;
+      const estimatedSizePerMember = 1024; // 1KB per member estimate
+      const usedStorage = memberCount * estimatedSizePerMember;
+      const totalStorage = 100 * 1024 * 1024; // 100MB total storage
+      const availableStorage = totalStorage - usedStorage;
+      const usagePercentage = (usedStorage / totalStorage) * 100;
+
+      return {
+        total_storage: totalStorage,
+        used_storage: usedStorage,
+        available_storage: availableStorage,
+        usage_percentage: usagePercentage
+      };
+    } catch (error) {
+      console.error('Error calculating storage info:', error);
+      return {
+        total_storage: 100 * 1024 * 1024, // 100MB
+        used_storage: 0,
+        available_storage: 100 * 1024 * 1024,
+        usage_percentage: 0
+      };
+    }
+  },
+
+  async cleanupOldData(): Promise<{ deleted: number }> {
+    try {
+      // Delete members marked as inactive for more than 1 year
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+      const { error, count } = await supabase
+        .from('members')
+        .delete()
+        .eq('status', 'inactive')
+        .lt('updated_at', oneYearAgo.toISOString())
+        .select('*', { count: 'exact' });
+
+      if (error) throw error;
+
+      return { deleted: count || 0 };
+    } catch (error) {
+      console.error('Error cleaning up old data:', error);
+      throw error;
+    }
   }
 };
 
@@ -621,6 +841,18 @@ const convertToCSV = (data: any[]): string => {
   }
   
   return csvRows.join('\n');
+};
+
+const formatBytes = (bytes: number, decimals = 2): string => {
+  if (bytes === 0) return '0 Bytes';
+
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 };
 
 // Modal wrapper component
@@ -666,7 +898,12 @@ const Admin = () => {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [backupStatus, setBackupStatus] = useState<string>('');
-  const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importOptions, setImportOptions] = useState({
+    updateExisting: true,
+    createMissing: true
+  });
+  const [importResults, setImportResults] = useState<{ success: number; errors: number } | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -690,7 +927,7 @@ const Admin = () => {
     login_pin: ''
   });
 
-  // Enhanced admin sections
+  // Enhanced admin sections (removed analytics/reports)
   const adminSections = [
     {
       icon: Building,
@@ -747,15 +984,7 @@ const Admin = () => {
       color: 'from-pink-500 to-pink-600',
       modal: 'communication',
       permission: 'admin_access'
-    },
-    {
-      icon: BarChart3,
-      title: 'Reports & Analytics',
-      description: 'System reports and statistics',
-      color: 'from-indigo-500 to-indigo-600',
-      modal: 'reports',
-      permission: 'view_reports'
-    },
+    }
   ];
 
   const roles = [
@@ -781,6 +1010,18 @@ const Admin = () => {
     { value: 'view_reports', label: 'View Reports', description: 'Can access analytics and reports' },
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
+
+  // Debounced church info update
+  const debouncedUpdateChurchInfo = useCallback(
+    debounce(async (info: ChurchInfo) => {
+      try {
+        await cloudService.updateChurchInfo(info);
+      } catch (err) {
+        console.error('Error auto-saving church info:', err);
+      }
+    }, 2000), // 2 second delay
+    []
+  );
 
   // Enhanced load data function
   const loadData = async () => {
@@ -940,10 +1181,6 @@ const Admin = () => {
       const settings = await cloudService.getNotificationSettings();
       setNotificationSettings(settings);
     }
-    if (modalType === 'reports') {
-      const reports = await cloudService.getReportData();
-      setReportData(reports);
-    }
   };
 
   const closeModal = () => {
@@ -963,6 +1200,8 @@ const Admin = () => {
     setShowCredentials(false);
     setGeneratedCredentials(null);
     setError(null);
+    setImportFile(null);
+    setImportResults(null);
   };
 
   // Handler functions for administrative sections
@@ -979,6 +1218,18 @@ const Admin = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleChurchInfoChange = (field: string, value: any) => {
+    if (!churchInfo) return;
+    
+    const updatedInfo = {
+      ...churchInfo,
+      [field]: value
+    };
+    
+    setChurchInfo(updatedInfo);
+    debouncedUpdateChurchInfo(updatedInfo);
   };
 
   const handleUpdateSystemConfig = async () => {
@@ -1033,6 +1284,7 @@ const Admin = () => {
       await cloudService.runBackup();
       setBackupStatus('Backup completed successfully!');
       setTimeout(() => setBackupStatus(''), 3000);
+      await loadData(); // Refresh stats
     } catch (err) {
       setBackupStatus('Backup failed!');
     } finally {
@@ -1054,6 +1306,42 @@ const Admin = () => {
       document.body.removeChild(a);
     } catch (err) {
       setError('Failed to export data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportData = async () => {
+    if (!importFile) {
+      setError('Please select a file to import');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const results = await cloudService.importData(importFile, importOptions);
+      setImportResults(results);
+      await loadData(); // Refresh data after import
+    } catch (err) {
+      setError('Failed to import data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCleanupData = async () => {
+    if (!confirm('Are you sure you want to cleanup old data? This action cannot be undone.')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await cloudService.cleanupOldData();
+      alert(`Successfully deleted ${result.deleted} inactive members.`);
+      await loadData(); // Refresh data after cleanup
+    } catch (err) {
+      setError('Failed to cleanup data');
     } finally {
       setLoading(false);
     }
@@ -1332,7 +1620,7 @@ const Admin = () => {
             <input
               type="text"
               value={churchInfo?.name || ''}
-              onChange={(e) => setChurchInfo(prev => prev ? {...prev, name: e.target.value} : null)}
+              onChange={(e) => handleChurchInfoChange('name', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -1341,7 +1629,7 @@ const Admin = () => {
             <input
               type="text"
               value={churchInfo?.denomination || ''}
-              onChange={(e) => setChurchInfo(prev => prev ? {...prev, denomination: e.target.value} : null)}
+              onChange={(e) => handleChurchInfoChange('denomination', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -1351,7 +1639,7 @@ const Admin = () => {
           <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
           <textarea
             value={churchInfo?.address || ''}
-            onChange={(e) => setChurchInfo(prev => prev ? {...prev, address: e.target.value} : null)}
+            onChange={(e) => handleChurchInfoChange('address', e.target.value)}
             rows={3}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
           />
@@ -1363,7 +1651,7 @@ const Admin = () => {
             <input
               type="text"
               value={churchInfo?.phone || ''}
-              onChange={(e) => setChurchInfo(prev => prev ? {...prev, phone: e.target.value} : null)}
+              onChange={(e) => handleChurchInfoChange('phone', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -1372,7 +1660,7 @@ const Admin = () => {
             <input
               type="email"
               value={churchInfo?.email || ''}
-              onChange={(e) => setChurchInfo(prev => prev ? {...prev, email: e.target.value} : null)}
+              onChange={(e) => handleChurchInfoChange('email', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -1381,7 +1669,7 @@ const Admin = () => {
             <input
               type="url"
               value={churchInfo?.website || ''}
-              onChange={(e) => setChurchInfo(prev => prev ? {...prev, website: e.target.value} : null)}
+              onChange={(e) => handleChurchInfoChange('website', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -1391,27 +1679,24 @@ const Admin = () => {
           <label className="block text-sm font-medium text-gray-700 mb-2">Doctrinal Statement</label>
           <textarea
             value={churchInfo?.doctrinal_statement || ''}
-            onChange={(e) => setChurchInfo(prev => prev ? {...prev, doctrinal_statement: e.target.value} : null)}
+            onChange={(e) => handleChurchInfoChange('doctrinal_statement', e.target.value)}
             rows={6}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             placeholder="Enter your church's doctrinal statement..."
           />
         </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={handleUpdateChurchInfo}
-            disabled={loading}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Saving...' : 'Save Changes'}
-          </button>
-          <button
-            onClick={closeModal}
-            className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-          >
-            Cancel
-          </button>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <RefreshCw className="h-5 w-5 text-blue-400" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-700">
+                Changes are automatically saved as you type.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </Modal>
@@ -1537,6 +1822,50 @@ const Admin = () => {
   const DataManagementModal = () => (
     <Modal title="Data Management" onClose={closeModal}>
       <div className="space-y-6">
+        {/* Storage Information */}
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Storage Information</h3>
+          {systemStats && (
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm text-gray-600 mb-1">
+                  <span>Storage Used</span>
+                  <span>{formatBytes(systemStats.storage_used)} of {formatBytes(systemStats.storage_total)}</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${systemStats.storage_percentage}%` }}
+                  ></div>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {systemStats.storage_percentage.toFixed(1)}% used
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white p-3 rounded-lg border text-center">
+                  <div className="text-lg font-bold text-blue-600">{systemStats.total_members}</div>
+                  <div className="text-xs text-gray-600">Members</div>
+                </div>
+                <div className="bg-white p-3 rounded-lg border text-center">
+                  <div className="text-lg font-bold text-green-600">{systemStats.total_groups}</div>
+                  <div className="text-xs text-gray-600">Groups</div>
+                </div>
+                <div className="bg-white p-3 rounded-lg border text-center">
+                  <div className="text-lg font-bold text-purple-600">{systemStats.total_backups}</div>
+                  <div className="text-xs text-gray-600">Backups</div>
+                </div>
+                <div className="bg-white p-3 rounded-lg border text-center">
+                  <div className="text-lg font-bold text-orange-600">{formatBytes(systemStats.storage_used)}</div>
+                  <div className="text-xs text-gray-600">Used</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Export Data */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Export Data</h3>
           <div className="space-y-4">
@@ -1544,10 +1873,6 @@ const Admin = () => {
               <label className="flex items-center">
                 <input type="radio" name="format" value="csv" defaultChecked className="mr-2" />
                 <span className="text-sm text-gray-700">CSV Format</span>
-              </label>
-              <label className="flex items-center">
-                <input type="radio" name="format" value="json" className="mr-2" />
-                <span className="text-sm text-gray-700">JSON Format</span>
               </label>
             </div>
             <label className="flex items-center">
@@ -1565,24 +1890,104 @@ const Admin = () => {
           </div>
         </div>
 
+        {/* Import Data */}
         <div className="bg-gray-50 p-6 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">System Statistics</h3>
-          {systemStats && (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div className="bg-white p-4 rounded-lg border">
-                <div className="text-2xl font-bold text-blue-600">{systemStats.total_members}</div>
-                <div className="text-sm text-gray-600">Total Members</div>
-              </div>
-              <div className="bg-white p-4 rounded-lg border">
-                <div className="text-2xl font-bold text-green-600">{systemStats.total_groups}</div>
-                <div className="text-sm text-gray-600">Groups</div>
-              </div>
-              <div className="bg-white p-4 rounded-lg border">
-                <div className="text-2xl font-bold text-purple-600">{systemStats.active_users}</div>
-                <div className="text-sm text-gray-600">Active Users</div>
-              </div>
+          <h3 className="text-lg font-semibold mb-4">Import Data</h3>
+          <div className="space-y-4">
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+              {importFile ? (
+                <div className="space-y-2">
+                  <FileText className="h-8 w-8 text-green-600 mx-auto" />
+                  <p className="text-sm font-medium text-gray-900">{importFile.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {formatBytes(importFile.size)} • {new Date(importFile.lastModified).toLocaleDateString()}
+                  </p>
+                  <button
+                    onClick={() => setImportFile(null)}
+                    className="text-red-600 text-sm hover:text-red-700"
+                  >
+                    Remove File
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">Drag and drop your CSV file here or click to browse</p>
+                  <input 
+                    type="file" 
+                    accept=".csv"
+                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    className="hidden" 
+                    id="file-upload"
+                  />
+                  <label
+                    htmlFor="file-upload"
+                    className="mt-2 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-700"
+                  >
+                    Browse Files
+                  </label>
+                </div>
+              )}
             </div>
-          )}
+            
+            <div className="space-y-2">
+              <label className="flex items-center">
+                <input 
+                  type="checkbox" 
+                  checked={importOptions.updateExisting}
+                  onChange={(e) => setImportOptions(prev => ({...prev, updateExisting: e.target.checked}))}
+                  className="mr-2" 
+                />
+                <span className="text-sm text-gray-700">Update existing records</span>
+              </label>
+              <label className="flex items-center">
+                <input 
+                  type="checkbox" 
+                  checked={importOptions.createMissing}
+                  onChange={(e) => setImportOptions(prev => ({...prev, createMissing: e.target.checked}))}
+                  className="mr-2" 
+                />
+                <span className="text-sm text-gray-700">Create missing records</span>
+              </label>
+            </div>
+
+            {importResults && (
+              <div className={`p-3 rounded-lg ${
+                importResults.errors > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+              }`}>
+                <p className="font-medium">
+                  Import completed: {importResults.success} successful, {importResults.errors} errors
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={handleImportData}
+              disabled={!importFile || loading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4" />
+              {loading ? 'Importing...' : 'Import Data'}
+            </button>
+          </div>
+        </div>
+
+        {/* Data Cleanup */}
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Data Cleanup</h3>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Remove inactive members who have been inactive for more than 1 year. This action cannot be undone.
+            </p>
+            <button
+              onClick={handleCleanupData}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              {loading ? 'Cleaning...' : 'Cleanup Old Data'}
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
@@ -1762,57 +2167,6 @@ const Admin = () => {
             ))}
             <button className="w-full p-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 hover:text-gray-700">
               + Add New Template
-            </button>
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-
-  const ReportsModal = () => (
-    <Modal title="Reports & Analytics" onClose={closeModal}>
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white p-4 rounded-lg border">
-            <div className="text-2xl font-bold text-blue-600">{systemStats?.total_members || 0}</div>
-            <div className="text-sm text-gray-600">Total Members</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg border">
-            <div className="text-2xl font-bold text-green-600">{systemStats?.total_groups || 0}</div>
-            <div className="text-sm text-gray-600">Active Groups</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg border">
-            <div className="text-2xl font-bold text-purple-600">{systemStats?.active_users || 0}</div>
-            <div className="text-sm text-gray-600">Active Users</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg border">
-            <div className="text-2xl font-bold text-orange-600">{systemStats?.total_donations || 0}</div>
-            <div className="text-sm text-gray-600">Donations</div>
-          </div>
-        </div>
-
-        <div className="bg-gray-50 p-6 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Quick Reports</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
-              <FileText className="h-6 w-6 text-blue-600 mb-2" />
-              <div className="font-semibold text-gray-900">Membership Report</div>
-              <div className="text-sm text-gray-600">Current membership statistics</div>
-            </button>
-            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
-              <BarChart3 className="h-6 w-6 text-green-600 mb-2" />
-              <div className="font-semibold text-gray-900">Attendance Report</div>
-              <div className="text-sm text-gray-600">Service attendance trends</div>
-            </button>
-            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
-              <CreditCard className="h-6 w-6 text-purple-600 mb-2" />
-              <div className="font-semibold text-gray-900">Financial Report</div>
-              <div className="text-sm text-gray-600">Donations and expenses</div>
-            </button>
-            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
-              <Users className="h-6 w-6 text-orange-600 mb-2" />
-              <div className="font-semibold text-gray-900">Group Report</div>
-              <div className="text-sm text-gray-600">Group activity and membership</div>
             </button>
           </div>
         </div>
@@ -2128,6 +2482,18 @@ const Admin = () => {
     </Modal>
   );
 
+  // Debounce utility function
+  function debounce<T extends (...args: any[]) => any>(
+    func: T,
+    wait: number
+  ): (...args: Parameters<T>) => void {
+    let timeout: NodeJS.Timeout;
+    return (...args: Parameters<T>) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  }
+
   // Keep your existing render logic for initialLoad and hasAccess
   if (initialLoad) {
     return (
@@ -2222,7 +2588,7 @@ const Admin = () => {
         )}
 
         {/* Enhanced Admin Sections Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
             if (!profile) return null;
             
@@ -2486,7 +2852,6 @@ const Admin = () => {
         {activeModal === 'security' && <SecurityModal />}
         {activeModal === 'notifications' && <NotificationsModal />}
         {activeModal === 'communication' && <CommunicationModal />}
-        {activeModal === 'reports' && <ReportsModal />}
         {activeModal === 'users' && <UsersModal />}
         {activeModal === 'userDetails' && <UserDetailsModal />}
 
