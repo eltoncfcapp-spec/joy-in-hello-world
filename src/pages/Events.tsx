@@ -47,12 +47,12 @@ interface Member {
   ministry_group_id: string | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  department_members?: {
+  department_members?: Array<{
     departments: {
       id: string;
       name: string;
     };
-  }[];
+  }>;
 }
 
 interface CellGroup {
@@ -177,14 +177,14 @@ const Events = () => {
       const eventsWithDefaults = (data || []).map((event: any) => ({
         ...event,
         is_whole_church: event.is_whole_church ?? true,
-        target_groups: event.target_groups ?? null,
-        target_departments: event.target_departments ?? null,
+        target_groups: event.target_groups ?? [],
+        target_departments: event.target_departments ?? [],
         is_completed: event.is_completed ?? false,
         completed_at: event.completed_at ?? null,
         pamphlet_url: event.pamphlet_url ?? null
       }));
 
-      setEvents(eventsWithDefaults);
+      setEvents(eventsWithDefaults as Event[]);
       
       eventsWithDefaults.forEach((event: any) => {
         fetchEventAttendees(event.id);
@@ -233,13 +233,7 @@ const Events = () => {
           ministry_group_id,
           status,
           cell_groups!fk_cell_group(name),
-          ministry_groups(name),
-          department_members!inner (
-            departments (
-              id,
-              name
-            )
-          )
+          ministry_groups(name)
         `)
         .order('name');
 
@@ -312,13 +306,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members!inner (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -350,8 +338,55 @@ const Events = () => {
   };
 
   // Helper function to check if member belongs to department
-  const isMemberInDepartment = (member: Member, departmentId: string) => {
-    return member.department_members?.some(dm => dm.departments.id === departmentId) || false;
+  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('department_members')
+        .select('id')
+        .eq('member_id', memberId)
+        .eq('department_id', departmentId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No rows returned - member is not in department
+          return false;
+        }
+        throw error;
+      }
+
+      return !!data;
+    } catch (error) {
+      console.error('Error checking department membership:', error);
+      return false;
+    }
+  };
+
+  // Helper function to check if member belongs to any target groups/departments
+  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
+    if (event.is_whole_church) return true;
+
+    // Check cell groups
+    if (event.target_groups && event.target_groups.length > 0) {
+      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
+        return true;
+      }
+    }
+
+    // Check ministry groups
+    if (event.target_departments && event.target_departments.length > 0) {
+      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
+        return true;
+      }
+
+      // Check departments
+      for (const deptId of event.target_departments) {
+        const isInDept = await isMemberInDepartment(member.id, deptId);
+        if (isInDept) return true;
+      }
+    }
+
+    return false;
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -477,7 +512,7 @@ const Events = () => {
   const uploadSermonFile = async (file: File, type: 'video' | 'document'): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `${type}/${fileName}`;
+    const filePath = `${type}s/${fileName}`;
 
     console.log(`Uploading ${type} file:`, file.name, 'to path:', filePath);
 
@@ -507,7 +542,7 @@ const Events = () => {
       
       const urlParts = fileUrl.split('/');
       const fileName = urlParts[urlParts.length - 1];
-      const filePath = `${type}/${fileName}`;
+      const filePath = `${type}s/${fileName}`;
 
       console.log(`Deleting ${type} file:`, filePath);
 
@@ -760,7 +795,7 @@ const Events = () => {
       if (error) throw error;
 
       await fetchSermons();
-      setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
+      setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error(`Error removing ${fileType}:`, error);
@@ -813,30 +848,18 @@ const Events = () => {
       const eventAttendees = getEventAttendees(eventId);
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
-      let expectedMembers: Member[] = [];
+      const absentMemberIds: string[] = [];
 
-      if (event.is_whole_church) {
-        expectedMembers = members.filter(member => 
-          member.status !== 'not_attending'
-        );
-      } else {
-        expectedMembers = members.filter(member => {
-          const inTargetCellGroup = event.target_groups?.some(groupId => 
-            member.cell_group_id === groupId
-          );
-          const inTargetMinistryGroup = event.target_departments?.some(deptId => 
-            member.ministry_group_id === deptId
-          );
-          const inTargetDepartment = event.target_departments?.some(deptId => 
-            isMemberInDepartment(member, deptId)
-          );
-          return (inTargetCellGroup || inTargetMinistryGroup || inTargetDepartment) && member.status !== 'not_attending';
-        });
+      // Check each member to see if they should be marked absent
+      for (const member of members) {
+        if (member.status === 'not_attending') continue;
+        if (attendeeIds.has(member.id)) continue;
+
+        const shouldAttend = await isMemberInTargetGroups(member, event);
+        if (shouldAttend) {
+          absentMemberIds.push(member.id);
+        }
       }
-
-      const absentMemberIds = expectedMembers
-        .filter(member => !attendeeIds.has(member.id))
-        .map(member => member.id);
 
       if (absentMemberIds.length > 0) {
         await markMembersAsAbsent(eventId, absentMemberIds);
