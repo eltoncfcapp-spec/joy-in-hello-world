@@ -772,9 +772,8 @@ const Events = () => {
         return {
           event_id: eventId,
           members_id: memberId,
-          name: member?.name || 'Unknown',
-          surname: member?.surname || 'Member',
           first_time: false,
+          invited_by_id: null,
           attendance_status: 'absent',
           attended_at: null
         };
@@ -944,7 +943,7 @@ const Events = () => {
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
         attendance_status: 'present',
-        attended_at: new Date().toISOString() // Set current timestamp for attendance
+        attended_at: new Date().toISOString()
       };
 
       console.log('Submitting attendee data:', attendeeData);
