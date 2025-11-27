@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -112,8 +112,6 @@ const Events = () => {
   const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
   const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
   
-  const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
-  const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
   const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
 
   const [eventFormData, setEventFormData] = useState({
@@ -149,7 +147,7 @@ const Events = () => {
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
   const hasAccess = () => {
-    return isAdmin() || isPastor();
+    return isAdmin?.() || isPastor?.();
   };
 
   useEffect(() => {
@@ -187,9 +185,10 @@ const Events = () => {
 
       setEvents(eventsWithDefaults as Event[]);
       
-      eventsWithDefaults.forEach((event: any) => {
-        fetchEventAttendees(event.id);
-      });
+      // Fetch attendees for each event
+      for (const event of eventsWithDefaults) {
+        await fetchEventAttendees(event.id);
+      }
     } catch (error: any) {
       console.error('Error fetching events:', error);
       setError(error.message || 'Failed to load events.');
@@ -257,7 +256,6 @@ const Events = () => {
       setCellGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
-      setError(error.message || 'Failed to load cell groups.');
     }
   };
 
@@ -272,7 +270,6 @@ const Events = () => {
       setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
-      setError(error.message || 'Failed to load ministry groups.');
     }
   };
 
@@ -287,7 +284,6 @@ const Events = () => {
       setDepartments(data || []);
     } catch (error: any) {
       console.error('Error fetching departments:', error);
-      setError(error.message || 'Failed to load departments.');
     }
   };
 
@@ -338,7 +334,6 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
-  // Helper function to check if member belongs to department
   const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
     try {
       const { data, error } = await supabase
@@ -362,7 +357,6 @@ const Events = () => {
     }
   };
 
-  // Helper function to check if member belongs to any target groups/departments
   const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
     if (event.is_whole_church) return true;
 
@@ -394,10 +388,10 @@ const Events = () => {
       setUploadingPamphlet(eventId);
       setError(null);
 
-      const allowedTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
       const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
       
-      if (!allowedTypes.includes(fileExtension)) {
+      if (!allowedTypes.includes(file.type)) {
         throw new Error('Invalid file type. Please upload PDF, image, or document files.');
       }
 
@@ -653,10 +647,10 @@ const Events = () => {
       if (!sermonToDelete) throw new Error('Sermon not found');
 
       if (sermonToDelete.video_url) {
-        deleteSermonFile(sermonToDelete.video_url, 'video');
+        await deleteSermonFile(sermonToDelete.video_url, 'video');
       }
       if (sermonToDelete.document_url) {
-        deleteSermonFile(sermonToDelete.document_url, 'document');
+        await deleteSermonFile(sermonToDelete.document_url, 'document');
       }
 
       const { error } = await supabase
@@ -767,17 +761,14 @@ const Events = () => {
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
-      const absentRecords = absentMemberIds.map(memberId => {
-        const member = members.find(m => m.id === memberId);
-        return {
-          event_id: eventId,
-          members_id: memberId,
-          first_time: false,
-          invited_by_id: null,
-          attendance_status: 'absent',
-          attended_at: null
-        };
-      });
+      const absentRecords = absentMemberIds.map(memberId => ({
+        event_id: eventId,
+        members_id: memberId,
+        first_time: false,
+        invited_by_id: null,
+        attendance_status: 'absent' as const,
+        attended_at: null
+      }));
 
       const { error } = await supabase
         .from('event_attendees')
@@ -907,7 +898,6 @@ const Events = () => {
     }
   };
 
-  // FIXED: handleAttendeeSubmit function
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
@@ -936,13 +926,12 @@ const Events = () => {
       const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
       if (!selectedMember) throw new Error('Selected member not found');
 
-      // FIXED: Create proper attendee data structure for Supabase
       const attendeeData = {
         event_id: eventId,
         members_id: attendeeFormData.memberId,
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
-        attendance_status: 'present',
+        attendance_status: 'present' as const,
         attended_at: new Date().toISOString()
       };
 
@@ -1051,28 +1040,6 @@ const Events = () => {
     });
     setInviterSearchTerm(`${member.name} ${member.surname}`);
     setIsInviterDropdownOpen(false);
-  };
-
-  const togglePresentList = (eventId: string) => {
-    setShowPresentList(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowAbsentList(prev => ({
-      ...prev,
-      [eventId]: false
-    }));
-  };
-
-  const toggleAbsentList = (eventId: string) => {
-    setShowAbsentList(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowPresentList(prev => ({
-      ...prev,
-      [eventId]: false
-    }));
   };
 
   const openAttendeeModal = (type: 'present' | 'absent', eventId: string) => {
@@ -1340,7 +1307,7 @@ const Events = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
@@ -1351,7 +1318,7 @@ const Events = () => {
             <p className="text-gray-600 dark:text-gray-400">Manage church events and sermons</p>
             <div className="mt-2">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                {isAdmin() ? 'Administrator' : isPastor() ? 'Pastor' : 'Member'}
+                {isAdmin?.() ? 'Administrator' : isPastor?.() ? 'Pastor' : 'Member'}
               </span>
             </div>
           </div>
@@ -1752,7 +1719,7 @@ const Events = () => {
               const sermon = getSermonForEvent(event.id);
               
               return (
-                <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
+                <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
                   <div className="flex flex-col lg:flex-row justify-between gap-6">
                     <div className="flex-1">
                       <div className="flex items-start gap-4 mb-4">
