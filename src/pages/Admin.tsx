@@ -1,4 +1,4 @@
-import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Calendar, MessageSquare, Globe, Building, Clock, MapPin, BookOpen, Heart, CreditCard, BarChart3, Filter, UserCheck, History, Lock, Eye, Server, Archive, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Calendar, MessageSquare, Globe, Building, Clock, MapPin, BookOpen, Heart, CreditCard, BarChart3, Filter, UserCheck, History, Lock, Eye, Server, Archive, Trash2, Wifi, WifiOff, Phone, Map, Globe2, Book, Cpu, HardDrive, Network, Smartphone, MessageCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -186,7 +186,14 @@ interface AuditLog {
   created_at: string;
 }
 
-// Helper functions (keep your existing ones)
+interface ReportData {
+  membership_growth: { month: string; count: number }[];
+  attendance_trends: { date: string; attendance: number }[];
+  donation_summary: { category: string; amount: number }[];
+  group_statistics: { group_name: string; member_count: number }[];
+}
+
+// Helper functions
 const getRolesFromMember = (member: Member): string[] => {
   const roles: string[] = [];
   if (member.admin_role && member.admin_role !== 'member') {
@@ -486,6 +493,49 @@ const cloudService = {
     return data;
   },
 
+  async getNotificationSettings(): Promise<NotificationSettings> {
+    const { data, error } = await supabase
+      .from('notification_settings')
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      return {
+        email_settings: {
+          smtp_host: '',
+          smtp_port: 587,
+          smtp_username: '',
+          smtp_password: '',
+          from_email: '',
+          from_name: ''
+        },
+        sms_settings: {
+          provider: 'twilio',
+          account_sid: '',
+          auth_token: '',
+          from_number: ''
+        },
+        push_settings: {
+          enabled: false,
+          service_key: ''
+        },
+        notification_templates: []
+      };
+    }
+    return data;
+  },
+
+  async updateNotificationSettings(settings: NotificationSettings): Promise<NotificationSettings> {
+    const { data, error } = await supabase
+      .from('notification_settings')
+      .upsert(settings)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
   async getAuditLogs(): Promise<AuditLog[]> {
     const { data, error } = await supabase
       .from('audit_logs')
@@ -509,7 +559,6 @@ const cloudService = {
   },
 
   async runBackup(): Promise<void> {
-    // Simulate backup process
     await new Promise(resolve => setTimeout(resolve, 2000));
   },
 
@@ -533,6 +582,39 @@ const cloudService = {
       total_donations: donationsCount.count || 0,
       storage_used: '2.3 GB',
       active_users: 45
+    };
+  },
+
+  async getReportData(): Promise<ReportData> {
+    // Mock report data
+    return {
+      membership_growth: [
+        { month: 'Jan', count: 120 },
+        { month: 'Feb', count: 135 },
+        { month: 'Mar', count: 142 },
+        { month: 'Apr', count: 156 },
+        { month: 'May', count: 165 },
+        { month: 'Jun', count: 178 }
+      ],
+      attendance_trends: [
+        { date: '2024-01-01', attendance: 85 },
+        { date: '2024-01-08', attendance: 92 },
+        { date: '2024-01-15', attendance: 78 },
+        { date: '2024-01-22', attendance: 105 },
+        { date: '2024-01-29', attendance: 98 }
+      ],
+      donation_summary: [
+        { category: 'Tithes', amount: 12500 },
+        { category: 'Offerings', amount: 3200 },
+        { category: 'Missions', amount: 1800 },
+        { category: 'Building Fund', amount: 4500 }
+      ],
+      group_statistics: [
+        { group_name: 'Young Adults', member_count: 25 },
+        { group_name: 'Men\'s Fellowship', member_count: 18 },
+        { group_name: 'Women\'s Ministry', member_count: 32 },
+        { group_name: 'Youth Group', member_count: 15 }
+      ]
     };
   }
 };
@@ -572,9 +654,11 @@ const Admin = () => {
   const [churchInfo, setChurchInfo] = useState<ChurchInfo | null>(null);
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null);
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [backupStatus, setBackupStatus] = useState<string>('');
+  const [reportData, setReportData] = useState<ReportData | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -695,24 +779,20 @@ const Admin = () => {
     setLoading(true);
     setError(null);
     try {
-      console.log('Loading admin data...');
-      const [membersData, groupsData, churchData, systemData, securityData, auditData, statsData] = await Promise.all([
+      const [membersData, groupsData, churchData, systemData, securityData, statsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups(),
         cloudService.getChurchInfo(),
         cloudService.getSystemConfig(),
         cloudService.getSecuritySettings(),
-        cloudService.getAuditLogs(),
         cloudService.getSystemStats()
       ]);
       
-      console.log('Data loaded:', { members: membersData.length, groups: groupsData.length });
       setMembers(membersData);
       setGroups(groupsData);
       setChurchInfo(churchData);
       setSystemConfig(systemData);
       setSecuritySettings(securityData);
-      setAuditLogs(auditData);
       setSystemStats(statsData);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
@@ -807,7 +887,17 @@ const Admin = () => {
       created_at: profile.created_at
     };
 
-    if (!isAdminOrPastor(currentUser)) {
+    if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions, 'view_members')) {
+      setError('You do not have permission to view user management');
+      return;
+    }
+    
+    if (user && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions, 'edit_members')) {
+      setError('You do not have permission to edit users');
+      return;
+    }
+
+    if (!isAdminOrPastor(currentUser) && !['users', 'userDetails'].includes(modalType)) {
       setError('You do not have permission to access admin sections');
       return;
     }
@@ -838,6 +928,14 @@ const Admin = () => {
       const logs = await cloudService.getAuditLogs();
       setAuditLogs(logs);
     }
+    if (modalType === 'notifications') {
+      const settings = await cloudService.getNotificationSettings();
+      setNotificationSettings(settings);
+    }
+    if (modalType === 'reports') {
+      const reports = await cloudService.getReportData();
+      setReportData(reports);
+    }
   };
 
   const closeModal = () => {
@@ -859,7 +957,7 @@ const Admin = () => {
     setError(null);
   };
 
-  // New handler functions for administrative sections
+  // Handler functions for administrative sections
   const handleUpdateChurchInfo = async () => {
     if (!churchInfo) return;
     
@@ -885,6 +983,36 @@ const Admin = () => {
       closeModal();
     } catch (err) {
       setError('Failed to update system configuration');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateSecuritySettings = async () => {
+    if (!securitySettings) return;
+    
+    setLoading(true);
+    try {
+      await cloudService.updateSecuritySettings(securitySettings);
+      alert('Security settings updated successfully!');
+      closeModal();
+    } catch (err) {
+      setError('Failed to update security settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateNotificationSettings = async () => {
+    if (!notificationSettings) return;
+    
+    setLoading(true);
+    try {
+      await cloudService.updateNotificationSettings(notificationSettings);
+      alert('Notification settings updated successfully!');
+      closeModal();
+    } catch (err) {
+      setError('Failed to update notification settings');
     } finally {
       setLoading(false);
     }
@@ -923,7 +1051,7 @@ const Admin = () => {
     }
   };
 
-  // Keep your existing handler functions (handleGenerateCredentials, handleUserUpdate, etc.)
+  // Keep your existing handler functions
   const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
     
@@ -1045,7 +1173,7 @@ const Admin = () => {
     }
   };
 
-  // Permission and role handlers (keep your existing ones)
+  // Permission and role handlers
   const handlePermissionToggle = (permission: string) => {
     setUserFormData(prev => ({
       ...prev,
@@ -1114,7 +1242,7 @@ const Admin = () => {
     return Array.from(combinedPermissions);
   };
 
-  // Enhanced member filtering (keep your existing)
+  // Enhanced member filtering
   const getFilteredMembers = () => {
     let filtered = members;
     if (searchTerm) {
@@ -1125,15 +1253,81 @@ const Admin = () => {
       );
     }
     if (!profile) return [];
-    // ... rest of your filtering logic
-    return filtered;
+
+    const currentUser: Member = {
+      id: profile.id,
+      name: profile.name || '',
+      surname: profile.surname || '',
+      email: profile.email,
+      phone: profile.phone || null,
+      admin_role: profile.admin_role || 'member',
+      pastor_role: profile.pastor_role || false,
+      deacon_role: profile.deacon_role || false,
+      group_leader: profile.group_leader || false,
+      department_leader: profile.department_leader || false,
+      permissions: profile.permissions || [],
+      login_username: profile.login_username || null,
+      login_pin: profile.login_pin || null,
+      assigned_groups: profile.assigned_groups || [],
+      assigned_departments: profile.assigned_departments || [],
+      can_add_members: profile.can_add_members || false,
+      can_edit_members: profile.can_edit_members || false,
+      can_view_own_data: profile.can_view_own_data || false,
+      cell_group_id: profile.cell_group_id,
+      status: profile.status,
+      created_at: profile.created_at
+    };
+
+    if (isAdminOrPastor(currentUser)) {
+      return filtered;
+    }
+
+    if (hasPermission(profile.permissions, 'manage_groups')) {
+      return filtered;
+    }
+
+    if (currentUser.group_leader && profile.assigned_groups && profile.assigned_groups.length > 0) {
+      filtered = filtered.filter(member => {
+        if (member.cell_group_id && profile.assigned_groups.includes(member.cell_group_id)) {
+          return true;
+        }
+        if (member.assigned_groups && member.assigned_groups.some(group => profile.assigned_groups.includes(group))) {
+          return true;
+        }
+        return false;
+      });
+      return filtered;
+    }
+
+    if (currentUser.department_leader && profile.assigned_departments && profile.assigned_departments.length > 0) {
+      filtered = filtered.filter(member => {
+        if (member.assigned_departments && member.assigned_departments.some(dept => profile.assigned_departments.includes(dept))) {
+          return true;
+        }
+        return false;
+      });
+      return filtered;
+    }
+
+    if (hasAnyRole(currentUser, ['member']) && profile.cell_group_id) {
+      filtered = filtered.filter(member => 
+        member.cell_group_id === profile.cell_group_id
+      );
+      return filtered;
+    }
+
+    if (hasPermission(profile.permissions, 'view_members')) {
+      return filtered;
+    }
+
+    return [];
   };
 
   const filteredMembers = getFilteredMembers();
   const cellGroups = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
 
-  // Modal Components for New Administrative Sections
+  // Modal Components for ALL Administrative Sections
   const ChurchInfoModal = () => (
     <Modal title="Church Information Management">
       <div className="space-y-6">
@@ -1409,6 +1603,45 @@ const Admin = () => {
     <Modal title="Security Settings">
       <div className="space-y-6">
         <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Password Policy</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Minimum Length</label>
+              <input 
+                type="number" 
+                value={securitySettings?.password_policy.min_length || 8}
+                onChange={(e) => setSecuritySettings(prev => prev ? {
+                  ...prev,
+                  password_policy: {...prev.password_policy, min_length: parseInt(e.target.value)}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg" 
+              />
+            </div>
+            <div className="space-y-2">
+              {[
+                { key: 'require_uppercase', label: 'Require uppercase letters' },
+                { key: 'require_lowercase', label: 'Require lowercase letters' },
+                { key: 'require_numbers', label: 'Require numbers' },
+                { key: 'require_special_chars', label: 'Require special characters' }
+              ].map((req) => (
+                <label key={req.key} className="flex items-center">
+                  <input 
+                    type="checkbox" 
+                    checked={securitySettings?.password_policy[req.key as keyof typeof securitySettings.password_policy] as boolean || false}
+                    onChange={(e) => setSecuritySettings(prev => prev ? {
+                      ...prev,
+                      password_policy: {...prev.password_policy, [req.key]: e.target.checked}
+                    } : null)}
+                    className="mr-2" 
+                  />
+                  <span className="text-sm text-gray-700">{req.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Audit Logs</h3>
           <div className="space-y-2 max-h-60 overflow-y-auto">
             {auditLogs.map((log) => (
@@ -1430,24 +1663,477 @@ const Admin = () => {
           </div>
         </div>
 
+        <div className="flex gap-3">
+          <button 
+            onClick={handleUpdateSecuritySettings}
+            disabled={loading}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Security Settings'}
+          </button>
+          <button onClick={closeModal} className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  const NotificationsModal = () => (
+    <Modal title="Notification Settings">
+      <div className="space-y-6">
         <div className="bg-gray-50 p-6 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Security Overview</h3>
+          <h3 className="text-lg font-semibold mb-4">Email Settings</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white p-4 rounded-lg border">
-              <div className="flex items-center gap-2 mb-2">
-                <Shield className="h-5 w-5 text-green-600" />
-                <span className="font-semibold">System Status</span>
-              </div>
-              <div className="text-sm text-gray-600">All systems secure</div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
+              <input 
+                type="text" 
+                value={notificationSettings?.email_settings.smtp_host || ''}
+                onChange={(e) => setNotificationSettings(prev => prev ? {
+                  ...prev,
+                  email_settings: {...prev.email_settings, smtp_host: e.target.value}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
             </div>
-            <div className="bg-white p-4 rounded-lg border">
-              <div className="flex items-center gap-2 mb-2">
-                <UserCheck className="h-5 w-5 text-blue-600" />
-                <span className="font-semibold">Active Sessions</span>
-              </div>
-              <div className="text-sm text-gray-600">{systemStats?.active_users || 0} users</div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Port</label>
+              <input 
+                type="number" 
+                value={notificationSettings?.email_settings.smtp_port || 587}
+                onChange={(e) => setNotificationSettings(prev => prev ? {
+                  ...prev,
+                  email_settings: {...prev.email_settings, smtp_port: parseInt(e.target.value)}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
             </div>
           </div>
+        </div>
+
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Notification Types</h3>
+          <div className="space-y-3">
+            {[
+              { key: 'email_notifications', label: 'Email Notifications', icon: Mail },
+              { key: 'sms_notifications', label: 'SMS Notifications', icon: MessageCircle },
+              { key: 'push_notifications', label: 'Push Notifications', icon: Bell },
+              { key: 'event_reminders', label: 'Event Reminders', icon: Calendar },
+              { key: 'donation_receipts', label: 'Donation Receipts', icon: CreditCard },
+              { key: 'birthday_reminders', label: 'Birthday Reminders', icon: Heart }
+            ].map((type) => (
+              <label key={type.key} className="flex items-center gap-3 p-3 bg-white rounded-lg border cursor-pointer hover:bg-gray-50">
+                <input 
+                  type="checkbox" 
+                  checked={systemConfig?.notification_settings[type.key as keyof typeof systemConfig.notification_settings] as boolean || false}
+                  onChange={(e) => setSystemConfig(prev => prev ? {
+                    ...prev,
+                    notification_settings: {...prev.notification_settings, [type.key]: e.target.checked}
+                  } : null)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <type.icon className="h-5 w-5 text-gray-600" />
+                <span className="text-sm font-medium text-gray-700">{type.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button 
+            onClick={handleUpdateNotificationSettings}
+            disabled={loading}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Notification Settings'}
+          </button>
+          <button onClick={closeModal} className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  const CommunicationModal = () => (
+    <Modal title="Communication Templates">
+      <div className="space-y-6">
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Email Templates</h3>
+          <div className="space-y-4">
+            {churchInfo?.communication_templates?.map((template, index) => (
+              <div key={index} className="bg-white p-4 rounded-lg border">
+                <h4 className="font-semibold text-gray-900">{template.name}</h4>
+                <p className="text-sm text-gray-600 mt-1">{template.subject}</p>
+                <button className="mt-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+                  Edit Template
+                </button>
+              </div>
+            ))}
+            <button className="w-full p-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 hover:text-gray-700">
+              + Add New Template
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  const ReportsModal = () => (
+    <Modal title="Reports & Analytics">
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white p-4 rounded-lg border">
+            <div className="text-2xl font-bold text-blue-600">{systemStats?.total_members || 0}</div>
+            <div className="text-sm text-gray-600">Total Members</div>
+          </div>
+          <div className="bg-white p-4 rounded-lg border">
+            <div className="text-2xl font-bold text-green-600">{systemStats?.total_groups || 0}</div>
+            <div className="text-sm text-gray-600">Active Groups</div>
+          </div>
+          <div className="bg-white p-4 rounded-lg border">
+            <div className="text-2xl font-bold text-purple-600">{systemStats?.active_users || 0}</div>
+            <div className="text-sm text-gray-600">Active Users</div>
+          </div>
+          <div className="bg-white p-4 rounded-lg border">
+            <div className="text-2xl font-bold text-orange-600">{systemStats?.total_donations || 0}</div>
+            <div className="text-sm text-gray-600">Donations</div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Quick Reports</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
+              <FileText className="h-6 w-6 text-blue-600 mb-2" />
+              <div className="font-semibold text-gray-900">Membership Report</div>
+              <div className="text-sm text-gray-600">Current membership statistics</div>
+            </button>
+            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
+              <BarChart3 className="h-6 w-6 text-green-600 mb-2" />
+              <div className="font-semibold text-gray-900">Attendance Report</div>
+              <div className="text-sm text-gray-600">Service attendance trends</div>
+            </button>
+            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
+              <CreditCard className="h-6 w-6 text-purple-600 mb-2" />
+              <div className="font-semibold text-gray-900">Financial Report</div>
+              <div className="text-sm text-gray-600">Donations and expenses</div>
+            </button>
+            <button className="p-4 bg-white rounded-lg border text-left hover:bg-gray-50">
+              <Users className="h-6 w-6 text-orange-600 mb-2" />
+              <div className="font-semibold text-gray-900">Group Report</div>
+              <div className="text-sm text-gray-600">Group activity and membership</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  // Your existing User Management Modal
+  const UsersModal = () => (
+    <Modal title="User Management">
+      <div className="space-y-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search users by name, email, or role..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+
+        {loading ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading users...</p>
+          </div>
+        ) : (
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {filteredMembers.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                    {member.name.charAt(0)}{member.surname.charAt(0)}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-900">
+                      {member.name} {member.surname}
+                    </h4>
+                    <p className="text-sm text-gray-500">
+                      {member.email} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => openModal('userDetails', member)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                >
+                  Manage
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+
+  // Your existing User Details Modal
+  const UserDetailsModal = () => (
+    <Modal title={`Manage User - ${selectedUser?.name} ${selectedUser?.surname}`}>
+      <div className="space-y-6">
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <p className="text-red-700 font-medium">{error}</p>
+          </div>
+        )}
+
+        <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
+              {selectedUser?.name.charAt(0)}{selectedUser?.surname.charAt(0)}
+            </div>
+            <div>
+              <h4 className="text-xl font-bold text-gray-900">
+                {selectedUser?.name} {selectedUser?.surname}
+              </h4>
+              <p className="text-gray-600">{selectedUser?.email}</p>
+              <p className="text-sm text-gray-500">{selectedUser?.phone}</p>
+              {selectedUser?.cell_group_id && (
+                <p className="text-sm text-gray-500">Cell Group ID: {selectedUser?.cell_group_id}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* User Roles Section */}
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-gray-700">
+              User Roles
+            </label>
+            <div className="grid grid-cols-1 gap-3">
+              {roles.map(role => (
+                <label
+                  key={role.value}
+                  className="flex items-start gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={userFormData.roles.includes(role.value)}
+                    onChange={() => handleRoleToggle(role.value)}
+                    className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="flex-1">
+                    <span className="font-medium text-gray-900">{role.label}</span>
+                    <p className="text-sm text-gray-500 mt-1">{role.description}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <p className="text-sm text-gray-500">
+              Selected: {userFormData.roles.map(role => 
+                roles.find(r => r.value === role)?.label || role
+              ).join(', ')}
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-gray-700">
+              Login Credentials
+            </label>
+            <button
+              onClick={handleGenerateCredentials}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Generating...' : 'Generate Login Credentials'}
+            </button>
+            
+            {showCredentials && generatedCredentials && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-green-900">Generated Credentials</span>
+                  <button
+                    onClick={() => {
+                      const text = `Username: ${generatedCredentials.username}\nPIN: ${generatedCredentials.pin}`;
+                      navigator.clipboard.writeText(text);
+                      alert('Credentials copied to clipboard!');
+                    }}
+                    className="flex items-center gap-1 text-green-700 hover:text-green-900"
+                  >
+                    <Copy className="h-4 w-4" />
+                    <span className="text-xs">Copy</span>
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <span className="text-xs text-green-700">Username:</span>
+                    <p className="font-mono font-semibold text-green-900">{generatedCredentials.username}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-green-700">PIN:</span>
+                    <p className="font-mono font-semibold text-green-900 text-2xl tracking-wider">{generatedCredentials.pin}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {(userFormData.roles.includes('group_leader') || userFormData.roles.includes('department_leader')) && (
+          <div className="space-y-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <h4 className="font-semibold text-blue-900 mb-2">Leadership Permissions</h4>
+              <p className="text-sm text-blue-700 mb-4">
+                Configure what this leader can do within their assigned groups/departments
+              </p>
+              
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={userFormData.can_add_members}
+                    onChange={(e) => setUserFormData(prev => ({...prev, can_add_members: e.target.checked}))}
+                    className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="font-medium text-gray-900">Can Add Members</span>
+                    <p className="text-xs text-gray-500">Allow adding new members to assigned groups</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={userFormData.can_edit_members}
+                    onChange={(e) => setUserFormData(prev => ({...prev, can_edit_members: e.target.checked}))}
+                    className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="font-medium text-gray-900">Can Edit Members</span>
+                    <p className="text-xs text-gray-500">Allow editing member information in assigned groups</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-3 p-3 bg-white rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={userFormData.can_view_own_data}
+                    onChange={(e) => setUserFormData(prev => ({...prev, can_view_own_data: e.target.checked}))}
+                    className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="font-medium text-gray-900">Can View & Edit Own Group/Department Data</span>
+                    <p className="text-xs text-gray-500">Full access to view and edit all data within assigned areas</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {userFormData.roles.includes('group_leader') && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Assigned Cell Groups
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {cellGroups.map(group => (
+                    <label
+                      key={group.id}
+                      className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={userFormData.assigned_groups.includes(group.id)}
+                        onChange={() => handleGroupToggle(group.id)}
+                        className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="font-medium text-gray-900">{group.name}</span>
+                        <p className="text-xs text-gray-500">{group.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {userFormData.roles.includes('department_leader') && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Assigned Departments
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {departments.map(dept => (
+                    <label
+                      key={dept.id}
+                      className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={userFormData.assigned_departments.includes(dept.id)}
+                        onChange={() => handleDepartmentToggle(dept.id)}
+                        className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+                      />
+                      <div>
+                        <span className="font-medium text-gray-900">{dept.name}</span>
+                        <p className="text-xs text-gray-500">{dept.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-3">
+            System Permissions
+          </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto p-2">
+            {permissions.map(permission => (
+              <label
+                key={permission.value}
+                className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={userFormData.permissions.includes(permission.value)}
+                  onChange={() => handlePermissionToggle(permission.value)}
+                  className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-900">{permission.label}</span>
+                  <p className="text-xs text-gray-500">{permission.description}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3 pt-4">
+          <button
+            onClick={handleUserUpdate}
+            disabled={loading}
+            className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+          >
+            {loading ? 'Updating...' : 'Update User'}
+          </button>
+          <button
+            onClick={closeModal}
+            className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </Modal>
@@ -1621,17 +2307,219 @@ const Admin = () => {
           })}
         </div>
 
-        {/* Keep your existing User Management Section */}
-        {/* ... */}
+        {/* Your existing User Management Section */}
+        {profile && (() => {
+          const currentUser: Member = {
+            id: profile.id,
+            name: profile.name || '',
+            surname: profile.surname || '',
+            email: profile.email,
+            phone: profile.phone || null,
+            admin_role: profile.admin_role || 'member',
+            pastor_role: profile.pastor_role || false,
+            deacon_role: profile.deacon_role || false,
+            group_leader: profile.group_leader || false,
+            department_leader: profile.department_leader || false,
+            permissions: profile.permissions || [],
+            login_username: profile.login_username || null,
+            login_pin: profile.login_pin || null,
+            assigned_groups: profile.assigned_groups || [],
+            assigned_departments: profile.assigned_departments || [],
+            can_add_members: profile.can_add_members || false,
+            can_edit_members: profile.can_edit_members || false,
+            can_view_own_data: profile.can_view_own_data || false,
+            cell_group_id: profile.cell_group_id,
+            status: profile.status,
+            created_at: profile.created_at
+          };
 
-        {/* Render Modals */}
+          return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions, 'view_members')) && (
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
+                {(isAdminOrPastor(currentUser) || hasPermission(profile.permissions, 'add_members')) && (
+                  <button
+                    onClick={() => openModal('users')}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                  >
+                    <Users className="h-4 w-4" />
+                    View All Users
+                  </button>
+                )}
+              </div>
+
+              <div className="relative mb-6">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search users by name, email, or role..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading users...</p>
+                </div>
+              ) : filteredMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600">
+                    {searchTerm 
+                      ? 'No users found matching your search' 
+                      : hasAnyRole(currentUser, ['member'])
+                      ? 'No members found in your cell group'
+                      : 'No users found in your assigned groups/departments'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {filteredMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                          {member.name.charAt(0)}{member.surname.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900">
+                            {member.name} {member.surname}
+                          </h4>
+                          <p className="text-sm text-gray-500">
+                            {member.email} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                          </p>
+                          {member.cell_group_id && (
+                            <p className="text-xs text-gray-500">
+                              Cell Group ID: {member.cell_group_id}
+                            </p>
+                          )}
+                          {member.login_username && (
+                            <p className="text-xs text-blue-600 mt-1">
+                              <Key className="h-3 w-3 inline mr-1" />
+                              Login: {member.login_username}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {member.assigned_groups.length > 0 && (
+                          <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                            {member.assigned_groups.length} Group{member.assigned_groups.length > 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {member.assigned_departments.length > 0 && (
+                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                            {member.assigned_departments.length} Dept{member.assigned_departments.length > 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {(isAdminOrPastor(currentUser) || hasPermission(profile.permissions, 'edit_members')) && (
+                          <button
+                            onClick={() => openModal('userDetails', member)}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                          >
+                            Manage
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Stats Section */}
+        {profile && (() => {
+          const currentUser: Member = {
+            id: profile.id,
+            name: profile.name || '',
+            surname: profile.surname || '',
+            email: profile.email,
+            phone: profile.phone || null,
+            admin_role: profile.admin_role || 'member',
+            pastor_role: profile.pastor_role || false,
+            deacon_role: profile.deacon_role || false,
+            group_leader: profile.group_leader || false,
+            department_leader: profile.department_leader || false,
+            permissions: profile.permissions || [],
+            login_username: profile.login_username || null,
+            login_pin: profile.login_pin || null,
+            assigned_groups: profile.assigned_groups || [],
+            assigned_departments: profile.assigned_departments || [],
+            can_add_members: profile.can_add_members || false,
+            can_edit_members: profile.can_edit_members || false,
+            can_view_own_data: profile.can_view_own_data || false,
+            cell_group_id: profile.cell_group_id,
+            status: profile.status,
+            created_at: profile.created_at
+          };
+
+          return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions, 'view_reports')) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Role Statistics</h2>
+                <div className="space-y-4">
+                  {roles.map(role => {
+                    const count = filteredMembers.filter(m => 
+                      getRolesFromMember(m).includes(role.value)
+                    ).length;
+                    return (
+                      <div key={role.value} className="flex justify-between items-center">
+                        <span className="text-gray-600">{role.label}</span>
+                        <span className="text-gray-900 font-semibold">{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Quick Stats</h2>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Visible Members</span>
+                    <span className="text-gray-900 font-semibold">{filteredMembers.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Total Members</span>
+                    <span className="text-gray-900 font-semibold">{members.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Active Groups</span>
+                    <span className="text-gray-900 font-semibold">{cellGroups.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Departments</span>
+                    <span className="text-gray-900 font-semibold">{departments.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Users with Login</span>
+                    <span className="text-gray-900 font-semibold">
+                      {members.filter(m => m.login_username).length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Render ALL Modals */}
         {activeModal === 'church-info' && <ChurchInfoModal />}
         {activeModal === 'system-config' && <SystemConfigModal />}
         {activeModal === 'data-management' && <DataManagementModal />}
         {activeModal === 'security' && <SecurityModal />}
-
-        {/* Keep your existing User Details Modal and other modals */}
-        {/* ... */}
+        {activeModal === 'notifications' && <NotificationsModal />}
+        {activeModal === 'communication' && <CommunicationModal />}
+        {activeModal === 'reports' && <ReportsModal />}
+        {activeModal === 'users' && <UsersModal />}
+        {activeModal === 'userDetails' && <UserDetailsModal />}
 
       </div>
     </div>
