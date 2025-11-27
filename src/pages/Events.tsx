@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -908,6 +908,7 @@ const Events = () => {
     }
   };
 
+  // FIXED: handleAttendeeSubmit function
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
@@ -917,6 +918,7 @@ const Events = () => {
       return;
     }
 
+    // Check if member is already registered for this event
     const alreadyRegistered = attendees.some(
       a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
     );
@@ -935,24 +937,57 @@ const Events = () => {
       const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
       if (!selectedMember) throw new Error('Selected member not found');
 
+      // FIXED: Create proper attendee data structure for Supabase
       const attendeeData = {
         event_id: eventId,
         members_id: attendeeFormData.memberId,
-        name: selectedMember.name,
-        surname: selectedMember.surname,
         first_time: attendeeFormData.firstTime,
+        invited_by_id: attendeeFormData.invitedById || null,
         attendance_status: 'present',
-        invited_by_id: attendeeFormData.invitedById || null
+        attended_at: new Date().toISOString() // Set current timestamp for attendance
       };
 
-      const { error } = await supabase.from('event_attendees').insert([attendeeData]);
+      console.log('Submitting attendee data:', attendeeData);
 
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .insert([attendeeData])
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name)
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
+        .single();
 
+      if (error) {
+        console.error('Supabase error details:', error);
+        throw error;
+      }
+
+      console.log('Attendee added successfully:', data);
+
+      // Reset form and close it
       resetAttendeeForm();
-      await fetchEventAttendees(eventId);
-      setSuccess('Attendee added successfully!');
       
+      // Refresh attendees for this event
+      await fetchEventAttendees(eventId);
+      
+      setSuccess('Attendee added successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error adding attendee:', error);
@@ -1129,7 +1164,7 @@ const Events = () => {
       return {
         color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
         text: 'Target Groups',
-        icon: GroupsIcon
+        icon: UsersIcon
       };
     }
   };
@@ -1180,7 +1215,7 @@ const Events = () => {
           <div className="p-6 max-h-[70vh] overflow-y-auto">
             {attendees.length === 0 ? (
               <div className="text-center py-12">
-                <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <UsersIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">
                   No {type === 'present' ? 'Present' : 'Absent'} Attendees
                 </h4>
@@ -1572,7 +1607,7 @@ const Events = () => {
                         onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
                         className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
                       />
-                      <GroupsIcon className="h-5 w-5 text-orange-600" />
+                      <UsersIcon className="h-5 w-5 text-orange-600" />
                       <div>
                         <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
