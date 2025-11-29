@@ -147,6 +147,7 @@ const Events = () => {
   });
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
   const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
@@ -1029,6 +1030,7 @@ const Events = () => {
       invitedById: '',
     });
     setSelectedMember(null);
+    setSelectedInviter(null);
     setSearchTerm('');
     setInviterSearchTerm('');
     setIsMemberDropdownOpen(false);
@@ -1050,6 +1052,7 @@ const Events = () => {
       ...attendeeFormData,
       invitedById: member.id,
     });
+    setSelectedInviter(member);
     setInviterSearchTerm(`${member.name} ${member.surname}`);
     setIsInviterDropdownOpen(false);
   };
@@ -2615,6 +2618,38 @@ const Events = () => {
                                   setSelectedMember(null);
                                   setAttendeeFormData({ ...attendeeFormData, memberId: '' });
                                   setSearchTerm('');
+                                }}
+                                className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                              >
+                                <X className="h-4 w-4 text-red-500" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Selected Inviter Preview */}
+                        {selectedInviter && (
+                          <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-sm font-medium">
+                                  {getInitials(selectedInviter.name, selectedInviter.surname)}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-gray-900 dark:text-white">
+                                    {selectedInviter.name} {selectedInviter.surname}
+                                  </div>
+                                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                                    Invited by this member
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedInviter(null);
+                                  setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
+                                  setInviterSearchTerm('');
                                 }}
                                 className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
                               >
