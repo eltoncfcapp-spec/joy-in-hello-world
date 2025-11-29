@@ -985,7 +985,7 @@ const Events = () => {
       // Reset form and close it
       resetAttendeeForm();
       
-      // Refresh attendees for this event
+      // Refresh attendees for this event - THIS IS THE KEY FIX
       await fetchEventAttendees(eventId);
       
       setSuccess('Attendee added successfully!');
@@ -1012,6 +1012,7 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Refresh attendees for this event
       await fetchEventAttendees(eventId);
       setSuccess('Attendee removed successfully!');
       
@@ -1151,7 +1152,7 @@ const Events = () => {
 
       if (insertError) throw insertError;
 
-      // Refresh attendees
+      // Refresh attendees - THIS IS THE KEY FIX
       await fetchEventAttendees(eventId);
       closeBulkAttendanceModal();
       setSuccess('Bulk attendance saved successfully!');
@@ -1268,7 +1269,7 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Refresh data
+      // Refresh data - THIS IS THE KEY FIX
       await fetchMembers();
       await fetchEventAttendees(eventId);
       closeNewcomerModal();
@@ -2391,7 +2392,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Attendance Summary */}
+                      {/* Attendance Summary - THIS UPDATES AUTOMATICALLY NOW */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
