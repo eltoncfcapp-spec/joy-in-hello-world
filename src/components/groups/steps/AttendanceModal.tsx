@@ -17,8 +17,6 @@ interface Member {
   name: string;
   surname: string;
   phone: string | null;
-  email?: string | null;
-  status?: string;
 }
 
 const AttendanceModal: React.FC<AttendanceModalProps> = ({
@@ -35,16 +33,14 @@ const AttendanceModal: React.FC<AttendanceModalProps> = ({
 
   useEffect(() => {
     loadGroupMembers();
-    if (meeting?.id) {
-      loadExistingAttendance();
-    }
-  }, [meeting?.id]);
+    loadExistingAttendance();
+  }, [meeting.id]);
 
   const loadGroupMembers = async () => {
     try {
       const { data, error } = await supabase
         .from('members')
-        .select('id, name, surname, phone, email, status')
+        .select('id, name, surname, phone')
         .eq('cell_group_id', group.id)
         .order('name');
 
@@ -111,11 +107,6 @@ const AttendanceModal: React.FC<AttendanceModalProps> = ({
   };
 
   const saveAttendance = async () => {
-    if (!meeting?.id) {
-      onError('No meeting selected');
-      return;
-    }
-
     try {
       setLoading(true);
 
@@ -128,26 +119,16 @@ const AttendanceModal: React.FC<AttendanceModalProps> = ({
       }));
 
       // Delete existing attendance and insert new ones
-      const { error: deleteError } = await supabase
+      await supabase
         .from('meeting_attendance')
         .delete()
         .eq('meeting_id', meeting.id);
 
-      if (deleteError) throw deleteError;
-
-      const { error: insertError } = await supabase
+      const { error } = await supabase
         .from('meeting_attendance')
         .insert(attendanceRecords);
 
-      if (insertError) throw insertError;
-
-      // Update meeting status to completed
-      const { error: updateError } = await supabase
-        .from('group_meetings')
-        .update({ status: 'completed' })
-        .eq('id', meeting.id);
-
-      if (updateError) throw updateError;
+      if (error) throw error;
 
       onSuccess('Attendance saved successfully!');
       onClose();
@@ -156,10 +137,6 @@ const AttendanceModal: React.FC<AttendanceModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
-
-  const getStatusCount = (status: string) => {
-    return Object.values(attendance).filter(s => s === status).length;
   };
 
   return (
@@ -174,11 +151,6 @@ const AttendanceModal: React.FC<AttendanceModalProps> = ({
             <p className="text-gray-600 dark:text-gray-400">
               {group.name} - {new Date(meeting.meeting_date).toLocaleDateString()}
             </p>
-            {meeting.topic && (
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                Topic: {meeting.topic}
-              </p>
-            )}
           </div>
           <button
             onClick={onClose}
@@ -188,145 +160,97 @@ const AttendanceModal: React.FC<AttendanceModalProps> = ({
           </button>
         </div>
 
-        {/* Attendance Summary */}
-        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-gray-700 dark:text-gray-300">
-                  Present: <strong>{getStatusCount('present')}</strong>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                <span className="text-gray-700 dark:text-gray-300">
-                  Absent: <strong>{getStatusCount('absent')}</strong>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                <span className="text-gray-700 dark:text-gray-300">
-                  With Reason: <strong>{getStatusCount('absent_with_reason')}</strong>
-                </span>
-              </div>
-            </div>
-            <div className="text-gray-700 dark:text-gray-300">
-              Total Members: <strong>{members.length}</strong>
-            </div>
-          </div>
-        </div>
-
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {members.length === 0 ? (
-            <div className="text-center py-12">
-              <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                No Members in Group
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                There are no members assigned to this group yet.
-              </p>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Mark attendance for {members.length} members
+              </h4>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="space-y-3">
-                {members.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {member.name} {member.surname}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1 mt-1">
-                          {member.phone && <div>📞 {member.phone}</div>}
-                          {member.email && <div>✉️ {member.email}</div>}
-                          {member.status && (
-                            <div className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${
-                              member.status === 'active' 
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                : 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-300'
-                            }`}>
-                              {member.status}
-                            </div>
-                          )}
-                        </div>
+
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {members.map((member) => (
+                <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-white">
+                        {member.name} {member.surname}
                       </div>
-                      
-                      <div className="flex items-center gap-2 ml-4">
-                        {/* Present Button */}
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'present')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                            attendance[member.id] === 'present'
-                              ? 'bg-green-600 text-white shadow-lg'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                          }`}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                          Present
-                        </button>
-
-                        {/* Absent Button */}
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                            attendance[member.id] === 'absent'
-                              ? 'bg-red-600 text-white shadow-lg'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                          }`}
-                        >
-                          <XCircle className="h-4 w-4" />
-                          Absent
-                        </button>
-
-                        {/* Absent with Reason Button */}
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                            attendance[member.id] === 'absent_with_reason'
-                              ? 'bg-orange-600 text-white shadow-lg'
-                              : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
-                          }`}
-                        >
-                          <FileText className="h-4 w-4" />
-                          With Reason
-                        </button>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        {member.phone}
                       </div>
                     </div>
+                    
+                    <div className="flex items-center gap-2">
+                      {/* Present Button */}
+                      <button
+                        onClick={() => handleAttendanceChange(member.id, 'present')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          attendance[member.id] === 'present'
+                            ? 'bg-green-600 text-white shadow-lg'
+                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Present
+                      </button>
 
-                    {/* Reason Input */}
-                    {attendance[member.id] === 'absent_with_reason' && (
-                      <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Reason for Absence
-                        </label>
-                        <input
-                          type="text"
-                          value={absenceReasons[member.id] || ''}
-                          onChange={(e) => handleReasonChange(member.id, e.target.value)}
-                          placeholder="Enter reason for absence..."
-                          className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        />
-                      </div>
-                    )}
+                      {/* Absent Button */}
+                      <button
+                        onClick={() => handleAttendanceChange(member.id, 'absent')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          attendance[member.id] === 'absent'
+                            ? 'bg-red-600 text-white shadow-lg'
+                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Absent
+                      </button>
+
+                      {/* Absent with Reason Button */}
+                      <button
+                        onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          attendance[member.id] === 'absent_with_reason'
+                            ? 'bg-orange-600 text-white shadow-lg'
+                            : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <FileText className="h-4 w-4" />
+                        With Reason
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </div>
 
-              <div className="flex justify-center pt-6 border-t border-gray-200 dark:border-gray-600">
-                <button
-                  onClick={saveAttendance}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Save className="h-4 w-4" />
-                  {loading ? 'Saving Attendance...' : 'Save Attendance'}
-                </button>
-              </div>
+                  {/* Reason Input */}
+                  {attendance[member.id] === 'absent_with_reason' && (
+                    <div className="mt-3">
+                      <input
+                        type="text"
+                        value={absenceReasons[member.id] || ''}
+                        onChange={(e) => handleReasonChange(member.id, e.target.value)}
+                        placeholder="Enter reason for absence..."
+                        className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
+
+            <div className="flex justify-center pt-6">
+              <button
+                onClick={saveAttendance}
+                disabled={loading}
+                className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {loading ? 'Saving...' : 'Save Attendance'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
