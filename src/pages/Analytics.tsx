@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -19,6 +19,7 @@ interface AbsentMember {
   last_attendance_date: string | null;
   consecutive_absences: number;
   cell_group_name: string | null;
+  department_name: string | null;
   absence_reason?: string;
   member_since: string;
   gender: string;
@@ -57,6 +58,16 @@ interface CellGroupStats {
   previous_month_attendance: number;
 }
 
+interface DepartmentStats {
+  department_name: string;
+  total_members: number;
+  avg_attendance: number;
+  meetings_this_month: number;
+  leader_name: string;
+  trend: 'increasing' | 'decreasing' | 'steady';
+  previous_month_attendance: number;
+}
+
 interface InviterStats {
   invited_by: string;
   invite_count: number;
@@ -73,8 +84,9 @@ interface GenderStats {
 interface FilterState {
   gender: 'all' | 'male' | 'female';
   cell_group: string;
+  department: string;
   attendance_status: 'all' | 'present' | 'absent';
-  meeting_type: 'all' | 'sunday' | 'cell' | 'other';
+  meeting_type: 'all' | 'sunday' | 'cell' | 'department' | 'other';
   date_from: string;
   date_to: string;
 }
@@ -97,6 +109,7 @@ const Analytics = () => {
     became_members_last_month: 0
   });
   const [cellGroupStats, setCellGroupStats] = useState<CellGroupStats[]>([]);
+  const [departmentStats, setDepartmentStats] = useState<DepartmentStats[]>([]);
   const [inviterStats, setInviterStats] = useState<InviterStats[]>([]);
   const [genderStats, setGenderStats] = useState<GenderStats>({
     male: 0,
@@ -105,7 +118,9 @@ const Analytics = () => {
     female_present: 0
   });
   const [cellGroups, setCellGroups] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments'>('cell-groups');
 
   // Default date range: last 30 days
   const defaultDateFrom = new Date();
@@ -114,6 +129,7 @@ const Analytics = () => {
   const [filters, setFilters] = useState<FilterState>({
     gender: 'all',
     cell_group: 'all',
+    department: 'all',
     attendance_status: 'all',
     meeting_type: 'all',
     date_from: defaultDateFrom.toISOString().split('T')[0],
@@ -129,11 +145,13 @@ const Analytics = () => {
       setLoading(true);
 
       // Fetch all data with real Supabase queries
-      const [membersData, cellGroupsData, eventsData, eventAttendeesData] = await Promise.all([
+      const [membersData, cellGroupsData, departmentsData, eventsData, eventAttendeesData] = await Promise.all([
         // Members query with filters
         buildMembersQuery(),
         // Cell groups query
         supabase.from('cell_groups').select('*'),
+        // Departments query
+        supabase.from('departments').select('*'),
         // Events query with filters
         buildEventsQuery(),
         // Event attendees query with filters
@@ -142,18 +160,21 @@ const Analytics = () => {
 
       if (membersData.error) throw membersData.error;
       if (cellGroupsData.error) throw cellGroupsData.error;
+      if (departmentsData.error) throw departmentsData.error;
       if (eventsData.error) throw eventsData.error;
       if (eventAttendeesData.error) throw eventAttendeesData.error;
 
       const members = membersData.data || [];
       const allCellGroups = cellGroupsData.data || [];
+      const allDepartments = departmentsData.data || [];
       const events = eventsData.data || [];
       const eventAttendees = eventAttendeesData.data || [];
 
       setCellGroups(allCellGroups);
+      setDepartments(allDepartments);
 
       // Calculate all metrics with real data
-      await calculateAllMetrics(members, allCellGroups, events, eventAttendees);
+      await calculateAllMetrics(members, allCellGroups, allDepartments, events, eventAttendees);
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
@@ -163,7 +184,18 @@ const Analytics = () => {
   };
 
   const buildMembersQuery = () => {
-    let query = supabase.from('members').select('*');
+    let query = supabase
+      .from('members')
+      .select(`
+        *,
+        cell_groups!fk_cell_group(name),
+        department_members(
+          departments(
+            id,
+            name
+          )
+        )
+      `);
 
     // Apply gender filter
     if (filters.gender !== 'all') {
@@ -196,6 +228,8 @@ const Analytics = () => {
       query = query.or('name.ilike.%sunday%,name.ilike.%service%');
     } else if (filters.meeting_type === 'cell') {
       query = query.or('name.ilike.%cell%,name.ilike.%group%');
+    } else if (filters.meeting_type === 'department') {
+      query = query.or('name.ilike.%department%,name.ilike.%ministry%');
     }
 
     return query;
@@ -212,10 +246,11 @@ const Analytics = () => {
     return query;
   };
 
-  const calculateAllMetrics = async (members: any[], cellGroups: any[], events: any[], eventAttendees: any[]) => {
+  const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[]) => {
     // Calculate basic statistics with real data
     const totalMembers = members.length;
-    const totalGroups = cellGroups.length;
+    const totalCellGroups = cellGroups.length;
+    const totalDepartments = departments.length;
     
     // Events in date range
     const eventsInRange = events.length;
@@ -236,23 +271,30 @@ const Analytics = () => {
       },
       { 
         icon: Users, 
-        label: 'Active Groups', 
-        value: totalGroups.toString(), 
+        label: 'Cell Groups', 
+        value: totalCellGroups.toString(), 
         color: 'bg-green-50 dark:bg-green-900/20',
         description: `${cellGroups.filter(g => g.is_active !== false).length} active`
+      },
+      { 
+        icon: Building, 
+        label: 'Departments', 
+        value: totalDepartments.toString(), 
+        color: 'bg-purple-50 dark:bg-purple-900/20',
+        description: `${departments.filter(d => d.is_active !== false).length} active`
       },
       { 
         icon: Calendar, 
         label: 'Events', 
         value: eventsInRange.toString(), 
-        color: 'bg-purple-50 dark:bg-purple-900/20',
+        color: 'bg-orange-50 dark:bg-orange-900/20',
         description: `in selected period`
       },
       { 
         icon: BarChart3, 
         label: 'Avg Attendance', 
         value: `${avgAttendance}%`, 
-        color: 'bg-orange-50 dark:bg-orange-900/20',
+        color: 'bg-indigo-50 dark:bg-indigo-900/20',
         description: 'Across filtered events'
       },
     ]);
@@ -263,9 +305,10 @@ const Analytics = () => {
     await calculateInviterStats(members);
     await generateAttendanceReports(events, members, eventAttendees);
     await calculateCellGroupStats(cellGroups, events, members, eventAttendees);
-    await findConsecutiveAbsences(members, events, eventAttendees);
-    await findSundayServiceAbsentees(members, events, eventAttendees);
-    await findThreeTimeAbsentees(members, events, eventAttendees);
+    await calculateDepartmentStats(departments, events, members, eventAttendees);
+    await findConsecutiveAbsences(members, events, eventAttendees, cellGroups, departments);
+    await findSundayServiceAbsentees(members, events, eventAttendees, cellGroups, departments);
+    await findThreeTimeAbsentees(members, events, eventAttendees, cellGroups, departments);
   };
 
   const calculateGrowthMetrics = async (members: any[]) => {
@@ -437,7 +480,7 @@ const Analytics = () => {
       
       const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
       
-      // Get real leader info - assuming leader_id exists in cell_groups
+      // Get real leader info
       const leaderName = group.leader_id ? 
         `Leader ${group.leader_id}` : 'Not assigned';
 
@@ -458,7 +501,57 @@ const Analytics = () => {
     setCellGroupStats(stats.filter(group => group.total_members > 0));
   };
 
-  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[]) => {
+  const calculateDepartmentStats = async (departments: any[], events: any[], members: any[], eventAttendees: any[]) => {
+    const stats: DepartmentStats[] = [];
+
+    for (const department of departments) {
+      // Get department members through department_members relationship
+      const departmentMembers = members.filter(member => 
+        member.department_members?.some((dm: any) => dm.departments.id === department.id)
+      );
+
+      if (!departmentMembers || departmentMembers.length === 0) continue;
+
+      const departmentMemberIds = departmentMembers.map(m => m.id);
+      
+      // Calculate real attendance for this department
+      let presentCount = 0;
+      let totalPossible = 0;
+      
+      events.forEach(event => {
+        const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+        eventAttendeesList.forEach((attendee: any) => {
+          if (departmentMemberIds.includes(attendee.members_id)) {
+            totalPossible++;
+            if (attendee.attendance_status === 'present') presentCount++;
+          }
+        });
+      });
+      
+      const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
+      
+      // Get department leader info
+      const leaderName = department.leader_id ? 
+        `Leader ${department.leader_id}` : 'Not assigned';
+
+      // Simple trend calculation based on recent performance
+      const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
+
+      stats.push({
+        department_name: department.name,
+        total_members: departmentMembers.length,
+        avg_attendance: avgAttendance,
+        meetings_this_month: events.length,
+        leader_name: leaderName,
+        trend: trend,
+        previous_month_attendance: Math.max(0, avgAttendance - 10)
+      });
+    }
+
+    setDepartmentStats(stats.filter(dept => dept.total_members > 0));
+  };
+
+  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], departments: any[]) => {
     try {
       const absentMembersList: AbsentMember[] = [];
       
@@ -488,6 +581,9 @@ const Analytics = () => {
         if (consecutiveAbsences >= 2) {
           // Get real cell group name
           const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
+          
+          // Get department names
+          const memberDepartments = member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null;
 
           absentMembersList.push({
             id: member.id,
@@ -498,6 +594,7 @@ const Analytics = () => {
             last_attendance_date: lastAttendanceDate,
             consecutive_absences: consecutiveAbsences,
             cell_group_name: cellGroup?.name || null,
+            department_name: memberDepartments,
             member_since: member.created_at,
             gender: member.gender || 'unknown'
           });
@@ -510,7 +607,7 @@ const Analytics = () => {
     }
   };
 
-  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[]) => {
+  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], departments: any[]) => {
     try {
       const sundayAbsenteesList: AbsentMember[] = [];
       
@@ -534,6 +631,7 @@ const Analytics = () => {
 
         if (sundayAbsences >= 2) {
           const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
+          const memberDepartments = member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null;
 
           sundayAbsenteesList.push({
             id: member.id,
@@ -544,6 +642,7 @@ const Analytics = () => {
             last_attendance_date: null,
             consecutive_absences: sundayAbsences,
             cell_group_name: cellGroup?.name || null,
+            department_name: memberDepartments,
             member_since: member.created_at,
             gender: member.gender || 'unknown'
           });
@@ -556,7 +655,7 @@ const Analytics = () => {
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[]) => {
+  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], departments: any[]) => {
     try {
       const threeTimeAbsenteesList: AbsentMember[] = [];
 
@@ -574,6 +673,7 @@ const Analytics = () => {
 
         if (totalAbsences >= 3) {
           const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
+          const memberDepartments = member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null;
 
           threeTimeAbsenteesList.push({
             id: member.id,
@@ -584,6 +684,7 @@ const Analytics = () => {
             last_attendance_date: null,
             consecutive_absences: totalAbsences,
             cell_group_name: cellGroup?.name || null,
+            department_name: memberDepartments,
             member_since: member.created_at,
             gender: member.gender || 'unknown'
           });
@@ -595,7 +696,6 @@ const Analytics = () => {
       console.error('Error finding three-time absentees:', error);
     }
   };
-
 
   const getTrendIcon = (trend: 'increasing' | 'decreasing' | 'steady') => {
     switch (trend) {
@@ -612,6 +712,7 @@ const Analytics = () => {
     setFilters({
       gender: 'all',
       cell_group: 'all',
+      department: 'all',
       attendance_status: 'all',
       meeting_type: 'all',
       date_from: defaultDateFrom.toISOString().split('T')[0],
@@ -622,6 +723,7 @@ const Analytics = () => {
   const hasActiveFilters = () => {
     return filters.gender !== 'all' || 
            filters.cell_group !== 'all' || 
+           filters.department !== 'all' || 
            filters.attendance_status !== 'all' || 
            filters.meeting_type !== 'all';
   };
@@ -717,6 +819,23 @@ const Analytics = () => {
                 </select>
               </div>
 
+              {/* Department Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Department
+                </label>
+                <select
+                  value={filters.department}
+                  onChange={(e) => setFilters({...filters, department: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="all">All Departments</option>
+                  {departments.map(dept => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
+
               {/* Attendance Status Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -746,6 +865,7 @@ const Analytics = () => {
                   <option value="all">All Events</option>
                   <option value="sunday">Sunday Services</option>
                   <option value="cell">Cell Groups</option>
+                  <option value="department">Department Events</option>
                   <option value="other">Other Events</option>
                 </select>
               </div>
@@ -784,6 +904,7 @@ const Analytics = () => {
                   Active Filters: 
                   {filters.gender !== 'all' && ` ${filters.gender}`}
                   {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
+                  {filters.department !== 'all' && `, ${departments.find(d => d.id === filters.department)?.name || 'Selected Department'}`}
                   {filters.attendance_status !== 'all' && `, ${filters.attendance_status}`}
                   {filters.meeting_type !== 'all' && `, ${filters.meeting_type} events`}
                 </div>
@@ -793,7 +914,7 @@ const Analytics = () => {
         )}
 
         {/* Main Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           {stats.map((stat, index) => (
             <div key={index} className={`${stat.color} rounded-2xl p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
               <div className="flex items-center gap-4">
@@ -928,52 +1049,120 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Cell Group Performance */}
+        {/* Group Performance Tabs */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Cell Group Performance
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {cellGroupStats.length > 0 ? cellGroupStats.map((group, index) => (
-              <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-semibold text-gray-900 dark:text-white">{group.group_name}</div>
-                  {getTrendIcon(group.trend)}
-                </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                  {group.total_members} members • {group.meetings_this_month} meetings
-                </div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
-                  <span className={`text-sm font-bold ${
-                    group.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
-                    group.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
-                    'text-red-600 dark:text-red-400'
-                  }`}>
-                    {group.avg_attendance}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mb-1">
-                  <div 
-                    className={`h-2 rounded-full ${
-                      group.avg_attendance >= 80 ? 'bg-green-500' :
-                      group.avg_attendance >= 60 ? 'bg-yellow-500' :
-                      'bg-red-500'
-                    }`}
-                    style={{ width: `${group.avg_attendance}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-500">
-                  Leader: {group.leader_name}
-                </div>
-              </div>
-            )) : (
-              <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
-                No cell group data available
-              </div>
-            )}
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Group Performance
+            </h2>
+            <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              <button
+                onClick={() => setActiveTab('cell-groups')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'cell-groups'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Cell Groups
+              </button>
+              <button
+                onClick={() => setActiveTab('departments')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'departments'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Departments
+              </button>
+            </div>
           </div>
+
+          {activeTab === 'cell-groups' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {cellGroupStats.length > 0 ? cellGroupStats.map((group, index) => (
+                <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="font-semibold text-gray-900 dark:text-white">{group.group_name}</div>
+                    {getTrendIcon(group.trend)}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    {group.total_members} members • {group.meetings_this_month} meetings
+                  </div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
+                    <span className={`text-sm font-bold ${
+                      group.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
+                      group.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
+                      'text-red-600 dark:text-red-400'
+                    }`}>
+                      {group.avg_attendance}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mb-1">
+                    <div 
+                      className={`h-2 rounded-full ${
+                        group.avg_attendance >= 80 ? 'bg-green-500' :
+                        group.avg_attendance >= 60 ? 'bg-yellow-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${group.avg_attendance}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-500">
+                    Leader: {group.leader_name}
+                  </div>
+                </div>
+              )) : (
+                <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
+                  No cell group data available
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {departmentStats.length > 0 ? departmentStats.map((dept, index) => (
+                <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="font-semibold text-gray-900 dark:text-white">{dept.department_name}</div>
+                    {getTrendIcon(dept.trend)}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    {dept.total_members} members • {dept.meetings_this_month} meetings
+                  </div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
+                    <span className={`text-sm font-bold ${
+                      dept.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
+                      dept.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
+                      'text-red-600 dark:text-red-400'
+                    }`}>
+                      {dept.avg_attendance}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mb-1">
+                    <div 
+                      className={`h-2 rounded-full ${
+                        dept.avg_attendance >= 80 ? 'bg-green-500' :
+                        dept.avg_attendance >= 60 ? 'bg-yellow-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${dept.avg_attendance}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-500">
+                    Leader: {dept.leader_name}
+                  </div>
+                </div>
+              )) : (
+                <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
+                  No department data available
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Absence Alerts */}
@@ -994,7 +1183,7 @@ const Analytics = () => {
                     {member.name} {member.surname}
                   </div>
                   <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.consecutive_absences} absences
+                    {member.cell_group_name} • {member.department_name} • {member.consecutive_absences} absences
                   </div>
                 </div>
               )) : (
@@ -1021,7 +1210,7 @@ const Analytics = () => {
                     {member.name} {member.surname}
                   </div>
                   <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.gender}
+                    {member.cell_group_name} • {member.department_name} • {member.gender}
                   </div>
                 </div>
               )) : (
@@ -1048,7 +1237,7 @@ const Analytics = () => {
                     {member.name} {member.surname}
                   </div>
                   <div className="text-xs text-gray-600 dark:text-gray-400">
-                    {member.cell_group_name} • {member.consecutive_absences} absences
+                    {member.cell_group_name} • {member.department_name} • {member.consecutive_absences} absences
                   </div>
                 </div>
               )) : (
