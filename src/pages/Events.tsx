@@ -985,7 +985,7 @@ const Events = () => {
       // Reset form and close it
       resetAttendeeForm();
       
-      // Refresh attendees for this event - THIS IS THE KEY FIX
+      // Refresh attendees for this event
       await fetchEventAttendees(eventId);
       
       setSuccess('Attendee added successfully!');
@@ -1152,7 +1152,7 @@ const Events = () => {
 
       if (insertError) throw insertError;
 
-      // Refresh attendees - THIS IS THE KEY FIX
+      // Refresh attendees
       await fetchEventAttendees(eventId);
       closeBulkAttendanceModal();
       setSuccess('Bulk attendance saved successfully!');
@@ -1269,7 +1269,7 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Refresh data - THIS IS THE KEY FIX
+      // Refresh data
       await fetchMembers();
       await fetchEventAttendees(eventId);
       closeNewcomerModal();
@@ -1310,15 +1310,23 @@ const Events = () => {
   };
 
   const getPresentAttendees = (eventId: string) => {
-    return getEventAttendees(eventId).filter(attendee => 
+    const eventAttendees = getEventAttendees(eventId);
+    console.log('All attendees for event:', eventAttendees);
+    const presentAttendees = eventAttendees.filter(attendee => 
       attendee.attendance_status === 'present'
     );
+    console.log('Present attendees:', presentAttendees);
+    return presentAttendees;
   };
 
   const getAbsentAttendees = (eventId: string) => {
-    return getEventAttendees(eventId).filter(attendee => 
+    const eventAttendees = getEventAttendees(eventId);
+    console.log('All attendees for event:', eventAttendees);
+    const absentAttendees = eventAttendees.filter(attendee => 
       attendee.attendance_status === 'absent'
     );
+    console.log('Absent attendees:', absentAttendees);
+    return absentAttendees;
   };
 
   const formatDate = (dateString: string) => {
@@ -1672,13 +1680,16 @@ const Events = () => {
     );
   };
 
-  // Attendee Modal Component
+  // Attendee Modal Component - FIXED VERSION
   const AttendeeModal = () => {
     if (!showAttendeeModal) return null;
 
     const { type, eventId } = showAttendeeModal;
-    const attendees = type === 'present' ? getPresentAttendees(eventId) : getAbsentAttendees(eventId);
+    const eventAttendees = type === 'present' ? getPresentAttendees(eventId) : getAbsentAttendees(eventId);
     const event = events.find(e => e.id === eventId);
+
+    console.log('AttendeeModal - Type:', type, 'Event ID:', eventId);
+    console.log('Filtered attendees:', eventAttendees);
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1689,7 +1700,7 @@ const Events = () => {
                 {type === 'present' ? 'Present' : 'Absent'} Attendees - {event?.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Total: {attendees.length} {type === 'present' ? 'present' : 'absent'}
+                Total: {eventAttendees.length} {type === 'present' ? 'present' : 'absent'}
               </p>
             </div>
             <button
@@ -1700,7 +1711,7 @@ const Events = () => {
             </button>
           </div>
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            {attendees.length === 0 ? (
+            {eventAttendees.length === 0 ? (
               <div className="text-center py-12">
                 <UsersIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">
@@ -1714,7 +1725,7 @@ const Events = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {attendees.map((attendee) => (
+                {eventAttendees.map((attendee) => (
                   <div key={attendee.id} className={`flex items-center justify-between p-4 ${
                     type === 'present' 
                       ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700' 
@@ -2392,7 +2403,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Attendance Summary - THIS UPDATES AUTOMATICALLY NOW */}
+                      {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
@@ -2674,7 +2685,7 @@ const Events = () => {
                             type="button"
                             onClick={resetAttendeeForm}
                             className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
-                          >
+                            >
                             Cancel
                           </button>
                         </div>
