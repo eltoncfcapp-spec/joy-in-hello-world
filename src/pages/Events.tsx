@@ -113,6 +113,8 @@ const Events = () => {
   const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
   
   const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
+  const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
+  const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
 
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -145,6 +147,16 @@ const Events = () => {
   });
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
+  const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+
+  const [newcomerFormData, setNewcomerFormData] = useState({
+    name: '',
+    surname: '',
+    phone: '',
+    email: '',
+    notes: ''
+  });
 
   const hasAccess = () => {
     return isAdmin?.() || isPastor?.();
@@ -1050,6 +1062,223 @@ const Events = () => {
     setShowAttendeeModal(null);
   };
 
+  // New Bulk Attendance Functions
+  const openBulkAttendanceModal = async (eventId: string) => {
+    setShowBulkAttendanceModal(eventId);
+    
+    // Initialize bulk attendance state
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const initialAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
+    const initialNotes: Record<string, string> = {};
+
+    // Set all target members as present by default
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
+      
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        initialAttendance[member.id] = 'present';
+      }
+    }
+
+    // Update with existing attendance records
+    const existingAttendees = getEventAttendees(eventId);
+    existingAttendees.forEach(attendee => {
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent' | 'absent_with_reason';
+      if (attendee.attendance_status === 'absent_with_reason') {
+        initialNotes[attendee.members_id] = 'Previously marked absent';
+      }
+    });
+
+    setBulkAttendance(initialAttendance);
+    setAttendanceNotes(initialNotes);
+  };
+
+  const closeBulkAttendanceModal = () => {
+    setShowBulkAttendanceModal(null);
+    setBulkAttendance({});
+    setAttendanceNotes({});
+  };
+
+  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
+    setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
+    
+    if (status !== 'absent_with_reason') {
+      setAttendanceNotes(prev => {
+        const newNotes = { ...prev };
+        delete newNotes[memberId];
+        return newNotes;
+      });
+    }
+  };
+
+  const handleAttendanceNotesChange = (memberId: string, note: string) => {
+    setAttendanceNotes(prev => ({ ...prev, [memberId]: note }));
+  };
+
+  const saveBulkAttendance = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Delete existing attendance records for this event
+      const { error: deleteError } = await supabase
+        .from('event_attendees')
+        .delete()
+        .eq('event_id', eventId);
+
+      if (deleteError) throw deleteError;
+
+      // Create new attendance records
+      const attendanceRecords = Object.entries(bulkAttendance).map(([memberId, status]) => ({
+        event_id: eventId,
+        members_id: memberId,
+        first_time: false,
+        invited_by_id: null,
+        attendance_status: status,
+        attended_at: status === 'present' ? new Date().toISOString() : null
+      }));
+
+      const { error: insertError } = await supabase
+        .from('event_attendees')
+        .insert(attendanceRecords);
+
+      if (insertError) throw insertError;
+
+      // Refresh attendees
+      await fetchEventAttendees(eventId);
+      closeBulkAttendanceModal();
+      setSuccess('Bulk attendance saved successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error saving bulk attendance:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Newcomer Functions
+  const openNewcomerModal = (eventId: string) => {
+    setShowNewcomerModal(eventId);
+  };
+
+  const closeNewcomerModal = () => {
+    setShowNewcomerModal(null);
+    setNewcomerFormData({
+      name: '',
+      surname: '',
+      phone: '',
+      email: '',
+      notes: ''
+    });
+  };
+
+  const handleNewcomerSubmit = async (e: React.FormEvent, eventId: string) => {
+    e.preventDefault();
+
+    if (!newcomerFormData.name.trim() || !newcomerFormData.surname.trim()) {
+      setError('Name and surname are required');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Check if member already exists with same email or phone
+      let existingMember = null;
+      if (newcomerFormData.email.trim()) {
+        const { data: emailMatch } = await supabase
+          .from('members')
+          .select('*')
+          .eq('email', newcomerFormData.email.trim())
+          .single();
+        existingMember = emailMatch;
+      }
+      
+      if (!existingMember && newcomerFormData.phone.trim()) {
+        const { data: phoneMatch } = await supabase
+          .from('members')
+          .select('*')
+          .eq('phone', newcomerFormData.phone.trim())
+          .single();
+        existingMember = phoneMatch;
+      }
+
+      let memberId;
+      
+      if (existingMember) {
+        // Use existing member
+        memberId = existingMember.id;
+      } else {
+        // Create new member
+        const memberPayload = {
+          name: newcomerFormData.name.trim(),
+          surname: newcomerFormData.surname.trim(),
+          phone: newcomerFormData.phone.trim() || null,
+          email: newcomerFormData.email.trim() || null,
+          status: 'newcomer',
+          first_time_visit_date: new Date().toISOString(),
+          is_permanent_member: false,
+          is_leader: false,
+          admin_role: 'member',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status_date: new Date().toISOString()
+        };
+
+        const { data: memberData, error: memberError } = await supabase
+          .from('members')
+          .insert([memberPayload])
+          .select()
+          .single();
+
+        if (memberError) {
+          if (memberError.code === '23505' && memberError.message.includes('email')) {
+            setError('A member with this email already exists');
+            return;
+          }
+          throw memberError;
+        }
+        memberId = memberData.id;
+      }
+
+      // Add to event attendees
+      const attendeeData = {
+        event_id: eventId,
+        members_id: memberId,
+        first_time: true,
+        invited_by_id: null,
+        attendance_status: 'present' as const,
+        attended_at: new Date().toISOString()
+      };
+
+      const { error: attendeeError } = await supabase
+        .from('event_attendees')
+        .insert([attendeeData]);
+
+      if (attendeeError) throw attendeeError;
+
+      // Refresh data
+      await fetchMembers();
+      await fetchEventAttendees(eventId);
+      closeNewcomerModal();
+      setSuccess('Newcomer added successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error adding newcomer:', error);
+      setError(error.message || 'Failed to add newcomer.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredMembers = members.filter(member => {
     const searchLower = searchTerm.toLowerCase();
     return (
@@ -1149,6 +1378,294 @@ const Events = () => {
         icon: AlertCircle
       };
     }
+  };
+
+  // Bulk Attendance Modal Component
+  const BulkAttendanceModal = () => {
+    if (!showBulkAttendanceModal) return null;
+
+    const event = events.find(e => e.id === showBulkAttendanceModal);
+    if (!event) return null;
+
+    const targetMembers = members.filter(member => {
+      if (member.status === 'not_attending') return false;
+      return isMemberInTargetGroups(member, event);
+    });
+
+    const stats = {
+      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+      absentWithReason: Object.values(bulkAttendance).filter(status => status === 'absent_with_reason').length,
+      total: targetMembers.length
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Bulk Attendance - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage attendance for all target members
+              </p>
+            </div>
+            <button
+              onClick={closeBulkAttendanceModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Attendance Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+              </div>
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.absentWithReason}</div>
+                <div className="text-sm text-yellow-700 dark:text-yellow-300 font-medium">Absent with Notes</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+            </div>
+
+            {/* Members List */}
+            <div className="space-y-3">
+              {targetMembers.map((member) => (
+                <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
+                        {getInitials(member.name, member.surname)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900 dark:text-white">
+                          {member.name} {member.surname}
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                          {member.phone && (
+                            <div className="flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {member.phone}
+                            </div>
+                          )}
+                          {member.email && (
+                            <div className="flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {member.email}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          bulkAttendance[member.id] === 'present'
+                            ? 'bg-green-600 text-white shadow-lg'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Present
+                      </button>
+                      <button
+                        onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          bulkAttendance[member.id] === 'absent'
+                            ? 'bg-red-600 text-white shadow-lg'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <X className="h-4 w-4" />
+                        Absent
+                      </button>
+                      <button
+                        onClick={() => handleBulkAttendanceChange(member.id, 'absent_with_reason')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          bulkAttendance[member.id] === 'absent_with_reason'
+                            ? 'bg-orange-600 text-white shadow-lg'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        <FileText className="h-4 w-4" />
+                        Absent with Notes
+                      </button>
+                    </div>
+                  </div>
+                  {bulkAttendance[member.id] === 'absent_with_reason' && (
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Notes for Absence
+                      </label>
+                      <input
+                        type="text"
+                        value={attendanceNotes[member.id] || ''}
+                        onChange={(e) => handleAttendanceNotesChange(member.id, e.target.value)}
+                        placeholder="Enter notes for absence..."
+                        className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={closeBulkAttendanceModal}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+              disabled={loading}
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 flex items-center gap-2"
+            >
+              {loading ? 'Saving...' : 'Save Attendance'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Newcomer Modal Component
+  const NewcomerModal = () => {
+    if (!showNewcomerModal) return null;
+
+    const event = events.find(e => e.id === showNewcomerModal);
+    if (!event) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+              Add Newcomer - {event.name}
+            </h3>
+            <button
+              onClick={closeNewcomerModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <form onSubmit={(e) => handleNewcomerSubmit(e, showNewcomerModal)} className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  First Name *
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={newcomerFormData.name}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, name: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter first name"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Last Name *
+                </label>
+                <input
+                  type="text"
+                  value={newcomerFormData.surname}
+                  onChange={(e) => setNewcomerFormData({ ...newcomerFormData, surname: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter last name"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="tel"
+                    value={newcomerFormData.phone}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, phone: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="email"
+                    value={newcomerFormData.email}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, email: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter email address"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Additional Notes
+              </label>
+              <textarea
+                value={newcomerFormData.notes}
+                onChange={(e) => setNewcomerFormData({ ...newcomerFormData, notes: e.target.value })}
+                rows={3}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                placeholder="Any additional notes about the newcomer..."
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors disabled:opacity-50 font-medium"
+              >
+                <User className="h-4 w-4" />
+                {loading ? 'Adding Newcomer...' : 'Add Newcomer'}
+              </button>
+              <button
+                type="button"
+                onClick={closeNewcomerModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
   };
 
   // Attendee Modal Component
@@ -1872,7 +2389,7 @@ const Events = () => {
                       )}
 
                       {/* Attendance Summary */}
-                      <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
                           className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
@@ -1895,6 +2412,12 @@ const Events = () => {
                           </div>
                           <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">First Timers</div>
                         </div>
+                        <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4 text-center">
+                          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                            {presentAttendees.length + absentAttendees.length}
+                          </div>
+                          <div className="text-sm text-purple-700 dark:text-purple-300 font-medium">Total Registered</div>
+                        </div>
                       </div>
                     </div>
 
@@ -1908,6 +2431,20 @@ const Events = () => {
                           >
                             <Plus className="h-4 w-4" />
                             Add Attendee
+                          </button>
+                          <button
+                            onClick={() => openBulkAttendanceModal(event.id)}
+                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          >
+                            <UsersIcon className="h-4 w-4" />
+                            Bulk Attendance
+                          </button>
+                          <button
+                            onClick={() => openNewcomerModal(event.id)}
+                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          >
+                            <User className="h-4 w-4" />
+                            Add Newcomer
                           </button>
                           {hasAccess() && (
                             <button
@@ -2349,6 +2886,12 @@ const Events = () => {
           </div>
         </div>
       )}
+
+      {/* Bulk Attendance Modal */}
+      <BulkAttendanceModal />
+
+      {/* Newcomer Modal */}
+      <NewcomerModal />
 
       {/* Attendee Modal */}
       <AttendeeModal />
