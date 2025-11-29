@@ -911,6 +911,7 @@ const Events = () => {
     }
   };
 
+  // FIXED: Improved attendee submission with immediate UI update
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
@@ -982,11 +983,11 @@ const Events = () => {
 
       console.log('Attendee added successfully:', data);
 
+      // FIXED: Update attendees state immediately
+      setAttendees(prev => [...prev, data]);
+
       // Reset form and close it
       resetAttendeeForm();
-      
-      // Refresh attendees for this event - THIS IS THE KEY FIX
-      await fetchEventAttendees(eventId);
       
       setSuccess('Attendee added successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -998,6 +999,7 @@ const Events = () => {
     }
   };
 
+  // FIXED: Improved remove attendee with immediate UI update
   const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
     if (!confirm('Are you sure you want to remove this attendee?')) return;
 
@@ -1012,10 +1014,10 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Refresh attendees for this event
-      await fetchEventAttendees(eventId);
-      setSuccess('Attendee removed successfully!');
+      // FIXED: Update attendees state immediately
+      setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
       
+      setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error removing attendee:', error);
@@ -1066,7 +1068,7 @@ const Events = () => {
     setShowAttendeeModal(null);
   };
 
-  // New Bulk Attendance Functions
+  // FIXED: Improved bulk attendance with immediate UI updates
   const openBulkAttendanceModal = async (eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     
@@ -1122,6 +1124,7 @@ const Events = () => {
     setAttendanceNotes(prev => ({ ...prev, [memberId]: note }));
   };
 
+  // FIXED: Improved bulk attendance saving with immediate UI updates
   const saveBulkAttendance = async (eventId: string) => {
     setLoading(true);
     setError(null);
@@ -1152,8 +1155,9 @@ const Events = () => {
 
       if (insertError) throw insertError;
 
-      // Refresh attendees - THIS IS THE KEY FIX
+      // FIXED: Update attendees state immediately by refetching
       await fetchEventAttendees(eventId);
+      
       closeBulkAttendanceModal();
       setSuccess('Bulk attendance saved successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1165,7 +1169,7 @@ const Events = () => {
     }
   };
 
-  // Newcomer Functions
+  // FIXED: Improved newcomer handling with immediate UI updates
   const openNewcomerModal = (eventId: string) => {
     setShowNewcomerModal(eventId);
   };
@@ -1263,15 +1267,40 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      const { error: attendeeError } = await supabase
+      const { data: newAttendee, error: attendeeError } = await supabase
         .from('event_attendees')
-        .insert([attendeeData]);
+        .insert([attendeeData])
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name)
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
+        .single();
 
       if (attendeeError) throw attendeeError;
 
-      // Refresh data - THIS IS THE KEY FIX
+      // FIXED: Update attendees state immediately
+      if (newAttendee) {
+        setAttendees(prev => [...prev, newAttendee]);
+      }
+
+      // Refresh data
       await fetchMembers();
-      await fetchEventAttendees(eventId);
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -2392,7 +2421,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Attendance Summary - THIS UPDATES AUTOMATICALLY NOW */}
+                      {/* Attendance Summary - NOW UPDATES IMMEDIATELY */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
@@ -2893,7 +2922,7 @@ const Events = () => {
                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
               >
                 <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-              </button>
+            </button>
             </div>
             <div className="p-6 max-h-[70vh] overflow-auto">
               <iframe
