@@ -293,51 +293,51 @@ const Events = () => {
     }
   }, []);
 
-const fetchEventAttendees = useCallback(async (eventId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('event_attendees')
-      .select(`
-        *,
-        members!event_attendees_members_id_fkey (
-          id,
-          name,
-          surname,
-          email,
-          phone,
-          status,
-          cell_group_id,
-          ministry_group_id,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
-        ),
-        invited_by_member:members!event_attendees_invited_by_id_fkey (
-          id,
-          name,
-          surname
-        )
-      `)
-      .eq('event_id', eventId)
-      .order('attended_at', { ascending: false });
+  const fetchEventAttendees = useCallback(async (eventId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name)
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
+        .eq('event_id', eventId)
+        .order('attended_at', { ascending: false });
 
-    if (error) throw error;
+      if (error) throw error;
 
-    const attendeesWithDefaults = (data || []).map((attendee: any) => ({
-      ...attendee,
-      attendance_status: attendee.attendance_status || 'present'
-    }));
+      const attendeesWithDefaults = (data || []).map((attendee: any) => ({
+        ...attendee,
+        attendance_status: attendee.attendance_status || 'present'
+      }));
 
-    setAttendees(prev => {
-      const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-      return [...filtered, ...attendeesWithDefaults];
-    });
-    
-    return attendeesWithDefaults;
-  } catch (error: any) {
-    console.error('Error fetching attendees:', error);
-    return [];
-  }
-}, []);
+      setAttendees(prev => {
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...attendeesWithDefaults];
+      });
+      
+      return attendeesWithDefaults;
+    } catch (error: any) {
+      console.error('Error fetching attendees:', error);
+      return [];
+    }
+  }, []);
 
   // Initialize all data
   useEffect(() => {
@@ -373,27 +373,111 @@ const fetchEventAttendees = useCallback(async (eventId: string) => {
     fetchDepartments
   ]);
 
-  // Refresh data after modifications
-  const refreshEventData = useCallback(async (eventId?: string) => {
+  // ATTENDANCE FUNCTIONS
+  const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent' | 'absent_with_reason', notes?: string) => {
     try {
-      if (eventId) {
-        // Refresh specific event and its attendees
-        await Promise.all([
-          fetchEvents(),
-          fetchEventAttendees(eventId)
-        ]);
+      setLoading(true);
+      setError(null);
+
+      // Check if attendance record already exists
+      const { data: existingRecord } = await supabase
+        .from('event_attendees')
+        .select('id')
+        .eq('event_id', eventId)
+        .eq('members_id', memberId)
+        .single();
+
+      const attendanceData = {
+        event_id: eventId,
+        members_id: memberId,
+        first_time: false,
+        invited_by_id: null,
+        attendance_status: status,
+        attended_at: status === 'present' ? new Date().toISOString() : null,
+        notes: notes || null,
+        updated_at: new Date().toISOString()
+      };
+
+      let error;
+      if (existingRecord) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from('event_attendees')
+          .update(attendanceData)
+          .eq('id', existingRecord.id);
+        error = updateError;
       } else {
-        // Refresh all data
-        await Promise.all([
-          fetchEvents(),
-          fetchSermons(),
-          fetchMembers()
-        ]);
+        // Create new record
+        const { error: insertError } = await supabase
+          .from('event_attendees')
+          .insert([{ ...attendanceData, created_at: new Date().toISOString() }]);
+        error = insertError;
       }
-    } catch (error) {
-      console.error('Error refreshing data:', error);
+
+      if (error) throw error;
+
+      // Refresh attendees data
+      await fetchEventAttendees(eventId);
+      return true;
+    } catch (error: any) {
+      console.error('Error saving attendance:', error);
+      setError(error.message || 'Failed to save attendance.');
+      return false;
+    } finally {
+      setLoading(false);
     }
-  }, [fetchEvents, fetchSermons, fetchMembers, fetchEventAttendees]);
+  };
+
+  const saveBulkAttendance = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
+        const notes = attendanceNotes[memberId] || null;
+        return await saveAttendance(eventId, memberId, status, notes);
+      });
+
+      const results = await Promise.all(savePromises);
+      const successfulSaves = results.filter(result => result).length;
+      const totalSaves = Object.keys(bulkAttendance).length;
+
+      if (successfulSaves === totalSaves) {
+        setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
+        closeBulkAttendanceModal();
+        
+        // Refresh the event data to show updated counts
+        await fetchEventAttendees(eventId);
+      } else {
+        setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
+    } catch (error: any) {
+      console.error('Error saving bulk attendance:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const markMemberAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
+    return await saveAttendance(eventId, memberId, status, notes);
+  };
+
+  const getAttendanceStats = (eventId: string) => {
+    const eventAttendees = getEventAttendees(eventId);
+    const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
+    const absent = eventAttendees.filter(a => a.attendance_status === 'absent').length;
+    const absentWithReason = eventAttendees.filter(a => a.attendance_status === 'absent_with_reason').length;
+    const firstTimers = eventAttendees.filter(a => a.first_time && a.attendance_status === 'present').length;
+    
+    return { present, absent, absentWithReason, firstTimers, total: present + absent + absentWithReason };
+  };
 
   const getSermonForEvent = (eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
@@ -1152,8 +1236,8 @@ const fetchEventAttendees = useCallback(async (eventId: string) => {
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
       initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent' | 'absent_with_reason';
-      if (attendee.attendance_status === 'absent_with_reason') {
-        initialNotes[attendee.members_id] = 'Previously marked absent';
+      if (attendee.attendance_status === 'absent_with_reason' && attendee.notes) {
+        initialNotes[attendee.members_id] = attendee.notes;
       }
     });
 
@@ -1181,50 +1265,6 @@ const fetchEventAttendees = useCallback(async (eventId: string) => {
 
   const handleAttendanceNotesChange = (memberId: string, note: string) => {
     setAttendanceNotes(prev => ({ ...prev, [memberId]: note }));
-  };
-
-  const saveBulkAttendance = async (eventId: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      // Delete existing attendance records for this event
-      const { error: deleteError } = await supabase
-        .from('event_attendees')
-        .delete()
-        .eq('event_id', eventId);
-
-      if (deleteError) throw deleteError;
-
-      // Create new attendance records
-      const attendanceRecords = Object.entries(bulkAttendance).map(([memberId, status]) => ({
-        event_id: eventId,
-        members_id: memberId,
-        first_time: false,
-        invited_by_id: null,
-        attendance_status: status,
-        attended_at: status === 'present' ? new Date().toISOString() : null
-      }));
-
-      const { error: insertError } = await supabase
-        .from('event_attendees')
-        .insert(attendanceRecords);
-
-      if (insertError) throw insertError;
-
-      // Update attendees state immediately by refetching
-      await fetchEventAttendees(eventId);
-      
-      closeBulkAttendanceModal();
-      setSuccess('Bulk attendance saved successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error saving bulk attendance:', error);
-      setError(error.message || 'Failed to save bulk attendance.');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const openNewcomerModal = (eventId: string) => {
@@ -1404,7 +1444,7 @@ const fetchEventAttendees = useCallback(async (eventId: string) => {
 
   const getAbsentAttendees = (eventId: string) => {
     return getEventAttendees(eventId).filter(attendee => 
-      attendee.attendance_status === 'absent'
+      attendee.attendance_status === 'absent' || attendee.attendance_status === 'absent_with_reason'
     );
   };
 
@@ -1471,349 +1511,242 @@ const fetchEventAttendees = useCallback(async (eventId: string) => {
     }
   };
 
-  // Bulk Attendance Modal Component - UPDATED VERSION
-const BulkAttendanceModal = () => {
-  if (!showBulkAttendanceModal) return null;
+  // Bulk Attendance Modal Component
+  const BulkAttendanceModal = () => {
+    if (!showBulkAttendanceModal) return null;
 
-  const event = events.find(e => e.id === showBulkAttendanceModal);
-  if (!event) return null;
+    const event = events.find(e => e.id === showBulkAttendanceModal);
+    if (!event) return null;
 
-  // Get target members who should attend this event
-  const [targetMembers, setTargetMembers] = useState<Member[]>([]);
-  
-  useEffect(() => {
-    const loadTargetMembers = async () => {
-      const membersList: Member[] = [];
-      for (const member of members) {
-        if (member.status === 'not_attending') continue;
-        const shouldAttend = await isMemberInTargetGroups(member, event);
-        if (shouldAttend) {
-          membersList.push(member);
-        }
-      }
-      setTargetMembers(membersList);
-    };
+    // Get target members who should attend this event
+    const [targetMembers, setTargetMembers] = useState<Member[]>([]);
     
-    loadTargetMembers();
-  }, [event, members]);
+    useEffect(() => {
+      const loadTargetMembers = async () => {
+        const membersList: Member[] = [];
+        for (const member of members) {
+          if (member.status === 'not_attending') continue;
+          const shouldAttend = await isMemberInTargetGroups(member, event);
+          if (shouldAttend) {
+            membersList.push(member);
+          }
+        }
+        setTargetMembers(membersList);
+      };
+      
+      loadTargetMembers();
+    }, [event, members]);
 
-  const stats = {
-    present: Object.values(bulkAttendance).filter(status => status === 'present').length,
-    absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
-    absentWithReason: Object.values(bulkAttendance).filter(status => status === 'absent_with_reason').length,
-    total: targetMembers.length
-  };
+    const stats = {
+      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+      absentWithReason: Object.values(bulkAttendance).filter(status => status === 'absent_with_reason').length,
+      total: targetMembers.length
+    };
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-              Bulk Attendance - {event.name}
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Manage attendance for all target members - {targetMembers.length} members found
-            </p>
-          </div>
-          <button
-            onClick={closeBulkAttendanceModal}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
-          >
-            <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-          </button>
-        </div>
-        
-        <div className="p-6 max-h-[70vh] overflow-y-auto">
-          {/* Attendance Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
-              <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Bulk Attendance - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage attendance for all target members - {targetMembers.length} members found
+              </p>
             </div>
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
-              <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
-            </div>
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.absentWithReason}</div>
-              <div className="text-sm text-yellow-700 dark:text-yellow-300 font-medium">Absent with Notes</div>
-            </div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
-              <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="flex gap-2 mb-6 flex-wrap">
-            <button
-              onClick={() => {
-                const newAttendance = { ...bulkAttendance };
-                targetMembers.forEach(member => {
-                  newAttendance[member.id] = 'present';
-                });
-                setBulkAttendance(newAttendance);
-                setAttendanceNotes({});
-              }}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-            >
-              Mark All Present
-            </button>
-            <button
-              onClick={() => {
-                const newAttendance = { ...bulkAttendance };
-                targetMembers.forEach(member => {
-                  newAttendance[member.id] = 'absent';
-                });
-                setBulkAttendance(newAttendance);
-                setAttendanceNotes({});
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
-            >
-              Mark All Absent
-            </button>
-            <button
-              onClick={() => {
-                setBulkAttendance({});
-                setAttendanceNotes({});
-              }}
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
-            >
-              Clear All
-            </button>
-          </div>
-
-          {/* Members List */}
-          <div className="space-y-3">
-            {targetMembers.length === 0 ? (
-              <div className="text-center py-8">
-                <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
-              </div>
-            ) : (
-              targetMembers.map((member) => (
-                <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
-                        {getInitials(member.name, member.surname)}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {member.name} {member.surname}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                          {member.phone && (
-                            <div className="flex items-center gap-1">
-                              <Phone className="h-3 w-3" />
-                              {member.phone}
-                            </div>
-                          )}
-                          {member.email && (
-                            <div className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              {member.email}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleBulkAttendanceChange(member.id, 'present')}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          bulkAttendance[member.id] === 'present'
-                            ? 'bg-green-600 text-white shadow-lg'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        <CheckCircle className="h-4 w-4" />
-                        Present
-                      </button>
-                      <button
-                        onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          bulkAttendance[member.id] === 'absent'
-                            ? 'bg-red-600 text-white shadow-lg'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        <X className="h-4 w-4" />
-                        Absent
-                      </button>
-                      <button
-                        onClick={() => handleBulkAttendanceChange(member.id, 'absent_with_reason')}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          bulkAttendance[member.id] === 'absent_with_reason'
-                            ? 'bg-orange-600 text-white shadow-lg'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        <FileText className="h-4 w-4" />
-                        Notes
-                      </button>
-                    </div>
-                  </div>
-                  {bulkAttendance[member.id] === 'absent_with_reason' && (
-                    <div className="mt-3">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Notes for Absence
-                      </label>
-                      <input
-                        type="text"
-                        value={attendanceNotes[member.id] || ''}
-                        onChange={(e) => handleAttendanceNotesChange(member.id, e.target.value)}
-                        placeholder="Enter reason for absence..."
-                        className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      />
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-600 dark:text-gray-400">
-            {stats.present + stats.absent + stats.absentWithReason} of {targetMembers.length} members marked
-          </div>
-          <div className="flex gap-3">
             <button
               onClick={closeBulkAttendanceModal}
-              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
             >
-              Cancel
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
-            <button
-              onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
-              disabled={loading || Object.keys(bulkAttendance).length === 0}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Saving...
-                </>
+          </div>
+          
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Attendance Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+              </div>
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.absentWithReason}</div>
+                <div className="text-sm text-yellow-700 dark:text-yellow-300 font-medium">Absent with Notes</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex gap-2 mb-6 flex-wrap">
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'present';
+                  });
+                  setBulkAttendance(newAttendance);
+                  setAttendanceNotes({});
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              >
+                Mark All Present
+              </button>
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'absent';
+                  });
+                  setBulkAttendance(newAttendance);
+                  setAttendanceNotes({});
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+              >
+                Mark All Absent
+              </button>
+              <button
+                onClick={() => {
+                  setBulkAttendance({});
+                  setAttendanceNotes({});
+                }}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+              >
+                Clear All
+              </button>
+            </div>
+
+            {/* Members List */}
+            <div className="space-y-3">
+              {targetMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+                </div>
               ) : (
-                `Save Attendance (${Object.keys(bulkAttendance).length})`
+                targetMembers.map((member) => (
+                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
+                          {getInitials(member.name, member.surname)}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                            {member.phone && (
+                              <div className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {member.phone}
+                              </div>
+                            )}
+                            {member.email && (
+                              <div className="flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                {member.email}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                            bulkAttendance[member.id] === 'present'
+                              ? 'bg-green-600 text-white shadow-lg'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                          }`}
+                        >
+                          <CheckCircle className="h-4 w-4" />
+                          Present
+                        </button>
+                        <button
+                          onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                            bulkAttendance[member.id] === 'absent'
+                              ? 'bg-red-600 text-white shadow-lg'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                          }`}
+                        >
+                          <X className="h-4 w-4" />
+                          Absent
+                        </button>
+                        <button
+                          onClick={() => handleBulkAttendanceChange(member.id, 'absent_with_reason')}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                            bulkAttendance[member.id] === 'absent_with_reason'
+                              ? 'bg-orange-600 text-white shadow-lg'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                          }`}
+                        >
+                          <FileText className="h-4 w-4" />
+                          Notes
+                        </button>
+                      </div>
+                    </div>
+                    {bulkAttendance[member.id] === 'absent_with_reason' && (
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Notes for Absence
+                        </label>
+                        <input
+                          type="text"
+                          value={attendanceNotes[member.id] || ''}
+                          onChange={(e) => handleAttendanceNotesChange(member.id, e.target.value)}
+                          placeholder="Enter reason for absence..."
+                          className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))
               )}
-            </button>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-700">
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              {stats.present + stats.absent + stats.absentWithReason} of {targetMembers.length} members marked
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={closeBulkAttendanceModal}
+                className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                disabled={loading || Object.keys(bulkAttendance).length === 0}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Saving...
+                  </>
+                ) : (
+                  `Save Attendance (${Object.keys(bulkAttendance).length})`
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-};
-// Add this function to save individual attendance
-const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent' | 'absent_with_reason', notes?: string) => {
-  try {
-    setLoading(true);
-    setError(null);
+    );
+  };
 
-    // Check if attendance record already exists
-    const { data: existingRecord } = await supabase
-      .from('event_attendees')
-      .select('id')
-      .eq('event_id', eventId)
-      .eq('members_id', memberId)
-      .single();
-
-    const attendanceData = {
-      event_id: eventId,
-      members_id: memberId,
-      first_time: false,
-      invited_by_id: null,
-      attendance_status: status,
-      attended_at: status === 'present' ? new Date().toISOString() : null,
-      notes: notes || null,
-      updated_at: new Date().toISOString()
-    };
-
-    let error;
-    if (existingRecord) {
-      // Update existing record
-      const { error: updateError } = await supabase
-        .from('event_attendees')
-        .update(attendanceData)
-        .eq('id', existingRecord.id);
-      error = updateError;
-    } else {
-      // Create new record
-      const { error: insertError } = await supabase
-        .from('event_attendees')
-        .insert([{ ...attendanceData, created_at: new Date().toISOString() }]);
-      error = insertError;
-    }
-
-    if (error) throw error;
-
-    // Refresh attendees data
-    await fetchEventAttendees(eventId);
-    return true;
-  } catch (error: any) {
-    console.error('Error saving attendance:', error);
-    setError(error.message || 'Failed to save attendance.');
-    return false;
-  } finally {
-    setLoading(false);
-  }
-};
-
-// Update the saveBulkAttendance function to actually save data
-const saveBulkAttendance = async (eventId: string) => {
-  setLoading(true);
-  setError(null);
-  setSuccess(null);
-
-  try {
-    const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
-      const notes = attendanceNotes[memberId] || null;
-      return await saveAttendance(eventId, memberId, status, notes);
-    });
-
-    const results = await Promise.all(savePromises);
-    const successfulSaves = results.filter(result => result).length;
-    const totalSaves = Object.keys(bulkAttendance).length;
-
-    if (successfulSaves === totalSaves) {
-      setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
-      closeBulkAttendanceModal();
-      
-      // Refresh the event data to show updated counts
-      await fetchEventAttendees(eventId);
-    } else {
-      setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
-    }
-
-    setTimeout(() => {
-      setSuccess(null);
-      setError(null);
-    }, 5000);
-  } catch (error: any) {
-    console.error('Error saving bulk attendance:', error);
-    setError(error.message || 'Failed to save bulk attendance.');
-  } finally {
-    setLoading(false);
-  }
-};
-
-// Add function to mark single member attendance
-const markMemberAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
-  return await saveAttendance(eventId, memberId, status, notes);
-};
-
-// Add function to get attendance statistics
-const getAttendanceStats = (eventId: string) => {
-  const eventAttendees = getEventAttendees(eventId);
-  const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
-  const absent = eventAttendees.filter(a => a.attendance_status === 'absent').length;
-  const absentWithReason = eventAttendees.filter(a => a.attendance_status === 'absent_with_reason').length;
-  const firstTimers = eventAttendees.filter(a => a.first_time && a.attendance_status === 'present').length;
-  
-  return { present, absent, absentWithReason, firstTimers, total: present + absent + absentWithReason };
-};
   // Newcomer Modal Component
   const NewcomerModal = () => {
     if (!showNewcomerModal) return null;
@@ -2019,6 +1952,11 @@ const getAttendanceStats = (eventId: string) => {
                           {type === 'present' && attendee.invited_by_member && (
                             <div className="text-xs text-gray-500">
                               Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
+                            </div>
+                          )}
+                          {type === 'absent' && attendee.notes && (
+                            <div className="text-xs text-orange-600 dark:text-orange-400">
+                              Notes: {attendee.notes}
                             </div>
                           )}
                         </div>
@@ -2747,6 +2685,7 @@ const getAttendanceStats = (eventId: string) => {
               const ScopeIcon = scopeBadge.icon;
               const StatusIcon = statusBadge.icon;
               const sermon = getSermonForEvent(event.id);
+              const stats = getAttendanceStats(event.id);
               
               return (
                 <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
@@ -2907,7 +2846,7 @@ const getAttendanceStats = (eventId: string) => {
                           onClick={() => openAttendeeModal('present', event.id)}
                           className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
                         >
-                          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{presentAttendees.length}</div>
+                          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
                           <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
                           <div className="text-xs text-green-600 dark:text-green-400 mt-1">Click to view</div>
                         </button>
@@ -2915,19 +2854,19 @@ const getAttendanceStats = (eventId: string) => {
                           onClick={() => openAttendeeModal('absent', event.id)}
                           className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
                         >
-                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{absentAttendees.length}</div>
+                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent + stats.absentWithReason}</div>
                           <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
                           <div className="text-xs text-red-600 dark:text-red-400 mt-1">Click to view</div>
                         </button>
                         <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
                           <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                            {presentAttendees.filter(a => a.first_time).length}
+                            {stats.firstTimers}
                           </div>
                           <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">First Timers</div>
                         </div>
                         <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4 text-center">
                           <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                            {presentAttendees.length + absentAttendees.length}
+                            {stats.total}
                           </div>
                           <div className="text-sm text-purple-700 dark:text-purple-300 font-medium">Total Registered</div>
                         </div>
@@ -2981,14 +2920,14 @@ const getAttendanceStats = (eventId: string) => {
                         onClick={() => openAttendeeModal('present', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
-                        <span>View Present ({presentAttendees.length})</span>
+                        <span>View Present ({stats.present})</span>
                         <Eye className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => openAttendeeModal('absent', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
-                        <span>View Absent ({absentAttendees.length})</span>
+                        <span>View Absent ({stats.absent + stats.absentWithReason})</span>
                         <Eye className="h-4 w-4" />
                       </button>
                     </div>
