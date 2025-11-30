@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -159,22 +159,12 @@ const Events = () => {
     notes: ''
   });
 
-  const hasAccess = () => {
+  const hasAccess = useCallback(() => {
     return isAdmin?.() || isPastor?.();
-  };
+  }, [isAdmin, isPastor]);
 
-  useEffect(() => {
-    if (user && !authLoading) {
-      fetchEvents();
-      fetchSermons();
-      fetchMembers();
-      fetchCellGroups();
-      fetchMinistryGroups();
-      fetchDepartments();
-    }
-  }, [user, authLoading]);
-
-  const fetchEvents = async () => {
+  // Memoized data fetching functions
+  const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -198,19 +188,21 @@ const Events = () => {
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Fetch attendees for each event
-      for (const event of eventsWithDefaults) {
-        await fetchEventAttendees(event.id);
-      }
+      // Fetch attendees for all events in parallel
+      const attendeePromises = eventsWithDefaults.map((event: Event) => 
+        fetchEventAttendees(event.id)
+      );
+      await Promise.all(attendeePromises);
+      
     } catch (error: any) {
       console.error('Error fetching events:', error);
       setError(error.message || 'Failed to load events.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchSermons = async () => {
+  const fetchSermons = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('sermons')
@@ -228,9 +220,9 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching sermons:', error);
     }
-  };
+  }, []);
 
-  const fetchMembers = async () => {
+  const fetchMembers = useCallback(async () => {
     try {
       setError(null);
       
@@ -256,9 +248,9 @@ const Events = () => {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
     }
-  };
+  }, []);
 
-  const fetchCellGroups = async () => {
+  const fetchCellGroups = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('cell_groups')
@@ -270,9 +262,9 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
     }
-  };
+  }, []);
 
-  const fetchMinistryGroups = async () => {
+  const fetchMinistryGroups = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('ministry_groups')
@@ -284,9 +276,9 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
     }
-  };
+  }, []);
 
-  const fetchDepartments = async () => {
+  const fetchDepartments = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('departments')
@@ -298,9 +290,9 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching departments:', error);
     }
-  };
+  }, []);
 
-  const fetchEventAttendees = async (eventId: string) => {
+  const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
       const { data, error } = await supabase
         .from('event_attendees')
@@ -338,10 +330,69 @@ const Events = () => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
         return [...filtered, ...attendeesWithDefaults];
       });
+      
+      return attendeesWithDefaults;
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
+      return [];
     }
-  };
+  }, []);
+
+  // Initialize all data
+  useEffect(() => {
+    if (user && !authLoading) {
+      const initializeData = async () => {
+        try {
+          setLoading(true);
+          await Promise.all([
+            fetchEvents(),
+            fetchSermons(),
+            fetchMembers(),
+            fetchCellGroups(),
+            fetchMinistryGroups(),
+            fetchDepartments()
+          ]);
+        } catch (error) {
+          console.error('Error initializing data:', error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      initializeData();
+    }
+  }, [
+    user, 
+    authLoading, 
+    fetchEvents, 
+    fetchSermons, 
+    fetchMembers, 
+    fetchCellGroups, 
+    fetchMinistryGroups, 
+    fetchDepartments
+  ]);
+
+  // Refresh data after modifications
+  const refreshEventData = useCallback(async (eventId?: string) => {
+    try {
+      if (eventId) {
+        // Refresh specific event and its attendees
+        await Promise.all([
+          fetchEvents(),
+          fetchEventAttendees(eventId)
+        ]);
+      } else {
+        // Refresh all data
+        await Promise.all([
+          fetchEvents(),
+          fetchSermons(),
+          fetchMembers()
+        ]);
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    }
+  }, [fetchEvents, fetchSermons, fetchMembers, fetchEventAttendees]);
 
   const getSermonForEvent = (eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
@@ -442,6 +493,7 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
+      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
@@ -483,6 +535,7 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
+      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: null } : event
       ));
@@ -636,6 +689,8 @@ const Events = () => {
         existingVideoUrl: '',
         existingDocumentUrl: '',
       });
+      
+      // Refresh sermons data
       await fetchSermons();
       setSuccess(editingSermon ? 'Sermon updated successfully!' : 'Sermon added successfully!');
       
@@ -673,12 +728,14 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Update local state immediately
       setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
       setSuccess('Sermon deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting sermon:', error);
       setError(error.message || 'Failed to delete sermon.');
+      // Refresh data on error
       await fetchSermons();
     } finally {
       setSermonLoading(null);
@@ -761,6 +818,7 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Refresh sermons data
       await fetchSermons();
       setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
       setTimeout(() => setSuccess(null), 3000);
@@ -788,6 +846,8 @@ const Events = () => {
         .insert(absentRecords);
 
       if (error) throw error;
+      
+      // Refresh attendees data
       await fetchEventAttendees(eventId);
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
@@ -837,6 +897,7 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId 
           ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
@@ -899,8 +960,10 @@ const Events = () => {
         targetMinistryGroups: [],
         targetDepartments: [],
       });
-      setSuccess('Event created successfully!');
+      
+      // Refresh events data
       await fetchEvents();
+      setSuccess('Event created successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -948,8 +1011,6 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      console.log('Submitting attendee data:', attendeeData);
-
       const { data, error } = await supabase
         .from('event_attendees')
         .insert([attendeeData])
@@ -980,10 +1041,9 @@ const Events = () => {
         throw error;
       }
 
-      console.log('Attendee added successfully:', data);
-
-      // Update attendees state immediately
+      // Update attendees state immediately AND refresh from server
       setAttendees(prev => [...prev, data]);
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
 
       // Reset form and close it
       resetAttendeeForm();
@@ -1012,8 +1072,9 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update attendees state immediately
+      // Update attendees state immediately AND refresh from server
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1289,12 +1350,13 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Update attendees state immediately
+      // Update attendees state immediately AND refresh from server
       if (newAttendee) {
         setAttendees(prev => [...prev, newAttendee]);
       }
+      await fetchEventAttendees(eventId);
 
-      // Refresh data
+      // Refresh members data
       await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
