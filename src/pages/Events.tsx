@@ -911,7 +911,6 @@ const Events = () => {
     }
   };
 
-  // FIXED: Improved attendee submission with immediate UI update
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
@@ -983,7 +982,7 @@ const Events = () => {
 
       console.log('Attendee added successfully:', data);
 
-      // FIXED: Update attendees state immediately
+      // Update attendees state immediately
       setAttendees(prev => [...prev, data]);
 
       // Reset form and close it
@@ -999,7 +998,6 @@ const Events = () => {
     }
   };
 
-  // FIXED: Improved remove attendee with immediate UI update
   const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
     if (!confirm('Are you sure you want to remove this attendee?')) return;
 
@@ -1014,7 +1012,7 @@ const Events = () => {
 
       if (error) throw error;
 
-      // FIXED: Update attendees state immediately
+      // Update attendees state immediately
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
       
       setSuccess('Attendee removed successfully!');
@@ -1068,7 +1066,6 @@ const Events = () => {
     setShowAttendeeModal(null);
   };
 
-  // FIXED: Improved bulk attendance with immediate UI updates
   const openBulkAttendanceModal = async (eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     
@@ -1124,7 +1121,6 @@ const Events = () => {
     setAttendanceNotes(prev => ({ ...prev, [memberId]: note }));
   };
 
-  // FIXED: Improved bulk attendance saving with immediate UI updates
   const saveBulkAttendance = async (eventId: string) => {
     setLoading(true);
     setError(null);
@@ -1155,7 +1151,7 @@ const Events = () => {
 
       if (insertError) throw insertError;
 
-      // FIXED: Update attendees state immediately by refetching
+      // Update attendees state immediately by refetching
       await fetchEventAttendees(eventId);
       
       closeBulkAttendanceModal();
@@ -1169,7 +1165,6 @@ const Events = () => {
     }
   };
 
-  // FIXED: Improved newcomer handling with immediate UI updates
   const openNewcomerModal = (eventId: string) => {
     setShowNewcomerModal(eventId);
   };
@@ -1294,7 +1289,7 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // FIXED: Update attendees state immediately
+      // Update attendees state immediately
       if (newAttendee) {
         setAttendees(prev => [...prev, newAttendee]);
       }
@@ -1808,6 +1803,249 @@ const Events = () => {
             >
               Close
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Sermon Modal Component
+  const SermonModal = () => {
+    if (!showSermonModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+              {editingSermon ? 'Edit Sermon' : showSermonModal === 'new' ? 'Add New Sermon' : 'Add Sermon to Event'}
+            </h3>
+            <button
+              onClick={closeSermonModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          <form onSubmit={handleSermonSubmit} className="p-6 space-y-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Sermon Title *
+                </label>
+                <input
+                  type="text"
+                  value={sermonFormData.title}
+                  onChange={(e) => setSermonFormData({ ...sermonFormData, title: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter sermon title"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Sermon Summary *
+                </label>
+                <textarea
+                  value={sermonFormData.summary}
+                  onChange={(e) => setSermonFormData({ ...sermonFormData, summary: e.target.value })}
+                  rows={4}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
+                  placeholder="Enter the sermon summary, key points, scriptures, and main message..."
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Pastor Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={sermonFormData.pastorName}
+                    onChange={(e) => setSermonFormData({ ...sermonFormData, pastorName: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter pastor's name"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Sermon Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={sermonFormData.sermonDate}
+                    onChange={(e) => setSermonFormData({ ...sermonFormData, sermonDate: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* File Uploads */}
+              <div className="space-y-4">
+                {/* Video Upload */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Video File
+                    </label>
+                    <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs">
+                      <AlertTriangle className="h-3 w-3" />
+                      <span>Development - Large Storage</span>
+                    </div>
+                  </div>
+                  
+                  {sermonFormData.existingVideoUrl && (
+                    <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <PlayCircle className="h-4 w-4 text-purple-600" />
+                          <span className="text-sm text-purple-700">Video file already uploaded</span>
+                        </div>
+                        <a
+                          href={sermonFormData.existingVideoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-purple-600 hover:text-purple-700 text-sm"
+                        >
+                          View
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
+                    <div className="flex flex-col items-center justify-center pt-3 pb-4">
+                      <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {sermonFormData.videoFile ? sermonFormData.videoFile.name : 'Upload Video'}
+                      </p>
+                      {uploadingSermonFile?.type === 'video' && (
+                        <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={(e) => setSermonFormData({ ...sermonFormData, videoFile: e.target.files?.[0] || null })}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {/* Document Upload */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Sermon Notes (PDF/DOC)
+                  </label>
+                  
+                  {sermonFormData.existingDocumentUrl && (
+                    <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-green-600" />
+                          <span className="text-sm text-green-700">Document file already uploaded</span>
+                        </div>
+                        <a
+                          href={sermonFormData.existingDocumentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-green-600 hover:text-green-700 text-sm"
+                        >
+                          View
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
+                    <div className="flex flex-col items-center justify-center pt-3 pb-4">
+                      <FileText className="h-6 w-6 text-gray-400 mb-1" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {sermonFormData.documentFile ? sermonFormData.documentFile.name : 'Upload Notes'}
+                      </p>
+                      {uploadingSermonFile?.type === 'document' && (
+                        <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={(e) => setSermonFormData({ ...sermonFormData, documentFile: e.target.files?.[0] || null })}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <button
+                type="submit"
+                disabled={sermonLoading === 'saving'}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <BookOpen className="h-4 w-4" />
+                {sermonLoading === 'saving' ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
+              </button>
+              <button
+                type="button"
+                onClick={closeSermonModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  // Pamphlet Modal Component
+  const PamphletModal = () => {
+    if (!viewingPamphlet) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Event Pamphlet</h3>
+            <button
+              onClick={closePamphletModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          <div className="p-6 max-h-[70vh] overflow-auto">
+            <iframe
+              src={viewingPamphlet}
+              className="w-full h-96 rounded-lg border border-gray-200 dark:border-gray-700"
+              title="Event Pamphlet"
+            />
+            <div className="mt-4 flex justify-between items-center">
+              <a
+                href={viewingPamphlet}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200"
+              >
+                <FileText className="h-4 w-4" />
+                Open in New Tab
+              </a>
+              <button
+                onClick={closePamphletModal}
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2421,7 +2659,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Attendance Summary - NOW UPDATES IMMEDIATELY */}
+                      {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
@@ -2717,248 +2955,11 @@ const Events = () => {
         </div>
       </div>
 
-      {/* Sermon Modal */}
-      {showSermonModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {editingSermon ? 'Edit Sermon' : showSermonModal === 'new' ? 'Add New Sermon' : 'Add Sermon to Event'}
-              </h3>
-              <button
-                onClick={closeSermonModal}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
-              >
-                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-              </button>
-            </div>
-            <form onSubmit={handleSermonSubmit} className="p-6 space-y-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Sermon Title *
-                  </label>
-                  <input
-                    type="text"
-                    value={sermonFormData.title}
-                    onChange={(e) => setSermonFormData({ ...sermonFormData, title: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter sermon title"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Sermon Summary *
-                  </label>
-                  <textarea
-                    value={sermonFormData.summary}
-                    onChange={(e) => setSermonFormData({ ...sermonFormData, summary: e.target.value })}
-                    rows={4}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
-                    placeholder="Enter the sermon summary, key points, scriptures, and main message..."
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Pastor Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={sermonFormData.pastorName}
-                      onChange={(e) => setSermonFormData({ ...sermonFormData, pastorName: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter pastor's name"
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Sermon Date *
-                    </label>
-                    <input
-                      type="date"
-                      value={sermonFormData.sermonDate}
-                      onChange={(e) => setSermonFormData({ ...sermonFormData, sermonDate: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* File Uploads */}
-                <div className="space-y-4">
-                  {/* Video Upload */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Video File
-                      </label>
-                      <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs">
-                        <AlertTriangle className="h-3 w-3" />
-                        <span>Development - Large Storage</span>
-                      </div>
-                    </div>
-                    
-                    {sermonFormData.existingVideoUrl && (
-                      <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <PlayCircle className="h-4 w-4 text-purple-600" />
-                            <span className="text-sm text-purple-700">Video file already uploaded</span>
-                          </div>
-                          <a
-                            href={sermonFormData.existingVideoUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-purple-600 hover:text-purple-700 text-sm"
-                          >
-                            View
-                          </a>
-                        </div>
-                      </div>
-                    )}
-
-                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center pt-3 pb-4">
-                        <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          {sermonFormData.videoFile ? sermonFormData.videoFile.name : 'Upload Video'}
-                        </p>
-                        {uploadingSermonFile?.type === 'video' && (
-                          <p className="text-xs text-blue-500 mt-1">Uploading...</p>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept="video/*"
-                        onChange={(e) => setSermonFormData({ ...sermonFormData, videoFile: e.target.files?.[0] || null })}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
-                  {/* Document Upload */}
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Sermon Notes (PDF/DOC)
-                    </label>
-                    
-                    {sermonFormData.existingDocumentUrl && (
-                      <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4 text-green-600" />
-                            <span className="text-sm text-green-700">Document file already uploaded</span>
-                          </div>
-                          <a
-                            href={sermonFormData.existingDocumentUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-green-600 hover:text-green-700 text-sm"
-                          >
-                            View
-                          </a>
-                        </div>
-                      </div>
-                    )}
-
-                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
-                      <div className="flex flex-col items-center justify-center pt-3 pb-4">
-                        <FileText className="h-6 w-6 text-gray-400 mb-1" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          {sermonFormData.documentFile ? sermonFormData.documentFile.name : 'Upload Notes'}
-                        </p>
-                        {uploadingSermonFile?.type === 'document' && (
-                          <p className="text-xs text-blue-500 mt-1">Uploading...</p>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.txt"
-                        onChange={(e) => setSermonFormData({ ...sermonFormData, documentFile: e.target.files?.[0] || null })}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <button
-                  type="submit"
-                  disabled={sermonLoading === 'saving'}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <BookOpen className="h-4 w-4" />
-                  {sermonLoading === 'saving' ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
-                </button>
-                <button
-                  type="button"
-                  onClick={closeSermonModal}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Pamphlet Modal */}
-      {viewingPamphlet && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Event Pamphlet</h3>
-              <button
-                onClick={closePamphletModal}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
-              >
-                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-            </button>
-            </div>
-            <div className="p-6 max-h-[70vh] overflow-auto">
-              <iframe
-                src={viewingPamphlet}
-                className="w-full h-96 rounded-lg border border-gray-200 dark:border-gray-700"
-                title="Event Pamphlet"
-              />
-              <div className="mt-4 flex justify-between items-center">
-                <a
-                  href={viewingPamphlet}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200"
-                >
-                  <FileText className="h-4 w-4" />
-                  Open in New Tab
-                </a>
-                <button
-                  onClick={closePamphletModal}
-                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Attendance Modal */}
+      {/* Render All Modals */}
+      <SermonModal />
+      <PamphletModal />
       <BulkAttendanceModal />
-
-      {/* Newcomer Modal */}
       <NewcomerModal />
-
-      {/* Attendee Modal */}
       <AttendeeModal />
     </div>
   );
