@@ -3,7 +3,7 @@ import { supabase } from '../../../integrations/supabase/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus, Printer,
+  Shield, AlertCircle, CheckCircle, Printer,
   Clock, FileText, Save, UserPlus, Mail, Phone,
   Download, FileDown
 } from 'lucide-react';
@@ -93,7 +93,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         .limit(5);
 
       if (error) throw error;
-      setRecentMeetings(data || []);
+      setRecentMeetings((data || []) as any);
     } catch (error) {
       console.error('Failed to load recent meetings:', error);
     }
@@ -124,7 +124,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         status: 'scheduled'
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('department_meetings')
         .insert([newMeeting])
         .select()
@@ -341,17 +341,19 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       if (deptError) throw deptError;
 
-      const memberData = departmentMembers?.map(dm => ({
+      const memberData = departmentMembers?.map((dm: any) => ({
         ...dm.member,
         department_role: dm.role,
         department_member_id: dm.id
       })) || [];
       
-      setDepartmentMembers(memberData);
+      setDepartmentMembers(memberData as any);
       
       const initialAttendance: Record<string, 'present'> = {};
-      memberData?.forEach(member => {
-        initialAttendance[member.id] = 'present';
+      memberData?.forEach((member: any) => {
+        if (member?.id) {
+          initialAttendance[member.id] = 'present';
+        }
       });
       setAttendance(initialAttendance);
     } catch (error: any) {
@@ -375,20 +377,24 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const loadExistingAttendance = async () => {
     try {
+      if (!selectedMeeting?.id) return;
+      
       const { data, error } = await supabase
         .from('department_attendance')
         .select('*')
-        .eq('meeting_id', selectedMeeting?.id);
+        .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
 
       const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
       const existingNotes: Record<string, string> = {};
 
-      data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.notes) {
-          existingNotes[record.member_id] = record.notes;
+      data?.forEach((record: any) => {
+        if (record.member_id) {
+          existingAttendance[record.member_id] = record.status || 'present';
+          if (record.notes) {
+            existingNotes[record.member_id] = record.notes;
+          }
         }
       });
 
@@ -825,7 +831,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
         const { data: memberData, error: memberError } = await supabase
           .from('members')
-          .insert([memberPayload])
+          .insert([memberPayload as any])
           .select()
           .single();
 
@@ -1126,7 +1132,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
         .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
-      setAttendance(data || []);
+      setAttendance((data || []) as any);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
       onError('Failed to load attendance data: ' + error.message);
@@ -1146,7 +1152,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
       if (error && error.code !== 'PGRST116') throw error;
       
       if (data) {
-        setExistingReport(data);
+        setExistingReport(data as any);
         setReportData({
           report_text: data.report_text || '',
           decisions_made: data.decisions_made || '',
@@ -1876,7 +1882,7 @@ const Departments = () => {
         .order('meeting_date', { ascending: false });
 
       if (error) throw error;
-      setMeetings(data || []);
+      setMeetings((data || []) as any);
     } catch (error: any) {
       setError('Failed to load meetings: ' + error.message);
     }
@@ -1899,7 +1905,7 @@ const Departments = () => {
         .eq('meeting_id', meetingId);
 
       if (error) throw error;
-      setAttendanceRecords(data || []);
+      setAttendanceRecords((data || []) as any);
     } catch (error: any) {
       setError('Failed to load attendance: ' + error.message);
     }

@@ -70,10 +70,12 @@ const AttendanceStep: React.FC<AttendanceStepProps> = ({
       const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
       const existingReasons: Record<string, string> = {};
 
-      data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'absent_with_reason';
-        if (record.notes) {
-          existingReasons[record.member_id] = record.notes;
+      data?.forEach((record: any) => {
+        if (record.member_id) {
+          existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'absent_with_reason';
+          if (record.notes) {
+            existingReasons[record.member_id] = record.notes;
+          }
         }
       });
 

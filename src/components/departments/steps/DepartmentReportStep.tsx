@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
-import { FileText, Users, CheckCircle, XCircle, AlertCircle, Download, Printer, Calendar, MapPin } from 'lucide-react';
+import { FileText, Users, CheckCircle, XCircle, AlertCircle, Download, Printer, Calendar, MapPin, Clock } from 'lucide-react';
 
 interface DepartmentReportStepProps {
   department: any;
