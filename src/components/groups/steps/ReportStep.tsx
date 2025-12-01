@@ -11,7 +11,6 @@ interface ReportStepProps {
 }
 
 const ReportStep: React.FC<ReportStepProps> = ({
-  group,
   selectedMeeting,
   onReportCreated,
   onError

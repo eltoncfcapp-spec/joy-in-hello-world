@@ -9,7 +9,6 @@ interface UserProfile {
   email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  department_id: string | null;
   admin_role: string;
   pastor_role: boolean | null;
   deacon_role: boolean | null;
@@ -214,8 +213,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (isDeacon()) return true;
     if (hasPermission('view_own_department')) {
       const isAssigned = profile.assigned_departments.includes(departmentId);
-      const isUserDepartment = profile.department_id === departmentId;
-      return isAssigned || isUserDepartment;
+      return isAssigned;
     }
     return false;
   };
@@ -238,8 +236,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (hasPermission('manage_all_departments')) return true;
     if (hasPermission('manage_own_department')) {
       const isAssigned = profile.assigned_departments.includes(departmentId);
-      const isUserDepartment = profile.department_id === departmentId;
-      return isAssigned || isUserDepartment;
+      return isAssigned;
     }
     return false;
   };
@@ -334,11 +331,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!profile) return [];
     if (hasPermission('view_all_departments')) return ['all_departments'];
     if (isDeacon()) return ['all_departments'];
-    const departments = [...profile.assigned_departments];
-    if (profile.department_id && !departments.includes(profile.department_id)) {
-      departments.push(profile.department_id);
-    }
-    return departments;
+    return [...profile.assigned_departments];
   };
 
   // Check for existing session and set up auth listener
@@ -397,7 +390,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, supabaseSession) => {
+      async (_event, supabaseSession) => {
         if (!mounted) return;
         
         setSession(supabaseSession);
@@ -442,7 +435,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
-          department_id: memberData.department_id || null,
           admin_role: memberData.admin_role || 'member',
           pastor_role: memberData.pastor_role || false,
           deacon_role: memberData.deacon_role || false,
@@ -518,7 +510,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         email: memberData.email || null,
         phone: memberData.phone || null,
         cell_group_id: memberData.cell_group_id || null,
-        department_id: memberData.department_id || null,
         admin_role: memberData.admin_role || 'member',
         pastor_role: memberData.pastor_role || false,
         deacon_role: memberData.deacon_role || false,
