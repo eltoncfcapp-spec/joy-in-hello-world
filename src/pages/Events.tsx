@@ -1685,7 +1685,7 @@ const Events = () => {
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
             <div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                <CloudUpload className="inline-block h-5 w-5 mr-2 text-blue-500" />
+                <Upload className="inline-block h-5 w-5 mr-2 text-blue-500" />
                 Sync to Cloud - {event.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
@@ -1760,7 +1760,7 @@ const Events = () => {
                   disabled={loading}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <CloudUpload className="h-4 w-4" />
+                  <Upload className="h-4 w-4" />
                   {loading ? 'Syncing...' : 'Sync to Cloud'}
                 </button>
               </div>
@@ -3155,7 +3155,7 @@ const Events = () => {
                         onClick={() => setShowSyncModal(event.id)}
                         className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
                       >
-                        <CloudUpload className="h-4 w-4" />
+                        <Upload className="h-4 w-4" />
                         Sync to Cloud
                       </button>
                       <button
