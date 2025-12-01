@@ -93,7 +93,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         .limit(5);
 
       if (error) throw error;
-      setRecentMeetings(data || []);
+      setRecentMeetings((data || []) as any);
     } catch (error) {
       console.error('Failed to load recent meetings:', error);
     }
@@ -1876,7 +1876,7 @@ const Departments = () => {
         .order('meeting_date', { ascending: false });
 
       if (error) throw error;
-      setMeetings(data || []);
+      setMeetings((data || []) as any);
     } catch (error: any) {
       setError('Failed to load meetings: ' + error.message);
     }

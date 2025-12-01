@@ -22,6 +22,9 @@ interface UserProfile {
   can_add_members: boolean;
   can_edit_members: boolean;
   can_view_own_data: boolean;
+  status?: string | null;
+  created_at?: string | null;
+  role?: string | null;
 }
 
 type Permission = 
