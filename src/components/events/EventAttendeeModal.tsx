@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../integrations/supabase/client';
-import { X, Search, User, Phone, Mail, CheckCircle, Users } from 'lucide-react';
+import { X, Search, User, CheckCircle, Users } from 'lucide-react';
 
 interface Member {
   id: string;

@@ -74,17 +74,19 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       if (deptError) throw deptError;
 
-      const memberData = departmentMembers?.map(dm => ({
+      const memberData = departmentMembers?.map((dm: any) => ({
         ...dm.member,
         department_role: dm.role,
         department_member_id: dm.id
       })) || [];
       
-      setDepartmentMembers(memberData);
+      setDepartmentMembers(memberData as any);
       
       const initialAttendance: Record<string, 'present'> = {};
-      memberData?.forEach(member => {
-        initialAttendance[member.id] = 'present';
+      memberData?.forEach((member: any) => {
+        if (member?.id) {
+          initialAttendance[member.id] = 'present';
+        }
       });
       setAttendance(initialAttendance);
     } catch (error: any) {
@@ -108,20 +110,24 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const loadExistingAttendance = async () => {
     try {
+      if (!selectedMeeting?.id) return;
+      
       const { data, error } = await supabase
         .from('department_attendance')
         .select('*')
-        .eq('meeting_id', selectedMeeting?.id);
+        .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
 
       const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
       const existingNotes: Record<string, string> = {};
 
-      data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.notes) {
-          existingNotes[record.member_id] = record.notes;
+      data?.forEach((record: any) => {
+        if (record.member_id) {
+          existingAttendance[record.member_id] = record.status || 'present';
+          if (record.notes) {
+            existingNotes[record.member_id] = record.notes;
+          }
         }
       });
 
