@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
-import { 
-  X, Users, CheckCircle, XCircle, FileText, Save 
-} from 'lucide-react';
+import { X, CheckCircle, XCircle, FileText, Save } from 'lucide-react';
 
 interface AttendanceModalProps {
   meeting: any;

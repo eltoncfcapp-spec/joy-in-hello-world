@@ -1660,7 +1660,6 @@ interface DepartmentWorkflowProps {
 const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   department,
   meetings,
-  members,
   onClose,
   onSuccess,
   onError
@@ -1803,7 +1802,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile, canViewDepartment, canManageDepartment, isAdmin, isPastor, isDepartmentLeader, isGroupLeader, isDeacon, getRoles } = useAuth();
+  const { profile, canViewDepartment, canManageDepartment } = useAuth();
   
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
@@ -1839,7 +1838,7 @@ const Departments = () => {
       
       const departmentsWithMemberCounts = await Promise.all(
         (departmentsData || []).map(async (department) => {
-          const { count, error: countError } = await supabase
+          const { count } = await supabase
             .from('department_members')
             .select('*', { count: 'exact', head: true })
             .eq('department_id', department.id);
@@ -1962,12 +1961,11 @@ const Departments = () => {
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    const roles = getRoles();
-    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
-    if (roles.includes('pastor')) return 'Pastor';
-    if (roles.includes('deacon')) return 'Deacon';
-    if (roles.includes('department_leader')) return 'Department Leader';
-    if (roles.includes('group_leader')) return 'Group Leader';
+    if (profile.admin_role === 'admin' || profile.admin_role === 'administrator') return 'Administrator';
+    if (profile.pastor_role) return 'Pastor';
+    if (profile.deacon_role) return 'Deacon';
+    if (profile.department_leader) return 'Department Leader';
+    if (profile.group_leader) return 'Group Leader';
     return 'Member';
   };
 

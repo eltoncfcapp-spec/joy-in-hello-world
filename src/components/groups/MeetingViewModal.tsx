@@ -47,7 +47,7 @@ const MeetingViewModal: React.FC<MeetingViewModalProps> = ({
         .eq('meeting_id', meeting.id);
 
       if (error) throw error;
-      setAttendance(data || []);
+      setAttendance((data || []).map(record => ({ ...record, reason: record.notes || null })) as any);
     } catch (error: any) {
       console.error('Error loading attendance:', error);
     } finally {
