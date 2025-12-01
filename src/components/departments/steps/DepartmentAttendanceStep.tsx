@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../integrations/supabase/client';
+import { supabase } from '../../../integrations/supabase/client';
 import { Users, CheckCircle, X, FileText, Calendar, Clock, UserPlus, Search } from 'lucide-react';
 
 interface Department {
