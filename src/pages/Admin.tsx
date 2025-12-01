@@ -622,13 +622,13 @@ const cloudService = {
   async updateNotificationSettings(settings: NotificationSettings): Promise<NotificationSettings> {
     try {
       const { data, error } = await supabase
-        .from('notification_settings' as any)
-        .upsert(settings as any)
+        .from('notification_settings')
+        .upsert(settings)
         .select()
         .single();
 
       if (error) throw error;
-      return data as any;
+      return data;
     } catch (error) {
       console.error('Error updating notification settings:', error);
       throw error;

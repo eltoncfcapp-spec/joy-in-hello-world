@@ -128,6 +128,8 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
@@ -149,7 +151,7 @@ const Dashboard = () => {
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
 
@@ -256,7 +258,7 @@ const Dashboard = () => {
         .order('sermon_date', { ascending: false });
 
       if (sermonsError) throw sermonsError;
-      setSermons((sermonsData || []) as any);
+      setSermons(sermonsData || []);
 
       // Calculate stats with all data (everyone can see)
       calculateStats(membersData || [], eventsData || [], sermonsData || []);

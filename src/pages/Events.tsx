@@ -164,17 +164,16 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Memoized data fetching functions - FIXED: Changed order to show newest first
+  // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // FIXED: Changed order to show newest events first (descending)
       const { data, error } = await supabase
         .from('events')
         .select('*')
-        .order('event_date', { ascending: false }); // Changed from true to false
+        .order('event_date', { ascending: true });
 
       if (error) throw error;
 
@@ -240,13 +239,7 @@ const Events = () => {
           ministry_group_id,
           status,
           cell_groups!fk_cell_group(name),
-          ministry_groups(name),
-          department_members (
-            departments (
-              id,
-              name
-            )
-          )
+          ministry_groups(name)
         `)
         .order('name');
 
@@ -316,13 +309,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -340,12 +327,9 @@ const Events = () => {
         attendance_status: attendee.attendance_status || 'present'
       }));
 
-      // FIXED: More reliable state update for attendees
       setAttendees(prev => {
-        // Remove all attendees for this event
-        const otherAttendees = prev.filter(attendee => attendee.event_id !== eventId);
-        // Add the newly fetched attendees
-        return [...otherAttendees, ...attendeesWithDefaults];
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...attendeesWithDefaults];
       });
       
       return attendeesWithDefaults;
@@ -389,7 +373,7 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS - FIXED: Improved attendance handling
+  // ATTENDANCE FUNCTIONS
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent' | 'absent_with_reason', notes?: string) => {
     try {
       setLoading(true);
@@ -432,12 +416,8 @@ const Events = () => {
 
       if (error) throw error;
 
-      // FIXED: Force refresh attendees data immediately
+      // Refresh attendees data
       await fetchEventAttendees(eventId);
-      
-      // Also refresh the events list to update counts
-      await fetchEvents();
-      
       return true;
     } catch (error: any) {
       console.error('Error saving attendance:', error);
@@ -467,9 +447,8 @@ const Events = () => {
         setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
         closeBulkAttendanceModal();
         
-        // FIXED: Force refresh all data
+        // Refresh the event data to show updated counts
         await fetchEventAttendees(eventId);
-        await fetchEvents();
       } else {
         setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
       }
@@ -938,24 +917,18 @@ const Events = () => {
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
-      // FIXED: Use upsert to handle both new and existing records
       const absentRecords = absentMemberIds.map(memberId => ({
         event_id: eventId,
         members_id: memberId,
         first_time: false,
         invited_by_id: null,
         attendance_status: 'absent' as const,
-        attended_at: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: null
       }));
 
       const { error } = await supabase
         .from('event_attendees')
-        .upsert(absentRecords, {
-          onConflict: 'event_id,members_id',
-          ignoreDuplicates: false
-        });
+        .insert(absentRecords);
 
       if (error) throw error;
       
@@ -1015,10 +988,6 @@ const Events = () => {
           ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
           : event
       ));
-
-      // FIXED: Refresh all data after completing event
-      await fetchEvents();
-      await fetchEventAttendees(eventId);
 
       setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
       setTimeout(() => setSuccess(null), 3000);
@@ -1124,9 +1093,7 @@ const Events = () => {
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase
@@ -1144,13 +1111,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1165,11 +1126,9 @@ const Events = () => {
         throw error;
       }
 
-      // FIXED: Force refresh attendees data
-      await fetchEventAttendees(eventId);
-      
-      // Also update events to refresh counts
-      await fetchEvents();
+      // Update attendees state immediately AND refresh from server
+      setAttendees(prev => [...prev, data]);
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
 
       // Reset form and close it
       resetAttendeeForm();
@@ -1198,11 +1157,9 @@ const Events = () => {
 
       if (error) throw error;
 
-      // FIXED: Force refresh attendees data
-      await fetchEventAttendees(eventId);
-      
-      // Also update events to refresh counts
-      await fetchEvents();
+      // Update attendees state immediately AND refresh from server
+      setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1404,9 +1361,7 @@ const Events = () => {
         first_time: true,
         invited_by_id: null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { data: newAttendee, error: attendeeError } = await supabase
@@ -1424,13 +1379,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1442,11 +1391,14 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // FIXED: Force refresh data
+      // Update attendees state immediately AND refresh from server
+      if (newAttendee) {
+        setAttendees(prev => [...prev, newAttendee]);
+      }
       await fetchEventAttendees(eventId);
-      await fetchEvents();
-      await fetchMembers();
 
+      // Refresh members data
+      await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1924,7 +1876,6 @@ const Events = () => {
     if (!showAttendeeModal) return null;
 
     const { type, eventId } = showAttendeeModal;
-    const eventAttendees = getEventAttendees(eventId);
     const attendees = type === 'present' ? getPresentAttendees(eventId) : getAbsentAttendees(eventId);
     const event = events.find(e => e.id === eventId);
 
@@ -1937,7 +1888,7 @@ const Events = () => {
                 {type === 'present' ? 'Present' : 'Absent'} Attendees - {event?.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Total: {attendees.length} {type === 'present' ? 'present' : 'absent'} (out of {eventAttendees.length} registered)
+                Total: {attendees.length} {type === 'present' ? 'present' : 'absent'}
               </p>
             </div>
             <button
@@ -2717,7 +2668,7 @@ const Events = () => {
           </div>
         )}
 
-        {/* Events List - FIXED: Now shows newest events first */}
+        {/* Events List */}
         <div className="space-y-6">
           {!loading && events.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
