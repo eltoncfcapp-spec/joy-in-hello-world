@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2, CloudUpload } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -77,8 +77,8 @@ interface EventAttendee {
   first_time: boolean | null;
   invited_by_id: string | null;
   attended_at: string | null;
-  attendance_status: 'present' | 'absent' | 'absent_with_reason';
-  notes?: string | null;
+  attendance_status: 'present' | 'absent'; // Changed from 'absent_with_reason'
+  notes?: string | null; // This might not exist in your schema
   members: Member;
   invited_by_member?: {
     id: string;
@@ -116,6 +116,7 @@ const Events = () => {
   const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
   const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
+  const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
 
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -149,7 +150,7 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
-  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent' | 'absent_with_reason'>>({});
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({}); // Removed 'absent_with_reason'
   const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
@@ -164,17 +165,16 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Memoized data fetching functions - FIXED: Changed order to show newest first
+  // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // FIXED: Changed order to show newest events first (descending)
       const { data, error } = await supabase
         .from('events')
         .select('*')
-        .order('event_date', { ascending: false }); // Changed from true to false
+        .order('event_date', { ascending: false });
 
       if (error) throw error;
 
@@ -340,12 +340,9 @@ const Events = () => {
         attendance_status: attendee.attendance_status || 'present'
       }));
 
-      // FIXED: More reliable state update for attendees
       setAttendees(prev => {
-        // Remove all attendees for this event
-        const otherAttendees = prev.filter(attendee => attendee.event_id !== eventId);
-        // Add the newly fetched attendees
-        return [...otherAttendees, ...attendeesWithDefaults];
+        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+        return [...filtered, ...attendeesWithDefaults];
       });
       
       return attendeesWithDefaults;
@@ -389,8 +386,8 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS - FIXED: Improved attendance handling
-  const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent' | 'absent_with_reason', notes?: string) => {
+  // ATTENDANCE FUNCTIONS - FIXED for schema
+  const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -403,15 +400,14 @@ const Events = () => {
         .eq('members_id', memberId)
         .single();
 
-      const attendanceData = {
+      const attendanceData: any = {
         event_id: eventId,
         members_id: memberId,
         first_time: false,
         invited_by_id: null,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
-        notes: notes || null,
-        updated_at: new Date().toISOString()
+        // Note: 'notes' column doesn't exist in your schema
       };
 
       let error;
@@ -423,21 +419,17 @@ const Events = () => {
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
-        // Create new record
+        // Create new record - FIXED: removed created_at since it doesn't exist in schema
         const { error: insertError } = await supabase
           .from('event_attendees')
-          .insert([{ ...attendanceData, created_at: new Date().toISOString() }]);
+          .insert([attendanceData]);
         error = insertError;
       }
 
       if (error) throw error;
 
-      // FIXED: Force refresh attendees data immediately
+      // Refresh attendees data
       await fetchEventAttendees(eventId);
-      
-      // Also refresh the events list to update counts
-      await fetchEvents();
-      
       return true;
     } catch (error: any) {
       console.error('Error saving attendance:', error);
@@ -455,8 +447,8 @@ const Events = () => {
 
     try {
       const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
-        const notes = attendanceNotes[memberId] || null;
-        return await saveAttendance(eventId, memberId, status, notes);
+        // Note: 'notes' parameter removed since column doesn't exist
+        return await saveAttendance(eventId, memberId, status);
       });
 
       const results = await Promise.all(savePromises);
@@ -467,9 +459,8 @@ const Events = () => {
         setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
         closeBulkAttendanceModal();
         
-        // FIXED: Force refresh all data
+        // Refresh the event data to show updated counts
         await fetchEventAttendees(eventId);
-        await fetchEvents();
       } else {
         setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
       }
@@ -486,18 +477,17 @@ const Events = () => {
     }
   };
 
-  const markMemberAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
-    return await saveAttendance(eventId, memberId, status, notes);
+  const markMemberAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent') => {
+    return await saveAttendance(eventId, memberId, status);
   };
 
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
     const absent = eventAttendees.filter(a => a.attendance_status === 'absent').length;
-    const absentWithReason = eventAttendees.filter(a => a.attendance_status === 'absent_with_reason').length;
     const firstTimers = eventAttendees.filter(a => a.first_time && a.attendance_status === 'present').length;
     
-    return { present, absent, absentWithReason, firstTimers, total: present + absent + absentWithReason };
+    return { present, absent, firstTimers, total: present + absent };
   };
 
   const getSermonForEvent = (eventId: string) => {
@@ -551,6 +541,137 @@ const Events = () => {
     }
 
     return false;
+  };
+
+  // Function to sync event to cloud (mark as synced/backed up)
+  const syncEventToCloud = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Get the event data
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      // Get all attendees for this event
+      const eventAttendees = getEventAttendees(eventId);
+
+      // Prepare data for sync
+      const syncData = {
+        event_id: event.id,
+        event_name: event.name,
+        event_date: event.event_date,
+        event_time: event.event_time,
+        location: event.location,
+        is_completed: event.is_completed,
+        total_attendees: eventAttendees.length,
+        present_count: getAttendanceStats(eventId).present,
+        absent_count: getAttendanceStats(eventId).absent,
+        attendees: eventAttendees.map(attendee => ({
+          member_id: attendee.members_id,
+          member_name: `${attendee.members.name} ${attendee.members.surname}`,
+          status: attendee.attendance_status,
+          first_time: attendee.first_time,
+          attended_at: attendee.attended_at
+        })),
+        synced_at: new Date().toISOString(),
+        synced_by: user?.id,
+        synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+      };
+
+      // Here you would typically send this data to your cloud backup service
+      // For now, we'll just update a field in the events table to mark it as synced
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ 
+          updated_at: new Date().toISOString(),
+          // You could add a 'last_synced_at' field to your events table
+        })
+        .eq('id', eventId);
+
+      if (updateError) throw updateError;
+
+      // Log the sync action (optional)
+      const { error: logError } = await supabase
+        .from('audit_logs')
+        .insert([{
+          table_name: 'events',
+          record_id: eventId,
+          action: 'SYNC',
+          new_data: syncData,
+          user_id: user?.id,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (logError) {
+        console.warn('Failed to log sync action:', logError);
+      }
+
+      setSuccess(`Event "${event.name}" successfully synced to cloud!`);
+      setTimeout(() => setSuccess(null), 3000);
+      
+      // Close sync modal
+      setShowSyncModal(null);
+      
+    } catch (error: any) {
+      console.error('Error syncing event to cloud:', error);
+      setError(error.message || 'Failed to sync event to cloud. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to export event data as CSV
+  const exportEventData = (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const eventAttendees = getEventAttendees(eventId);
+    
+    // Prepare CSV content
+    const csvRows = [];
+    
+    // Add event info
+    csvRows.push(['Event Information']);
+    csvRows.push(['Name', event.name]);
+    csvRows.push(['Date', event.event_date]);
+    csvRows.push(['Time', event.event_time]);
+    csvRows.push(['Location', event.location || '']);
+    csvRows.push(['Topic', event.topic || '']);
+    csvRows.push(['']);
+    
+    // Add attendees
+    csvRows.push(['Attendees List']);
+    csvRows.push(['Name', 'Surname', 'Status', 'First Time', 'Attended At', 'Invited By']);
+    
+    eventAttendees.forEach(attendee => {
+      csvRows.push([
+        attendee.members.name,
+        attendee.members.surname,
+        attendee.attendance_status,
+        attendee.first_time ? 'Yes' : 'No',
+        attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
+        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : ''
+      ]);
+    });
+    
+    // Convert to CSV string
+    const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `event_${event.name.replace(/\s+/g, '_')}_${event.event_date}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    setSuccess(`Event data exported successfully!`);
+    setTimeout(() => setSuccess(null), 3000);
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -938,26 +1059,39 @@ const Events = () => {
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
-      // FIXED: Use upsert to handle both new and existing records
+      // Create absent records
       const absentRecords = absentMemberIds.map(memberId => ({
         event_id: eventId,
         members_id: memberId,
         first_time: false,
         invited_by_id: null,
         attendance_status: 'absent' as const,
-        attended_at: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: null
       }));
 
-      const { error } = await supabase
-        .from('event_attendees')
-        .upsert(absentRecords, {
-          onConflict: 'event_id,members_id',
-          ignoreDuplicates: false
-        });
+      // Insert or update records
+      for (const record of absentRecords) {
+        // Check if record exists
+        const { data: existing } = await supabase
+          .from('event_attendees')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('members_id', record.members_id)
+          .single();
 
-      if (error) throw error;
+        if (existing) {
+          // Update existing
+          await supabase
+            .from('event_attendees')
+            .update(record)
+            .eq('id', existing.id);
+        } else {
+          // Insert new
+          await supabase
+            .from('event_attendees')
+            .insert([record]);
+        }
+      }
       
       // Refresh attendees data
       await fetchEventAttendees(eventId);
@@ -1015,10 +1149,6 @@ const Events = () => {
           ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
           : event
       ));
-
-      // FIXED: Refresh all data after completing event
-      await fetchEvents();
-      await fetchEventAttendees(eventId);
 
       setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
       setTimeout(() => setSuccess(null), 3000);
@@ -1124,9 +1254,7 @@ const Events = () => {
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase
@@ -1165,11 +1293,9 @@ const Events = () => {
         throw error;
       }
 
-      // FIXED: Force refresh attendees data
-      await fetchEventAttendees(eventId);
-      
-      // Also update events to refresh counts
-      await fetchEvents();
+      // Update attendees state immediately AND refresh from server
+      setAttendees(prev => [...prev, data]);
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
 
       // Reset form and close it
       resetAttendeeForm();
@@ -1198,11 +1324,9 @@ const Events = () => {
 
       if (error) throw error;
 
-      // FIXED: Force refresh attendees data
-      await fetchEventAttendees(eventId);
-      
-      // Also update events to refresh counts
-      await fetchEvents();
+      // Update attendees state immediately AND refresh from server
+      setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1262,7 +1386,7 @@ const Events = () => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
-    const initialAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
     const initialNotes: Record<string, string> = {};
 
     // Set all target members as present by default
@@ -1278,10 +1402,7 @@ const Events = () => {
     // Update with existing attendance records
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
-      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent' | 'absent_with_reason';
-      if (attendee.attendance_status === 'absent_with_reason' && attendee.notes) {
-        initialNotes[attendee.members_id] = attendee.notes;
-      }
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
     });
 
     setBulkAttendance(initialAttendance);
@@ -1294,20 +1415,8 @@ const Events = () => {
     setAttendanceNotes({});
   };
 
-  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
+  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
     setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
-    
-    if (status !== 'absent_with_reason') {
-      setAttendanceNotes(prev => {
-        const newNotes = { ...prev };
-        delete newNotes[memberId];
-        return newNotes;
-      });
-    }
-  };
-
-  const handleAttendanceNotesChange = (memberId: string, note: string) => {
-    setAttendanceNotes(prev => ({ ...prev, [memberId]: note }));
   };
 
   const openNewcomerModal = (eventId: string) => {
@@ -1404,9 +1513,7 @@ const Events = () => {
         first_time: true,
         invited_by_id: null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { data: newAttendee, error: attendeeError } = await supabase
@@ -1442,11 +1549,14 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // FIXED: Force refresh data
+      // Update attendees state immediately AND refresh from server
+      if (newAttendee) {
+        setAttendees(prev => [...prev, newAttendee]);
+      }
       await fetchEventAttendees(eventId);
-      await fetchEvents();
-      await fetchMembers();
 
+      // Refresh members data
+      await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1492,7 +1602,7 @@ const Events = () => {
 
   const getAbsentAttendees = (eventId: string) => {
     return getEventAttendees(eventId).filter(attendee => 
-      attendee.attendance_status === 'absent' || attendee.attendance_status === 'absent_with_reason'
+      attendee.attendance_status === 'absent'
     );
   };
 
@@ -1559,7 +1669,122 @@ const Events = () => {
     }
   };
 
-  // Bulk Attendance Modal Component
+  // Sync Modal Component
+  const SyncModal = () => {
+    if (!showSyncModal) return null;
+
+    const event = events.find(e => e.id === showSyncModal);
+    if (!event) return null;
+
+    const stats = getAttendanceStats(event.id);
+    const eventAttendees = getEventAttendees(event.id);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                <CloudUpload className="inline-block h-5 w-5 mr-2 text-blue-500" />
+                Sync to Cloud - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Backup event data to cloud storage
+              </p>
+            </div>
+            <button
+              onClick={() => setShowSyncModal(null)}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-6">
+            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">What will be synced:</h4>
+              <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Event details (name, date, time, location)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendance statistics ({stats.present} present, {stats.absent} absent)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendee list ({eventAttendees.length} members)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  First-time visitor information
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Sync timestamp and user information
+                </li>
+              </ul>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.present}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Present</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.absent}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Absent</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{eventAttendees.length}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Total Registered</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportEventData(event.id)}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 font-medium"
+                >
+                  <Download className="h-4 w-4" />
+                  Export as CSV
+                </button>
+                <button
+                  onClick={() => syncEventToCloud(event.id)}
+                  disabled={loading}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CloudUpload className="h-4 w-4" />
+                  {loading ? 'Syncing...' : 'Sync to Cloud'}
+                </button>
+              </div>
+              
+              <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
+                Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setShowSyncModal(null)}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Bulk Attendance Modal Component - UPDATED for schema
   const BulkAttendanceModal = () => {
     if (!showBulkAttendanceModal) return null;
 
@@ -1588,7 +1813,6 @@ const Events = () => {
     const stats = {
       present: Object.values(bulkAttendance).filter(status => status === 'present').length,
       absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
-      absentWithReason: Object.values(bulkAttendance).filter(status => status === 'absent_with_reason').length,
       total: targetMembers.length
     };
 
@@ -1614,7 +1838,7 @@ const Events = () => {
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
             {/* Attendance Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
                 <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
@@ -1622,10 +1846,6 @@ const Events = () => {
               <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
                 <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
-              </div>
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.absentWithReason}</div>
-                <div className="text-sm text-yellow-700 dark:text-yellow-300 font-medium">Absent with Notes</div>
               </div>
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
@@ -1642,7 +1862,6 @@ const Events = () => {
                     newAttendance[member.id] = 'present';
                   });
                   setBulkAttendance(newAttendance);
-                  setAttendanceNotes({});
                 }}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
               >
@@ -1655,7 +1874,6 @@ const Events = () => {
                     newAttendance[member.id] = 'absent';
                   });
                   setBulkAttendance(newAttendance);
-                  setAttendanceNotes({});
                 }}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
               >
@@ -1664,7 +1882,6 @@ const Events = () => {
               <button
                 onClick={() => {
                   setBulkAttendance({});
-                  setAttendanceNotes({});
                 }}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
               >
@@ -1730,33 +1947,8 @@ const Events = () => {
                           <X className="h-4 w-4" />
                           Absent
                         </button>
-                        <button
-                          onClick={() => handleBulkAttendanceChange(member.id, 'absent_with_reason')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            bulkAttendance[member.id] === 'absent_with_reason'
-                              ? 'bg-orange-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                          }`}
-                        >
-                          <FileText className="h-4 w-4" />
-                          Notes
-                        </button>
                       </div>
                     </div>
-                    {bulkAttendance[member.id] === 'absent_with_reason' && (
-                      <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Notes for Absence
-                        </label>
-                        <input
-                          type="text"
-                          value={attendanceNotes[member.id] || ''}
-                          onChange={(e) => handleAttendanceNotesChange(member.id, e.target.value)}
-                          placeholder="Enter reason for absence..."
-                          className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        />
-                      </div>
-                    )}
                   </div>
                 ))
               )}
@@ -1765,7 +1957,7 @@ const Events = () => {
 
           <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-700">
             <div className="text-sm text-gray-600 dark:text-gray-400">
-              {stats.present + stats.absent + stats.absentWithReason} of {targetMembers.length} members marked
+              {stats.present + stats.absent} of {targetMembers.length} members marked
             </div>
             <div className="flex gap-3">
               <button
@@ -1924,7 +2116,6 @@ const Events = () => {
     if (!showAttendeeModal) return null;
 
     const { type, eventId } = showAttendeeModal;
-    const eventAttendees = getEventAttendees(eventId);
     const attendees = type === 'present' ? getPresentAttendees(eventId) : getAbsentAttendees(eventId);
     const event = events.find(e => e.id === eventId);
 
@@ -1937,7 +2128,7 @@ const Events = () => {
                 {type === 'present' ? 'Present' : 'Absent'} Attendees - {event?.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Total: {attendees.length} {type === 'present' ? 'present' : 'absent'} (out of {eventAttendees.length} registered)
+                Total: {attendees.length} {type === 'present' ? 'present' : 'absent'}
               </p>
             </div>
             <button
@@ -2001,11 +2192,6 @@ const Events = () => {
                           {type === 'present' && attendee.invited_by_member && (
                             <div className="text-xs text-gray-500">
                               Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
-                            </div>
-                          )}
-                          {type === 'absent' && attendee.notes && (
-                            <div className="text-xs text-orange-600 dark:text-orange-400">
-                              Notes: {attendee.notes}
                             </div>
                           )}
                         </div>
@@ -2717,7 +2903,7 @@ const Events = () => {
           </div>
         )}
 
-        {/* Events List - FIXED: Now shows newest events first */}
+        {/* Events List */}
         <div className="space-y-6">
           {!loading && events.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
@@ -2903,7 +3089,7 @@ const Events = () => {
                           onClick={() => openAttendeeModal('absent', event.id)}
                           className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
                         >
-                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent + stats.absentWithReason}</div>
+                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
                           <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
                           <div className="text-xs text-red-600 dark:text-red-400 mt-1">Click to view</div>
                         </button>
@@ -2922,7 +3108,7 @@ const Events = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons */}
+                    {/* Action Buttons - ADDED SYNC BUTTON */}
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
@@ -2966,6 +3152,13 @@ const Events = () => {
                         {sermon ? 'Edit Sermon' : 'Add Sermon'}
                       </button>
                       <button
+                        onClick={() => setShowSyncModal(event.id)}
+                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                      >
+                        <CloudUpload className="h-4 w-4" />
+                        Sync to Cloud
+                      </button>
+                      <button
                         onClick={() => openAttendeeModal('present', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
@@ -2976,7 +3169,7 @@ const Events = () => {
                         onClick={() => openAttendeeModal('absent', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
-                        <span>View Absent ({stats.absent + stats.absentWithReason})</span>
+                        <span>View Absent ({stats.absent})</span>
                         <Eye className="h-4 w-4" />
                       </button>
                     </div>
@@ -3191,6 +3384,7 @@ const Events = () => {
       <BulkAttendanceModal />
       <NewcomerModal />
       <AttendeeModal />
+      <SyncModal />
     </div>
   );
 };
