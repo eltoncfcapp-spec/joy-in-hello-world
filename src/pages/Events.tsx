@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -117,6 +117,9 @@ const Events = () => {
   const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
+  
+  // Use ref for absence notes to prevent re-renders while typing
+  const attendanceNotesRef = useRef<Record<string, string>>({});
 
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -447,7 +450,7 @@ const Events = () => {
 
     try {
       const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
-        const notes = attendanceNotes[memberId] || '';
+        const notes = attendanceNotesRef.current[memberId] || '';
         return await saveAttendance(eventId, memberId, status, notes);
       });
 
@@ -1413,6 +1416,7 @@ const Events = () => {
     setShowBulkAttendanceModal(null);
     setBulkAttendance({});
     setAttendanceNotes({});
+    attendanceNotesRef.current = {};
   };
 
   const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
@@ -1958,11 +1962,10 @@ const Events = () => {
                             Reason for absence (optional)
                           </label>
                           <textarea
-                            value={attendanceNotes[member.id] || ''}
-                            onChange={(e) => setAttendanceNotes(prev => ({
-                              ...prev,
-                              [member.id]: e.target.value
-                            }))}
+                            defaultValue={attendanceNotesRef.current[member.id] || ''}
+                            onChange={(e) => {
+                              attendanceNotesRef.current[member.id] = e.target.value;
+                            }}
                             placeholder="Enter reason for absence..."
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
                             rows={2}
