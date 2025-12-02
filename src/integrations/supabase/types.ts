@@ -430,6 +430,7 @@ export type Database = {
           invited_by_id: string | null
           members_id: string
           name: string | null
+          notes: string | null
           phone: string | null
           surname: string | null
         }
@@ -444,6 +445,7 @@ export type Database = {
           invited_by_id?: string | null
           members_id: string
           name?: string | null
+          notes?: string | null
           phone?: string | null
           surname?: string | null
         }
@@ -458,6 +460,7 @@ export type Database = {
           invited_by_id?: string | null
           members_id?: string
           name?: string | null
+          notes?: string | null
           phone?: string | null
           surname?: string | null
         }

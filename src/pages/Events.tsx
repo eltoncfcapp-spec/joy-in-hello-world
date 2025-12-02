@@ -150,7 +150,7 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
-  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({}); // Removed 'absent_with_reason'
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
@@ -407,7 +407,7 @@ const Events = () => {
         invited_by_id: null,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
-        // Note: 'notes' column doesn't exist in your schema
+        notes: notes || null,
       };
 
       let error;
@@ -447,8 +447,8 @@ const Events = () => {
 
     try {
       const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
-        // Note: 'notes' parameter removed since column doesn't exist
-        return await saveAttendance(eventId, memberId, status);
+        const notes = attendanceNotes[memberId] || '';
+        return await saveAttendance(eventId, memberId, status, notes);
       });
 
       const results = await Promise.all(savePromises);
@@ -1899,55 +1899,76 @@ const Events = () => {
               ) : (
                 targetMembers.map((member) => (
                   <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-1">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
-                          {getInitials(member.name, member.surname)}
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+                            {getInitials(member.name, member.surname)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white truncate">
+                              {member.name} {member.surname}
+                            </div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                              {member.phone && (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.phone}</span>
+                                </div>
+                              )}
+                              {member.email && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.email}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                            {member.phone && (
-                              <div className="flex items-center gap-1">
-                                <Phone className="h-3 w-3" />
-                                {member.phone}
-                              </div>
-                            )}
-                            {member.email && (
-                              <div className="flex items-center gap-1">
-                                <Mail className="h-3 w-3" />
-                                {member.email}
-                              </div>
-                            )}
-                          </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'present'
+                                ? 'bg-green-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="hidden sm:inline">Present</span>
+                          </button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'absent'
+                                ? 'bg-red-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <X className="h-4 w-4" />
+                            <span className="hidden sm:inline">Absent</span>
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleBulkAttendanceChange(member.id, 'present')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            bulkAttendance[member.id] === 'present'
-                              ? 'bg-green-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                          }`}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                          Present
-                        </button>
-                        <button
-                          onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            bulkAttendance[member.id] === 'absent'
-                              ? 'bg-red-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                          }`}
-                        >
-                          <X className="h-4 w-4" />
-                          Absent
-                        </button>
-                      </div>
+                      
+                      {/* Absence Reason Field - Only show when marked as absent */}
+                      {bulkAttendance[member.id] === 'absent' && (
+                        <div className="mt-2 pl-0 sm:pl-13">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Reason for absence (optional)
+                          </label>
+                          <textarea
+                            value={attendanceNotes[member.id] || ''}
+                            onChange={(e) => setAttendanceNotes(prev => ({
+                              ...prev,
+                              [member.id]: e.target.value
+                            }))}
+                            placeholder="Enter reason for absence..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                            rows={2}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -1955,31 +1976,37 @@ const Events = () => {
             </div>
           </div>
 
-          <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-700">
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              {stats.present + stats.absent} of {targetMembers.length} members marked
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={closeBulkAttendanceModal}
-                className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
-                disabled={loading || Object.keys(bulkAttendance).length === 0}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Saving...
-                  </>
-                ) : (
-                  `Save Attendance (${Object.keys(bulkAttendance).length})`
-                )}
-              </button>
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                {stats.present + stats.absent} of {targetMembers.length} members marked
+              </div>
+              <div className="flex gap-3 w-full sm:w-auto">
+                <button
+                  onClick={closeBulkAttendanceModal}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                  disabled={loading || Object.keys(bulkAttendance).length === 0}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="hidden sm:inline">Save Attendance</span>
+                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
