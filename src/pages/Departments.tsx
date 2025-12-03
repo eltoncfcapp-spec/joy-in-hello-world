@@ -124,7 +124,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         status: 'scheduled'
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('department_meetings')
         .insert([newMeeting])
         .select()
@@ -345,13 +345,13 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         ...dm.member,
         department_role: dm.role,
         department_member_id: dm.id
-      })) || [];
+      })).filter(m => m.id) || [];
       
-      setDepartmentMembers(memberData);
+      setDepartmentMembers(memberData as Member[]);
       
       const initialAttendance: Record<string, 'present'> = {};
       memberData?.forEach(member => {
-        initialAttendance[member.id] = 'present';
+        if (member.id) initialAttendance[member.id] = 'present';
       });
       setAttendance(initialAttendance);
     } catch (error: any) {
@@ -375,10 +375,12 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const loadExistingAttendance = async () => {
     try {
+      if (!selectedMeeting?.id) return;
+      
       const { data, error } = await supabase
         .from('department_attendance')
         .select('*')
-        .eq('meeting_id', selectedMeeting?.id);
+        .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
 
@@ -386,9 +388,11 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       const existingNotes: Record<string, string> = {};
 
       data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.notes) {
-          existingNotes[record.member_id] = record.notes;
+        if (record.member_id && record.status) {
+          existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'absent_with_reason';
+          if (record.notes) {
+            existingNotes[record.member_id] = record.notes;
+          }
         }
       });
 
@@ -1395,7 +1399,7 @@ ${reportData.additional_notes || 'No additional notes'}
 DETAILED ATTENDANCE
 ===================
 ${attendance.map(record => `
-${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}
+${record.members?.name} ${record.members?.surname} - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}
 `).join('')}
 
 ${selectedMeeting?.notes ? `
@@ -1633,7 +1637,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                               ? 'bg-red-100 text-red-800'
                               : 'bg-yellow-100 text-yellow-800'
                           }`}>
-                            {record.status.replace('_', ' ')}
+                            {(record.status || 'unknown').replace('_', ' ')}
                           </div>
                           {record.notes && (
                             <p className="text-sm text-gray-600 mt-1">
@@ -1776,7 +1780,7 @@ interface DepartmentWorkflowProps {
 const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   department,
   meetings,
-  members,
+  members: _members,
   onClose,
   onSuccess,
   onError
@@ -1919,7 +1923,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile, canViewDepartment, canManageDepartment, isAdmin, isPastor, isDepartmentLeader, isGroupLeader, isDeacon, getRoles } = useAuth();
+  const { profile, canViewDepartment, canManageDepartment, isAdmin: _isAdmin, isPastor: _isPastor, isDepartmentLeader: _isDepartmentLeader, isGroupLeader: _isGroupLeader, isDeacon: _isDeacon, getRoles } = useAuth();
   
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
@@ -1955,7 +1959,7 @@ const Departments = () => {
       
       const departmentsWithMemberCounts = await Promise.all(
         (departmentsData || []).map(async (department) => {
-          const { count, error: countError } = await supabase
+          const { count } = await supabase
             .from('department_members')
             .select('*', { count: 'exact', head: true })
             .eq('department_id', department.id);

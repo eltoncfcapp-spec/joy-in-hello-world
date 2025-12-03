@@ -17,7 +17,6 @@ import {
   Search,
   Key,
   RefreshCw,
-  Edit,
   FileText,
   Download,
   Upload,
@@ -137,7 +136,6 @@ const Dashboard = () => {
   const [sermonSearchTerm, setSermonSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
@@ -150,23 +148,6 @@ const Dashboard = () => {
   const [_cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
-
-  // Form states
-  const [newMember, setNewMember] = useState({
-    name: '',
-    surname: '',
-    email: '',
-    phone: '',
-    invited_by: '',
-    cell_group_id: ''
-  });
-  const [newEvent, setNewEvent] = useState({
-    name: '',
-    location: '',
-    event_date: '',
-    event_time: '',
-    topic: ''
-  });
 
   // Check user permissions - use admin_role from profile instead of role
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
@@ -518,11 +499,6 @@ const Dashboard = () => {
     }
   };
 
-  // View pamphlet in modal
-  const viewPamphlet = (pamphletUrl: string) => {
-    setViewingPamphlet(pamphletUrl);
-  };
-
   // Close pamphlet modal
   const closePamphletModal = () => {
     setViewingPamphlet(null);
@@ -563,10 +539,6 @@ const Dashboard = () => {
     setSelectedMember(null);
     setSelectedEvent(null);
     setSelectedSermon(null);
-    setEditingMember(null);
-    // Reset form states
-    setNewMember({ name: '', surname: '', email: '', phone: '', invited_by: '', cell_group_id: '' });
-    setNewEvent({ name: '', location: '', event_date: '', event_time: '', topic: '' });
     setError(null);
   };
 
@@ -591,110 +563,6 @@ const Dashboard = () => {
     if (type === 'positive') return <ArrowUp className="h-3 w-3" />;
     if (type === 'negative') return <ArrowDown className="h-3 w-3" />;
     return null;
-  };
-
-  // Add new member handler
-  const handleAddMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const { error } = await supabase
-        .from('members')
-        .insert([{
-          name: newMember.name,
-          surname: newMember.surname,
-          email: newMember.email || null,
-          phone: newMember.phone || null,
-          invited_by: newMember.invited_by || null,
-          cell_group_id: newMember.cell_group_id || null,
-          status: 'newcomer'
-        }]);
-
-      if (error) throw error;
-      
-      alert('Member added successfully!');
-      await loadDashboardData();
-      closeModal();
-    } catch (error) {
-      console.error('Error adding member:', error);
-      setError('Failed to add member');
-    }
-  };
-
-  // Create event handler
-  const handleCreateEvent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const { error } = await supabase
-        .from('events')
-        .insert([{
-          name: newEvent.name,
-          event_date: newEvent.event_date,
-          event_time: newEvent.event_time,
-          location: newEvent.location || null,
-          topic: newEvent.topic || null
-        }]);
-
-      if (error) throw error;
-      
-      alert('Event created successfully!');
-      await loadDashboardData();
-      closeModal();
-    } catch (error) {
-      console.error('Error creating event:', error);
-      setError('Failed to create event');
-    }
-  };
-
-  // Edit member handler
-  const handleEditMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingMember) return;
-
-    try {
-      const { error } = await supabase
-        .from('members')
-        .update({
-          name: editingMember.name,
-          surname: editingMember.surname,
-          email: editingMember.email,
-          phone: editingMember.phone,
-          invited_by: editingMember.invited_by,
-          cell_group_id: editingMember.cell_group_id,
-          status: editingMember.status
-        })
-        .eq('id', editingMember.id);
-
-      if (error) throw error;
-      
-      alert('Member updated successfully!');
-      await loadDashboardData();
-      setEditingMember(null);
-      closeModal();
-    } catch (error) {
-      console.error('Error updating member:', error);
-      setError('Failed to update member');
-    }
-  };
-
-  // Delete member handler
-  const handleDeleteMember = async (memberId: string) => {
-    if (!confirm('Are you sure you want to delete this member?')) return;
-
-    try {
-      const { error } = await supabase
-        .from('members')
-        .delete()
-        .eq('id', memberId);
-
-      if (error) throw error;
-      
-      alert('Member deleted successfully!');
-      await loadDashboardData();
-      closeModal();
-    } catch (error) {
-      console.error('Error deleting member:', error);
-      setError('Failed to delete member');
-    }
   };
 
   const Modal = ({ children, title, size = 'max-w-md' }: { children: React.ReactNode; title: string; size?: string }) => (
@@ -729,7 +597,7 @@ const Dashboard = () => {
 
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
-  const filteredAbsentMembers = getFilteredAbsentMembers();
+  getFilteredAbsentMembers(); // Called for side effects
   const filteredSermons = getFilteredSermons();
 
   return (
@@ -1358,18 +1226,6 @@ const Dashboard = () => {
                       <Eye className="h-4 w-4" />
                       View Details
                     </button>
-                    {currentUserCanEdit && (
-                      <button 
-                        onClick={() => {
-                          setEditingMember(member);
-                          setActiveModal('editMember');
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors font-medium"
-                      >
-                        <Edit className="h-4 w-4" />
-                        Edit
-                      </button>
-                    )}
                   </div>
                 </div>
               ))}
