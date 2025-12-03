@@ -551,7 +551,7 @@ const Analytics = () => {
     setDepartmentStats(stats.filter(dept => dept.total_members > 0));
   };
 
-  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], departments: any[]) => {
+  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
     try {
       const absentMembersList: AbsentMember[] = [];
       
@@ -607,7 +607,7 @@ const Analytics = () => {
     }
   };
 
-  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], departments: any[]) => {
+  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
     try {
       const sundayAbsenteesList: AbsentMember[] = [];
       
@@ -655,7 +655,7 @@ const Analytics = () => {
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], departments: any[]) => {
+  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
     try {
       const threeTimeAbsenteesList: AbsentMember[] = [];
 

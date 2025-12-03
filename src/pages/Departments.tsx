@@ -3,7 +3,7 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Plus, Printer,
+  Shield, AlertCircle, CheckCircle, Printer,
   Clock, FileText, Save, UserPlus, Mail, Phone,
   Download, FileDown
 } from 'lucide-react';
@@ -22,14 +22,14 @@ interface Department {
 
 interface DepartmentMeeting {
   id: string;
-  department_id: string;
+  department_id: string | null;
   meeting_date: string;
   meeting_time: string | null;
   location: string | null;
   topic: string | null;
   notes: string | null;
-  status: string;
-  created_at: string;
+  status: string | null;
+  created_at: string | null;
   cancellation_reason?: string | null;
 }
 
@@ -46,21 +46,21 @@ interface Member {
 
 interface DepartmentAttendanceRecord {
   id: string;
-  meeting_id: string;
-  member_id: string;
-  status: 'present' | 'absent' | 'absent_with_reason';
+  meeting_id: string | null;
+  member_id: string | null;
+  status: 'present' | 'absent' | 'absent_with_reason' | string | null;
   notes?: string | null;
-  members?: Member;
+  members?: Member | null;
 }
 
 interface DepartmentReport {
   id: string;
-  meeting_id: string;
-  report_text: string;
+  meeting_id: string | null;
+  report_text: string | null;
   decisions_made: string | null;
   action_items: string | null;
   next_meeting_date: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 // Department Meeting Creation Step
@@ -810,7 +810,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
           email: formData.email.trim() || null,
-          status: 'newcomer',
+          status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           invited_by: department.name,
           // Set default values for required schema fields

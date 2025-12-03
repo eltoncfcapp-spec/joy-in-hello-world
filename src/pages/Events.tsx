@@ -11,6 +11,7 @@ interface Event {
   event_time: string;
   location: string | null;
   created_at: string | null;
+  updated_at: string | null;
   is_whole_church: boolean;
   target_groups: string[] | null;
   target_departments: string[] | null;
@@ -33,7 +34,7 @@ interface Sermon {
   events?: {
     name: string;
     topic: string | null;
-  };
+  } | null;
 }
 
 interface Member {
@@ -51,7 +52,7 @@ interface Member {
     departments: {
       id: string;
       name: string;
-    };
+    } | null;
   }>;
 }
 
@@ -77,8 +78,8 @@ interface EventAttendee {
   first_time: boolean | null;
   invited_by_id: string | null;
   attended_at: string | null;
-  attendance_status: 'present' | 'absent'; // Changed from 'absent_with_reason'
-  notes?: string | null; // This might not exist in your schema
+  attendance_status: 'present' | 'absent' | string | null;
+  notes?: string | null;
   members: Member;
   invited_by_member?: {
     id: string;
@@ -154,7 +155,7 @@ const Events = () => {
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
-  const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+  const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
@@ -1484,7 +1485,7 @@ const Events = () => {
           surname: newcomerFormData.surname.trim(),
           phone: newcomerFormData.phone.trim() || null,
           email: newcomerFormData.email.trim() || null,
-          status: 'newcomer',
+          status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
           is_leader: false,

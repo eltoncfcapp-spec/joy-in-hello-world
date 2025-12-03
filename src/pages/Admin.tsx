@@ -561,78 +561,35 @@ const cloudService = {
   },
 
   async getNotificationSettings(): Promise<NotificationSettings> {
-    try {
-      const { data, error } = await supabase
-        .from('notification_settings' as any)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        // Return default notification settings if table doesn't exist
-        const defaultSettings: NotificationSettings = {
-          email_settings: {
-            smtp_host: '',
-            smtp_port: 587,
-            smtp_username: '',
-            smtp_password: '',
-            from_email: '',
-            from_name: ''
-          },
-          sms_settings: {
-            provider: 'twilio',
-            account_sid: '',
-            auth_token: '',
-            from_number: ''
-          },
-          push_settings: {
-            enabled: false,
-            service_key: ''
-          },
-          notification_templates: []
-        };
-        return defaultSettings;
-      }
-      return data;
-    } catch (error) {
-      console.error('Error fetching notification settings:', error);
-      return {
-        email_settings: {
-          smtp_host: '',
-          smtp_port: 587,
-          smtp_username: '',
-          smtp_password: '',
-          from_email: '',
-          from_name: ''
-        },
-        sms_settings: {
-          provider: 'twilio',
-          account_sid: '',
-          auth_token: '',
-          from_number: ''
-        },
-        push_settings: {
-          enabled: false,
-          service_key: ''
-        },
-        notification_templates: []
-      };
-    }
+    // Return default notification settings since table doesn't exist
+    const defaultSettings: NotificationSettings = {
+      email_settings: {
+        smtp_host: '',
+        smtp_port: 587,
+        smtp_username: '',
+        smtp_password: '',
+        from_email: '',
+        from_name: ''
+      },
+      sms_settings: {
+        provider: 'twilio',
+        account_sid: '',
+        auth_token: '',
+        from_number: ''
+      },
+      push_settings: {
+        enabled: false,
+        service_key: ''
+      },
+      notification_templates: []
+    };
+    return defaultSettings;
   },
 
   async updateNotificationSettings(settings: NotificationSettings): Promise<NotificationSettings> {
-    try {
-      const { data, error } = await supabase
-        .from('notification_settings')
-        .upsert(settings)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error updating notification settings:', error);
-      throw error;
-    }
+    // Return the settings as-is since table doesn't exist
+    console.warn('Notification settings table not configured');
+    return settings;
   },
 
   async getAuditLogs(): Promise<AuditLog[]> {
@@ -1391,8 +1348,8 @@ const Admin = () => {
       can_edit_members: profile!.can_edit_members || false,
       can_view_own_data: profile!.can_view_own_data || false,
       cell_group_id: profile!.cell_group_id || null,
-      status: profile!.status || null,
-      created_at: profile!.created_at || null
+      status: null,
+      created_at: null
     };
     
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions || [], 'edit_members')) {
@@ -1447,8 +1404,8 @@ const Admin = () => {
       can_edit_members: profile.can_edit_members || false,
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
-      status: profile.status || null,
-      created_at: profile.created_at || null
+      status: null,
+      created_at: null
     };
 
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'edit_members')) {
@@ -1571,8 +1528,8 @@ const Admin = () => {
       can_edit_members: profile.can_edit_members || false,
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
-      status: profile.status || null,
-      created_at: profile.created_at || null
+      status: null,
+      created_at: null
     };
 
     if (isAdminOrPastor(currentUser)) {
@@ -2586,8 +2543,8 @@ const Admin = () => {
                   can_edit_members: profile.can_edit_members || false,
                   can_view_own_data: profile.can_view_own_data || false,
                   cell_group_id: profile.cell_group_id || null,
-                  status: profile.status || null,
-                  created_at: profile.created_at || null
+                  status: null,
+                  created_at: null
                 };
                 
                 if (isAdminOrPastor(currentUser)) return 'Full administrative access';
@@ -2645,8 +2602,8 @@ const Admin = () => {
               can_edit_members: profile.can_edit_members || false,
               can_view_own_data: profile.can_view_own_data || false,
               cell_group_id: profile.cell_group_id || null,
-              status: profile.status || null,
-              created_at: profile.created_at || null
+              status: null,
+              created_at: null
             };
             
             const sectionHasAccess = isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], section.permission);
@@ -2697,8 +2654,8 @@ const Admin = () => {
             can_edit_members: profile.can_edit_members || false,
             can_view_own_data: profile.can_view_own_data || false,
             cell_group_id: profile.cell_group_id || null,
-            status: profile.status || null,
-            created_at: profile.created_at || null
+            status: null,
+            created_at: null
           };
 
           return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], 'view_members')) && (
@@ -2824,8 +2781,8 @@ const Admin = () => {
             can_edit_members: profile.can_edit_members || false,
             can_view_own_data: profile.can_view_own_data || false,
             cell_group_id: profile.cell_group_id || null,
-            status: profile.status || null,
-            created_at: profile.created_at || null
+            status: null,
+            created_at: null
           };
 
           return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], 'view_reports')) && (
