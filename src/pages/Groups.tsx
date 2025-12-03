@@ -1082,7 +1082,129 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   };
 
   const handlePrint = () => {
-    window.print();
+    const stats = getAttendanceStats();
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Group Meeting Report - ${group.name}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
+            h1 { color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
+            h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+            .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .header-info p { margin: 8px 0; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
+            .stat-box.present { background: #dcfce7; border-color: #86efac; }
+            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
+            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
+            .stat-value { font-size: 28px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 12px; color: #6b7280; margin-top: 5px; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 15px 0; }
+            .report-section h3 { margin-top: 0; color: #1f2937; }
+            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; }
+            .attendance-table th { background: #f3f4f6; font-weight: 600; }
+            .status-present { color: #059669; font-weight: 600; }
+            .status-absent { color: #dc2626; font-weight: 600; }
+            .status-with-reason { color: #d97706; font-weight: 600; }
+            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
+            @media print { body { padding: 20px; } }
+          </style>
+        </head>
+        <body>
+          <h1>📋 Group Meeting Report</h1>
+          <div class="header-info">
+            <p><strong>Group:</strong> ${group.name}</p>
+            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'}</p>
+            <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
+            <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
+            <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
+          </div>
+
+          <h2>📊 Attendance Summary</h2>
+          <div class="stats-grid">
+            <div class="stat-box present">
+              <div class="stat-value">${stats.present}</div>
+              <div class="stat-label">Present</div>
+            </div>
+            <div class="stat-box absent">
+              <div class="stat-value">${stats.absent}</div>
+              <div class="stat-label">Absent</div>
+            </div>
+            <div class="stat-box with-reason">
+              <div class="stat-value">${stats.absentWithReason}</div>
+              <div class="stat-label">Absent with Reason</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
+              <div class="stat-label">Attendance Rate</div>
+            </div>
+          </div>
+
+          ${reportData.report_text ? `
+          <div class="report-section">
+            <h3>📝 Meeting Report</h3>
+            <p>${reportData.report_text.replace(/\n/g, '<br>')}</p>
+          </div>
+          ` : ''}
+
+          ${reportData.decisions_made ? `
+          <div class="report-section">
+            <h3>✅ Decisions Made</h3>
+            <p>${reportData.decisions_made.replace(/\n/g, '<br>')}</p>
+          </div>
+          ` : ''}
+
+          ${reportData.action_items ? `
+          <div class="report-section">
+            <h3>📌 Action Items</h3>
+            <p>${reportData.action_items.replace(/\n/g, '<br>')}</p>
+          </div>
+          ` : ''}
+
+          ${reportData.next_meeting_date ? `
+          <div class="report-section">
+            <h3>📅 Next Meeting</h3>
+            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString()}</p>
+          </div>
+          ` : ''}
+
+          <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
+          <table class="attendance-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${attendance.map(record => `
+                <tr>
+                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+                    ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
+                  </td>
+                  <td>${record.notes || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            <p>Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+            <p>Church Management System</p>
+          </div>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.print();
+    }
   };
 
   const downloadReport = () => {
