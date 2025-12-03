@@ -114,7 +114,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         status: 'scheduled'
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('meetings')
         .insert([newMeeting])
         .select()
@@ -329,10 +329,12 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
   const loadExistingAttendance = async () => {
     try {
+      if (!selectedMeeting?.id) return;
+      
       const { data, error } = await supabase
         .from('meeting_attendance')
         .select('*')
-        .eq('meeting_id', selectedMeeting?.id);
+        .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
       
@@ -340,9 +342,11 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       const existingNotes: Record<string, string> = {};
       
       data?.forEach(record => {
-        existingAttendance[record.member_id] = record.status;
-        if (record.notes) {
-          existingNotes[record.member_id] = record.notes;
+        if (record.member_id && record.status) {
+          existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'absent_with_reason';
+          if (record.notes) {
+            existingNotes[record.member_id] = record.notes;
+          }
         }
       });
       
@@ -1245,7 +1249,7 @@ ${reportData.additional_notes || 'No additional notes'}
 
 DETAILED ATTENDANCE
 ${attendance.map(record => 
-  `${record.members?.name} ${record.members?.surname} - ${record.status.toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}`
+  `${record.members?.name} ${record.members?.surname} - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}`
 ).join('\n')}
 
 ${selectedMeeting?.notes ? `
@@ -1462,7 +1466,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                             record.status === 'absent' ? 'bg-red-100 text-red-800' :
                             'bg-yellow-100 text-yellow-800'
                           }`}>
-                            {record.status.replace('_', ' ')}
+                            {(record.status || 'unknown').replace('_', ' ')}
                           </div>
                           {record.notes && (
                             <p className="text-sm text-gray-600 mt-1">Notes: {record.notes}</p>
@@ -1588,7 +1592,7 @@ interface GroupWorkflowProps {
   onError: (message: string) => void;
 }
 
-const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members, onClose, onSuccess, onError }) => {
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
   const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
@@ -1762,7 +1766,7 @@ const Groups = () => {
 
       const groupsWithMemberCounts = await Promise.all(
         (groupsData || []).map(async (group) => {
-          const { count, error: countError } = await supabase
+          const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);

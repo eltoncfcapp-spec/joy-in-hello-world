@@ -481,10 +481,6 @@ const Events = () => {
     }
   };
 
-  const markMemberAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent') => {
-    return await saveAttendance(eventId, memberId, status);
-  };
-
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
@@ -684,7 +680,6 @@ const Events = () => {
       setError(null);
 
       const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
       
       if (!allowedTypes.includes(file.type)) {
         throw new Error('Invalid file type. Please upload PDF, image, or document files.');
@@ -2944,8 +2939,6 @@ const Events = () => {
             </div>
           ) : (
             events.map((event) => {
-              const presentAttendees = getPresentAttendees(event.id);
-              const absentAttendees = getAbsentAttendees(event.id);
               const scopeBadge = getEventScopeBadge(event);
               const statusBadge = getEventStatusBadge(event);
               const ScopeIcon = scopeBadge.icon;
