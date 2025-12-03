@@ -1,5 +1,6 @@
 import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Calendar, Building, Heart, CreditCard, Trash2, MessageCircle } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import ChurchInfoModalComponent from '../components/admin/ChurchInfoModal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
 
@@ -992,18 +993,6 @@ const Admin = () => {
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
 
-  // Debounced church info update
-  const debouncedUpdateChurchInfo = useCallback(
-    debounce(async (info: ChurchInfo) => {
-      try {
-        await cloudService.updateChurchInfo(info);
-      } catch (err) {
-        console.error('Error auto-saving church info:', err);
-      }
-    }, 2000),
-    []
-  );
-
   // Enhanced load data function
   const loadData = async () => {
     setLoading(true);
@@ -1186,32 +1175,6 @@ const Admin = () => {
   };
 
   // Handler functions for administrative sections
-  const handleUpdateChurchInfo = async () => {
-    if (!churchInfo) return;
-    
-    setLoading(true);
-    try {
-      await cloudService.updateChurchInfo(churchInfo);
-      setError(null);
-    } catch (err) {
-      setError('Failed to update church information');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleChurchInfoChange = (field: string, value: any) => {
-    if (!churchInfo) return;
-    
-    const updatedInfo = {
-      ...churchInfo,
-      [field]: value
-    };
-    
-    setChurchInfo(updatedInfo);
-    debouncedUpdateChurchInfo(updatedInfo);
-  };
-
   const handleUpdateSystemConfig = async () => {
     if (!systemConfig) return;
     
@@ -1582,116 +1545,6 @@ const Admin = () => {
   const departments = groups.filter(g => g.type === 'department');
 
   // Modal Components for ALL Administrative Sections
-  const ChurchInfoModal = () => (
-    <Modal title="Church Information Management" onClose={closeModal}>
-      <div className="space-y-6">
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-            <p className="text-red-700 font-medium">{error}</p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Church Name</label>
-            <input
-              type="text"
-              value={churchInfo?.name || ''}
-              onChange={(e) => handleChurchInfoChange('name', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Denomination</label>
-            <input
-              type="text"
-              value={churchInfo?.denomination || ''}
-              onChange={(e) => handleChurchInfoChange('denomination', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
-          <textarea
-            value={churchInfo?.address || ''}
-            onChange={(e) => handleChurchInfoChange('address', e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
-            <input
-              type="text"
-              value={churchInfo?.phone || ''}
-              onChange={(e) => handleChurchInfoChange('phone', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-            <input
-              type="email"
-              value={churchInfo?.email || ''}
-              onChange={(e) => handleChurchInfoChange('email', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Website</label>
-            <input
-              type="url"
-              value={churchInfo?.website || ''}
-              onChange={(e) => handleChurchInfoChange('website', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Doctrinal Statement</label>
-          <textarea
-            value={churchInfo?.doctrinal_statement || ''}
-            onChange={(e) => handleChurchInfoChange('doctrinal_statement', e.target.value)}
-            rows={6}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            placeholder="Enter your church's doctrinal statement..."
-          />
-        </div>
-
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <RefreshCw className="h-5 w-5 text-blue-400" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm text-blue-700">
-                Changes are automatically saved as you type.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-3 pt-4">
-          <button
-            onClick={handleUpdateChurchInfo}
-            disabled={loading}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Saving...' : 'Save Changes'}
-          </button>
-          <button onClick={closeModal} className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
-            Close
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-
   const SystemConfigModal = () => (
     <Modal title="System Configuration" onClose={closeModal}>
       <div className="space-y-6">
@@ -2472,18 +2325,6 @@ const Admin = () => {
     </Modal>
   );
 
-  // Debounce utility function
-  function debounce<T extends (...args: any[]) => any>(
-    func: T,
-    wait: number
-  ): (...args: Parameters<T>) => void {
-    let timeout: NodeJS.Timeout;
-    return (...args: Parameters<T>) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func(...args), wait);
-    };
-  }
-
   // Keep your existing render logic for initialLoad and hasAccess
   if (initialLoad) {
     return (
@@ -2836,7 +2677,26 @@ const Admin = () => {
         })()}
 
         {/* Render ALL Modals */}
-        {activeModal === 'church-info' && <ChurchInfoModal />}
+        {activeModal === 'church-info' && (
+          <ChurchInfoModalComponent
+            churchInfo={churchInfo}
+            onClose={closeModal}
+            onSave={async (info) => {
+              setLoading(true);
+              try {
+                await cloudService.updateChurchInfo(info);
+                setChurchInfo(info);
+                setError(null);
+              } catch (err) {
+                setError('Failed to update church information');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            loading={loading}
+            error={error}
+          />
+        )}
         {activeModal === 'system-config' && <SystemConfigModal />}
         {activeModal === 'data-management' && <DataManagementModal />}
         {activeModal === 'security' && <SecurityModal />}
