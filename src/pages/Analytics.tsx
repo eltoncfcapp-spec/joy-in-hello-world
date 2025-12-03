@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -728,6 +728,190 @@ const Analytics = () => {
            filters.meeting_type !== 'all';
   };
 
+  const handlePrintAnalytics = () => {
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Church Analytics Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; color: #111827; }
+            h1 { color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
+            h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+            .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin: 20px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
+            .stat-value { font-size: 24px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 11px; color: #6b7280; margin-top: 5px; }
+            .quick-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
+            .quick-stat { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
+            .quick-stat.male { background: #dbeafe; border-color: #93c5fd; }
+            .quick-stat.female { background: #fce7f3; border-color: #f9a8d4; }
+            .quick-stat.growth { background: #dcfce7; border-color: #86efac; }
+            .quick-stat.members { background: #f3e8ff; border-color: #d8b4fe; }
+            .section { margin: 25px 0; }
+            .table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            .table th, .table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; font-size: 12px; }
+            .table th { background: #f3f4f6; font-weight: 600; }
+            .trend-up { color: #059669; }
+            .trend-down { color: #dc2626; }
+            .trend-steady { color: #6b7280; }
+            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
+            @media print { body { padding: 20px; } .stats-grid { grid-template-columns: repeat(3, 1fr); } }
+          </style>
+        </head>
+        <body>
+          <h1>📊 Church Analytics Report</h1>
+          <div class="header-info">
+            <p><strong>Report Period:</strong> ${filters.date_from} to ${filters.date_to}</p>
+            <p><strong>Generated:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+            ${hasActiveFilters() ? `<p><strong>Filters Applied:</strong> ${filters.gender !== 'all' ? filters.gender + ' gender' : ''} ${filters.cell_group !== 'all' ? ', specific cell group' : ''} ${filters.department !== 'all' ? ', specific department' : ''}</p>` : ''}
+          </div>
+
+          <h2>📈 Key Metrics</h2>
+          <div class="stats-grid">
+            ${stats.map(stat => `
+              <div class="stat-box">
+                <div class="stat-value">${stat.value}</div>
+                <div class="stat-label">${stat.label}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          <h2>👥 Member Statistics</h2>
+          <div class="quick-stats">
+            <div class="quick-stat male">
+              <div class="stat-value">${genderStats.male}</div>
+              <div class="stat-label">Male Members (${genderStats.male_present} present)</div>
+            </div>
+            <div class="quick-stat female">
+              <div class="stat-value">${genderStats.female}</div>
+              <div class="stat-label">Female Members (${genderStats.female_present} present)</div>
+            </div>
+            <div class="quick-stat growth">
+              <div class="stat-value">${growthMetrics.new_members_this_month}</div>
+              <div class="stat-label">New Members in Period</div>
+            </div>
+            <div class="quick-stat members">
+              <div class="stat-value">${growthMetrics.became_members_this_month}</div>
+              <div class="stat-label">Became Members</div>
+            </div>
+          </div>
+
+          <h2>🏠 Cell Group Performance</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Group Name</th>
+                <th>Members</th>
+                <th>Avg Attendance</th>
+                <th>Meetings</th>
+                <th>Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${cellGroupStats.map(group => `
+                <tr>
+                  <td>${group.group_name}</td>
+                  <td>${group.total_members}</td>
+                  <td>${group.avg_attendance}%</td>
+                  <td>${group.meetings_this_month}</td>
+                  <td class="${group.trend === 'increasing' ? 'trend-up' : group.trend === 'decreasing' ? 'trend-down' : 'trend-steady'}">
+                    ${group.trend === 'increasing' ? '↑ Increasing' : group.trend === 'decreasing' ? '↓ Decreasing' : '→ Steady'}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <h2>🏢 Department Performance</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Department Name</th>
+                <th>Members</th>
+                <th>Avg Attendance</th>
+                <th>Meetings</th>
+                <th>Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${departmentStats.map(dept => `
+                <tr>
+                  <td>${dept.department_name}</td>
+                  <td>${dept.total_members}</td>
+                  <td>${dept.avg_attendance}%</td>
+                  <td>${dept.meetings_this_month}</td>
+                  <td class="${dept.trend === 'increasing' ? 'trend-up' : dept.trend === 'decreasing' ? 'trend-down' : 'trend-steady'}">
+                    ${dept.trend === 'increasing' ? '↑ Increasing' : dept.trend === 'decreasing' ? '↓ Decreasing' : '→ Steady'}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          ${inviterStats.length > 0 ? `
+          <h2>⭐ Top Inviters</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Inviter Name</th>
+                <th>Total Invited</th>
+                <th>New Members</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${inviterStats.map((inviter, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td>${inviter.invited_by}</td>
+                  <td>${inviter.invite_count}</td>
+                  <td>${inviter.new_members_count}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : ''}
+
+          ${absentMembers.length > 0 ? `
+          <h2>⚠️ Consecutive Absences (4+ times)</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Consecutive Absences</th>
+                <th>Cell Group</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${absentMembers.slice(0, 10).map(member => `
+                <tr>
+                  <td>${member.name} ${member.surname}</td>
+                  <td>${member.phone || 'N/A'}</td>
+                  <td>${member.consecutive_absences}</td>
+                  <td>${member.cell_group_name || 'Not assigned'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : ''}
+
+          <div class="footer">
+            <p>Church Management System - Analytics Report</p>
+            <p>Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+          </div>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
@@ -754,6 +938,13 @@ const Analytics = () => {
           </div>
           
           <div className="flex gap-3">
+            <button
+              onClick={handlePrintAnalytics}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Printer className="h-4 w-4" />
+              Print Report
+            </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
