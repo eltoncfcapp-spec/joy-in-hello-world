@@ -10,18 +10,14 @@ import {
   Plus,
   UserPlus,
   MapPin,
-  Clock,
   ChevronDown,
   ChevronUp,
-  PhoneCall,
   AlertTriangle,
   Eye,
   Search,
   Key,
   RefreshCw,
   Edit,
-  Save,
-  Trash2,
   FileText,
   Download,
   Upload,
@@ -84,7 +80,7 @@ interface Sermon {
   events?: {
     name: string;
     topic: string | null;
-  };
+  } | null;
 }
 
 interface StatCard {
@@ -128,8 +124,8 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [_selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [_selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
@@ -151,7 +147,7 @@ const Dashboard = () => {
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [_cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
 
@@ -172,9 +168,8 @@ const Dashboard = () => {
     topic: ''
   });
 
-  // Check user permissions
-  const currentUserCanEdit = canEdit(profile?.role, profile?.permissions);
-  const currentUserPermissions = profile?.permissions || [];
+  // Check user permissions - use admin_role from profile instead of role
+  const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
 
   // All users can see data - no filtering for viewing
   const getFilteredMembers = () => {
@@ -748,7 +743,7 @@ const Dashboard = () => {
           <p className="text-foreground/60">
             {currentUserCanEdit 
               ? 'Welcome to your church management dashboard' 
-              : `Welcome - ${profile?.role || 'Member'} access`
+              : `Welcome - ${profile?.admin_role || 'Member'} access`
             }
           </p>
           {!currentUserCanEdit && (

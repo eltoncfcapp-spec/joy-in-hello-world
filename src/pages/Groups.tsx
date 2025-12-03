@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Plus, Printer, Clock, FileText, Save, UserPlus, Mail, Phone, Download, FileDown } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Mail, Phone, Download, FileDown } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -17,14 +17,14 @@ interface CellGroup {
 
 interface GroupMeeting {
   id: string;
-  group_id: string;
+  group_id: string | null;
   meeting_date: string;
   meeting_time: string | null;
   location: string | null;
   topic: string | null;
   notes: string | null;
-  status: string;
-  created_at: string;
+  status: string | null;
+  created_at: string | null;
   cancellation_reason?: string | null;
 }
 
@@ -35,26 +35,26 @@ interface Member {
   email: string | null;
   phone: string | null;
   cell_group_id?: string | null;
-  status?: string;
+  status?: string | null;
 }
 
 interface GroupAttendanceRecord {
   id: string;
-  meeting_id: string;
-  member_id: string;
-  status: 'present' | 'absent' | 'absent_with_reason';
+  meeting_id: string | null;
+  member_id: string | null;
+  status: 'present' | 'absent' | 'absent_with_reason' | string | null;
   notes?: string | null;
-  members?: Member;
+  members?: Member | null;
 }
 
 interface GroupReport {
   id: string;
-  meeting_id: string;
-  report_text: string;
+  meeting_id: string | null;
+  report_text: string | null;
   decisions_made: string | null;
   action_items: string | null;
   next_meeting_date: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 // Group Meeting Creation Step
@@ -742,7 +742,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
           email: formData.email.trim() || null,
-          status: 'newcomer',
+          status: 'newcomer' as const,
           cell_group_id: group.id,
           first_time_visit_date: new Date().toISOString(),
           invited_by: group.name,
