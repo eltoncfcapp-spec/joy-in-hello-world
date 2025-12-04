@@ -90,6 +90,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authInitialized, setAuthInitialized] = useState(false);
 
   // Helper methods for role checking
   const isAdmin = (): boolean => {
@@ -334,93 +335,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return [...profile.assigned_departments];
   };
 
-  // Check for existing session and set up auth listener
-  useEffect(() => {
-    let mounted = true;
-
-    const initializeAuth = async () => {
-      try {
-        setLoading(true);
-        
-        // First check for stored username/PIN auth
-        const storedAuth = localStorage.getItem('username_pin_auth');
-        if (storedAuth) {
-          const authData = JSON.parse(storedAuth);
-          const timestamp = authData.timestamp;
-          const now = Date.now();
-          const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
-          
-          if (hoursElapsed < 24 && mounted) {
-            setUser(authData.user);
-            setSession(authData.session);
-            setProfile(authData.profile);
-            setLoading(false);
-            return;
-          } else {
-            localStorage.removeItem('username_pin_auth');
-          }
-        }
-
-        // Check for Supabase session
-        const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error('Error getting session:', error);
-        }
-
-        if (mounted) {
-          setSession(supabaseSession);
-          setUser(supabaseSession?.user ?? null);
-          if (supabaseSession?.user) {
-            await fetchUserProfile(supabaseSession.user.id);
-          } else {
-            setProfile(null);
-          }
-        }
-      } catch (error) {
-        console.error('Error initializing auth:', error);
-        if (mounted) {
-          setProfile(null);
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, supabaseSession) => {
-        if (!mounted) return;
-        
-        setSession(supabaseSession);
-        setUser(supabaseSession?.user ?? null);
-        
-        if (supabaseSession?.user) {
-          await fetchUserProfile(supabaseSession.user.id);
-        } else {
-          setProfile(null);
-          localStorage.removeItem('username_pin_auth');
-        }
-      }
-    );
-
-    initializeAuth();
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const fetchUserProfile = async (userId: string) => {
+  // Fetch user profile from database
+  const fetchUserProfile = async (userId: string, email?: string): Promise<UserProfile | null> => {
     try {
-      // Fetch from members table
+      console.log('Fetching profile for user:', userId, 'email:', email);
+      
+      // Try to find user by ID first
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
-        .eq('id', userId)
-        .single();
+        .or(`id.eq.${userId},email.eq.${email || ''}`)
+        .maybeSingle();
 
       if (memberError) {
         console.error('Error fetching from members table:', memberError);
@@ -429,7 +354,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (memberData) {
         const userProfile: UserProfile = {
-          id: userId,
+          id: memberData.id,
           name: memberData.name || null,
           surname: memberData.surname || null,
           email: memberData.email || null,
@@ -450,59 +375,132 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           can_view_own_data: Boolean(memberData.can_view_own_data)
         };
 
-        setProfile(userProfile);
-        return;
+        console.log('Profile fetched successfully:', userProfile);
+        return userProfile;
       }
 
-      throw new Error('No user data found in members table');
+      console.log('No user data found in members table');
+      return null;
     } catch (error) {
       console.error('Error fetching user profile:', error);
-      setProfile(null);
+      return null;
     }
   };
 
+  // Handle Supabase auth state changes
+  const handleAuthStateChange = async (event: string, session: Session | null) => {
+    console.log('Auth state change:', event, session?.user?.id);
+    
+    setSession(session);
+    setUser(session?.user ?? null);
+    
+    if (session?.user) {
+      // Fetch profile for authenticated user
+      const userProfile = await fetchUserProfile(session.user.id, session.user.email);
+      if (userProfile) {
+        setProfile(userProfile);
+        // Store minimal auth info in localStorage
+        localStorage.setItem('auth_info', JSON.stringify({
+          userId: session.user.id,
+          timestamp: Date.now(),
+          type: 'supabase'
+        }));
+      }
+    } else {
+      // Clear everything on sign out
+      setProfile(null);
+      localStorage.removeItem('auth_info');
+      localStorage.removeItem('username_auth');
+    }
+    
+    setLoading(false);
+    setAuthInitialized(true);
+  };
+
+  // Initialize auth
+  useEffect(() => {
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      try {
+        setLoading(true);
+        
+        // First check for existing Supabase session
+        const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error getting Supabase session:', error);
+          if (mounted) {
+            setLoading(false);
+            setAuthInitialized(true);
+          }
+          return;
+        }
+
+        if (supabaseSession?.user && mounted) {
+          console.log('Found Supabase session for user:', supabaseSession.user.id);
+          const userProfile = await fetchUserProfile(supabaseSession.user.id, supabaseSession.user.email);
+          if (userProfile) {
+            setSession(supabaseSession);
+            setUser(supabaseSession.user);
+            setProfile(userProfile);
+            
+            // Store auth info
+            localStorage.setItem('auth_info', JSON.stringify({
+              userId: supabaseSession.user.id,
+              timestamp: Date.now(),
+              type: 'supabase'
+            }));
+          }
+        }
+        
+        if (mounted) {
+          setLoading(false);
+          setAuthInitialized(true);
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        if (mounted) {
+          setLoading(false);
+          setAuthInitialized(true);
+        }
+      }
+    };
+
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(handleAuthStateChange);
+
+    initializeAuth();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const loginWithUsernamePin = async (username: string, pin: string): Promise<boolean> => {
     try {
+      console.log('Attempting username/PIN login:', username);
+      
+      // Clear any existing Supabase session first
+      await supabase.auth.signOut();
+      
       // Search for member with matching username and PIN
       const { data: memberData, error } = await supabase
         .from('members')
         .select('*')
         .eq('login_username', username)
         .eq('login_pin', pin)
-        .single();
+        .maybeSingle();
 
       if (error || !memberData) {
         console.error('Username/PIN login error:', error);
         return false;
       }
 
-      // Create a mock session and user for username/PIN login
-      const mockUser: SupabaseUser = {
-        id: memberData.id,
-        email: memberData.email,
-        phone: memberData.phone,
-        created_at: memberData.created_at || new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        app_metadata: {},
-        user_metadata: {
-          name: memberData.name,
-          surname: memberData.surname
-        },
-        aud: 'authenticated',
-        role: 'authenticated'
-      } as SupabaseUser;
-
-      const mockSession: Session = {
-        access_token: 'username-pin-token',
-        token_type: 'bearer',
-        expires_in: 3600,
-        expires_at: Math.floor(Date.now() / 1000) + 3600,
-        refresh_token: 'username-pin-refresh',
-        user: mockUser,
-        provider_token: null,
-        provider_refresh_token: null
-      } as Session;
-
+      console.log('Username/PIN login successful for:', memberData.id);
+      
+      // Create a lightweight user object
       const userProfile: UserProfile = {
         id: memberData.id,
         name: memberData.name || null,
@@ -525,18 +523,48 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         can_view_own_data: Boolean(memberData.can_view_own_data)
       };
 
+      // Create a simple SupabaseUser-like object
+      const simpleUser: SupabaseUser = {
+        id: memberData.id,
+        email: memberData.email || `${username}@church.local`,
+        phone: memberData.phone || null,
+        created_at: memberData.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        app_metadata: {},
+        user_metadata: {
+          name: memberData.name,
+          surname: memberData.surname
+        },
+        aud: 'authenticated',
+        role: 'authenticated'
+      } as SupabaseUser;
+
+      // Create a simple session
+      const simpleSession: Session = {
+        access_token: 'simple-token-' + Date.now(),
+        token_type: 'bearer',
+        expires_in: 86400, // 24 hours
+        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        refresh_token: 'simple-refresh-' + Date.now(),
+        user: simpleUser,
+        provider_token: null,
+        provider_refresh_token: null
+      } as Session;
+
       // Set state
-      setUser(mockUser);
-      setSession(mockSession);
+      setUser(simpleUser);
+      setSession(simpleSession);
       setProfile(userProfile);
 
-      // Store in localStorage for persistence
-      localStorage.setItem('username_pin_auth', JSON.stringify({
-        user: mockUser,
-        session: mockSession,
-        profile: userProfile,
-        timestamp: Date.now()
+      // Store simple auth info
+      localStorage.setItem('auth_info', JSON.stringify({
+        userId: memberData.id,
+        timestamp: Date.now(),
+        type: 'username_pin'
       }));
+      
+      // Store user profile separately for quick retrieval
+      localStorage.setItem('user_profile', JSON.stringify(userProfile));
 
       return true;
     } catch (error) {
@@ -547,6 +575,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const loginWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
     try {
+      console.log('Attempting email/password login:', email);
+      
+      // Clear any stored auth info
+      localStorage.removeItem('auth_info');
+      localStorage.removeItem('user_profile');
+      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -557,6 +591,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return false;
       }
 
+      console.log('Email/password login successful');
       return !!data.session;
     } catch (error) {
       console.error('Email/password login error:', error);
@@ -567,6 +602,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async (identifier: string, credential: string): Promise<boolean> => {
     try {
       setLoading(true);
+      console.log('Login attempt with identifier:', identifier);
+
+      // Clear any existing local storage
+      localStorage.removeItem('auth_info');
+      localStorage.removeItem('user_profile');
 
       // Check if identifier is email format
       const isEmail = identifier.includes('@');
@@ -587,19 +627,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      // Clear username/PIN auth from localStorage
+      setLoading(true);
+      
+      // Clear all local storage
+      localStorage.removeItem('auth_info');
+      localStorage.removeItem('user_profile');
       localStorage.removeItem('username_pin_auth');
-
-      // Only call Supabase logout if it's an email/password session
-      if (session?.access_token !== 'username-pin-token') {
-        await supabase.auth.signOut();
-      }
-
+      
+      // Sign out from Supabase if it's an email/password session
+      await supabase.auth.signOut();
+      
+      // Reset all state
       setUser(null);
       setSession(null);
       setProfile(null);
+      
+      console.log('Logout successful');
     } catch (error) {
       console.error('Logout error:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -609,7 +656,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     profile,
     login,
     logout,
-    loading,
+    loading: loading || !authInitialized,
     hasPermission,
     canViewGroup,
     canViewDepartment,
