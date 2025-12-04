@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { supabase } from '../integrations/supabase/client';
 import { User as SupabaseUser, Session } from '@supabase/supabase-js';
 
-// Define UserProfile interface
 interface UserProfile {
   id: string;
   name: string | null;
@@ -86,73 +85,6 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-// PRESET DEVELOPER ACCOUNT
-const DEVELOPER_ACCOUNT = {
-  email: 'admin1@church.com',
-  username: 'developer',
-  password: 'admin2025',
-  pin: '2025',
-  name: 'System',
-  surname: 'Developer',
-  id: 'dev-001'
-};
-
-// Check if credentials match developer account
-const isDeveloperCredentials = (identifier: string, credential: string): boolean => {
-  const normalizedIdentifier = identifier.toLowerCase().trim();
-  
-  // Check email login
-  if (normalizedIdentifier === DEVELOPER_ACCOUNT.email.toLowerCase()) {
-    return credential === DEVELOPER_ACCOUNT.password;
-  }
-  
-  // Check username login
-  if (normalizedIdentifier === DEVELOPER_ACCOUNT.username.toLowerCase()) {
-    return credential === DEVELOPER_ACCOUNT.pin;
-  }
-  
-  return false;
-};
-
-// Create developer user profile
-const createDeveloperProfile = (): UserProfile => ({
-  id: DEVELOPER_ACCOUNT.id,
-  name: DEVELOPER_ACCOUNT.name,
-  surname: DEVELOPER_ACCOUNT.surname,
-  email: DEVELOPER_ACCOUNT.email,
-  phone: '+1234567890',
-  cell_group_id: null,
-  admin_role: 'super_admin',
-  pastor_role: true,
-  deacon_role: true,
-  group_leader: true,
-  department_leader: true,
-  login_username: DEVELOPER_ACCOUNT.username,
-  login_pin: DEVELOPER_ACCOUNT.pin,
-  permissions: [
-    'view_all_groups',
-    'view_all_departments',
-    'view_own_group',
-    'view_own_department',
-    'manage_all_groups',
-    'manage_all_departments',
-    'manage_own_group',
-    'manage_own_department',
-    'edit_users',
-    'view_reports',
-    'manage_system',
-    'create_meetings',
-    'manage_attendance',
-    'add_newcomers',
-    'create_reports'
-  ],
-  assigned_groups: ['all_groups'],
-  assigned_departments: ['all_departments'],
-  can_add_members: true,
-  can_edit_members: true,
-  can_view_own_data: true
-});
-
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -161,35 +93,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Helper methods for role checking
   const isAdmin = (): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     return profile ? (profile.admin_role === 'admin' || profile.pastor_role === true) : false;
   };
 
   const isPastor = (): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     return profile ? profile.pastor_role === true : false;
   };
 
   const isDeacon = (): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     return profile ? profile.deacon_role === true : false;
   };
 
   const isGroupLeader = (): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     return profile ? profile.group_leader === true : false;
   };
 
   const isDepartmentLeader = (): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     return profile ? profile.department_leader === true : false;
   };
 
   const getRoles = (): string[] => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) {
-      return ['super_admin', 'developer', 'pastor', 'deacon', 'group_leader', 'department_leader'];
-    }
-    
     if (!profile) return [];
     
     const roles: string[] = [];
@@ -210,9 +133,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Enhanced permission check function
   const hasPermission = (permission: Permission, departmentId?: string, groupId?: string): boolean => {
-    // Developer has all permissions everywhere
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
-
     if (!profile) return false;
 
     // Admin and Pastor have all permissions everywhere
@@ -276,7 +196,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Check if user can view a specific group
   const canViewGroup = (groupId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (hasPermission('view_all_groups')) return true;
     if (hasPermission('view_own_group')) {
@@ -289,7 +208,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Check if user can view a specific department
   const canViewDepartment = (departmentId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (hasPermission('view_all_departments')) return true;
     if (isDeacon()) return true;
@@ -302,7 +220,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Check if user can manage a specific group
   const canManageGroup = (groupId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (hasPermission('manage_all_groups')) return true;
     if (hasPermission('manage_own_group')) {
@@ -315,7 +232,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Check if user can manage a specific department
   const canManageDepartment = (departmentId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (hasPermission('manage_all_departments')) return true;
     if (hasPermission('manage_own_department')) {
@@ -327,7 +243,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Enhanced department-specific permission checks
   const canCreateDepartmentMeetings = (departmentId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isDepartmentLeader()) {
@@ -337,7 +252,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const canManageDepartmentAttendance = (departmentId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isDepartmentLeader()) {
@@ -347,7 +261,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const canAddDepartmentNewcomers = (departmentId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isDepartmentLeader()) {
@@ -357,7 +270,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const canCreateDepartmentReports = (departmentId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isDepartmentLeader()) {
@@ -368,7 +280,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Group-specific permission checks
   const canCreateGroupMeetings = (groupId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isGroupLeader()) {
@@ -378,7 +289,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const canManageGroupAttendance = (groupId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isGroupLeader()) {
@@ -388,7 +298,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const canAddGroupNewcomers = (groupId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isGroupLeader()) {
@@ -398,7 +307,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const canCreateGroupReports = (groupId: string): boolean => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return true;
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
     if (isGroupLeader()) {
@@ -409,7 +317,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Get user's accessible groups
   const getUserGroups = (): string[] => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return ['all_groups'];
     if (!profile) return [];
     if (hasPermission('view_all_groups')) return ['all_groups'];
     const groups = [...profile.assigned_groups];
@@ -421,7 +328,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Get user's accessible departments
   const getUserDepartments = (): string[] => {
-    if (user?.id === DEVELOPER_ACCOUNT.id) return ['all_departments'];
     if (!profile) return [];
     if (hasPermission('view_all_departments')) return ['all_departments'];
     if (isDeacon()) return ['all_departments'];
@@ -452,25 +358,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             return;
           } else {
             localStorage.removeItem('username_pin_auth');
-          }
-        }
-
-        // Check for developer session in localStorage
-        const storedDeveloperAuth = localStorage.getItem('developer_auth');
-        if (storedDeveloperAuth) {
-          const authData = JSON.parse(storedDeveloperAuth);
-          const timestamp = authData.timestamp;
-          const now = Date.now();
-          const hoursElapsed = (now - timestamp) / (1000 * 60 * 60);
-          
-          if (hoursElapsed < 24 && mounted) {
-            setUser(authData.user);
-            setSession(authData.session);
-            setProfile(authData.profile);
-            setLoading(false);
-            return;
-          } else {
-            localStorage.removeItem('developer_auth');
           }
         }
 
@@ -514,7 +401,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         } else {
           setProfile(null);
           localStorage.removeItem('username_pin_auth');
-          localStorage.removeItem('developer_auth');
         }
       }
     );
@@ -529,14 +415,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      // If it's the developer user, create profile
-      if (userId === DEVELOPER_ACCOUNT.id) {
-        const developerProfile = createDeveloperProfile();
-        setProfile(developerProfile);
-        return;
-      }
-
-      // Fetch from members table for regular users
+      // Fetch from members table
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
@@ -582,69 +461,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Developer login handler
-  const loginAsDeveloper = async (): Promise<boolean> => {
-    try {
-      // Create a mock user object for developer
-      const devUser: SupabaseUser = {
-        id: DEVELOPER_ACCOUNT.id,
-        email: DEVELOPER_ACCOUNT.email,
-        phone: '+1234567890',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        app_metadata: {
-          provider: 'developer',
-          roles: ['super_admin', 'developer']
-        },
-        user_metadata: {
-          name: DEVELOPER_ACCOUNT.name,
-          surname: DEVELOPER_ACCOUNT.surname,
-          full_name: `${DEVELOPER_ACCOUNT.name} ${DEVELOPER_ACCOUNT.surname}`
-        },
-        aud: 'authenticated',
-        role: 'authenticated'
-      } as SupabaseUser;
-
-      const devSession: Session = {
-        access_token: 'developer-token-' + Date.now(),
-        token_type: 'bearer',
-        expires_in: 86400,
-        expires_at: Math.floor(Date.now() / 1000) + 86400,
-        refresh_token: 'developer-refresh-' + Date.now(),
-        user: devUser,
-        provider_token: null,
-        provider_refresh_token: null
-      } as Session;
-
-      const devProfile = createDeveloperProfile();
-
-      // Set state
-      setUser(devUser);
-      setSession(devSession);
-      setProfile(devProfile);
-
-      // Store in localStorage for persistence
-      localStorage.setItem('developer_auth', JSON.stringify({
-        user: devUser,
-        session: devSession,
-        profile: devProfile,
-        timestamp: Date.now()
-      }));
-
-      return true;
-    } catch (error) {
-      console.error('Developer login error:', error);
-      return false;
-    }
-  };
-
   const loginWithUsernamePin = async (username: string, pin: string): Promise<boolean> => {
     try {
-      // Check if it's developer login
-      if (isDeveloperCredentials(username, pin)) {
-        return await loginAsDeveloper();
-      }
-
       // Search for member with matching username and PIN
       const { data: memberData, error } = await supabase
         .from('members')
@@ -729,11 +547,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const loginWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
     try {
-      // Check if it's developer login
-      if (isDeveloperCredentials(email, password)) {
-        return await loginAsDeveloper();
-      }
-
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -774,12 +587,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      // Clear all auth from localStorage
+      // Clear username/PIN auth from localStorage
       localStorage.removeItem('username_pin_auth');
-      localStorage.removeItem('developer_auth');
 
-      // Only call Supabase logout if it's a regular user session
-      if (user?.id !== DEVELOPER_ACCOUNT.id && session?.access_token !== 'username-pin-token') {
+      // Only call Supabase logout if it's an email/password session
+      if (session?.access_token !== 'username-pin-token') {
         await supabase.auth.signOut();
       }
 
