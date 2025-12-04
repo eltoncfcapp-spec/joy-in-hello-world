@@ -123,6 +123,7 @@ const Events = () => {
   const attendanceNotesRef = useRef<Record<string, string>>({});
 
   const [eventFormData, setEventFormData] = useState({
+    eventType: '' as 'sunday' | 'other' | '',
     name: '',
     topic: '',
     eventDate: '',
@@ -1195,6 +1196,7 @@ const Events = () => {
 
       setShowEventForm(false);
       setEventFormData({ 
+        eventType: '',
         name: '', 
         topic: '', 
         eventDate: '', 
@@ -2723,18 +2725,73 @@ const Events = () => {
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
             <form onSubmit={handleEventSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
-                  <input
-                    type="text"
-                    value={eventFormData.name}
-                    onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter event name"
-                    required
-                  />
+              {/* Event Type Selection */}
+              {!eventFormData.eventType && (
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Event Type *</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'sunday', name: 'Sunday' })}
+                      className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200"
+                    >
+                      <CalendarIcon className="h-8 w-8 text-blue-600" />
+                      <div className="text-left">
+                        <div className="font-semibold text-gray-900 dark:text-white text-lg">Sunday Service</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Regular Sunday worship service</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'other', name: '' })}
+                      className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200"
+                    >
+                      <Plus className="h-8 w-8 text-purple-600" />
+                      <div className="text-left">
+                        <div className="font-semibold text-gray-900 dark:text-white text-lg">Other Event</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Custom event with your own name</div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
+              )}
+
+              {/* Show form fields only after event type is selected */}
+              {eventFormData.eventType && (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium">
+                      {eventFormData.eventType === 'sunday' ? 'Sunday Service' : 'Other Event'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: '', name: '' })}
+                      className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm underline"
+                    >
+                      Change type
+                    </button>
+                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {eventFormData.eventType === 'sunday' ? (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
+                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
+                      Sunday
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                    <input
+                      type="text"
+                      value={eventFormData.name}
+                      onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      placeholder="Enter event name"
+                      required
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
                   <input
@@ -2917,6 +2974,8 @@ const Events = () => {
                   Cancel
                 </button>
               </div>
+                </>
+              )}
             </form>
           </div>
         )}
