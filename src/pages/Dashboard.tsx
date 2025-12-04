@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+from this code remove quickaccess to add members and quick acces to create  event import { useState, useEffect } from 'react';
 import { 
   Users, 
   Calendar, 
@@ -937,181 +937,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Quick Actions - Only show if user has edit permissions */}
-      {currentUserCanEdit && (
-        <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
-          <div className="flex flex-wrap gap-3">
-            <button 
-              onClick={() => openModal('addMember')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add New Member
-            </button>
-            <button 
-              onClick={() => openModal('createEvent')}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <Plus className="h-4 w-4" />
-              Create Event
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Quick View Pamphlet Modal */}
-      {quickViewEvent && quickViewEvent.pamphlet_url && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-gray-200">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{quickViewEvent.name}</h3>
-                <p className="text-sm text-gray-600">Event Pamphlet</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={quickViewEvent.pamphlet_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
-                  title="Open in new tab"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </a>
-                <button
-                  onClick={closeQuickView}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-                >
-                  <X className="h-5 w-5 text-gray-500" />
-                </button>
-              </div>
-            </div>
-            <div className="p-4 h-96">
-              <iframe
-                src={quickViewEvent.pamphlet_url}
-                className="w-full h-full rounded-lg border border-gray-200"
-                title="Event Pamphlet"
-              />
-            </div>
-            <div className="p-4 border-t border-gray-200 bg-gray-50">
-              <div className="flex justify-between items-center">
-                <div className="text-sm text-gray-600">
-                  <p><strong>Date:</strong> {quickViewEvent.event_date}</p>
-                  <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
-                  {quickViewEvent.location && <p><strong>Location:</strong> {quickViewEvent.location}</p>}
-                </div>
-                <a
-                  href={quickViewEvent.pamphlet_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
-                >
-                  <Download className="h-4 w-4" />
-                  Download
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sermons Modal */}
-      {activeModal === 'viewSermons' && (
-        <Modal title="All Sermons" size="max-w-4xl">
-          <div className="space-y-4">
-            <p className="text-gray-600 dark:text-gray-400">
-              Browse all available sermons
-            </p>
-            
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search sermons by title, pastor, or content..."
-                value={sermonSearchTerm}
-                onChange={(e) => setSermonSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-
-            <div className="space-y-4 max-h-96 overflow-y-auto">
-              {filteredSermons.map((sermon) => (
-                <div 
-                  key={sermon.id}
-                  className="border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors duration-200 cursor-pointer"
-                  onClick={() => openSermonDetail(sermon)}
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex-1">
-                      <h4 className="font-bold text-lg text-gray-900 mb-1">{sermon.title}</h4>
-                      <p className="text-orange-600 font-medium text-sm">
-                        {sermon.events?.name || 'Standalone Sermon'}
-                      </p>
-                    </div>
-                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                      {formatDate(sermon.sermon_date)}
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-2 mb-3">
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Users className="h-3 w-3" />
-                      <span>By {sermon.pastor_name}</span>
-                    </div>
-                    <p className="text-gray-600 text-sm line-clamp-2">
-                      {sermon.summary}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {sermon.document_url && (
-                      <a
-                        href={sermon.document_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-sm transition-colors duration-200"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Download className="h-3 w-3" />
-                        Download Notes
-                      </a>
-                    )}
-                    {sermon.video_url && (
-                      <a
-                        href={sermon.video_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg text-sm transition-colors duration-200"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <PlayCircle className="h-3 w-3" />
-                        Watch Video
-                      </a>
-                    )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openSermonDetail(sermon);
-                      }}
-                      className="flex items-center gap-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm transition-colors duration-200"
-                    >
-                      <Eye className="h-3 w-3" />
-                      View Details
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {filteredSermons.length === 0 && (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
-                  {sermonSearchTerm ? 'No sermons found matching your search' : 'No sermons available'}
-                </p>
-              )}
-            </div>
-          </div>
-        </Modal>
-      )}
-
       {/* Sermon Detail Modal */}
       {activeModal === 'sermonDetail' && selectedSermon && (
         <Modal title="Sermon Details" size="max-w-2xl">
@@ -1240,6 +1065,62 @@ const Dashboard = () => {
       )}
 
       {/* ... (other modals remain the same) ... */}
+
+      {/* Quick View Pamphlet Modal */}
+      {quickViewEvent && quickViewEvent.pamphlet_url && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">{quickViewEvent.name}</h3>
+                <p className="text-sm text-gray-600">Event Pamphlet</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={quickViewEvent.pamphlet_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
+                  title="Open in new tab"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+                <button
+                  onClick={closeQuickView}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                >
+                  <X className="h-5 w-5 text-gray-500" />
+                </button>
+              </div>
+            </div>
+            <div className="p-4 h-96">
+              <iframe
+                src={quickViewEvent.pamphlet_url}
+                className="w-full h-full rounded-lg border border-gray-200"
+                title="Event Pamphlet"
+              />
+            </div>
+            <div className="p-4 border-t border-gray-200 bg-gray-50">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  <p><strong>Date:</strong> {quickViewEvent.event_date}</p>
+                  <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
+                  {quickViewEvent.location && <p><strong>Location:</strong> {quickViewEvent.location}</p>}
+                </div>
+                <a
+                  href={quickViewEvent.pamphlet_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pamphlet Viewer Modal */}
       {viewingPamphlet && (
