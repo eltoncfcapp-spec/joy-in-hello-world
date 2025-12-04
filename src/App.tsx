@@ -1,15 +1,7 @@
 import { BrowserRouter, Routes, Route, Link, useLocation, Outlet } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import Dashboard from './pages/Dashboard';
-import Members from './pages/Members';
-import Events from './pages/Events';
-import Groups from './pages/Groups';
-import Departments from './pages/Departments';
-import Trends from './pages/Trends';
-import Analytics from './pages/Analytics';
-import Admin from './pages/Admin';
-import Login from './pages/Login';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { 
   Home, 
   Users, 
@@ -23,7 +15,25 @@ import {
   Building
 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
-import { useState, useEffect } from 'react';
+import churchLogo from '@/assets/church-logo.png';
+
+// Lazy load pages for better performance
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Members = lazy(() => import('./pages/Members'));
+const Events = lazy(() => import('./pages/Events'));
+const Groups = lazy(() => import('./pages/Groups'));
+const Departments = lazy(() => import('./pages/Departments'));
+const Trends = lazy(() => import('./pages/Trends'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Admin = lazy(() => import('./pages/Admin'));
+const Login = lazy(() => import('./pages/Login'));
+
+// Loading spinner for lazy-loaded pages
+const PageLoader = () => (
+  <div className="flex items-center justify-center h-64">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+  </div>
+);
 
 // Layout component with responsive sidebar
 const Layout = () => {
@@ -102,13 +112,14 @@ const Layout = () => {
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <Link 
             to="/" 
-            className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white"
+            className="flex items-center gap-2 text-lg font-bold text-gray-900 dark:text-white"
             onClick={closeSidebar}
           >
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
-              <Home className="h-5 w-5 text-white" />
-            </div>
-            Church App
+            <img src={churchLogo} alt="CFC Logo" className="h-12 w-auto object-contain" />
+            <span className="text-xs leading-tight">
+              <span className="block font-bold">Christian Family</span>
+              <span className="block">Church</span>
+            </span>
           </Link>
         </div>
 
@@ -185,47 +196,24 @@ const Layout = () => {
 };
 
 function App() {
-  const [appLoading, setAppLoading] = useState(true);
-
-  useEffect(() => {
-    // Simulate initial app loading
-    const timer = setTimeout(() => {
-      setAppLoading(false);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (appLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Home className="h-8 w-8 text-white" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Church App</h2>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<Dashboard />} />
-            <Route path="members" element={<Members />} />
-            <Route path="events" element={<Events />} />
-            <Route path="groups" element={<Groups />} />
-            <Route path="departments" element={<Departments />} />
-            <Route path="trends" element={<Trends />} />
-            <Route path="analytics" element={<Analytics />} />
-            <Route path="admin" element={<Admin />} />
-          </Route>
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route index element={<Dashboard />} />
+              <Route path="members" element={<Members />} />
+              <Route path="events" element={<Events />} />
+              <Route path="groups" element={<Groups />} />
+              <Route path="departments" element={<Departments />} />
+              <Route path="trends" element={<Trends />} />
+              <Route path="analytics" element={<Analytics />} />
+              <Route path="admin" element={<Admin />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </AuthProvider>
   );
