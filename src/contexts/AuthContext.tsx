@@ -6,22 +6,35 @@ interface UserProfile {
   id: string;
   name: string | null;
   surname: string | null;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  admin_role: string;
-  pastor_role: boolean | null;
-  deacon_role: boolean | null;
-  group_leader: boolean | null;
-  department_leader: boolean | null;
+  is_permanent_member: boolean | null;
+  permanent_member_date: string | null;
+  invited_by: string | null;
+  first_time_visit_date: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  status_date: string | null;
+  not_attending_reason: string | null;
+  ministry_group_id: string | null;
+  is_leader: boolean | null;
+  gender: 'male' | 'female' | 'other' | null;
   login_username: string | null;
   login_pin: string | null;
-  permissions: string[];
   assigned_groups: string[];
   assigned_departments: string[];
   can_add_members: boolean;
   can_edit_members: boolean;
   can_view_own_data: boolean;
+  permissions: string[];
+  admin_role: string;
+  pastor_role: boolean | null;
+  deacon_role: boolean | null;
+  group_leader: boolean | null;
+  department_leader: boolean | null;
+  baptism: string | null;
 }
 
 type Permission = 
@@ -68,7 +81,9 @@ interface AuthContextType {
   isDeacon: () => boolean;
   isGroupLeader: () => boolean;
   isDepartmentLeader: () => boolean;
+  isPermanentMember: () => boolean;
   getRoles: () => string[];
+  getStatus: () => string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -112,6 +127,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return profile ? profile.department_leader === true : false;
   };
 
+  const isPermanentMember = (): boolean => {
+    return profile ? profile.is_permanent_member === true : false;
+  };
+
+  const getStatus = (): string => {
+    return profile ? profile.status || 'newcomer' : 'newcomer';
+  };
+
   const getRoles = (): string[] => {
     if (!profile) return [];
     
@@ -123,6 +146,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (profile.deacon_role) roles.push('deacon');
     if (profile.group_leader) roles.push('group_leader');
     if (profile.department_leader) roles.push('department_leader');
+    if (profile.is_leader) roles.push('leader');
+    if (profile.is_permanent_member) roles.push('permanent_member');
     
     if (roles.length === 0) {
       roles.push('member');
@@ -138,6 +163,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Admin and Pastor have all permissions everywhere
     if (isAdmin() || isPastor()) return true;
 
+    // Permanent members have basic view permissions
+    if (isPermanentMember()) {
+      if (permission === 'view_own_group' && groupId && profile.cell_group_id === groupId) {
+        return true;
+      }
+      if (permission === 'view_own_department' && departmentId && profile.assigned_departments.includes(departmentId)) {
+        return true;
+      }
+      if (permission === 'view_reports') {
+        return true;
+      }
+    }
+
     // Check specific permissions based on role and assignments
     switch (permission) {
       case 'view_all_groups':
@@ -152,13 +190,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (groupId) {
           return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
         }
-        return isGroupLeader() || isDeacon();
+        return isGroupLeader() || isDeacon() || isPermanentMember();
       
       case 'view_own_department':
         if (departmentId) {
           return profile.assigned_departments.includes(departmentId);
         }
-        return isDepartmentLeader() || isDeacon();
+        return isDepartmentLeader() || isDeacon() || isPermanentMember();
       
       case 'manage_own_group':
         if (groupId) {
@@ -173,7 +211,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return isDepartmentLeader();
       
       case 'view_reports':
-        return isAdmin() || isPastor() || isDeacon() || isDepartmentLeader() || isGroupLeader();
+        return isAdmin() || isPastor() || isDeacon() || isDepartmentLeader() || isGroupLeader() || isPermanentMember();
       
       case 'create_meetings':
       case 'manage_attendance':
@@ -432,22 +470,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           id: userId,
           name: memberData.name || null,
           surname: memberData.surname || null,
-          email: memberData.email || null,
+          residence: memberData.residence || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
+          is_permanent_member: memberData.is_permanent_member || false,
+          permanent_member_date: memberData.permanent_member_date || null,
+          invited_by: memberData.invited_by || null,
+          first_time_visit_date: memberData.first_time_visit_date || null,
+          created_at: memberData.created_at || null,
+          updated_at: memberData.updated_at || null,
+          status: memberData.status || 'newcomer',
+          status_date: memberData.status_date || null,
+          not_attending_reason: memberData.not_attending_reason || null,
+          ministry_group_id: memberData.ministry_group_id || null,
+          is_leader: memberData.is_leader || false,
+          gender: memberData.gender || null,
+          login_username: memberData.login_username || null,
+          login_pin: memberData.login_pin || null,
+          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+          can_add_members: Boolean(memberData.can_add_members),
+          can_edit_members: Boolean(memberData.can_edit_members),
+          can_view_own_data: Boolean(memberData.can_view_own_data),
+          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
           admin_role: memberData.admin_role || 'member',
           pastor_role: memberData.pastor_role || false,
           deacon_role: memberData.deacon_role || false,
           group_leader: memberData.group_leader || false,
           department_leader: memberData.department_leader || false,
-          login_username: memberData.login_username || null,
-          login_pin: memberData.login_pin || null,
-          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
-          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
-          can_add_members: Boolean(memberData.can_add_members),
-          can_edit_members: Boolean(memberData.can_edit_members),
-          can_view_own_data: Boolean(memberData.can_view_own_data)
+          baptism: memberData.baptism || null
         };
 
         setProfile(userProfile);
@@ -479,14 +530,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
         id: memberData.id,
-        email: memberData.email,
-        phone: memberData.phone,
+        email: memberData.email || null,
+        phone: memberData.phone || null,
         created_at: memberData.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
         app_metadata: {},
         user_metadata: {
           name: memberData.name,
-          surname: memberData.surname
+          surname: memberData.surname,
+          residence: memberData.residence
         },
         aud: 'authenticated',
         role: 'authenticated'
@@ -507,22 +559,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         id: memberData.id,
         name: memberData.name || null,
         surname: memberData.surname || null,
-        email: memberData.email || null,
+        residence: memberData.residence || null,
         phone: memberData.phone || null,
         cell_group_id: memberData.cell_group_id || null,
+        is_permanent_member: memberData.is_permanent_member || false,
+        permanent_member_date: memberData.permanent_member_date || null,
+        invited_by: memberData.invited_by || null,
+        first_time_visit_date: memberData.first_time_visit_date || null,
+        created_at: memberData.created_at || null,
+        updated_at: memberData.updated_at || null,
+        status: memberData.status || 'newcomer',
+        status_date: memberData.status_date || null,
+        not_attending_reason: memberData.not_attending_reason || null,
+        ministry_group_id: memberData.ministry_group_id || null,
+        is_leader: memberData.is_leader || false,
+        gender: memberData.gender || null,
+        login_username: memberData.login_username || null,
+        login_pin: memberData.login_pin || null,
+        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
+        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+        can_add_members: Boolean(memberData.can_add_members),
+        can_edit_members: Boolean(memberData.can_edit_members),
+        can_view_own_data: Boolean(memberData.can_view_own_data),
+        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
         admin_role: memberData.admin_role || 'member',
         pastor_role: memberData.pastor_role || false,
         deacon_role: memberData.deacon_role || false,
         group_leader: memberData.group_leader || false,
         department_leader: memberData.department_leader || false,
-        login_username: memberData.login_username || null,
-        login_pin: memberData.login_pin || null,
-        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
-        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
-        can_add_members: Boolean(memberData.can_add_members),
-        can_edit_members: Boolean(memberData.can_edit_members),
-        can_view_own_data: Boolean(memberData.can_view_own_data)
+        baptism: memberData.baptism || null
       };
 
       // Set state
@@ -630,7 +695,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isDeacon,
     isGroupLeader,
     isDepartmentLeader,
-    getRoles
+    isPermanentMember,
+    getRoles,
+    getStatus
   };
 
   return (
