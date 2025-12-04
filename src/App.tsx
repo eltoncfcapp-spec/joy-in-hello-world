@@ -12,7 +12,8 @@ import {
   LogOut,
   Menu,
   X,
-  Building
+  Building,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import churchLogo from '@/assets/church-logo.png';
@@ -26,6 +27,7 @@ const Departments = lazy(() => import('./pages/Departments'));
 const Trends = lazy(() => import('./pages/Trends'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Admin = lazy(() => import('./pages/Admin'));
+const UserManual = lazy(() => import('./pages/UserManual'));
 const Login = lazy(() => import('./pages/Login'));
 
 // Loading spinner for lazy-loaded pages
@@ -62,6 +64,7 @@ const Layout = () => {
     { path: '/trends', icon: TrendingUp, label: 'Trends' },
     { path: '/analytics', icon: BarChart3, label: 'Analytics' },
     { path: '/admin', icon: Settings, label: 'Admin' },
+    { path: '/manual', icon: BookOpen, label: 'User Manual' },
   ];
 
   const toggleSidebar = () => {
@@ -211,6 +214,7 @@ function App() {
               <Route path="trends" element={<Trends />} />
               <Route path="analytics" element={<Analytics />} />
               <Route path="admin" element={<Admin />} />
+              <Route path="manual" element={<UserManual />} />
             </Route>
           </Routes>
         </Suspense>
