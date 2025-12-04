@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Eye, EyeOff, Mail, User } from 'lucide-react';
+import { Eye, EyeOff, Mail, User, Home } from 'lucide-react';
 
 export default function Login() {
   const [identifier, setIdentifier] = useState('');
@@ -46,14 +46,36 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-2xl shadow-xl">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 p-4">
+      {/* Logo on top left - matches Dashboard */}
+      <div className="absolute top-6 left-6 flex items-center gap-3">
+        <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
+          <span className="text-white font-bold text-xl">CM</span>
+        </div>
+        <div className="flex flex-col">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            Church Management
+          </h1>
+          <p className="text-xs text-gray-500">Faithful. Connected. United.</p>
+        </div>
+      </div>
+
+      {/* Home button */}
+      <button
+        onClick={() => navigate('/')}
+        className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md border border-gray-200"
+      >
+        <Home className="h-4 w-4" />
+        Return Home
+      </button>
+
+      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-2xl shadow-xl mt-16">
         <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
             <span className="text-white font-bold text-xl">CM</span>
           </div>
-          <h2 className="text-3xl font-bold text-gray-900">Church Management</h2>
-          <p className="mt-2 text-gray-600">Sign in to your account</p>
+          <h2 className="text-3xl font-bold text-gray-900">Welcome Back</h2>
+          <p className="mt-2 text-gray-600">Sign in to access your church dashboard</p>
         </div>
 
         {/* Login Method Toggle */}
@@ -201,8 +223,15 @@ export default function Login() {
             <li>• <strong>Email Login:</strong> For administrators with email/password</li>
             <li>• <strong>Username/PIN:</strong> For members with generated credentials</li>
             <li>• Members get username/PIN from church administrators</li>
+            <li>• Contact your church administrator if you need credentials</li>
           </ul>
         </div>
+      </div>
+
+      {/* Footer */}
+      <div className="mt-8 text-center text-gray-500 text-sm">
+        <p>Church Management System v1.0 • Secure & Confidential</p>
+        <p className="mt-1">For church use only • © {new Date().getFullYear()}</p>
       </div>
     </div>
   );
