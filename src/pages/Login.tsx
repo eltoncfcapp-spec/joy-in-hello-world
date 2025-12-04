@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Eye, EyeOff, Mail, User } from 'lucide-react';
 
+// Assuming you have the logo image in your project
+// If not, you can replace the img tag with a div containing the church name
 export default function Login() {
   const [identifier, setIdentifier] = useState('');
   const [credential, setCredential] = useState('');
@@ -49,11 +51,31 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-2xl shadow-xl">
         <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-xl">CM</span>
+          {/* Church Logo Section */}
+          <div className="mb-8">
+            {/* If you have the actual logo image file */}
+            {/* <img 
+              src="/path-to-your-logo/cfc-images.png" 
+              alt="Christian Family Church Pretoria East" 
+              className="h-20 w-auto mx-auto mb-4"
+            /> */}
+            
+            {/* If you don't have the image file, use text version */}
+            <div className="mb-6">
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 rounded-xl mb-4">
+                <h1 className="text-2xl font-bold tracking-wide">CHRISTIAN FAMILY CHURCH</h1>
+                <p className="text-lg font-semibold">PRETORIA EAST</p>
+              </div>
+            </div>
+            
+            {/* Original App Logo/Badge */}
+            <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-white font-bold text-xl">CM</span>
+            </div>
+            
+            <h2 className="text-2xl font-bold text-gray-900">Church Management System</h2>
+            <p className="mt-2 text-gray-600">Sign in to your account</p>
           </div>
-          <h2 className="text-3xl font-bold text-gray-900">Church Management</h2>
-          <p className="mt-2 text-gray-600">Sign in to your account</p>
         </div>
 
         {/* Login Method Toggle */}
