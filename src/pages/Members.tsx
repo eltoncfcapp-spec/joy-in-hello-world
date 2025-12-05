@@ -1,7 +1,8 @@
-// Members.tsx - Updated with corrected export and structure
-import { Search, Plus, Home, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Building, Users } from 'lucide-react';
+// Members.tsx - Updated with role-based access control
+import { Search, Plus, Home, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Building, Users, Shield, Lock } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
 
 // Interfaces
 export interface Member {
@@ -23,6 +24,9 @@ export interface Member {
   created_at: string | null;
   invited_by: string | null;
   baptism: string | null;
+  is_developer: boolean | null;
+  is_admin: boolean | null;
+  auth_user_id: string | null;
 }
 
 export interface CellGroup {
@@ -40,6 +44,15 @@ export interface MemberOption {
   name: string;
   surname: string;
   fullName: string;
+  is_developer: boolean | null;
+}
+
+export interface UserRole {
+  is_developer: boolean;
+  is_admin: boolean;
+  member_id: string | null;
+  cell_group_id: string | null;
+  ministry_group_id: string | null;
 }
 
 export const Members: React.FC = () => {
@@ -52,6 +65,7 @@ export const Members: React.FC = () => {
   const [editingMember, setEditingMember] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
@@ -62,6 +76,8 @@ export const Members: React.FC = () => {
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     baptism: '',
+    is_developer: false,
+    is_admin: false,
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -76,19 +92,162 @@ export const Members: React.FC = () => {
     status_date: '',
     not_attending_reason: '',
     baptism: '',
+    is_developer: false,
+    is_admin: false,
   });
   
   const [memberOptions, setMemberOptions] = useState<MemberOption[]>([]);
   const [showInvitedByDropdown, setShowInvitedByDropdown] = useState(false);
   const [invitedBySearch, setInvitedBySearch] = useState('');
   const invitedByDropdownRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
 
-  // Fetch data on component mount
+  // Fetch user role and data on component mount
   useEffect(() => {
-    fetchMembers();
+    const fetchUserData = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Get user role from members table
+        const { data: memberData, error: memberError } = await supabase
+          .from('members')
+          .select('id, is_developer, is_admin, cell_group_id, ministry_group_id')
+          .eq('auth_user_id', user.id)
+          .single();
+
+        if (memberError && memberError.code !== 'PGRST116') {
+          console.error('Error fetching member data:', memberError);
+        }
+
+        if (memberData) {
+          setCurrentUserRole({
+            is_developer: memberData.is_developer || false,
+            is_admin: memberData.is_admin || false,
+            member_id: memberData.id,
+            cell_group_id: memberData.cell_group_id,
+            ministry_group_id: memberData.ministry_group_id,
+          });
+        } else {
+          // If not found in members table, check if they're a developer/admin via auth metadata
+          setCurrentUserRole({
+            is_developer: user.user_metadata?.is_developer || false,
+            is_admin: user.user_metadata?.is_admin || false,
+            member_id: null,
+            cell_group_id: null,
+            ministry_group_id: null,
+          });
+        }
+
+        // Fetch data based on role
+        await fetchDataBasedOnRole(memberData);
+      } catch (error: any) {
+        console.error('Error fetching user role:', error);
+      }
+    };
+
+    fetchUserData();
     fetchCellGroups();
     fetchMinistryGroups();
-  }, []);
+  }, [user]);
+
+  const fetchDataBasedOnRole = async (userMemberData: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      let query = supabase
+        .from('members')
+        .select(`
+          *,
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name)
+        `);
+
+      // Apply filters based on user role
+      if (currentUserRole?.is_developer) {
+        // Developers can see everything
+        console.log('Developer view: Showing all members');
+      } else if (currentUserRole?.is_admin) {
+        // Admins can see everything except developers
+        query = query.or(`is_developer.is.false,is_developer.is.null`);
+        console.log('Admin view: Showing all except developers');
+      } else if (currentUserRole?.member_id) {
+        // Normal members can see:
+        // 1. Their own profile
+        // 2. Members in their cell group
+        // 3. Members in their ministry group
+        const conditions = [`id.eq.${currentUserRole.member_id}`];
+        
+        if (userMemberData?.cell_group_id) {
+          conditions.push(`cell_group_id.eq.${userMemberData.cell_group_id}`);
+        }
+        
+        if (userMemberData?.ministry_group_id) {
+          conditions.push(`ministry_group_id.eq.${userMemberData.ministry_group_id}`);
+        }
+        
+        query = query.or(conditions.join(','));
+        console.log('Member view: Limited access');
+      } else {
+        // No role or member ID, show empty
+        setMembers([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Error fetching members:', error);
+      setError(error.message || 'Failed to load members.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch cell groups
+  const fetchCellGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setCellGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching cell groups:', error);
+      setError(error.message || 'Failed to load cell groups.');
+    }
+  };
+
+  // Fetch ministry groups
+  const fetchMinistryGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        throw error;
+      }
+
+      setMinistryGroups(data || []);
+    } catch (error: any) {
+      console.error('Error fetching ministry groups:', error);
+      setError(error.message || 'Failed to load ministry groups.');
+    }
+  };
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -111,74 +270,56 @@ export const Members: React.FC = () => {
         id: member.id,
         name: member.name,
         surname: member.surname,
-        fullName: `${member.name} ${member.surname}`
+        fullName: `${member.name} ${member.surname}`,
+        is_developer: member.is_developer
       }));
       setMemberOptions(options);
     }
   }, [members]);
 
-  const fetchMembers = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const { data, error } = await supabase
-        .from('members')
-        .select(`
-          *,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Supabase error:', error);
-        throw error;
-      }
-
-      setMembers(data || []);
-    } catch (error: any) {
-      console.error('Error fetching members:', error);
-      setError(error.message || 'Failed to load members. Please check your connection.');
-    } finally {
-      setLoading(false);
+  // Check if user can edit/delete a member
+  const canEditMember = (member: Member): boolean => {
+    if (!currentUserRole) return false;
+    
+    if (currentUserRole.is_developer) return true;
+    
+    if (currentUserRole.is_admin) {
+      return !member.is_developer; // Admins cannot edit developers
     }
+    
+    // Normal members can only edit themselves
+    return currentUserRole.member_id === member.id;
   };
 
-  const fetchCellGroups = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('cell_groups')
-        .select('id, name')
-        .order('name');
-
-      if (error) {
-        throw error;
-      }
-
-      setCellGroups(data || []);
-    } catch (error: any) {
-      console.error('Error fetching cell groups:', error);
-      setError(error.message || 'Failed to load cell groups.');
+  // Check if user can mark as permanent
+  const canMarkAsPermanent = (member: Member): boolean => {
+    if (!currentUserRole) return false;
+    
+    if (currentUserRole.is_developer || currentUserRole.is_admin) {
+      return !member.is_permanent_member;
     }
+    
+    return false; // Only developers and admins can mark as permanent
   };
 
-  const fetchMinistryGroups = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('ministry_groups')
-        .select('id, name')
-        .order('name');
-
-      if (error) {
-        throw error;
-      }
-
-      setMinistryGroups(data || []);
-    } catch (error: any) {
-      console.error('Error fetching ministry groups:', error);
-      setError(error.message || 'Failed to load ministry groups.');
+  // Check if user can delete a member
+  const canDeleteMember = (member: Member): boolean => {
+    if (!currentUserRole) return false;
+    
+    if (currentUserRole.is_developer) return true;
+    
+    if (currentUserRole.is_admin) {
+      return !member.is_developer; // Admins cannot delete developers
     }
+    
+    // Normal members cannot delete anyone
+    return false;
+  };
+
+  // Check if user can add new members
+  const canAddMembers = (): boolean => {
+    if (!currentUserRole) return false;
+    return currentUserRole.is_developer || currentUserRole.is_admin;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -188,6 +329,11 @@ export const Members: React.FC = () => {
     setSuccess(null);
     
     try {
+      // Check permissions
+      if (!canAddMembers()) {
+        throw new Error('You do not have permission to add members');
+      }
+
       // Basic validation
       if (!formData.name.trim() || !formData.surname.trim()) {
         throw new Error('Name and surname are required');
@@ -205,7 +351,19 @@ export const Members: React.FC = () => {
         baptism: formData.baptism || null,
         status: 'newcomer',
         status_date: new Date().toISOString(),
+        is_developer: formData.is_developer,
+        is_admin: formData.is_admin,
       };
+
+      // Only developers can create developers
+      if (memberData.is_developer && !currentUserRole?.is_developer) {
+        throw new Error('Only developers can create developer accounts');
+      }
+
+      // Only developers/admins can create admins
+      if (memberData.is_admin && !currentUserRole?.is_developer && !currentUserRole?.is_admin) {
+        throw new Error('Only developers and admins can create admin accounts');
+      }
 
       const { data, error } = await supabase
         .from('members')
@@ -219,7 +377,7 @@ export const Members: React.FC = () => {
       setShowForm(false);
       resetForm();
       setSuccess('Member added successfully!');
-      fetchMembers();
+      fetchDataBasedOnRole(currentUserRole);
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -231,6 +389,11 @@ export const Members: React.FC = () => {
   };
 
   const handleEditMember = (member: Member) => {
+    if (!canEditMember(member)) {
+      setError('You do not have permission to edit this member');
+      return;
+    }
+    
     setEditingMember(member.id);
     setEditFormData({
       name: member.name,
@@ -245,6 +408,8 @@ export const Members: React.FC = () => {
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
       baptism: member.baptism || '',
+      is_developer: member.is_developer || false,
+      is_admin: member.is_admin || false,
     });
   };
 
@@ -254,6 +419,15 @@ export const Members: React.FC = () => {
     setSuccess(null);
     
     try {
+      const member = members.find(m => m.id === memberId);
+      if (!member) {
+        throw new Error('Member not found');
+      }
+
+      if (!canEditMember(member)) {
+        throw new Error('You do not have permission to edit this member');
+      }
+
       if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.gender) {
         setError('Name, surname, and gender are required fields.');
         setLoading(false);
@@ -274,6 +448,15 @@ export const Members: React.FC = () => {
         baptism: editFormData.baptism || null,
       };
 
+      // Only developers can change developer/admin status
+      if (currentUserRole?.is_developer) {
+        updateData.is_developer = editFormData.is_developer;
+        updateData.is_admin = editFormData.is_admin;
+      } else if (currentUserRole?.is_admin) {
+        // Admins cannot change developer status, but can change admin status
+        updateData.is_admin = editFormData.is_admin;
+      }
+
       if (editFormData.status === 'not_attending') {
         updateData.not_attending_reason = editFormData.not_attending_reason.trim();
       } else {
@@ -291,7 +474,7 @@ export const Members: React.FC = () => {
 
       setEditingMember(null);
       setSuccess('Member details updated successfully!');
-      fetchMembers();
+      fetchDataBasedOnRole(currentUserRole);
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -308,6 +491,15 @@ export const Members: React.FC = () => {
 
   const handleMarkAsPermanent = async (memberId: string) => {
     try {
+      const member = members.find(m => m.id === memberId);
+      if (!member) {
+        throw new Error('Member not found');
+      }
+
+      if (!canMarkAsPermanent(member)) {
+        throw new Error('You do not have permission to mark this member as permanent');
+      }
+
       setError(null);
       setSuccess(null);
       
@@ -324,7 +516,7 @@ export const Members: React.FC = () => {
       }
 
       setSuccess('Member marked as permanent!');
-      fetchMembers();
+      fetchDataBasedOnRole(currentUserRole);
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -334,6 +526,17 @@ export const Members: React.FC = () => {
   };
 
   const handleDeleteMember = async (memberId: string) => {
+    const member = members.find(m => m.id === memberId);
+    if (!member) {
+      setError('Member not found');
+      return;
+    }
+
+    if (!canDeleteMember(member)) {
+      setError('You do not have permission to delete this member');
+      return;
+    }
+
     if (!confirm('Are you sure you want to delete this member? This action cannot be undone.')) {
       return;
     }
@@ -352,7 +555,7 @@ export const Members: React.FC = () => {
       }
 
       setSuccess('Member deleted successfully!');
-      fetchMembers();
+      fetchDataBasedOnRole(currentUserRole);
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -370,9 +573,13 @@ export const Members: React.FC = () => {
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredMemberOptions = memberOptions.filter(option =>
-    option.fullName.toLowerCase().includes(invitedBySearch.toLowerCase())
-  );
+  const filteredMemberOptions = memberOptions
+    .filter(option =>
+      option.fullName.toLowerCase().includes(invitedBySearch.toLowerCase())
+    )
+    .filter(option => 
+      currentUserRole?.is_developer ? true : !option.is_developer
+    );
 
   const handleSelectInvitedBy = (memberName: string) => {
     setFormData({ ...formData, invited_by: memberName });
@@ -395,6 +602,8 @@ export const Members: React.FC = () => {
       ministry_group_id: '',
       gender: '',
       baptism: '',
+      is_developer: false,
+      is_admin: false,
     });
     setShowInvitedByDropdown(false);
     setInvitedBySearch('');
@@ -436,18 +645,53 @@ export const Members: React.FC = () => {
     }
   };
 
+  const getRoleBadge = (member: Member) => {
+    if (member.is_developer) {
+      return { 
+        color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+        icon: <Shield className="h-3 w-3 inline mr-1" />,
+        text: 'Developer' 
+      };
+    } else if (member.is_admin) {
+      return { 
+        color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
+        icon: <Shield className="h-3 w-3 inline mr-1" />,
+        text: 'Admin' 
+      };
+    }
+    return null;
+  };
+
   const getStatusCounts = () => {
+    const visibleMembers = members.filter(member => {
+      if (member.is_developer && !currentUserRole?.is_developer) {
+        return false; // Hide developers from non-developers
+      }
+      return true;
+    });
+
     return {
-      total: members.length,
-      permanent: members.filter(m => m.is_permanent_member).length,
-      newcomer: members.filter(m => m.status === 'newcomer').length,
-      signed_member: members.filter(m => m.status === 'signed_member').length,
-      not_attending: members.filter(m => m.status === 'not_attending').length,
-      baptised: members.filter(m => m.baptism).length,
+      total: visibleMembers.length,
+      permanent: visibleMembers.filter(m => m.is_permanent_member).length,
+      newcomer: visibleMembers.filter(m => m.status === 'newcomer').length,
+      signed_member: visibleMembers.filter(m => m.status === 'signed_member').length,
+      not_attending: visibleMembers.filter(m => m.status === 'not_attending').length,
+      baptised: visibleMembers.filter(m => m.baptism).length,
+      developers: visibleMembers.filter(m => m.is_developer).length,
+      admins: visibleMembers.filter(m => m.is_admin && !m.is_developer).length,
     };
   };
 
   const statusCounts = getStatusCounts();
+
+  const getUserRoleDisplay = () => {
+    if (!currentUserRole) return 'Loading...';
+    
+    if (currentUserRole.is_developer) return 'Developer (Full Access)';
+    if (currentUserRole.is_admin) return 'Administrator';
+    if (currentUserRole.member_id) return 'Member (Limited Access)';
+    return 'Guest (No Access)';
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
@@ -455,18 +699,25 @@ export const Members: React.FC = () => {
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Members Directory
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">Manage and view all church members</p>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Members Directory
+              </h1>
+              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full text-sm font-medium">
+                {getUserRoleDisplay()}
+              </span>
+            </div>
+            <p className="text-gray-600 dark:text-gray-400">Manage and view church members based on your access level</p>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-          >
-            <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-            {showForm ? 'Cancel' : 'Add Member'}
-          </button>
+          {canAddMembers() && (
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+              {showForm ? 'Cancel' : 'Add Member'}
+            </button>
+          )}
         </div>
 
         {/* Success Message */}
@@ -483,8 +734,8 @@ export const Members: React.FC = () => {
           </div>
         )}
 
-        {/* Add Member Form */}
-        {showForm && (
+        {/* Add Member Form - Only visible to developers and admins */}
+        {showForm && canAddMembers() && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add New Member</h2>
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -603,6 +854,11 @@ export const Members: React.FC = () => {
                                   <div className="font-medium text-gray-900 dark:text-white">
                                     {member.fullName}
                                   </div>
+                                  {member.is_developer && (
+                                    <span className="text-xs text-purple-600 dark:text-purple-400">
+                                      Developer
+                                    </span>
+                                  )}
                                 </div>
                               </button>
                             ))
@@ -676,6 +932,67 @@ export const Members: React.FC = () => {
                     ))}
                   </select>
                 </div>
+
+                {/* Developer and Admin fields - Only visible to developers */}
+                {currentUserRole?.is_developer && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-purple-500" />
+                        Developer Account
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={formData.is_developer}
+                          onChange={(e) => setFormData({ ...formData, is_developer: e.target.checked })}
+                          className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 dark:border-gray-600 rounded"
+                        />
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          Grant developer access (full system permissions)
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-indigo-500" />
+                        Admin Account
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={formData.is_admin}
+                          onChange={(e) => setFormData({ ...formData, is_admin: e.target.checked })}
+                          className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded"
+                        />
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          Grant admin access (manage members, groups, etc.)
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Admin field - Visible to developers and admins */}
+                {(currentUserRole?.is_developer || currentUserRole?.is_admin) && !currentUserRole?.is_developer && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-indigo-500" />
+                      Admin Account
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={formData.is_admin}
+                        onChange={(e) => setFormData({ ...formData, is_admin: e.target.checked })}
+                        className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded"
+                      />
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        Grant admin access (manage members, groups, etc.)
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex gap-3">
                 <button
@@ -723,6 +1040,20 @@ export const Members: React.FC = () => {
           </div>
         </div>
 
+        {/* Access Warning for Normal Members */}
+        {currentUserRole?.member_id && !currentUserRole?.is_admin && !currentUserRole?.is_developer && (
+          <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-xl">
+            <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300 mb-2">
+              <Lock className="h-4 w-4" />
+              <span className="font-medium">Limited Access</span>
+            </div>
+            <p className="text-sm text-yellow-700 dark:text-yellow-400">
+              You can only view your own profile and members in your cell/ministry groups.
+              Developer and admin profiles are hidden from your view.
+            </p>
+          </div>
+        )}
+
         {/* Loading State */}
         {loading && members.length === 0 && (
           <div className="text-center py-12">
@@ -737,10 +1068,14 @@ export const Members: React.FC = () => {
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                {searchQuery ? 'No Members Found' : 'No Members Yet'}
+                {searchQuery ? 'No Members Found' : 'No Members Available'}
               </h3>
               <p className="text-gray-500 dark:text-gray-500">
-                {searchQuery ? 'Try adjusting your search terms' : 'Add your first member to get started'}
+                {searchQuery 
+                  ? 'Try adjusting your search terms' 
+                  : currentUserRole?.member_id && !currentUserRole?.is_admin && !currentUserRole?.is_developer
+                    ? 'You can only view members in your groups'
+                    : 'Add your first member to get started'}
               </p>
             </div>
           ) : (
@@ -869,6 +1204,35 @@ export const Members: React.FC = () => {
                           placeholder="Invited by"
                         />
                       </div>
+
+                      {/* Role editing - Only visible to developers */}
+                      {currentUserRole?.is_developer && (
+                        <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-gray-600">
+                          <h4 className="font-semibold text-gray-900 dark:text-white">Roles</h4>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={editFormData.is_developer}
+                              onChange={(e) => setEditFormData({ ...editFormData, is_developer: e.target.checked })}
+                              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 dark:border-gray-600 rounded"
+                            />
+                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                              Developer Access (Full system permissions)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={editFormData.is_admin}
+                              onChange={(e) => setEditFormData({ ...editFormData, is_admin: e.target.checked })}
+                              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded"
+                            />
+                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                              Admin Access (Manage members, groups, etc.)
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
@@ -951,6 +1315,12 @@ export const Members: React.FC = () => {
                                 Permanent Member
                               </span>
                             )}
+                            {getRoleBadge(member) && (
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${getRoleBadge(member)!.color}`}>
+                                {getRoleBadge(member)!.icon}
+                                {getRoleBadge(member)!.text}
+                              </span>
+                            )}
                             <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
                               {getStatusBadge(member.status).text}
                             </span>
@@ -1017,14 +1387,16 @@ export const Members: React.FC = () => {
                     
                     <div className="flex flex-col justify-between items-end gap-4">
                       <div className="flex flex-col gap-3">
-                        <button
-                          onClick={() => handleEditMember(member)}
-                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                        >
-                          <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                          Edit Details
-                        </button>
-                        {!member.is_permanent_member && (
+                        {canEditMember(member) && (
+                          <button
+                            onClick={() => handleEditMember(member)}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                            Edit Details
+                          </button>
+                        )}
+                        {canMarkAsPermanent(member) && !member.is_permanent_member && (
                           <button
                             onClick={() => handleMarkAsPermanent(member.id)}
                             className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -1033,13 +1405,15 @@ export const Members: React.FC = () => {
                             Mark as Permanent
                           </button>
                         )}
-                        <button
-                          onClick={() => handleDeleteMember(member.id)}
-                          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                        >
-                          <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                          Delete
-                        </button>
+                        {canDeleteMember(member) && (
+                          <button
+                            onClick={() => handleDeleteMember(member.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          >
+                            <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                            Delete
+                          </button>
+                        )}
                       </div>
                       {member.status_date && member.status === 'signed_member' && (
                         <div className="text-sm text-gray-600 dark:text-gray-400">
@@ -1064,7 +1438,7 @@ export const Members: React.FC = () => {
         </div>
 
         {/* Stats Summary */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-8 gap-6">
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
             <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Total Members</div>
@@ -1092,6 +1466,24 @@ export const Members: React.FC = () => {
             <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
           </div>
+          {currentUserRole?.is_developer && (
+            <>
+              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+                <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.developers}</div>
+                <div className="text-gray-600 dark:text-gray-400 font-medium flex items-center justify-center gap-1">
+                  <Shield className="h-4 w-4 text-purple-500" />
+                  Developers
+                </div>
+              </div>
+              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+                <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.admins}</div>
+                <div className="text-gray-600 dark:text-gray-400 font-medium flex items-center justify-center gap-1">
+                  <Shield className="h-4 w-4 text-indigo-500" />
+                  Admins
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
