@@ -1,5 +1,5 @@
-import { Search, Plus, Home, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Building } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Search, Plus, Home, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Building, Users } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
 interface Member {
@@ -31,6 +31,13 @@ interface CellGroup {
 interface MinistryGroup {
   id: string;
   name: string;
+}
+
+interface MemberOption {
+  id: string;
+  name: string;
+  surname: string;
+  fullName: string;
 }
 
 const Members = () => {
@@ -68,12 +75,43 @@ const Members = () => {
     not_attending_reason: '',
     baptism: '',
   });
+  
+  // New state for invited by dropdown
+  const [memberOptions, setMemberOptions] = useState<MemberOption[]>([]);
+  const [showInvitedByDropdown, setShowInvitedByDropdown] = useState(false);
+  const [invitedBySearch, setInvitedBySearch] = useState('');
+  const invitedByDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchMembers();
     fetchCellGroups();
     fetchMinistryGroups();
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (invitedByDropdownRef.current && !invitedByDropdownRef.current.contains(event.target as Node)) {
+        setShowInvitedByDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Load member options for invited by dropdown
+  useEffect(() => {
+    if (members.length > 0) {
+      const options = members.map(member => ({
+        id: member.id,
+        name: member.name,
+        surname: member.surname,
+        fullName: `${member.name} ${member.surname}`
+      }));
+      setMemberOptions(options);
+    }
+  }, [members]);
 
   const fetchMembers = async () => {
     try {
@@ -339,6 +377,7 @@ const Members = () => {
     }
   };
 
+  // Filter members for search
   const filteredMembers = members.filter(
     (member) =>
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -347,6 +386,18 @@ const Members = () => {
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Filter member options for invited by dropdown
+  const filteredMemberOptions = memberOptions.filter(option =>
+    option.fullName.toLowerCase().includes(invitedBySearch.toLowerCase())
+  );
+
+  // Handle selecting a member from dropdown
+  const handleSelectInvitedBy = (memberId: string, memberName: string) => {
+    setFormData({ ...formData, invited_by: memberName });
+    setShowInvitedByDropdown(false);
+    setInvitedBySearch('');
+  };
 
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
@@ -366,6 +417,8 @@ const Members = () => {
     });
     setShowForm(false);
     setError(null);
+    setShowInvitedByDropdown(false);
+    setInvitedBySearch('');
   };
 
   const getStatusBadge = (status: string | null) => {
@@ -507,18 +560,94 @@ const Members = () => {
                     placeholder="Enter phone number"
                   />
                 </div>
-                <div className="space-y-2">
+                
+                {/* Invited By Field with Dropdown */}
+                <div className="space-y-2 relative" ref={invitedByDropdownRef}>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Invited By
                   </label>
-                  <input
-                    type="text"
-                    value={formData.invited_by}
-                    onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Who invited this member?"
-                  />
+                  <div className="relative">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={formData.invited_by}
+                        onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
+                        onFocus={() => setShowInvitedByDropdown(true)}
+                        className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Select member or type name"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowInvitedByDropdown(!showInvitedByDropdown)}
+                        className="px-3 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                      >
+                        <Users className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+                      </button>
+                    </div>
+                    
+                    {/* Dropdown for selecting members */}
+                    {showInvitedByDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-auto">
+                        {/* Search input inside dropdown */}
+                        <div className="sticky top-0 bg-white dark:bg-gray-800 p-2 border-b border-gray-200 dark:border-gray-700">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                              type="text"
+                              value={invitedBySearch}
+                              onChange={(e) => setInvitedBySearch(e.target.value)}
+                              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Search members..."
+                              autoFocus
+                            />
+                          </div>
+                        </div>
+                        
+                        {/* Member options */}
+                        <div className="p-1">
+                          {filteredMemberOptions.length === 0 ? (
+                            <div className="px-3 py-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                              {invitedBySearch ? 'No members found' : 'No members available'}
+                            </div>
+                          ) : (
+                            filteredMemberOptions.map((member) => (
+                              <button
+                                key={member.id}
+                                type="button"
+                                onClick={() => handleSelectInvitedBy(member.id, member.fullName)}
+                                className="w-full px-3 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-3 transition-colors"
+                              >
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
+                                  {getInitials(member.name, member.surname)}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-gray-900 dark:text-white">
+                                    {member.fullName}
+                                  </div>
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                        
+                        {/* Close dropdown button */}
+                        <div className="sticky bottom-0 bg-white dark:bg-gray-800 p-2 border-t border-gray-200 dark:border-gray-700">
+                          <button
+                            type="button"
+                            onClick={() => setShowInvitedByDropdown(false)}
+                            className="w-full px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Select from existing members or type name manually
+                  </p>
                 </div>
+                
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Gender *
