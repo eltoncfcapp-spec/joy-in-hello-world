@@ -41,7 +41,6 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
@@ -239,7 +238,6 @@ const Events = () => {
           id,
           name,
           surname,
-          email,
           phone,
           cell_group_id,
           ministry_group_id,

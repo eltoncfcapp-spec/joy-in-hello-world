@@ -8,7 +8,6 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
   admin_role: string;
   pastor_role: boolean | null;
@@ -1036,7 +1035,6 @@ const Admin = () => {
         id: profile.id,
         name: profile.name || '',
         surname: profile.surname || '',
-        email: profile.email,
         phone: profile.phone || null,
         admin_role: profile.admin_role || 'member',
         pastor_role: profile.pastor_role || false,
@@ -1086,7 +1084,6 @@ const Admin = () => {
       id: profile.id,
       name: profile.name || '',
       surname: profile.surname || '',
-      email: profile.email,
       phone: profile.phone || null,
       admin_role: profile.admin_role || 'member',
       pastor_role: profile.pastor_role || false,
@@ -1295,7 +1292,6 @@ const Admin = () => {
       id: profile!.id,
       name: profile!.name || '',
       surname: profile!.surname || '',
-      email: profile!.email,
       phone: profile!.phone || null,
       admin_role: profile!.admin_role || 'member',
       pastor_role: profile!.pastor_role || false,
@@ -1351,7 +1347,6 @@ const Admin = () => {
       id: profile.id,
       name: profile.name || '',
       surname: profile.surname || '',
-      email: profile.email,
       phone: profile.phone || null,
       admin_role: profile.admin_role || 'member',
       pastor_role: profile.pastor_role || false,
@@ -1465,7 +1460,7 @@ const Admin = () => {
     if (searchTerm) {
       filtered = filtered.filter(member =>
         `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (member.phone && member.phone.toLowerCase().includes(searchTerm.toLowerCase())) ||
         getRolesFromMember(member).some(role => role.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
@@ -1475,7 +1470,6 @@ const Admin = () => {
       id: profile.id,
       name: profile.name || '',
       surname: profile.surname || '',
-      email: profile.email,
       phone: profile.phone || null,
       admin_role: profile.admin_role || 'member',
       pastor_role: profile.pastor_role || false,
@@ -2053,7 +2047,7 @@ const Admin = () => {
                       {member.name} {member.surname}
                     </h4>
                     <p className="text-sm text-gray-500">
-                      {member.email} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                      {member.phone} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                     </p>
                   </div>
                 </div>

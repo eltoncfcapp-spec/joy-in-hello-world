@@ -30,7 +30,6 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
@@ -143,7 +142,7 @@ const Dashboard = () => {
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
 
@@ -1117,7 +1116,6 @@ const Dashboard = () => {
               {filteredMembers
                 .filter(member => 
                   `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
                   (member.phone && member.phone.includes(searchTerm))
                 )
                 .map(member => (
@@ -1128,7 +1126,7 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">{member.email || member.phone || 'No contact'}</p>
+                      <p className="text-sm text-gray-500">{member.phone || 'No contact'}</p>
                       {member.login_username && (
                         <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                           <Key className="h-3 w-3" />
