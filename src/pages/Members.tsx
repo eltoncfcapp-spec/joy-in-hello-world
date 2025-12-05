@@ -1,4 +1,4 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar } from 'lucide-react';
+import { Search, Plus, Home, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Building } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -6,7 +6,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
   ministry_group_id: string | null;
@@ -20,6 +20,9 @@ interface Member {
   not_attending_reason: string | null;
   created_at: string | null;
   invited_by: string | null;
+  baptism: string | null;
+  login_username: string | null;
+  login_pin: string | null;
 }
 
 interface CellGroup {
@@ -45,17 +48,20 @@ const Members = () => {
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
-    email: '',
+    residence: '',
     phone: '',
     invited_by: '',
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
+    baptism: '',
+    login_username: '',
+    login_pin: '',
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
     surname: '',
-    email: '',
+    residence: '',
     phone: '',
     invited_by: '',
     cell_group_id: '',
@@ -64,6 +70,9 @@ const Members = () => {
     status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
     status_date: '',
     not_attending_reason: '',
+    baptism: '',
+    login_username: '',
+    login_pin: '',
   });
 
   useEffect(() => {
@@ -147,12 +156,15 @@ const Members = () => {
         .insert([{
           name: formData.name.trim(),
           surname: formData.surname.trim(),
-          email: formData.email.trim() || null,
+          residence: formData.residence.trim() || null,
           phone: formData.phone.trim() || null,
           cell_group_id: formData.cell_group_id || null,
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
+          baptism: formData.baptism.trim() || null,
+          login_username: formData.login_username.trim() || null,
+          login_pin: formData.login_pin.trim() || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
         }])
@@ -166,12 +178,15 @@ const Members = () => {
       setFormData({ 
         name: '', 
         surname: '', 
-        email: '', 
+        residence: '', 
         phone: '', 
         invited_by: '', 
         cell_group_id: '',
         ministry_group_id: '',
         gender: '',
+        baptism: '',
+        login_username: '',
+        login_pin: '',
       });
       setSuccess('Member added successfully!');
       fetchMembers();
@@ -190,7 +205,7 @@ const Members = () => {
     setEditFormData({
       name: member.name,
       surname: member.surname,
-      email: member.email || '',
+      residence: member.residence || '',
       phone: member.phone || '',
       invited_by: member.invited_by || '',
       cell_group_id: member.cell_group_id || '',
@@ -199,6 +214,9 @@ const Members = () => {
       status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
+      baptism: member.baptism || '',
+      login_username: member.login_username || '',
+      login_pin: member.login_pin || '',
     });
   };
 
@@ -218,7 +236,7 @@ const Members = () => {
       const updateData: any = {
         name: editFormData.name.trim(),
         surname: editFormData.surname.trim(),
-        email: editFormData.email.trim() || null,
+        residence: editFormData.residence.trim() || null,
         phone: editFormData.phone.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
         ministry_group_id: editFormData.ministry_group_id || null,
@@ -226,6 +244,9 @@ const Members = () => {
         invited_by: editFormData.invited_by.trim() || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
+        baptism: editFormData.baptism.trim() || null,
+        login_username: editFormData.login_username.trim() || null,
+        login_pin: editFormData.login_pin.trim() || null,
       };
 
       if (editFormData.status === 'not_attending') {
@@ -261,7 +282,7 @@ const Members = () => {
     setEditFormData({
       name: '',
       surname: '',
-      email: '',
+      residence: '',
       phone: '',
       invited_by: '',
       cell_group_id: '',
@@ -270,6 +291,9 @@ const Members = () => {
       status: 'newcomer',
       status_date: '',
       not_attending_reason: '',
+      baptism: '',
+      login_username: '',
+      login_pin: '',
     });
   };
 
@@ -332,7 +356,7 @@ const Members = () => {
     (member) =>
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -345,12 +369,15 @@ const Members = () => {
     setFormData({ 
       name: '', 
       surname: '', 
-      email: '', 
+      residence: '', 
       phone: '', 
       invited_by: '', 
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
+      baptism: '',
+      login_username: '',
+      login_pin: '',
     });
     setShowForm(false);
     setError(null);
@@ -374,6 +401,24 @@ const Members = () => {
     return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
   };
 
+  const getBaptismBadge = (baptism: string | null) => {
+    if (!baptism) {
+      return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: 'Not Baptised' };
+    }
+    
+    const baptismDate = new Date(baptism);
+    const now = new Date();
+    const yearsDiff = now.getFullYear() - baptismDate.getFullYear();
+    
+    if (yearsDiff === 0) {
+      return { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Recently Baptised' };
+    } else if (yearsDiff <= 5) {
+      return { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: `${yearsDiff} Year${yearsDiff > 1 ? 's' : ''} Since Baptism` };
+    } else {
+      return { color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', text: `Baptised ${yearsDiff} Years Ago` };
+    }
+  };
+
   const getStatusCounts = () => {
     return {
       total: members.length,
@@ -381,6 +426,7 @@ const Members = () => {
       newcomer: members.filter(m => m.status === 'newcomer').length,
       signed_member: members.filter(m => m.status === 'signed_member').length,
       not_attending: members.filter(m => m.status === 'not_attending').length,
+      baptised: members.filter(m => m.baptism).length,
     };
   };
 
@@ -454,14 +500,14 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Email
+                    Residence
                   </label>
                   <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    type="text"
+                    value={formData.residence}
+                    onChange={(e) => setFormData({ ...formData, residence: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
+                    placeholder="Enter residence address"
                   />
                 </div>
                 <div className="space-y-2">
@@ -502,6 +548,43 @@ const Members = () => {
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                   </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Baptism Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.baptism}
+                    onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Baptism date"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Login Username
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.login_username}
+                    onChange={(e) => setFormData({ ...formData, login_username: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Username for login"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Login PIN
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.login_pin}
+                    onChange={(e) => setFormData({ ...formData, login_pin: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="4-digit PIN for login"
+                    maxLength={4}
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -565,7 +648,7 @@ const Members = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search members by name, email, phone, or cell group..."
+              placeholder="Search members by name, residence, phone, or cell group..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -632,15 +715,22 @@ const Members = () => {
                               placeholder="Last Name"
                             />
                           </div>
-                          <select
-                            value={editFormData.status}
-                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
-                            className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
-                          >
-                            <option value="newcomer">Newcomer</option>
-                            <option value="signed_member">Signed Member</option>
-                            <option value="not_attending">Not Attending</option>
-                          </select>
+                          <div className="flex gap-2">
+                            <select
+                              value={editFormData.status}
+                              onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                              className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
+                            >
+                              <option value="newcomer">Newcomer</option>
+                              <option value="signed_member">Signed Member</option>
+                              <option value="not_attending">Not Attending</option>
+                            </select>
+                            {editFormData.baptism && (
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getBaptismBadge(editFormData.baptism).color}`}>
+                                {getBaptismBadge(editFormData.baptism).text}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -648,13 +738,13 @@ const Members = () => {
                     <div className="space-y-4">
                       {/* Contact Information */}
                       <div className="flex items-center gap-3">
-                        <Mail className="h-4 w-4 text-gray-400" />
+                        <Home className="h-4 w-4 text-gray-400" />
                         <input
-                          type="email"
-                          value={editFormData.email}
-                          onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                          type="text"
+                          value={editFormData.residence}
+                          onChange={(e) => setEditFormData({ ...editFormData, residence: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                          placeholder="Email address"
+                          placeholder="Residence address"
                         />
                       </div>
                       
@@ -684,6 +774,60 @@ const Members = () => {
                             </option>
                           ))}
                         </select>
+                      </div>
+
+                      {/* Ministry Group */}
+                      <div className="flex items-center gap-3">
+                        <Building className="h-4 w-4 text-gray-400" />
+                        <select
+                          value={editFormData.ministry_group_id}
+                          onChange={(e) => setEditFormData({ ...editFormData, ministry_group_id: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                        >
+                          <option value="">Select ministry group</option>
+                          {ministryGroups.map((group) => (
+                            <option key={group.id} value={group.id}>
+                              {group.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Baptism */}
+                      <div className="flex items-center gap-3">
+                        <Droplets className="h-4 w-4 text-gray-400" />
+                        <input
+                          type="date"
+                          value={editFormData.baptism}
+                          onChange={(e) => setEditFormData({ ...editFormData, baptism: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                          placeholder="Baptism date"
+                        />
+                      </div>
+
+                      {/* Login Credentials */}
+                      <div className="grid grid-cols-2 gap-4 pt-2">
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label>
+                          <input
+                            type="text"
+                            value={editFormData.login_username}
+                            onChange={(e) => setEditFormData({ ...editFormData, login_username: e.target.value })}
+                            className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                            placeholder="Username"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1">PIN</label>
+                          <input
+                            type="text"
+                            value={editFormData.login_pin}
+                            onChange={(e) => setEditFormData({ ...editFormData, login_pin: e.target.value })}
+                            className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                            placeholder="4-digit PIN"
+                            maxLength={4}
+                          />
+                        </div>
                       </div>
 
                       {/* Invited By */}
@@ -786,13 +930,19 @@ const Members = () => {
                             <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
                               {getStatusBadge(member.status).text}
                             </span>
+                            {member.baptism && (
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getBaptismBadge(member.baptism).color}`}>
+                                <Droplets className="h-3 w-3 inline mr-1" />
+                                {getBaptismBadge(member.baptism).text}
+                              </span>
+                            )}
                           </div>
                           
                           <div className="space-y-3 text-gray-600 dark:text-gray-400">
-                            {member.email && (
+                            {member.residence && (
                               <div className="flex items-center gap-3">
-                                <Mail className="h-4 w-4" />
-                                <span className="font-medium">{member.email}</span>
+                                <Home className="h-4 w-4" />
+                                <span className="font-medium">{member.residence}</span>
                               </div>
                             )}
                             {member.phone && (
@@ -807,8 +957,24 @@ const Members = () => {
                             </div>
                             {member.ministry_groups?.name && (
                               <div className="flex items-center gap-3">
-                                <User className="h-4 w-4" />
+                                <Building className="h-4 w-4" />
                                 <span className="font-medium">{member.ministry_groups.name}</span>
+                              </div>
+                            )}
+                            {member.baptism && (
+                              <div className="flex items-center gap-3 text-sm">
+                                <Droplets className="h-4 w-4" />
+                                <span>Baptised: {new Date(member.baptism).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric'
+                                })}</span>
+                              </div>
+                            )}
+                            {member.login_username && (
+                              <div className="flex items-center gap-3 text-sm">
+                                <User className="h-4 w-4" />
+                                <span>Login: <code className="bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded">{member.login_username}</code> | PIN: <code className="bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded">{member.login_pin || 'Not set'}</code></span>
                               </div>
                             )}
                             {member.invited_by && (
@@ -883,7 +1049,7 @@ const Members = () => {
         </div>
 
         {/* Stats Summary */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
             <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Total Members</div>
@@ -899,6 +1065,13 @@ const Members = () => {
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
             <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
             <div className="text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
+            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptised}</div>
+            <div className="text-gray-600 dark:text-gray-400 font-medium flex items-center justify-center gap-1">
+              <Droplets className="h-4 w-4" />
+              Baptised
+            </div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
             <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
