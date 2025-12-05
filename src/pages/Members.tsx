@@ -21,8 +21,6 @@ interface Member {
   created_at: string | null;
   invited_by: string | null;
   baptism: string | null;
-  login_username: string | null;
-  login_pin: string | null;
 }
 
 interface CellGroup {
@@ -55,8 +53,6 @@ const Members = () => {
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     baptism: '',
-    login_username: '',
-    login_pin: '',
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -71,8 +67,6 @@ const Members = () => {
     status_date: '',
     not_attending_reason: '',
     baptism: '',
-    login_username: '',
-    login_pin: '',
   });
 
   useEffect(() => {
@@ -151,7 +145,7 @@ const Members = () => {
     setSuccess(null);
     
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('members')
         .insert([{
           name: formData.name.trim(),
@@ -163,16 +157,17 @@ const Members = () => {
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
           baptism: formData.baptism.trim() || null,
-          login_username: formData.login_username.trim() || null,
-          login_pin: formData.login_pin.trim() || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
         }])
         .select();
 
       if (error) {
+        console.error('Insert error details:', error);
         throw error;
       }
+
+      console.log('Member added successfully:', data);
 
       setShowForm(false);
       setFormData({ 
@@ -185,8 +180,6 @@ const Members = () => {
         ministry_group_id: '',
         gender: '',
         baptism: '',
-        login_username: '',
-        login_pin: '',
       });
       setSuccess('Member added successfully!');
       fetchMembers();
@@ -215,8 +208,6 @@ const Members = () => {
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
       baptism: member.baptism || '',
-      login_username: member.login_username || '',
-      login_pin: member.login_pin || '',
     });
   };
 
@@ -245,8 +236,6 @@ const Members = () => {
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         baptism: editFormData.baptism.trim() || null,
-        login_username: editFormData.login_username.trim() || null,
-        login_pin: editFormData.login_pin.trim() || null,
       };
 
       if (editFormData.status === 'not_attending') {
@@ -292,8 +281,6 @@ const Members = () => {
       status_date: '',
       not_attending_reason: '',
       baptism: '',
-      login_username: '',
-      login_pin: '',
     });
   };
 
@@ -376,8 +363,6 @@ const Members = () => {
       ministry_group_id: '',
       gender: '',
       baptism: '',
-      login_username: '',
-      login_pin: '',
     });
     setShowForm(false);
     setError(null);
@@ -559,31 +544,6 @@ const Members = () => {
                     onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Baptism date"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Login Username
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.login_username}
-                    onChange={(e) => setFormData({ ...formData, login_username: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Username for login"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Login PIN
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.login_pin}
-                    onChange={(e) => setFormData({ ...formData, login_pin: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="4-digit PIN for login"
-                    maxLength={4}
                   />
                 </div>
                 <div className="space-y-2">
@@ -805,31 +765,6 @@ const Members = () => {
                         />
                       </div>
 
-                      {/* Login Credentials */}
-                      <div className="grid grid-cols-2 gap-4 pt-2">
-                        <div>
-                          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label>
-                          <input
-                            type="text"
-                            value={editFormData.login_username}
-                            onChange={(e) => setEditFormData({ ...editFormData, login_username: e.target.value })}
-                            className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                            placeholder="Username"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-500 dark:text-gray-400 mb-1">PIN</label>
-                          <input
-                            type="text"
-                            value={editFormData.login_pin}
-                            onChange={(e) => setEditFormData({ ...editFormData, login_pin: e.target.value })}
-                            className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                            placeholder="4-digit PIN"
-                            maxLength={4}
-                          />
-                        </div>
-                      </div>
-
                       {/* Invited By */}
                       <div className="flex items-center gap-3">
                         <User className="h-4 w-4 text-gray-400" />
@@ -969,12 +904,6 @@ const Members = () => {
                                   month: 'long',
                                   day: 'numeric'
                                 })}</span>
-                              </div>
-                            )}
-                            {member.login_username && (
-                              <div className="flex items-center gap-3 text-sm">
-                                <User className="h-4 w-4" />
-                                <span>Login: <code className="bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded">{member.login_username}</code> | PIN: <code className="bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded">{member.login_pin || 'Not set'}</code></span>
                               </div>
                             )}
                             {member.invited_by && (
