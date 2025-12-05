@@ -23,8 +23,7 @@ import {
   PlayCircle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
-// Updated import path - adjust based on your actual file structure
-import { useAuth } from '../../contexts/AuthContext'; // Or '../contexts/AuthContext'
+import { useAuth } from '../contexts/AuthContext';
 
 // Types
 interface Member {
@@ -119,7 +118,7 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 };
 
 const Dashboard = () => {
-  const { profile, hasPermission: authHasPermission, isAdmin, isPastor } = useAuth();
+  const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -138,19 +137,17 @@ const Dashboard = () => {
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
 
-  // Real data state with initial empty arrays
+  // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
 
-  // Check user permissions
-  const currentUserCanEdit = profile?.admin_role === 'admin' || profile?.admin_role === 'pastor' || 
-                            isAdmin() || isPastor() || 
-                            hasPermission(['admin_access']);
+  // Check user permissions - use admin_role from profile instead of role
+  const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
 
   // All users can see data - no filtering for viewing
   const getFilteredMembers = () => {
@@ -178,28 +175,13 @@ const Dashboard = () => {
 
   // Format date for display
   const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    } catch (error) {
-      return dateString;
-    }
-  };
-
-  // Format time ago
-  const formatTimeAgo = (date: Date): string => {
-    const now = new Date();
-    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-    
-    if (diffInHours < 1) return 'Just now';
-    if (diffInHours < 24) return `${diffInHours} hours ago`;
-    if (diffInHours < 168) return `${Math.floor(diffInHours / 24)} days ago`;
-    return `${Math.floor(diffInHours / 168)} weeks ago`;
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
 
   // Load dashboard data from Supabase
@@ -214,11 +196,7 @@ const Dashboard = () => {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (membersError) {
-        console.error('Error loading members:', membersError);
-        throw membersError;
-      }
-      
+      if (membersError) throw membersError;
       setMembers(membersData || []);
 
       // Load cell groups
@@ -227,24 +205,17 @@ const Dashboard = () => {
         .select('id, name')
         .order('name');
 
-      if (cellGroupsError) {
-        console.error('Error loading cell groups:', cellGroupsError);
-        // Don't throw, continue with other data
-      }
+      if (cellGroupsError) throw cellGroupsError;
       setCellGroups(cellGroupsData || []);
 
-      // Load events with pamphlet URLs - get today and future events
-      const today = new Date().toISOString().split('T')[0];
+      // Load events with pamphlet URLs
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('*')
-        .gte('event_date', today)
+        .gte('event_date', new Date().toISOString().split('T')[0])
         .order('event_date', { ascending: true });
 
-      if (eventsError) {
-        console.error('Error loading events:', eventsError);
-        throw eventsError;
-      }
+      if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
 
       // Load sermons
@@ -257,16 +228,12 @@ const Dashboard = () => {
             topic
           )
         `)
-        .order('sermon_date', { ascending: false })
-        .limit(20);
+        .order('sermon_date', { ascending: false });
 
-      if (sermonsError) {
-        console.error('Error loading sermons:', sermonsError);
-        throw sermonsError;
-      }
+      if (sermonsError) throw sermonsError;
       setSermons(sermonsData || []);
 
-      // Calculate stats with all data
+      // Calculate stats with all data (everyone can see)
       calculateStats(membersData || [], eventsData || [], sermonsData || []);
 
       // Generate recent activities with all data
@@ -275,81 +242,12 @@ const Dashboard = () => {
       // Load absent members
       await loadAbsentMembers();
 
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading dashboard data:', error);
-      setError(error.message || 'Failed to load dashboard data');
-      
-      // Set default empty stats if data loading fails
-      setStats(getDefaultStats());
+      setError('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
-  };
-
-  // Default stats when no data is available
-  const getDefaultStats = (): StatCard[] => {
-    return [
-      { 
-        icon: Users, 
-        label: 'Total Members', 
-        value: '0', 
-        change: '0 signed members', 
-        changeType: 'info',
-        color: 'from-blue-500 to-blue-600',
-        bgColor: 'bg-blue-50 dark:bg-blue-950/20',
-        action: 'viewMembers'
-      },
-      { 
-        icon: Calendar, 
-        label: 'Upcoming Events', 
-        value: '0', 
-        change: 'No upcoming events',
-        changeType: 'info',
-        color: 'from-purple-500 to-purple-600',
-        bgColor: 'bg-purple-50 dark:bg-purple-950/20',
-        action: 'viewEvents'
-      },
-      { 
-        icon: BookOpen, 
-        label: 'Sermons', 
-        value: '0', 
-        change: '0 messages available', 
-        changeType: 'info',
-        color: 'from-orange-500 to-orange-600',
-        bgColor: 'bg-orange-50 dark:bg-orange-950/20',
-        action: 'viewSermons'
-      },
-      { 
-        icon: Users, 
-        label: 'Newcomers', 
-        value: '0', 
-        change: '0 new visitors', 
-        changeType: 'info',
-        color: 'from-green-500 to-green-600',
-        bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: 'viewMembers'
-      },
-      { 
-        icon: TrendingUp, 
-        label: 'Active Groups', 
-        value: '0', 
-        change: '0 cell groups', 
-        changeType: 'info',
-        color: 'from-indigo-500 to-indigo-600',
-        bgColor: 'bg-indigo-50 dark:bg-indigo-950/20',
-        action: 'viewGroups'
-      },
-      { 
-        icon: AlertTriangle, 
-        label: 'Absent 2 Sundays', 
-        value: '0', 
-        change: 'No data available',
-        changeType: 'info',
-        color: 'from-red-500 to-red-600',
-        bgColor: 'bg-red-50 dark:bg-red-950/20',
-        action: 'viewAbsentMembers'
-      },
-    ];
   };
 
   const loadAbsentMembers = async () => {
@@ -358,12 +256,11 @@ const Dashboard = () => {
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
-        .or('name.ilike.%sunday%,name.ilike.%service%')
+        .ilike('name', '%sunday%service%')
         .order('event_date', { ascending: false })
         .limit(10);
 
       if (eventsError) throw eventsError;
-      
       if (!sundayEvents || sundayEvents.length < 2) {
         setAbsentMembers([]);
         return;
@@ -375,10 +272,10 @@ const Dashboard = () => {
       // Get all members
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, phone');
+        .select('id, name, surname, phone, assigned_groups, assigned_departments');
 
       if (membersError) throw membersError;
-      if (!allMembers || allMembers.length === 0) {
+      if (!allMembers) {
         setAbsentMembers([]);
         return;
       }
@@ -421,7 +318,7 @@ const Dashboard = () => {
     }
   };
 
-  const calculateStats = (allMembers: Member[] = [], events: Event[] = [], allSermons: Sermon[] = []) => {
+  const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const totalMembers = allMembers.length;
     const newcomers = allMembers.filter(m => m.status === 'newcomer').length;
     const signedMembers = allMembers.filter(m => m.status === 'signed_member').length;
@@ -436,7 +333,7 @@ const Dashboard = () => {
         label: 'Total Members', 
         value: totalMembers.toString(), 
         change: `${signedMembers} signed members`, 
-        changeType: totalMembers > 0 ? 'positive' : 'info',
+        changeType: 'positive',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
         action: 'viewMembers'
@@ -446,7 +343,7 @@ const Dashboard = () => {
         label: 'Upcoming Events', 
         value: upcomingEventsCount.toString(), 
         change: events[0] ? `Next: ${events[0].name}` : 'No upcoming events',
-        changeType: upcomingEventsCount > 0 ? 'info' : 'info',
+        changeType: 'info',
         color: 'from-purple-500 to-purple-600',
         bgColor: 'bg-purple-50 dark:bg-purple-950/20',
         action: 'viewEvents'
@@ -456,7 +353,7 @@ const Dashboard = () => {
         label: 'Sermons', 
         value: totalSermons.toString(), 
         change: `${totalSermons} messages available`, 
-        changeType: totalSermons > 0 ? 'positive' : 'info',
+        changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
         action: 'viewSermons'
@@ -466,7 +363,7 @@ const Dashboard = () => {
         label: 'Newcomers', 
         value: newcomers.toString(), 
         change: `${newcomers} new visitors`, 
-        changeType: newcomers > 0 ? 'positive' : 'info',
+        changeType: 'positive',
         color: 'from-green-500 to-green-600',
         bgColor: 'bg-green-50 dark:bg-green-950/20',
         action: 'viewMembers'
@@ -476,7 +373,7 @@ const Dashboard = () => {
         label: 'Active Groups', 
         value: uniqueGroups.toString(), 
         change: `${uniqueGroups} cell groups`, 
-        changeType: uniqueGroups > 0 ? 'positive' : 'info',
+        changeType: 'positive',
         color: 'from-indigo-500 to-indigo-600',
         bgColor: 'bg-indigo-50 dark:bg-indigo-950/20',
         action: 'viewGroups'
@@ -496,7 +393,7 @@ const Dashboard = () => {
     setStats(statsData);
   };
 
-  const generateRecentActivities = (allMembers: Member[] = [], events: Event[] = [], allSermons: Sermon[] = []) => {
+  const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
     // Add recent member joins
@@ -541,20 +438,17 @@ const Dashboard = () => {
       });
     });
 
-    // Add default activity if none
-    if (activities.length === 0) {
-      activities.push({
-        id: 1,
-        type: 'info',
-        message: 'Welcome to your dashboard!',
-        time: 'Just now',
-        color: 'bg-blue-500',
-        icon: Calendar,
-        action: () => {}
-      });
-    }
-
     setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 6));
+  };
+
+  const formatTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${diffInHours} hours ago`;
+    if (diffInHours < 168) return `${Math.floor(diffInHours / 24)} days ago`;
+    return `${Math.floor(diffInHours / 168)} weeks ago`;
   };
 
   // Upload pamphlet function
@@ -609,9 +503,7 @@ const Dashboard = () => {
 
   // Quick view pamphlet on event card
   const openQuickView = (event: Event) => {
-    if (event.pamphlet_url) {
-      setQuickViewEvent(event);
-    }
+    setQuickViewEvent(event);
   };
 
   const closeQuickView = () => {
@@ -622,18 +514,6 @@ const Dashboard = () => {
   const openSermonDetail = (sermon: Sermon) => {
     setSelectedSermon(sermon);
     setActiveModal('sermonDetail');
-  };
-
-  // Open member detail modal
-  const openMemberDetail = (member: Member) => {
-    setSelectedMember(member);
-    setActiveModal('memberDetail');
-  };
-
-  // Open event detail modal
-  const openEventDetail = (event: Event) => {
-    setSelectedEvent(event);
-    setActiveModal('eventDetail');
   };
 
   useEffect(() => {
@@ -657,6 +537,16 @@ const Dashboard = () => {
     setSelectedEvent(null);
     setSelectedSermon(null);
     setError(null);
+  };
+
+  const openMemberDetail = (member: Member) => {
+    setSelectedMember(member);
+    setActiveModal('memberDetail');
+  };
+
+  const openEventDetail = (event: Event) => {
+    setSelectedEvent(event);
+    setActiveModal('eventDetail');
   };
 
   const toggleSection = (section: string) => {
@@ -1232,7 +1122,7 @@ const Dashboard = () => {
                 <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                      {member.name?.charAt(0)}{member.surname?.charAt(0)}
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
