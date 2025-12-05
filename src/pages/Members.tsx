@@ -1,8 +1,10 @@
+// Members.tsx - Updated with corrected export and structure
 import { Search, Plus, Home, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Building, Users } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
-interface Member {
+// Interfaces
+export interface Member {
   id: string;
   name: string;
   surname: string;
@@ -23,24 +25,24 @@ interface Member {
   baptism: string | null;
 }
 
-interface CellGroup {
+export interface CellGroup {
   id: string;
   name: string;
 }
 
-interface MinistryGroup {
+export interface MinistryGroup {
   id: string;
   name: string;
 }
 
-interface MemberOption {
+export interface MemberOption {
   id: string;
   name: string;
   surname: string;
   fullName: string;
 }
 
-const Members = () => {
+export const Members: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
@@ -76,12 +78,12 @@ const Members = () => {
     baptism: '',
   });
   
-  // New state for invited by dropdown
   const [memberOptions, setMemberOptions] = useState<MemberOption[]>([]);
   const [showInvitedByDropdown, setShowInvitedByDropdown] = useState(false);
   const [invitedBySearch, setInvitedBySearch] = useState('');
   const invitedByDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Fetch data on component mount
   useEffect(() => {
     fetchMembers();
     fetchCellGroups();
@@ -97,7 +99,9 @@ const Members = () => {
     };
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   // Load member options for invited by dropdown
@@ -128,6 +132,7 @@ const Members = () => {
         .order('created_at', { ascending: false });
 
       if (error) {
+        console.error('Supabase error:', error);
         throw error;
       }
 
@@ -183,42 +188,36 @@ const Members = () => {
     setSuccess(null);
     
     try {
+      // Basic validation
+      if (!formData.name.trim() || !formData.surname.trim()) {
+        throw new Error('Name and surname are required');
+      }
+
+      const memberData = {
+        name: formData.name.trim(),
+        surname: formData.surname.trim(),
+        residence: formData.residence.trim() || null,
+        phone: formData.phone.trim() || null,
+        cell_group_id: formData.cell_group_id || null,
+        ministry_group_id: formData.ministry_group_id || null,
+        gender: formData.gender || null,
+        invited_by: formData.invited_by.trim() || null,
+        baptism: formData.baptism || null,
+        status: 'newcomer',
+        status_date: new Date().toISOString(),
+      };
+
       const { data, error } = await supabase
         .from('members')
-        .insert([{
-          name: formData.name.trim(),
-          surname: formData.surname.trim(),
-          residence: formData.residence.trim() || null,
-          phone: formData.phone.trim() || null,
-          cell_group_id: formData.cell_group_id || null,
-          ministry_group_id: formData.ministry_group_id || null,
-          gender: formData.gender || null,
-          invited_by: formData.invited_by.trim() || null,
-          baptism: formData.baptism.trim() || null,
-          status: 'newcomer',
-          status_date: new Date().toISOString(),
-        }])
+        .insert([memberData])
         .select();
 
       if (error) {
-        console.error('Insert error details:', error);
         throw error;
       }
 
-      console.log('Member added successfully:', data);
-
       setShowForm(false);
-      setFormData({ 
-        name: '', 
-        surname: '', 
-        residence: '', 
-        phone: '', 
-        invited_by: '', 
-        cell_group_id: '',
-        ministry_group_id: '',
-        gender: '',
-        baptism: '',
-      });
+      resetForm();
       setSuccess('Member added successfully!');
       fetchMembers();
       
@@ -255,7 +254,6 @@ const Members = () => {
     setSuccess(null);
     
     try {
-      // Validate required fields
       if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.gender) {
         setError('Name, surname, and gender are required fields.');
         setLoading(false);
@@ -273,7 +271,7 @@ const Members = () => {
         invited_by: editFormData.invited_by.trim() || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
-        baptism: editFormData.baptism.trim() || null,
+        baptism: editFormData.baptism || null,
       };
 
       if (editFormData.status === 'not_attending') {
@@ -306,20 +304,6 @@ const Members = () => {
 
   const handleCancelEdit = () => {
     setEditingMember(null);
-    setEditFormData({
-      name: '',
-      surname: '',
-      residence: '',
-      phone: '',
-      invited_by: '',
-      cell_group_id: '',
-      ministry_group_id: '',
-      gender: '',
-      status: 'newcomer',
-      status_date: '',
-      not_attending_reason: '',
-      baptism: '',
-    });
   };
 
   const handleMarkAsPermanent = async (memberId: string) => {
@@ -377,7 +361,6 @@ const Members = () => {
     }
   };
 
-  // Filter members for search
   const filteredMembers = members.filter(
     (member) =>
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -387,13 +370,11 @@ const Members = () => {
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Filter member options for invited by dropdown
   const filteredMemberOptions = memberOptions.filter(option =>
     option.fullName.toLowerCase().includes(invitedBySearch.toLowerCase())
   );
 
-  // Handle selecting a member from dropdown
-  const handleSelectInvitedBy = (memberId: string, memberName: string) => {
+  const handleSelectInvitedBy = (memberName: string) => {
     setFormData({ ...formData, invited_by: memberName });
     setShowInvitedByDropdown(false);
     setInvitedBySearch('');
@@ -415,8 +396,6 @@ const Members = () => {
       gender: '',
       baptism: '',
     });
-    setShowForm(false);
-    setError(null);
     setShowInvitedByDropdown(false);
     setInvitedBySearch('');
   };
@@ -471,7 +450,7 @@ const Members = () => {
   const statusCounts = getStatusCounts();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
@@ -587,7 +566,7 @@ const Members = () => {
                     
                     {/* Dropdown for selecting members */}
                     {showInvitedByDropdown && (
-                      <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-auto">
+                      <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-auto">
                         {/* Search input inside dropdown */}
                         <div className="sticky top-0 bg-white dark:bg-gray-800 p-2 border-b border-gray-200 dark:border-gray-700">
                           <div className="relative">
@@ -614,7 +593,7 @@ const Members = () => {
                               <button
                                 key={member.id}
                                 type="button"
-                                onClick={() => handleSelectInvitedBy(member.id, member.fullName)}
+                                onClick={() => handleSelectInvitedBy(member.fullName)}
                                 className="w-full px-3 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-3 transition-colors"
                               >
                                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
@@ -628,17 +607,6 @@ const Members = () => {
                               </button>
                             ))
                           )}
-                        </div>
-                        
-                        {/* Close dropdown button */}
-                        <div className="sticky bottom-0 bg-white dark:bg-gray-800 p-2 border-t border-gray-200 dark:border-gray-700">
-                          <button
-                            type="button"
-                            onClick={() => setShowInvitedByDropdown(false)}
-                            className="w-full px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                          >
-                            Close
-                          </button>
                         </div>
                       </div>
                     )}
@@ -672,7 +640,6 @@ const Members = () => {
                     value={formData.baptism}
                     onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Baptism date"
                   />
                 </div>
                 <div className="space-y-2">
@@ -721,7 +688,10 @@ const Members = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={resetForm}
+                  onClick={() => {
+                    setShowForm(false);
+                    resetForm();
+                  }}
                   className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
                 >
                   Cancel
@@ -825,7 +795,6 @@ const Members = () => {
                     </div>
 
                     <div className="space-y-4">
-                      {/* Contact Information */}
                       <div className="flex items-center gap-3">
                         <Home className="h-4 w-4 text-gray-400" />
                         <input
@@ -848,7 +817,6 @@ const Members = () => {
                         />
                       </div>
 
-                      {/* Cell Group */}
                       <div className="flex items-center gap-3">
                         <MapPin className="h-4 w-4 text-gray-400" />
                         <select
@@ -865,7 +833,6 @@ const Members = () => {
                         </select>
                       </div>
 
-                      {/* Ministry Group */}
                       <div className="flex items-center gap-3">
                         <Building className="h-4 w-4 text-gray-400" />
                         <select
@@ -882,7 +849,6 @@ const Members = () => {
                         </select>
                       </div>
 
-                      {/* Baptism */}
                       <div className="flex items-center gap-3">
                         <Droplets className="h-4 w-4 text-gray-400" />
                         <input
@@ -890,11 +856,9 @@ const Members = () => {
                           value={editFormData.baptism}
                           onChange={(e) => setEditFormData({ ...editFormData, baptism: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                          placeholder="Baptism date"
                         />
                       </div>
 
-                      {/* Invited By */}
                       <div className="flex items-center gap-3">
                         <User className="h-4 w-4 text-gray-400" />
                         <input
@@ -966,10 +930,6 @@ const Members = () => {
                       >
                         Cancel
                       </button>
-                    </div>
-
-                    <div className="text-xs text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-600">
-                      Member ID: {member.id.slice(0, 8)}...
                     </div>
                   </div>
                 ) : (
@@ -1095,9 +1055,6 @@ const Members = () => {
                           Reason: {member.not_attending_reason}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Member ID: {member.id.slice(0, 8)}...
-                      </div>
                     </div>
                   </div>
                 )}
