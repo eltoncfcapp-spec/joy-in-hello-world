@@ -70,7 +70,7 @@ const EventNewcomerModal: React.FC<EventNewcomerModalProps> = ({
             name: formData.name.trim(),
             surname: formData.surname.trim(),
             phone: formData.phone.trim() || null,
-            email: formData.email.trim() || null,
+            residence: 'Not specified',
             status: 'newcomer',
             first_time_visit_date: new Date().toISOString(),
             is_permanent_member: false,

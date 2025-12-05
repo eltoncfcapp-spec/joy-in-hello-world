@@ -13,7 +13,6 @@ interface ChurchMember {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
 }
 
@@ -51,7 +50,6 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
     } else {
       const filtered = churchMembers.filter(member =>
         `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        member.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         member.phone?.includes(searchTerm)
       ).slice(0, 10); // Limit to 10 results
       setFilteredMembers(filtered);
@@ -63,7 +61,7 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
       // Get all members from the church (excluding newcomers if needed)
       const { data, error } = await supabase
         .from('members')
-        .select('id, name, surname, email, phone')
+        .select('id, name, surname, phone')
         .neq('status', 'newcomer') // Optional: exclude newcomers from inviting
         .order('name');
 
@@ -113,12 +111,11 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
           surname: formData.surname,
           phone: formData.phone,
           gender: formData.gender,
+          residence: 'Not specified',
           cell_group_id: group.id,
           status: 'newcomer',
           invited_by: formData.invited_by,
-          invited_by_member_id: formData.invited_by_member_id || null,
-          first_time_visit_date: new Date().toISOString(),
-          notes: formData.notes
+          first_time_visit_date: new Date().toISOString()
         });
 
       if (error) throw error;
@@ -265,7 +262,7 @@ const NewcomerStep: React.FC<NewcomerStepProps> = ({
                             {member.name} {member.surname}
                           </div>
                           <div className="text-sm text-gray-600 dark:text-gray-400">
-                            {member.email && `${member.email} • `}{member.phone}
+                            {member.phone}
                           </div>
                         </button>
                       ))

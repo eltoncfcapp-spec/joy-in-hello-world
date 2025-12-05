@@ -32,7 +32,6 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
   cell_group_id?: string | null;
   status?: string | null;

@@ -530,7 +530,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
         id: memberData.id,
-        email: memberData.email || null,
         phone: memberData.phone || null,
         created_at: memberData.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
