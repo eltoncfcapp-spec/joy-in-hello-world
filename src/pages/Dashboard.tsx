@@ -31,7 +31,6 @@ interface Member {
   name: string;
   surname: string;
   phone: string | null;
-  email?: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
   created_at: string | null;
@@ -121,8 +120,8 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [, setSelectedMember] = useState<Member | null>(null); // Prefix with underscore since not used
-  const [, setSelectedEvent] = useState<Event | null>(null); // Prefix with underscore since not used
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
@@ -159,13 +158,17 @@ const Dashboard = () => {
     return upcomingEvents;
   };
 
+  const getFilteredAbsentMembers = () => {
+    return absentMembers;
+  };
+
   const getFilteredSermons = () => {
     if (!sermonSearchTerm) return sermons;
     
     return sermons.filter(sermon => 
       sermon.title.toLowerCase().includes(sermonSearchTerm.toLowerCase()) ||
       sermon.pastor_name.toLowerCase().includes(sermonSearchTerm.toLowerCase()) ||
-      (sermon.summary && sermon.summary.toLowerCase().includes(sermonSearchTerm.toLowerCase())) ||
+      sermon.summary.toLowerCase().includes(sermonSearchTerm.toLowerCase()) ||
       sermon.events?.name?.toLowerCase().includes(sermonSearchTerm.toLowerCase())
     );
   };
@@ -280,7 +283,7 @@ const Dashboard = () => {
       // Get attendance for the last 2 Sunday services
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
-        .select('member_id, event_id')
+        .select('members_id, event_id')
         .in('event_id', lastTwoSundays.map(e => e.id));
 
       if (attendanceError) throw attendanceError;
@@ -289,7 +292,7 @@ const Dashboard = () => {
       const absent: AbsentMember[] = [];
       
       allMembers.forEach(member => {
-        const memberAttendances = attendances?.filter(a => a.member_id === member.id) || [];
+        const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
         // Check if member was absent for both Sundays (no attendance record = absent)
         const absentCount = lastTwoSundays.filter(sunday => {
@@ -513,18 +516,6 @@ const Dashboard = () => {
     setActiveModal('sermonDetail');
   };
 
-  // Open member detail modal
-  const openMemberDetail = (member: Member) => {
-    setSelectedMember(member);
-    setActiveModal('memberDetail');
-  };
-
-  // Open event detail modal
-  const openEventDetail = (event: Event) => {
-    setSelectedEvent(event);
-    setActiveModal('eventDetail');
-  };
-
   useEffect(() => {
     loadDashboardData();
   }, []);
@@ -542,8 +533,20 @@ const Dashboard = () => {
 
   const closeModal = () => {
     setActiveModal(null);
+    setSelectedMember(null);
+    setSelectedEvent(null);
     setSelectedSermon(null);
     setError(null);
+  };
+
+  const openMemberDetail = (member: Member) => {
+    setSelectedMember(member);
+    setActiveModal('memberDetail');
+  };
+
+  const openEventDetail = (event: Event) => {
+    setSelectedEvent(event);
+    setActiveModal('eventDetail');
   };
 
   const toggleSection = (section: string) => {
@@ -591,6 +594,7 @@ const Dashboard = () => {
 
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
+  const filteredAbsentMembers = getFilteredAbsentMembers();
   const filteredSermons = getFilteredSermons();
 
   return (
@@ -623,7 +627,7 @@ const Dashboard = () => {
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
           <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
-            {profile?.name?.charAt(0) || 'U'}{profile?.surname?.charAt(0) || ''}
+            {profile?.name?.charAt(0)}{profile?.surname?.charAt(0) || 'U'}
           </div>
         </div>
       </div>
@@ -1112,8 +1116,7 @@ const Dashboard = () => {
               {filteredMembers
                 .filter(member => 
                   `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (member.phone && member.phone.includes(searchTerm)) ||
-                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase()))
+                  (member.phone && member.phone.includes(searchTerm))
                 )
                 .map(member => (
                 <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
@@ -1124,11 +1127,8 @@ const Dashboard = () => {
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
                       <p className="text-sm text-gray-500">{member.phone || 'No contact'}</p>
-                      {member.email && (
-                        <p className="text-xs text-blue-600 mt-1">{member.email}</p>
-                      )}
                       {member.login_username && (
-                        <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                           <Key className="h-3 w-3" />
                           Login: {member.login_username}
                         </p>
