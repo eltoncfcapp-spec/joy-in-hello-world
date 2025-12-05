@@ -32,12 +32,6 @@ export default function Login() {
     }
   };
 
-  const handleDemoLogin = (demoIdentifier: string, demoCredential: string, method: 'email' | 'username') => {
-    setIdentifier(demoIdentifier);
-    setCredential(demoCredential);
-    setLoginMethod(method);
-  };
-
   const toggleLoginMethod = () => {
     setLoginMethod(loginMethod === 'email' ? 'username' : 'email');
     setIdentifier('');
@@ -97,7 +91,7 @@ export default function Login() {
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                placeholder={loginMethod === 'email' ? 'admin@church.com' : 'Enter your username'}
+                placeholder={loginMethod === 'email' ? 'Enter your email' : 'Enter your username'}
                 disabled={loading}
               />
             </div>
@@ -114,7 +108,7 @@ export default function Login() {
                   value={credential}
                   onChange={(e) => setCredential(e.target.value)}
                   className="mt-1 block w-full px-3 py-3 pr-10 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={loginMethod === 'email' ? '••••••••' : 'Enter your 4-digit PIN'}
+                  placeholder={loginMethod === 'email' ? 'Enter your password' : 'Enter your 4-digit PIN'}
                   maxLength={loginMethod === 'username' ? 4 : undefined}
                   inputMode={loginMethod === 'username' ? 'numeric' : 'text'}
                   disabled={loading}
@@ -141,31 +135,6 @@ export default function Login() {
               <p className="text-red-700 text-sm text-center">{error}</p>
             </div>
           )}
-
-          {/* Demo Credentials */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <p className="font-medium text-blue-900 mb-2 text-sm">Demo Credentials:</p>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('admin@church.com', 'admin123', 'email')}
-                className="w-full text-left text-blue-700 hover:text-blue-900 transition-colors text-sm p-2 bg-white rounded-lg hover:bg-blue-100 disabled:opacity-50"
-                disabled={loading}
-              >
-                <span className="font-medium">Email Login:</span><br />
-                admin@church.com / admin123
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('user1762420855216', '6719', 'username')}
-                className="w-full text-left text-blue-700 hover:text-blue-900 transition-colors text-sm p-2 bg-white rounded-lg hover:bg-blue-100 disabled:opacity-50"
-                disabled={loading}
-              >
-                <span className="font-medium">Username/PIN Login:</span><br />
-                user1762420855216 / 6719
-              </button>
-            </div>
-          </div>
 
           <button
             type="submit"
@@ -201,6 +170,7 @@ export default function Login() {
             <li>• <strong>Email Login:</strong> For administrators with email/password</li>
             <li>• <strong>Username/PIN:</strong> For members with generated credentials</li>
             <li>• Members get username/PIN from church administrators</li>
+            <li>• Contact your church administrator if you need credentials</li>
           </ul>
         </div>
       </div>
