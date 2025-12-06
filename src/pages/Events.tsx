@@ -44,8 +44,8 @@ interface Member {
   residence: string;
   phone: string | null;
   cell_group_id: string | null;
-  cell_groups: { name: string } | null;
   ministry_group_id: string | null;
+  cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   department_ids?: string[];
@@ -225,6 +225,7 @@ const Events = () => {
     try {
       setError(null);
       
+      // Fetch members with their cell groups and ministry groups
       const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
@@ -236,18 +237,23 @@ const Events = () => {
           cell_group_id,
           ministry_group_id,
           status,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
+          cell_groups (
+            name
+          ),
+          ministry_groups (
+            name
+          )
         `)
         .order('name');
 
       if (membersError) throw membersError;
 
+      // Fetch department memberships separately
       const { data: deptMembersData, error: deptError } = await supabase
         .from('department_members')
         .select(`
           member_id,
-          departments!fk_department_id (
+          departments (
             id,
             name
           )
@@ -271,7 +277,9 @@ const Events = () => {
 
       const membersWithDepartments = (membersData || []).map((member: any) => ({
         ...member,
-        department_ids: memberDeptMap.get(member.id) || []
+        department_ids: memberDeptMap.get(member.id) || [],
+        cell_groups: member.cell_groups?.[0] || null,
+        ministry_groups: member.ministry_groups?.[0] || null
       }));
 
       setMembers(membersWithDepartments);
@@ -325,44 +333,89 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      const { data, error } = await supabase
+      // First fetch the attendees
+      const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey (
-            id,
-            name,
-            surname,
-            residence,
-            phone,
-            status,
-            cell_group_id,
-            ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name)
-          ),
-          invited_by_member:members!event_attendees_invited_by_id_fkey (
-            id,
-            name,
-            surname
-          )
-        `)
+        .select('*')
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false });
 
-      if (error) throw error;
+      if (attendeesError) throw attendeesError;
 
-      const attendeesWithDefaults = (data || []).map((attendee: any) => ({
-        ...attendee,
-        attendance_status: attendee.attendance_status || 'present'
-      }));
+      if (!attendeesData || attendeesData.length === 0) {
+        const attendeesWithDefaults: EventAttendee[] = [];
+        setAttendees(prev => {
+          const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+          return [...filtered, ...attendeesWithDefaults];
+        });
+        return [];
+      }
+
+      // Fetch member details for each attendee
+      const attendeesWithMembers = await Promise.all(
+        attendeesData.map(async (attendee: any) => {
+          // Fetch member details
+          const { data: memberData, error: memberError } = await supabase
+            .from('members')
+            .select(`
+              id,
+              name,
+              surname,
+              residence,
+              phone,
+              status,
+              cell_group_id,
+              ministry_group_id,
+              cell_groups (
+                name
+              ),
+              ministry_groups (
+                name
+              )
+            `)
+            .eq('id', attendee.members_id)
+            .single();
+
+          if (memberError) {
+            console.error('Error fetching member:', memberError);
+            return null;
+          }
+
+          // Fetch inviter details if exists
+          let invited_by_member = null;
+          if (attendee.invited_by_id) {
+            const { data: inviterData } = await supabase
+              .from('members')
+              .select('id, name, surname')
+              .eq('id', attendee.invited_by_id)
+              .single();
+            
+            invited_by_member = inviterData;
+          }
+
+          return {
+            ...attendee,
+            attendance_status: attendee.attendance_status || 'present',
+            members: {
+              ...memberData,
+              cell_groups: memberData.cell_groups?.[0] || null,
+              ministry_groups: memberData.ministry_groups?.[0] || null
+            },
+            invited_by_member
+          };
+        })
+      );
+
+      const validAttendees = attendeesWithMembers.filter(
+        (attendee): attendee is EventAttendee => attendee !== null
+      );
 
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...attendeesWithDefaults];
+        return [...filtered, ...validAttendees];
       });
       
-      return attendeesWithDefaults;
+      return validAttendees;
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
       return [];
@@ -1220,12 +1273,24 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
+      // Insert attendee
+      const { data: newAttendee, error: attendeeError } = await supabase
         .from('event_attendees')
         .insert([attendeeData])
+        .select()
+        .single();
+
+      if (attendeeError) {
+        console.error('Supabase error details:', attendeeError);
+        throw attendeeError;
+      }
+
+      // Fetch the newly created attendee with member details
+      const { data: attendeeWithDetails } = await supabase
+        .from('event_attendees')
         .select(`
           *,
-          members!event_attendees_members_id_fkey (
+          members (
             id,
             name,
             surname,
@@ -1233,24 +1298,39 @@ const Events = () => {
             phone,
             status,
             cell_group_id,
-            ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name)
-          ),
-          invited_by_member:members!event_attendees_invited_by_id_fkey (
-            id,
-            name,
-            surname
+            ministry_group_id
           )
         `)
+        .eq('id', newAttendee.id)
         .single();
 
-      if (error) {
-        console.error('Supabase error details:', error);
-        throw error;
+      if (attendeeWithDetails) {
+        // Fetch inviter details if exists
+        let invited_by_member = null;
+        if (attendeeWithDetails.invited_by_id) {
+          const { data: inviterData } = await supabase
+            .from('members')
+            .select('id, name, surname')
+            .eq('id', attendeeWithDetails.invited_by_id)
+            .single();
+          
+          invited_by_member = inviterData;
+        }
+
+        const attendeeToAdd: EventAttendee = {
+          ...attendeeWithDetails,
+          members: {
+            ...attendeeWithDetails.members,
+            cell_groups: null,
+            ministry_groups: null,
+            department_ids: []
+          },
+          invited_by_member
+        };
+
+        setAttendees(prev => [...prev, attendeeToAdd]);
       }
 
-      setAttendees(prev => [...prev, data]);
       await fetchEventAttendees(eventId);
 
       resetAttendeeForm();
@@ -1455,38 +1535,13 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      const { data: newAttendee, error: attendeeError } = await supabase
+      const { error: attendeeError } = await supabase
         .from('event_attendees')
-        .insert([attendeeData])
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey (
-            id,
-            name,
-            surname,
-            residence,
-            phone,
-            status,
-            cell_group_id,
-            ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name)
-          ),
-          invited_by_member:members!event_attendees_invited_by_id_fkey (
-            id,
-            name,
-            surname
-          )
-        `)
-        .single();
+        .insert([attendeeData]);
 
       if (attendeeError) throw attendeeError;
 
-      if (newAttendee) {
-        setAttendees(prev => [...prev, newAttendee]);
-      }
       await fetchEventAttendees(eventId);
-
       await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
