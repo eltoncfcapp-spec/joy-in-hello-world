@@ -120,8 +120,6 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
@@ -533,19 +531,15 @@ const Dashboard = () => {
 
   const closeModal = () => {
     setActiveModal(null);
-    setSelectedMember(null);
-    setSelectedEvent(null);
     setSelectedSermon(null);
     setError(null);
   };
 
   const openMemberDetail = (member: Member) => {
-    setSelectedMember(member);
     setActiveModal('memberDetail');
   };
 
   const openEventDetail = (event: Event) => {
-    setSelectedEvent(event);
     setActiveModal('eventDetail');
   };
 
@@ -594,7 +588,6 @@ const Dashboard = () => {
 
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
-  const filteredAbsentMembers = getFilteredAbsentMembers();
   const filteredSermons = getFilteredSermons();
 
   return (
