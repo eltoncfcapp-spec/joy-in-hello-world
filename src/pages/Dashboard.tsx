@@ -20,7 +20,10 @@ import {
   Upload,
   ExternalLink,
   BookOpen,
-  PlayCircle
+  PlayCircle,
+  Phone,
+  UserX,
+  Clock
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -106,6 +109,9 @@ interface AbsentMember {
   surname: string;
   phone: string | null;
   consecutiveAbsences: number;
+  lastAttendedDate?: string | null;
+  cellGroupId?: string | null;
+  status?: string | null;
 }
 
 // Permission checking utilities
@@ -124,23 +130,26 @@ const Dashboard = () => {
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
     activity: true,
-    sermons: true
+    sermons: true,
+    absentMembers: true
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [sermonSearchTerm, setSermonSearchTerm] = useState('');
+  const [absentSearchTerm, setAbsentSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
+  const [selectedAbsentMember, setSelectedAbsentMember] = useState<AbsentMember | null>(null);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [, setCellGroups] = useState<CellGroup[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
 
@@ -157,7 +166,13 @@ const Dashboard = () => {
   };
 
   const getFilteredAbsentMembers = () => {
-    return absentMembers;
+    if (!absentSearchTerm) return absentMembers;
+    
+    return absentMembers.filter(member => 
+      member.name.toLowerCase().includes(absentSearchTerm.toLowerCase()) ||
+      member.surname.toLowerCase().includes(absentSearchTerm.toLowerCase()) ||
+      (member.phone && member.phone.includes(absentSearchTerm))
+    );
   };
 
   const getFilteredSermons = () => {
@@ -267,10 +282,10 @@ const Dashboard = () => {
       // Get the last 2 Sunday services
       const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      // Get all members
+      // Get all members with their cell group info
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, phone, assigned_groups, assigned_departments');
+        .select('id, name, surname, phone, cell_group_id, status, assigned_groups, assigned_departments');
 
       if (membersError) throw membersError;
       if (!allMembers) {
@@ -286,6 +301,17 @@ const Dashboard = () => {
 
       if (attendanceError) throw attendanceError;
 
+      // Also get last attendance date for each member
+      const { data: lastAttendances, error: lastAttendanceError } = await supabase
+        .from('event_attendees')
+        .select('members_id, events(event_date)')
+        .in('event_id', sundayEvents.map(e => e.id))
+        .order('events(event_date)', { ascending: false });
+
+      if (lastAttendanceError) {
+        console.error('Error loading last attendances:', lastAttendanceError);
+      }
+
       // Find members who were absent for both services
       const absent: AbsentMember[] = [];
       
@@ -299,12 +325,22 @@ const Dashboard = () => {
         }).length;
 
         if (absentCount === 2) {
+          // Find the member's last attendance date
+          const lastAttendance = lastAttendances?.find(a => a.members_id === member.id);
+          const lastAttendedDate = lastAttendance?.events?.event_date || null;
+
+          // Get cell group name
+          const cellGroup = cellGroups.find(g => g.id === member.cell_group_id);
+          
           absent.push({
             id: member.id,
             name: member.name,
             surname: member.surname,
             phone: member.phone,
-            consecutiveAbsences: 2
+            consecutiveAbsences: 2,
+            lastAttendedDate,
+            cellGroupId: member.cell_group_id,
+            status: member.status
           });
         }
       });
@@ -436,6 +472,19 @@ const Dashboard = () => {
       });
     });
 
+    // Add absent member alert if any
+    if (absentMembers.length > 0) {
+      activities.unshift({
+        id: activities.length + 1,
+        type: 'absent',
+        message: `${absentMembers.length} members absent for 2 consecutive Sundays`,
+        time: 'Today',
+        color: 'bg-red-500',
+        icon: AlertTriangle,
+        action: () => openModal('viewAbsentMembers')
+      });
+    }
+
     setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 6));
   };
 
@@ -508,6 +557,12 @@ const Dashboard = () => {
     setQuickViewEvent(null);
   };
 
+  // Open absent member detail modal
+  const openAbsentMemberDetail = (member: AbsentMember) => {
+    setSelectedAbsentMember(member);
+    setActiveModal('absentMemberDetail');
+  };
+
   // Open sermon detail modal
   const openSermonDetail = (sermon: Sermon) => {
     setSelectedSermon(sermon);
@@ -517,6 +572,17 @@ const Dashboard = () => {
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  useEffect(() => {
+    if (cellGroups.length > 0 && absentMembers.length > 0) {
+      // Update absent members with cell group names
+      const updatedAbsent = absentMembers.map(member => ({
+        ...member,
+        cellGroupName: cellGroups.find(g => g.id === member.cellGroupId)?.name || null
+      }));
+      setAbsentMembers(updatedAbsent);
+    }
+  }, [cellGroups]);
 
   const openModal = (modalType: string) => {
     // Check permissions for editing modals only
@@ -532,6 +598,7 @@ const Dashboard = () => {
   const closeModal = () => {
     setActiveModal(null);
     setSelectedSermon(null);
+    setSelectedAbsentMember(null);
     setError(null);
   };
 
@@ -589,6 +656,7 @@ const Dashboard = () => {
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
   const filteredSermons = getFilteredSermons();
+  const filteredAbsentMembers = getFilteredAbsentMembers();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
@@ -688,7 +756,7 @@ const Dashboard = () => {
       </div>
 
       {/* Content Grid - All users can see */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Recent Activity */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
@@ -927,6 +995,119 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Absent Members Section */}
+      {absentMembers.length > 0 && (
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300 mb-6">
+          <button 
+            onClick={() => toggleSection('absentMembers')}
+            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-xl">
+                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div className="text-left">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Members Absent for 2 Consecutive Sundays</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {absentMembers.length} member{absentMembers.length !== 1 ? 's' : ''} need follow-up
+                </p>
+              </div>
+            </div>
+            {expandedSections.absentMembers ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+          </button>
+          
+          {expandedSections.absentMembers && (
+            <div className="p-6 pt-0">
+              <div className="mb-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search absent members by name or phone..."
+                    value={absentSearchTerm}
+                    onChange={(e) => setAbsentSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {filteredAbsentMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10 rounded-xl p-4 hover:bg-red-100/50 dark:hover:bg-red-900/20 transition-colors duration-200 cursor-pointer"
+                    onClick={() => openAbsentMemberDetail(member)}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
+                          {member.name.charAt(0)}{member.surname.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </p>
+                          <div className="flex items-center gap-3 mt-1">
+                            {member.phone && (
+                              <span className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {member.phone}
+                              </span>
+                            )}
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded-full">
+                              <UserX className="h-3 w-3" />
+                              {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openAbsentMemberDetail(member);
+                        }}
+                        className="p-2 hover:bg-red-200 dark:hover:bg-red-800 rounded-lg transition-colors"
+                      >
+                        <Eye className="h-4 w-4 text-red-600 dark:text-red-400" />
+                      </button>
+                    </div>
+                    
+                    <div className="mt-3 pt-3 border-t border-red-200 dark:border-red-800/50">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400">Last Attended</p>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {member.lastAttendedDate ? formatDate(member.lastAttendedDate) : 'Never'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400">Status</p>
+                          <p className="font-medium text-gray-900 dark:text-white capitalize">
+                            {member.status?.replace('_', ' ') || 'Unknown'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-4 flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Showing {filteredAbsentMembers.length} of {absentMembers.length} absent members
+                </p>
+                <button
+                  onClick={() => openModal('viewAbsentMembers')}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors duration-200"
+                >
+                  View All Absent Members
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Sermons Modal */}
       {activeModal === 'viewSermons' && (
         <Modal title="All Sermons" size="max-w-4xl">
@@ -1080,6 +1261,183 @@ const Dashboard = () => {
                 {!selectedSermon.document_url && !selectedSermon.video_url && (
                   <p className="text-gray-500">No additional resources available for this sermon.</p>
                 )}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Absent Members Modal */}
+      {activeModal === 'viewAbsentMembers' && (
+        <Modal title="Members Absent for 2 Consecutive Sundays" size="max-w-4xl">
+          <div className="space-y-4">
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+                <div>
+                  <h4 className="font-semibold text-red-700">Follow-up Required</h4>
+                  <p className="text-red-600 text-sm">
+                    These members have missed 2 consecutive Sunday services and may need pastoral care.
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search absent members by name, phone, or status..."
+                value={absentSearchTerm}
+                onChange={(e) => setAbsentSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {filteredAbsentMembers.map((member) => (
+                <div 
+                  key={member.id}
+                  className="border border-red-200 rounded-xl p-4 hover:bg-red-50 transition-colors duration-200 cursor-pointer"
+                  onClick={() => openAbsentMemberDetail(member)}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
+                        {member.name.charAt(0)}{member.surname.charAt(0)}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-lg text-gray-900">{member.name} {member.surname}</h4>
+                        <div className="flex items-center gap-3 mt-1">
+                          {member.phone && (
+                            <span className="text-sm text-gray-600 flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {member.phone}
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
+                            <UserX className="h-3 w-3" />
+                            {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openAbsentMemberDetail(member);
+                      }}
+                      className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                    >
+                      <Eye className="h-4 w-4 text-red-600" />
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-red-200">
+                    <div>
+                      <p className="text-gray-500 text-sm">Status</p>
+                      <p className="font-medium text-gray-900 capitalize">
+                        {member.status?.replace('_', ' ') || 'Unknown'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-sm">Last Attended</p>
+                      <p className="font-medium text-gray-900">
+                        {member.lastAttendedDate ? formatDate(member.lastAttendedDate) : 'Never'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-sm">Cell Group</p>
+                      <p className="font-medium text-gray-900">
+                        {member.cellGroupId ? `Group ${member.cellGroupId}` : 'Not assigned'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filteredAbsentMembers.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
+                  {absentSearchTerm ? 'No absent members found matching your search' : 'No members absent for 2 Sundays'}
+                </p>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Absent Member Detail Modal */}
+      {activeModal === 'absentMemberDetail' && selectedAbsentMember && (
+        <Modal title="Absent Member Details" size="max-w-md">
+          <div className="space-y-6">
+            <div className="flex justify-center">
+              <div className="w-24 h-24 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-2xl">
+                {selectedAbsentMember.name.charAt(0)}{selectedAbsentMember.surname.charAt(0)}
+              </div>
+            </div>
+            
+            <div className="text-center">
+              <h3 className="text-2xl font-bold text-gray-900 mb-1">
+                {selectedAbsentMember.name} {selectedAbsentMember.surname}
+              </h3>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-100 text-red-700 rounded-full font-medium">
+                <AlertTriangle className="h-4 w-4" />
+                {selectedAbsentMember.consecutiveAbsences} Sunday{selectedAbsentMember.consecutiveAbsences !== 1 ? 's' : ''} Absent
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Contact Information</h4>
+                {selectedAbsentMember.phone ? (
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <Phone className="h-4 w-4" />
+                    <span>{selectedAbsentMember.phone}</span>
+                  </div>
+                ) : (
+                  <p className="text-gray-500">No contact information available</p>
+                )}
+              </div>
+
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2">Attendance Information</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Status:</span>
+                    <span className="font-medium capitalize">
+                      {selectedAbsentMember.status?.replace('_', ' ') || 'Unknown'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Last Attended:</span>
+                    <span className="font-medium">
+                      {selectedAbsentMember.lastAttendedDate ? formatDate(selectedAbsentMember.lastAttendedDate) : 'Never'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Cell Group:</span>
+                    <span className="font-medium">
+                      {selectedAbsentMember.cellGroupId ? `Group ${selectedAbsentMember.cellGroupId}` : 'Not assigned'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+              <h4 className="font-semibold text-gray-900 mb-3">Suggested Actions</h4>
+              <div className="space-y-2">
+                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors duration-200">
+                  <Phone className="h-4 w-4" />
+                  Call Member for Follow-up
+                </button>
+                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition-colors duration-200">
+                  <Users className="h-4 w-4" />
+                  Assign to Pastoral Care
+                </button>
+                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors duration-200">
+                  <Clock className="h-4 w-4" />
+                  Mark as Followed-up
+                </button>
               </div>
             </div>
           </div>
@@ -1248,5 +1606,4 @@ const Dashboard = () => {
     </div>
   );
 };
-
 export default Dashboard;
