@@ -112,6 +112,7 @@ interface AbsentMember {
   lastAttendedDate?: string | null;
   cellGroupId?: string | null;
   status?: string | null;
+  cellGroupName?: string | null;
 }
 
 // Permission checking utilities
@@ -143,6 +144,7 @@ const Dashboard = () => {
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
   const [selectedAbsentMember, setSelectedAbsentMember] = useState<AbsentMember | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -188,13 +190,17 @@ const Dashboard = () => {
 
   // Format date for display
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
   };
 
   // Load dashboard data from Supabase
@@ -202,6 +208,7 @@ const Dashboard = () => {
     try {
       setLoading(true);
       setError(null);
+      setDebugInfo('Loading dashboard data...');
       
       // Load members with additional fields for permissions
       const { data: membersData, error: membersError } = await supabase
@@ -211,6 +218,7 @@ const Dashboard = () => {
 
       if (membersError) throw membersError;
       setMembers(membersData || []);
+      setDebugInfo(prev => prev + ` Loaded ${membersData?.length || 0} members. `);
 
       // Load cell groups
       const { data: cellGroupsData, error: cellGroupsError } = await supabase
@@ -220,6 +228,7 @@ const Dashboard = () => {
 
       if (cellGroupsError) throw cellGroupsError;
       setCellGroups(cellGroupsData || []);
+      setDebugInfo(prev => prev + ` Loaded ${cellGroupsData?.length || 0} cell groups. `);
 
       // Load events with pamphlet URLs
       const { data: eventsData, error: eventsError } = await supabase
@@ -230,6 +239,7 @@ const Dashboard = () => {
 
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
+      setDebugInfo(prev => prev + ` Loaded ${eventsData?.length || 0} events. `);
 
       // Load sermons
       const { data: sermonsData, error: sermonsError } = await supabase
@@ -245,6 +255,7 @@ const Dashboard = () => {
 
       if (sermonsError) throw sermonsError;
       setSermons(sermonsData || []);
+      setDebugInfo(prev => prev + ` Loaded ${sermonsData?.length || 0} sermons. `);
 
       // Calculate stats with all data (everyone can see)
       calculateStats(membersData || [], eventsData || [], sermonsData || []);
@@ -253,63 +264,74 @@ const Dashboard = () => {
       generateRecentActivities(membersData || [], eventsData || [], sermonsData || []);
 
       // Load absent members
-      await loadAbsentMembers();
+      await loadAbsentMembers(membersData || [], cellGroupsData || []);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
       setError('Failed to load dashboard data');
+      setDebugInfo(prev => prev + ' Error: ' + (error as Error).message);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadAbsentMembers = async () => {
+  const loadAbsentMembers = async (allMembers: Member[], cellGroupsData: CellGroup[]) => {
     try {
+      setDebugInfo(prev => prev + ' Starting to load absent members... ');
+      
       // Get all Sunday Service events in descending order
+      // First, let's try to find Sunday services by name pattern
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
-        .ilike('name', '%sunday%service%')
+        .or('name.ilike.%sunday%,name.ilike.%service%')
         .order('event_date', { ascending: false })
         .limit(10);
 
-      if (eventsError) throw eventsError;
-      if (!sundayEvents || sundayEvents.length < 2) {
+      if (eventsError) {
+        console.error('Error loading Sunday events:', eventsError);
+        setDebugInfo(prev => prev + ' Error loading events: ' + eventsError.message);
         setAbsentMembers([]);
         return;
       }
 
-      // Get the last 2 Sunday services
-      const lastTwoSundays = sundayEvents.slice(0, 2);
+      setDebugInfo(prev => prev + ` Found ${sundayEvents?.length || 0} potential Sunday events. `);
       
-      // Get all members with their cell group info
-      const { data: allMembers, error: membersError } = await supabase
-        .from('members')
-        .select('id, name, surname, phone, cell_group_id, status, assigned_groups, assigned_departments');
-
-      if (membersError) throw membersError;
-      if (!allMembers) {
+      if (!sundayEvents || sundayEvents.length < 2) {
+        setDebugInfo(prev => prev + ' Not enough Sunday events found (need at least 2). ');
         setAbsentMembers([]);
         return;
       }
 
-      // Get attendance for the last 2 Sunday services
+      // Get the last 2 events that are likely Sunday services
+      const lastTwoEvents = sundayEvents.slice(0, 2);
+      setDebugInfo(prev => prev + ` Using last 2 events: ${lastTwoEvents.map(e => e.name).join(', ')} `);
+
+      // Get attendance for the last 2 events
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
         .select('members_id, event_id')
-        .in('event_id', lastTwoSundays.map(e => e.id));
+        .in('event_id', lastTwoEvents.map(e => e.id));
 
-      if (attendanceError) throw attendanceError;
+      if (attendanceError) {
+        console.error('Error loading attendances:', attendanceError);
+        setDebugInfo(prev => prev + ' Error loading attendances: ' + attendanceError.message);
+        setAbsentMembers([]);
+        return;
+      }
+
+      setDebugInfo(prev => prev + ` Found ${attendances?.length || 0} attendance records. `);
 
       // Also get last attendance date for each member
       const { data: lastAttendances, error: lastAttendanceError } = await supabase
         .from('event_attendees')
-        .select('members_id, events(event_date)')
+        .select('members_id, events!inner(event_date)')
         .in('event_id', sundayEvents.map(e => e.id))
         .order('events(event_date)', { ascending: false });
 
       if (lastAttendanceError) {
         console.error('Error loading last attendances:', lastAttendanceError);
+        setDebugInfo(prev => prev + ' Error loading last attendances: ' + lastAttendanceError.message);
       }
 
       // Find members who were absent for both services
@@ -318,9 +340,9 @@ const Dashboard = () => {
       allMembers.forEach(member => {
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
-        // Check if member was absent for both Sundays (no attendance record = absent)
-        const absentCount = lastTwoSundays.filter(sunday => {
-          const hasAttendance = memberAttendances.some(a => a.event_id === sunday.id);
+        // Check if member was absent for both events (no attendance record = absent)
+        const absentCount = lastTwoEvents.filter(event => {
+          const hasAttendance = memberAttendances.some(a => a.event_id === event.id);
           return !hasAttendance; // No attendance record means absent
         }).length;
 
@@ -330,7 +352,7 @@ const Dashboard = () => {
           const lastAttendedDate = lastAttendance?.events?.event_date || null;
 
           // Get cell group name
-          const cellGroup = cellGroups.find(g => g.id === member.cell_group_id);
+          const cellGroup = cellGroupsData.find(g => g.id === member.cell_group_id);
           
           absent.push({
             id: member.id,
@@ -340,14 +362,17 @@ const Dashboard = () => {
             consecutiveAbsences: 2,
             lastAttendedDate,
             cellGroupId: member.cell_group_id,
+            cellGroupName: cellGroup?.name || null,
             status: member.status
           });
         }
       });
 
+      setDebugInfo(prev => prev + ` Found ${absent.length} absent members. `);
       setAbsentMembers(absent);
     } catch (error) {
       console.error('Error loading absent members:', error);
+      setDebugInfo(prev => prev + ' Error in loadAbsentMembers: ' + (error as Error).message);
       setAbsentMembers([]);
     }
   };
@@ -573,17 +598,6 @@ const Dashboard = () => {
     loadDashboardData();
   }, []);
 
-  useEffect(() => {
-    if (cellGroups.length > 0 && absentMembers.length > 0) {
-      // Update absent members with cell group names
-      const updatedAbsent = absentMembers.map(member => ({
-        ...member,
-        cellGroupName: cellGroups.find(g => g.id === member.cellGroupId)?.name || null
-      }));
-      setAbsentMembers(updatedAbsent);
-    }
-  }, [cellGroups]);
-
   const openModal = (modalType: string) => {
     // Check permissions for editing modals only
     if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
@@ -648,6 +662,7 @@ const Dashboard = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading dashboard...</p>
+          {debugInfo && <p className="mt-2 text-xs text-gray-500">{debugInfo}</p>}
         </div>
       </div>
     );
@@ -712,6 +727,14 @@ const Dashboard = () => {
               <X className="h-4 w-4" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Debug info - remove in production */}
+      {debugInfo && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+          <p className="text-yellow-700 text-sm font-medium">Debug Info:</p>
+          <p className="text-yellow-600 text-xs">{debugInfo}</p>
         </div>
       )}
 
@@ -995,7 +1018,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Absent Members Section */}
+      {/* Absent Members Section - Always show if there are absent members */}
       {absentMembers.length > 0 && (
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300 mb-6">
           <button 
@@ -1039,26 +1062,21 @@ const Dashboard = () => {
                     onClick={() => openAbsentMemberDetail(member)}
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
-                          {member.name.charAt(0)}{member.surname.charAt(0)}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </p>
-                          <div className="flex items-center gap-3 mt-1">
-                            {member.phone && (
-                              <span className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                                <Phone className="h-3 w-3" />
-                                {member.phone}
-                              </span>
-                            )}
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded-full">
-                              <UserX className="h-3 w-3" />
-                              {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
+                      <div>
+                        <p className="font-medium text-lg text-gray-900 dark:text-white">
+                          {member.name} {member.surname}
+                        </p>
+                        <div className="flex items-center gap-3 mt-1">
+                          {member.phone && (
+                            <span className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {member.phone}
                             </span>
-                          </div>
+                          )}
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded-full">
+                            <UserX className="h-3 w-3" />
+                            {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
+                          </span>
                         </div>
                       </div>
                       <button
@@ -1084,6 +1102,12 @@ const Dashboard = () => {
                           <p className="text-gray-500 dark:text-gray-400">Status</p>
                           <p className="font-medium text-gray-900 dark:text-white capitalize">
                             {member.status?.replace('_', ' ') || 'Unknown'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 dark:text-gray-400">Cell Group</p>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {member.cellGroupName || 'Not assigned'}
                           </p>
                         </div>
                       </div>
@@ -1302,24 +1326,19 @@ const Dashboard = () => {
                   onClick={() => openAbsentMemberDetail(member)}
                 >
                   <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {member.name.charAt(0)}{member.surname.charAt(0)}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-lg text-gray-900">{member.name} {member.surname}</h4>
-                        <div className="flex items-center gap-3 mt-1">
-                          {member.phone && (
-                            <span className="text-sm text-gray-600 flex items-center gap-1">
-                              <Phone className="h-3 w-3" />
-                              {member.phone}
-                            </span>
-                          )}
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                            <UserX className="h-3 w-3" />
-                            {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
+                    <div>
+                      <h4 className="font-bold text-lg text-gray-900">{member.name} {member.surname}</h4>
+                      <div className="flex items-center gap-3 mt-1">
+                        {member.phone && (
+                          <span className="text-sm text-gray-600 flex items-center gap-1">
+                            <Phone className="h-3 w-3" />
+                            {member.phone}
                           </span>
-                        </div>
+                        )}
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
+                          <UserX className="h-3 w-3" />
+                          {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
+                        </span>
                       </div>
                     </div>
                     <button
@@ -1349,7 +1368,7 @@ const Dashboard = () => {
                     <div>
                       <p className="text-gray-500 text-sm">Cell Group</p>
                       <p className="font-medium text-gray-900">
-                        {member.cellGroupId ? `Group ${member.cellGroupId}` : 'Not assigned'}
+                        {member.cellGroupName || 'Not assigned'}
                       </p>
                     </div>
                   </div>
@@ -1369,12 +1388,6 @@ const Dashboard = () => {
       {activeModal === 'absentMemberDetail' && selectedAbsentMember && (
         <Modal title="Absent Member Details" size="max-w-md">
           <div className="space-y-6">
-            <div className="flex justify-center">
-              <div className="w-24 h-24 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-2xl">
-                {selectedAbsentMember.name.charAt(0)}{selectedAbsentMember.surname.charAt(0)}
-              </div>
-            </div>
-            
             <div className="text-center">
               <h3 className="text-2xl font-bold text-gray-900 mb-1">
                 {selectedAbsentMember.name} {selectedAbsentMember.surname}
@@ -1416,7 +1429,7 @@ const Dashboard = () => {
                   <div className="flex justify-between">
                     <span className="text-gray-600">Cell Group:</span>
                     <span className="font-medium">
-                      {selectedAbsentMember.cellGroupId ? `Group ${selectedAbsentMember.cellGroupId}` : 'Not assigned'}
+                      {selectedAbsentMember.cellGroupName || 'Not assigned'}
                     </span>
                   </div>
                 </div>
@@ -1471,20 +1484,15 @@ const Dashboard = () => {
                 )
                 .map(member => (
                 <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                      {member.name.charAt(0)}{member.surname.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">{member.phone || 'No contact'}</p>
-                      {member.login_username && (
-                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-                          <Key className="h-3 w-3" />
-                          Login: {member.login_username}
-                        </p>
-                      )}
-                    </div>
+                  <div>
+                    <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                    <p className="text-sm text-gray-500">{member.phone || 'No contact'}</p>
+                    {member.login_username && (
+                      <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                        <Key className="h-3 w-3" />
+                        Login: {member.login_username}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <button 
