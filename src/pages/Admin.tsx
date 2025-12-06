@@ -796,7 +796,6 @@ const Admin = () => {
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
-  const [backupStatus, setBackupStatus] = useState<string>('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importOptions, setImportOptions] = useState({
     updateExisting: true,
@@ -1058,21 +1057,6 @@ const Admin = () => {
     setShowImportMapping(false);
   };
 
-  // Handler functions for administrative sections
-  const handleUpdateSystemConfig = async () => {
-    if (!systemConfig) return;
-    
-    setLoading(true);
-    try {
-      await cloudService.updateSystemConfig(systemConfig);
-      setError(null);
-    } catch (err) {
-      setError('Failed to update system configuration');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleUpdateSecuritySettings = async () => {
     if (!securitySettings) return;
     
@@ -1082,21 +1066,6 @@ const Admin = () => {
       setError(null);
     } catch (err) {
       setError('Failed to update security settings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRunBackup = async () => {
-    setLoading(true);
-    setBackupStatus('Starting backup...');
-    try {
-      await cloudService.runBackup();
-      setBackupStatus('Backup completed successfully!');
-      setTimeout(() => setBackupStatus(''), 3000);
-      await loadData();
-    } catch (err) {
-      setBackupStatus('Backup failed!');
     } finally {
       setLoading(false);
     }
