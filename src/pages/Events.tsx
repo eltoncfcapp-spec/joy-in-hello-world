@@ -41,18 +41,14 @@ interface Member {
   id: string;
   name: string;
   surname: string;
+  residence: string;
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
   ministry_group_id: string | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  department_members?: Array<{
-    departments: {
-      id: string;
-      name: string;
-    } | null;
-  }>;
+  department_ids?: string[];
 }
 
 interface CellGroup {
@@ -118,7 +114,6 @@ const Events = () => {
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   
-  // Use ref for absence notes to prevent re-renders while typing
   const attendanceNotesRef = useRef<Record<string, string>>({});
 
   const [eventFormData, setEventFormData] = useState({
@@ -161,7 +156,7 @@ const Events = () => {
     name: '',
     surname: '',
     phone: '',
-    email: '',
+    residence: '',
     notes: ''
   });
 
@@ -169,7 +164,6 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
@@ -194,7 +188,6 @@ const Events = () => {
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Fetch attendees for all events in parallel
       const attendeePromises = eventsWithDefaults.map((event: Event) => 
         fetchEventAttendees(event.id)
       );
@@ -232,29 +225,56 @@ const Events = () => {
     try {
       setError(null);
       
-      const { data, error } = await supabase
+      const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
           id,
           name,
           surname,
+          residence,
           phone,
           cell_group_id,
           ministry_group_id,
           status,
           cell_groups!fk_cell_group(name),
-          ministry_groups(name),
-          department_members (
-            departments (
-              id,
-              name
-            )
-          )
+          ministry_groups(name)
         `)
         .order('name');
 
-      if (error) throw error;
-      setMembers(data || []);
+      if (membersError) throw membersError;
+
+      const { data: deptMembersData, error: deptError } = await supabase
+        .from('department_members')
+        .select(`
+          member_id,
+          departments!fk_department_id (
+            id,
+            name
+          )
+        `);
+
+      if (deptError && deptError.code !== 'PGRST116') {
+        console.warn('Error fetching department members:', deptError);
+      }
+
+      const memberDeptMap = new Map<string, string[]>();
+      if (deptMembersData) {
+        deptMembersData.forEach((item: any) => {
+          if (item.departments && item.member_id) {
+            if (!memberDeptMap.has(item.member_id)) {
+              memberDeptMap.set(item.member_id, []);
+            }
+            memberDeptMap.get(item.member_id)?.push(item.departments.id);
+          }
+        });
+      }
+
+      const membersWithDepartments = (membersData || []).map((member: any) => ({
+        ...member,
+        department_ids: memberDeptMap.get(member.id) || []
+      }));
+
+      setMembers(membersWithDepartments);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
@@ -313,19 +333,13 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            residence,
             phone,
             status,
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -355,7 +369,6 @@ const Events = () => {
     }
   }, []);
 
-  // Initialize all data
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
@@ -389,13 +402,60 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS - FIXED for schema
+  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('department_members')
+        .select('id')
+        .eq('member_id', memberId)
+        .eq('department_id', departmentId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return false;
+        }
+        throw error;
+      }
+
+      return !!data;
+    } catch (error) {
+      console.error('Error checking department membership:', error);
+      return false;
+    }
+  };
+
+  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
+    if (event.is_whole_church) return true;
+
+    if (event.target_groups && event.target_groups.length > 0) {
+      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
+        return true;
+      }
+    }
+
+    if (event.target_departments && event.target_departments.length > 0) {
+      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
+        return true;
+      }
+
+      if (member.department_ids && member.department_ids.length > 0) {
+        for (const deptId of event.target_departments) {
+          if (member.department_ids.includes(deptId)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  };
+
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
       setError(null);
 
-      // Check if attendance record already exists
       const { data: existingRecord } = await supabase
         .from('event_attendees')
         .select('id')
@@ -415,14 +475,12 @@ const Events = () => {
 
       let error;
       if (existingRecord) {
-        // Update existing record
         const { error: updateError } = await supabase
           .from('event_attendees')
           .update(attendanceData)
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
-        // Create new record - FIXED: removed created_at since it doesn't exist in schema
         const { error: insertError } = await supabase
           .from('event_attendees')
           .insert([attendanceData]);
@@ -431,7 +489,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Refresh attendees data
       await fetchEventAttendees(eventId);
       return true;
     } catch (error: any) {
@@ -462,7 +519,6 @@ const Events = () => {
         setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
         closeBulkAttendanceModal();
         
-        // Refresh the event data to show updated counts
         await fetchEventAttendees(eventId);
       } else {
         setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
@@ -493,70 +549,17 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
-  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('department_members')
-        .select('id')
-        .eq('member_id', memberId)
-        .eq('department_id', departmentId)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return false;
-        }
-        throw error;
-      }
-
-      return !!data;
-    } catch (error) {
-      console.error('Error checking department membership:', error);
-      return false;
-    }
-  };
-
-  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
-    if (event.is_whole_church) return true;
-
-    // Check cell groups
-    if (event.target_groups && event.target_groups.length > 0) {
-      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
-        return true;
-      }
-    }
-
-    // Check ministry groups
-    if (event.target_departments && event.target_departments.length > 0) {
-      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
-        return true;
-      }
-
-      // Check departments
-      for (const deptId of event.target_departments) {
-        const isInDept = await isMemberInDepartment(member.id, deptId);
-        if (isInDept) return true;
-      }
-    }
-
-    return false;
-  };
-
-  // Function to sync event to cloud (mark as synced/backed up)
   const syncEventToCloud = async (eventId: string) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
 
     try {
-      // Get the event data
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
-      // Get all attendees for this event
       const eventAttendees = getEventAttendees(eventId);
 
-      // Prepare data for sync
       const syncData = {
         event_id: event.id,
         event_name: event.name,
@@ -579,38 +582,18 @@ const Events = () => {
         synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
       };
 
-      // Here you would typically send this data to your cloud backup service
-      // For now, we'll just update a field in the events table to mark it as synced
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
           updated_at: new Date().toISOString(),
-          // You could add a 'last_synced_at' field to your events table
         })
         .eq('id', eventId);
 
       if (updateError) throw updateError;
 
-      // Log the sync action (optional)
-      const { error: logError } = await supabase
-        .from('audit_logs')
-        .insert([{
-          table_name: 'events',
-          record_id: eventId,
-          action: 'SYNC',
-          new_data: syncData,
-          user_id: user?.id,
-          created_at: new Date().toISOString()
-        }]);
-
-      if (logError) {
-        console.warn('Failed to log sync action:', logError);
-      }
-
       setSuccess(`Event "${event.name}" successfully synced to cloud!`);
       setTimeout(() => setSuccess(null), 3000);
       
-      // Close sync modal
       setShowSyncModal(null);
       
     } catch (error: any) {
@@ -621,17 +604,14 @@ const Events = () => {
     }
   };
 
-  // Function to export event data as CSV
   const exportEventData = (eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
     const eventAttendees = getEventAttendees(eventId);
     
-    // Prepare CSV content
     const csvRows = [];
     
-    // Add event info
     csvRows.push(['Event Information']);
     csvRows.push(['Name', event.name]);
     csvRows.push(['Date', event.event_date]);
@@ -640,14 +620,15 @@ const Events = () => {
     csvRows.push(['Topic', event.topic || '']);
     csvRows.push(['']);
     
-    // Add attendees
     csvRows.push(['Attendees List']);
-    csvRows.push(['Name', 'Surname', 'Status', 'First Time', 'Attended At', 'Invited By']);
+    csvRows.push(['Name', 'Surname', 'Residence', 'Phone', 'Status', 'First Time', 'Attended At', 'Invited By']);
     
     eventAttendees.forEach(attendee => {
       csvRows.push([
         attendee.members.name,
         attendee.members.surname,
+        attendee.members.residence || '',
+        attendee.members.phone || '',
         attendee.attendance_status,
         attendee.first_time ? 'Yes' : 'No',
         attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
@@ -655,10 +636,8 @@ const Events = () => {
       ]);
     });
     
-    // Convert to CSV string
     const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
     
-    // Create download link
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -718,7 +697,6 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
-      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
@@ -760,7 +738,6 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
-      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: null } : event
       ));
@@ -915,7 +892,6 @@ const Events = () => {
         existingDocumentUrl: '',
       });
       
-      // Refresh sermons data
       await fetchSermons();
       setSuccess(editingSermon ? 'Sermon updated successfully!' : 'Sermon added successfully!');
       
@@ -953,14 +929,12 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update local state immediately
       setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
       setSuccess('Sermon deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting sermon:', error);
       setError(error.message || 'Failed to delete sermon.');
-      // Refresh data on error
       await fetchSermons();
     } finally {
       setSermonLoading(null);
@@ -1043,7 +1017,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Refresh sermons data
       await fetchSermons();
       setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
       setTimeout(() => setSuccess(null), 3000);
@@ -1057,7 +1030,6 @@ const Events = () => {
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
-      // Create absent records
       const absentRecords = absentMemberIds.map(memberId => ({
         event_id: eventId,
         members_id: memberId,
@@ -1067,9 +1039,7 @@ const Events = () => {
         attended_at: null
       }));
 
-      // Insert or update records
       for (const record of absentRecords) {
-        // Check if record exists
         const { data: existing } = await supabase
           .from('event_attendees')
           .select('id')
@@ -1078,20 +1048,17 @@ const Events = () => {
           .single();
 
         if (existing) {
-          // Update existing
           await supabase
             .from('event_attendees')
             .update(record)
             .eq('id', existing.id);
         } else {
-          // Insert new
           await supabase
             .from('event_attendees')
             .insert([record]);
         }
       }
       
-      // Refresh attendees data
       await fetchEventAttendees(eventId);
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
@@ -1141,7 +1108,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId 
           ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
@@ -1206,7 +1172,6 @@ const Events = () => {
         targetDepartments: [],
       });
       
-      // Refresh events data
       await fetchEvents();
       setSuccess('Event created successfully!');
       
@@ -1228,7 +1193,6 @@ const Events = () => {
       return;
     }
 
-    // Check if member is already registered for this event
     const alreadyRegistered = attendees.some(
       a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
     );
@@ -1265,19 +1229,13 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            residence,
             phone,
             status,
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1292,11 +1250,9 @@ const Events = () => {
         throw error;
       }
 
-      // Update attendees state immediately AND refresh from server
       setAttendees(prev => [...prev, data]);
-      await fetchEventAttendees(eventId); // Ensure data is fresh from server
+      await fetchEventAttendees(eventId);
 
-      // Reset form and close it
       resetAttendeeForm();
       
       setSuccess('Attendee added successfully!');
@@ -1323,9 +1279,8 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update attendees state immediately AND refresh from server
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
-      await fetchEventAttendees(eventId); // Ensure data is fresh from server
+      await fetchEventAttendees(eventId);
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1381,14 +1336,12 @@ const Events = () => {
   const openBulkAttendanceModal = async (eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     
-    // Initialize bulk attendance state
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
     const initialAttendance: Record<string, 'present' | 'absent'> = {};
     const initialNotes: Record<string, string> = {};
 
-    // Set all target members as present by default
     for (const member of members) {
       if (member.status === 'not_attending') continue;
       
@@ -1398,7 +1351,6 @@ const Events = () => {
       }
     }
 
-    // Update with existing attendance records
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
       initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
@@ -1429,7 +1381,7 @@ const Events = () => {
       name: '',
       surname: '',
       phone: '',
-      email: '',
+      residence: '',
       notes: ''
     });
   };
@@ -1448,18 +1400,8 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      // Check if member already exists with same email or phone
       let existingMember = null;
-      if (newcomerFormData.email.trim()) {
-        const { data: emailMatch } = await supabase
-          .from('members')
-          .select('*')
-          .eq('email', newcomerFormData.email.trim())
-          .single();
-        existingMember = emailMatch;
-      }
-      
-      if (!existingMember && newcomerFormData.phone.trim()) {
+      if (newcomerFormData.phone.trim()) {
         const { data: phoneMatch } = await supabase
           .from('members')
           .select('*')
@@ -1471,15 +1413,13 @@ const Events = () => {
       let memberId;
       
       if (existingMember) {
-        // Use existing member
         memberId = existingMember.id;
       } else {
-        // Create new member
         const memberPayload = {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
+          residence: newcomerFormData.residence.trim(),
           phone: newcomerFormData.phone.trim() || null,
-          email: newcomerFormData.email.trim() || null,
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -1497,8 +1437,8 @@ const Events = () => {
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            setError('A member with this email already exists');
+          if (memberError.code === '23505' && memberError.message.includes('phone')) {
+            setError('A member with this phone number already exists');
             return;
           }
           throw memberError;
@@ -1506,7 +1446,6 @@ const Events = () => {
         memberId = memberData.id;
       }
 
-      // Add to event attendees
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
@@ -1525,19 +1464,13 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            residence,
             phone,
             status,
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1549,13 +1482,11 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Update attendees state immediately AND refresh from server
       if (newAttendee) {
         setAttendees(prev => [...prev, newAttendee]);
       }
       await fetchEventAttendees(eventId);
 
-      // Refresh members data
       await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
@@ -1574,8 +1505,8 @@ const Events = () => {
       member.name.toLowerCase().includes(searchLower) ||
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.residence.toLowerCase().includes(searchLower) ||
+      member.phone?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1585,8 +1516,8 @@ const Events = () => {
       member.name.toLowerCase().includes(searchLower) ||
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.residence.toLowerCase().includes(searchLower) ||
+      member.phone?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1669,7 +1600,6 @@ const Events = () => {
     }
   };
 
-  // Sync Modal Component
   const SyncModal = () => {
     if (!showSyncModal) return null;
 
@@ -1784,14 +1714,12 @@ const Events = () => {
     );
   };
 
-  // Bulk Attendance Modal Component - UPDATED for schema
   const BulkAttendanceModal = () => {
     if (!showBulkAttendanceModal) return null;
 
     const event = events.find(e => e.id === showBulkAttendanceModal);
     if (!event) return null;
 
-    // Get target members who should attend this event
     const [targetMembers, setTargetMembers] = useState<Member[]>([]);
     
     useEffect(() => {
@@ -1837,7 +1765,6 @@ const Events = () => {
           </div>
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            {/* Attendance Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
@@ -1853,7 +1780,6 @@ const Events = () => {
               </div>
             </div>
 
-            {/* Quick Actions */}
             <div className="flex gap-2 mb-6 flex-wrap">
               <button
                 onClick={() => {
@@ -1889,7 +1815,6 @@ const Events = () => {
               </button>
             </div>
 
-            {/* Members List */}
             <div className="space-y-3">
               {targetMembers.length === 0 ? (
                 <div className="text-center py-8">
@@ -1910,16 +1835,16 @@ const Events = () => {
                               {member.name} {member.surname}
                             </div>
                             <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                              {member.residence && (
+                                <div className="flex items-center gap-1">
+                                  <MapPin className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.residence}</span>
+                                </div>
+                              )}
                               {member.phone && (
                                 <div className="flex items-center gap-1">
                                   <Phone className="h-3 w-3 flex-shrink-0" />
                                   <span className="truncate">{member.phone}</span>
-                                </div>
-                              )}
-                              {member.email && (
-                                <div className="flex items-center gap-1">
-                                  <Mail className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate">{member.email}</span>
                                 </div>
                               )}
                             </div>
@@ -1951,7 +1876,6 @@ const Events = () => {
                         </div>
                       </div>
                       
-                      {/* Absence Reason Field - Only show when marked as absent */}
                       {bulkAttendance[member.id] === 'absent' && (
                         <div className="mt-2 pl-0 sm:pl-13">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -2013,7 +1937,6 @@ const Events = () => {
     );
   };
 
-  // Newcomer Modal Component
   const NewcomerModal = () => {
     if (!showNewcomerModal) return null;
 
@@ -2071,6 +1994,22 @@ const Events = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Residence *
+                </label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={newcomerFormData.residence}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, residence: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter residence"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Phone Number
                 </label>
                 <div className="relative">
@@ -2081,21 +2020,6 @@ const Events = () => {
                     onChange={(e) => setNewcomerFormData({ ...newcomerFormData, phone: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter phone number"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="email"
-                    value={newcomerFormData.email}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, email: e.target.value })}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
                   />
                 </div>
               </div>
@@ -2137,7 +2061,6 @@ const Events = () => {
     );
   };
 
-  // Attendee Modal Component
   const AttendeeModal = () => {
     if (!showAttendeeModal) return null;
 
@@ -2198,16 +2121,16 @@ const Events = () => {
                           {attendee.members.name} {attendee.members.surname}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                          {attendee.members.residence && (
+                            <div className="flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {attendee.members.residence}
+                            </div>
+                          )}
                           {attendee.members.phone && (
                             <div className="flex items-center gap-1">
                               <Phone className="h-3 w-3" />
                               {attendee.members.phone}
-                            </div>
-                          )}
-                          {attendee.members.email && (
-                            <div className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              {attendee.members.email}
                             </div>
                           )}
                           {type === 'present' && attendee.first_time && (
@@ -2250,7 +2173,6 @@ const Events = () => {
     );
   };
 
-  // Sermon Modal Component
   const SermonModal = () => {
     if (!showSermonModal) return null;
 
@@ -2327,9 +2249,7 @@ const Events = () => {
                 </div>
               </div>
 
-              {/* File Uploads */}
               <div className="space-y-4">
-                {/* Video Upload */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2379,7 +2299,6 @@ const Events = () => {
                   </label>
                 </div>
 
-                {/* Document Upload */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Sermon Notes (PDF/DOC)
@@ -2448,7 +2367,6 @@ const Events = () => {
     );
   };
 
-  // Pamphlet Modal Component
   const PamphletModal = () => {
     if (!viewingPamphlet) return null;
 
@@ -2538,7 +2456,6 @@ const Events = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -2569,21 +2486,18 @@ const Events = () => {
           </div>
         </div>
 
-        {/* Success Message */}
         {success && (
           <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
             {success}
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
             {error}
           </div>
         )}
 
-        {/* Sermons List */}
         {showSermonList && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between mb-6">
@@ -2718,12 +2632,10 @@ const Events = () => {
           </div>
         )}
 
-        {/* Event Creation Form */}
         {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
             <form onSubmit={handleEventSubmit} className="space-y-6">
-              {/* Event Type Selection */}
               {!eventFormData.eventType && (
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Event Type *</label>
@@ -2754,7 +2666,6 @@ const Events = () => {
                 </div>
               )}
 
-              {/* Show form fields only after event type is selected */}
               {eventFormData.eventType && (
                 <>
                   <div className="flex items-center gap-2 mb-4">
@@ -2831,7 +2742,6 @@ const Events = () => {
                   />
                 </div>
 
-                {/* Event Scope */}
                 <div className="md:col-span-2 space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
                   <div className="flex flex-col sm:flex-row gap-4">
@@ -2866,7 +2776,6 @@ const Events = () => {
                   </div>
                 </div>
 
-                {/* Target Groups Selection */}
                 {!eventFormData.isWholeChurch && (
                   <>
                     <div className="space-y-2">
@@ -2978,7 +2887,6 @@ const Events = () => {
           </div>
         )}
 
-        {/* Loading State */}
         {loading && events.length === 0 && (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -2986,7 +2894,6 @@ const Events = () => {
           </div>
         )}
 
-        {/* Events List */}
         <div className="space-y-6">
           {!loading && events.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
@@ -3052,7 +2959,6 @@ const Events = () => {
                         )}
                       </div>
 
-                      {/* Sermon Preview */}
                       {sermon && (
                         <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                           <div className="flex items-center justify-between">
@@ -3095,7 +3001,6 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Pamphlet Display Section */}
                       {event.pamphlet_url && (
                         <div className="mt-4">
                           <div className="flex items-center gap-3 flex-wrap">
@@ -3134,7 +3039,6 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Upload Pamphlet Button */}
                       {hasAccess() && !event.pamphlet_url && (
                         <div className="mt-4">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
@@ -3156,7 +3060,6 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
@@ -3189,7 +3092,6 @@ const Events = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons - ADDED SYNC BUTTON */}
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
@@ -3256,13 +3158,11 @@ const Events = () => {
                     </div>
                   </div>
 
-                  {/* Add Attendee Form */}
                   {showAttendeeForm === event.id && (
                     <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
                       <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Attendee</h4>
                       <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Member Search */}
                           <div className="space-y-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Member *</label>
                             <div className="relative">
@@ -3295,7 +3195,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.residence} {member.phone && `• ${member.phone}`}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -3308,7 +3208,6 @@ const Events = () => {
                             </div>
                           </div>
 
-                          {/* Inviter Search */}
                           <div className="space-y-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Invited By (Optional)</label>
                             <div className="relative">
@@ -3341,7 +3240,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.residence} {member.phone && `• ${member.phone}`}
                                         </div>
                                       </div>
                                     </div>
@@ -3352,7 +3251,6 @@ const Events = () => {
                           </div>
                         </div>
 
-                        {/* First Time Checkbox */}
                         <div className="flex items-center gap-3">
                           <input
                             type="checkbox"
@@ -3366,7 +3264,6 @@ const Events = () => {
                           </label>
                         </div>
 
-                        {/* Selected Member Preview */}
                         {selectedMember && (
                           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                             <div className="flex items-center justify-between">
@@ -3379,8 +3276,8 @@ const Events = () => {
                                     {selectedMember.name} {selectedMember.surname}
                                   </div>
                                   <div className="text-sm text-gray-600 dark:text-gray-400">
+                                    {selectedMember.residence && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{selectedMember.residence}</span>}
                                     {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
-                                    {selectedMember.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.email}</span>}
                                   </div>
                                 </div>
                               </div>
@@ -3399,7 +3296,6 @@ const Events = () => {
                           </div>
                         )}
 
-                        {/* Selected Inviter Preview */}
                         {selectedInviter && (
                           <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
                             <div className="flex items-center justify-between">
@@ -3431,7 +3327,6 @@ const Events = () => {
                           </div>
                         )}
 
-                        {/* Form Actions */}
                         <div className="flex gap-3">
                           <button
                             type="submit"
@@ -3459,7 +3354,6 @@ const Events = () => {
         </div>
       </div>
 
-      {/* Render All Modals */}
       <SermonModal />
       <PamphletModal />
       <BulkAttendanceModal />
