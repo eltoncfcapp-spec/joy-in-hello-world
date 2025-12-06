@@ -164,6 +164,67 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
+  // Helper function to fix date timezone issue
+  const fixTimezoneIssue = (dateString: string) => {
+    if (!dateString) return dateString;
+    
+    // If the date string is already in YYYY-MM-DD format, ensure it stays as local date
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (datePattern.test(dateString)) {
+      // Create a new date in local timezone
+      const date = new Date(dateString);
+      // Get the date components in local timezone
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      
+      // Return as YYYY-MM-DD without timezone conversion
+      return `${year}-${month}-${day}`;
+    }
+    
+    return dateString;
+  };
+
+  // Helper function to format date for display
+  const formatDateForDisplay = (dateString: string) => {
+    if (!dateString) return '';
+    
+    const date = new Date(dateString);
+    // Force to local timezone
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper function to initialize bulk attendance with all target members as ABSENT by default
+  const initializeBulkAttendance = async (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return {};
+
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
+
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
+      
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        // By default, mark all expected members as ABSENT
+        // The user will then mark present members
+        initialAttendance[member.id] = 'absent';
+      }
+    }
+
+    const existingAttendees = getEventAttendees(eventId);
+    existingAttendees.forEach(attendee => {
+      // Override with existing attendance status
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+    });
+
+    return initialAttendance;
+  };
+
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
@@ -908,7 +969,7 @@ const Events = () => {
         title: sermonFormData.title.trim(),
         summary: sermonFormData.summary.trim(),
         pastor_name: sermonFormData.pastorName.trim(),
-        sermon_date: sermonFormData.sermonDate,
+        sermon_date: fixTimezoneIssue(sermonFormData.sermonDate), // Fix timezone
         event_id: sermonFormData.eventId || null,
         video_url: videoUrl,
         document_url: documentUrl,
@@ -1001,7 +1062,7 @@ const Events = () => {
         title: sermonToEdit.title,
         summary: sermonToEdit.summary,
         pastorName: sermonToEdit.pastor_name,
-        sermonDate: sermonToEdit.sermon_date,
+        sermonDate: formatDateForDisplay(sermonToEdit.sermon_date), // Format for display
         eventId: sermonToEdit.event_id || '',
         videoFile: null,
         documentFile: null,
@@ -1015,7 +1076,7 @@ const Events = () => {
         title: event?.name || '',
         summary: '',
         pastorName: '',
-        sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
+        sermonDate: event?.event_date ? formatDateForDisplay(event.event_date) : new Date().toISOString().split('T')[0],
         eventId: eventId || '',
         videoFile: null,
         documentFile: null,
@@ -1191,10 +1252,13 @@ const Events = () => {
     setSuccess(null);
     
     try {
+      // Fix the date timezone issue before saving
+      const fixedEventDate = fixTimezoneIssue(eventFormData.eventDate);
+      
       const eventData = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
-        event_date: eventFormData.eventDate,
+        event_date: fixedEventDate, // Use fixed date
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
         is_whole_church: eventFormData.isWholeChurch,
@@ -1415,29 +1479,17 @@ const Events = () => {
 
   const openBulkAttendanceModal = async (eventId: string) => {
     setShowBulkAttendanceModal(eventId);
+    setLoading(true);
     
-    const event = events.find(e => e.id === eventId);
-    if (!event) return;
-
-    const initialAttendance: Record<string, 'present' | 'absent'> = {};
-    const initialNotes: Record<string, string> = {};
-
-    for (const member of members) {
-      if (member.status === 'not_attending') continue;
-      
-      const shouldAttend = await isMemberInTargetGroups(member, event);
-      if (shouldAttend) {
-        initialAttendance[member.id] = 'present';
-      }
+    try {
+      const initialAttendance = await initializeBulkAttendance(eventId);
+      setBulkAttendance(initialAttendance);
+    } catch (error: any) {
+      console.error('Error initializing bulk attendance:', error);
+      setError('Failed to load attendance data.');
+    } finally {
+      setLoading(false);
     }
-
-    const existingAttendees = getEventAttendees(eventId);
-    existingAttendees.forEach(attendee => {
-      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
-    });
-
-    setBulkAttendance(initialAttendance);
-    setAttendanceNotes(initialNotes);
   };
 
   const closeBulkAttendanceModal = () => {
@@ -1593,16 +1645,28 @@ const Events = () => {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+    if (!dateString) return 'Invalid date';
+    
+    // Parse the date as local time
+    const date = new Date(dateString + 'T00:00:00'); // Add time to ensure it's treated as local
+    
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      return 'Invalid date';
+    }
+    
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
-      day: 'numeric'
+      day: 'numeric',
+      timeZone: 'UTC' // Force UTC to avoid timezone conversion
     });
   };
 
   const formatTime = (timeString: string) => {
+    if (!timeString) return '';
+    
     const [hours, minutes] = timeString.split(':');
     const hour = parseInt(hours);
     const ampm = hour >= 12 ? 'PM' : 'AM';
@@ -1810,6 +1874,9 @@ const Events = () => {
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Manage attendance for all target members - {targetMembers.length} members found
               </p>
+              <div className="mt-2 text-sm text-blue-600 dark:text-blue-400">
+                <span className="font-medium">Note:</span> All members are marked as ABSENT by default. Click "Present" for members who attended.
+              </div>
             </div>
             <button
               onClick={closeBulkAttendanceModal}
@@ -1957,7 +2024,7 @@ const Events = () => {
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div className="text-sm text-gray-600 dark:text-gray-400">
-                {stats.present + stats.absent} of {targetMembers.length} members marked
+                {stats.present} present, {stats.absent} absent of {targetMembers.length} members
               </div>
               <div className="flex gap-3 w-full sm:w-auto">
                 <button
