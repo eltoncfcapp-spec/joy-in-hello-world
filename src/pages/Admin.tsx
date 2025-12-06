@@ -1,4 +1,4 @@
-import { Settings, Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Building, Trash2 } from 'lucide-react';
+import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -24,7 +24,6 @@ interface Member {
   cell_group_id: string | null;
   status: string | null;
   created_at: string | null;
-  email?: string;
 }
 
 interface Group {
@@ -942,8 +941,7 @@ const Admin = () => {
         can_view_own_data: profile.can_view_own_data || false,
         cell_group_id: profile.cell_group_id || null,
         status: (profile as any).status || null,
-        created_at: (profile as any).created_at || null,
-        email: profile.email
+        created_at: (profile as any).created_at || null
       };
 
       if (profile.cell_group_id) {
@@ -991,8 +989,7 @@ const Admin = () => {
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
       status: null,
-      created_at: null,
-      email: profile.email
+      created_at: null
     };
 
     if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'view_members')) {
@@ -1233,8 +1230,7 @@ const Admin = () => {
       can_view_own_data: profile!.can_view_own_data || false,
       cell_group_id: profile!.cell_group_id || null,
       status: null,
-      created_at: null,
-      email: profile!.email
+      created_at: null
     };
     
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions || [], 'edit_members')) {
@@ -1289,8 +1285,7 @@ const Admin = () => {
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
       status: null,
-      created_at: null,
-      email: profile.email
+      created_at: null
     };
 
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'edit_members')) {
@@ -1411,8 +1406,7 @@ const Admin = () => {
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
       status: null,
-      created_at: null,
-      email: profile.email
+      created_at: null
     };
 
     if (isAdminOrPastor(currentUser)) {
@@ -1830,7 +1824,7 @@ const Admin = () => {
                       {member.name} {member.surname}
                     </h4>
                     <p className="text-sm text-gray-500">
-                      {member.email || member.phone} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                      {member.phone || 'No phone'} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                     </p>
                   </div>
                 </div>
@@ -1866,7 +1860,7 @@ const Admin = () => {
               <h4 className="text-xl font-bold text-gray-900">
                 {selectedUser?.name} {selectedUser?.surname}
               </h4>
-              <p className="text-gray-600">{selectedUser?.email}</p>
+              <p className="text-gray-600">{selectedUser?.phone || 'No phone'}</p>
               <p className="text-sm text-gray-500">{selectedUser?.phone}</p>
               {selectedUser?.cell_group_id && (
                 <p className="text-sm text-gray-500">Cell Group ID: {selectedUser?.cell_group_id}</p>
@@ -2143,7 +2137,6 @@ const Admin = () => {
                   id: profile.id,
                   name: profile.name || '',
                   surname: profile.surname || '',
-                  email: profile.email,
                   phone: profile.phone || null,
                   admin_role: profile.admin_role || 'member',
                   pastor_role: profile.pastor_role || false,
@@ -2202,7 +2195,6 @@ const Admin = () => {
               id: profile.id,
               name: profile.name || '',
               surname: profile.surname || '',
-              email: profile.email,
               phone: profile.phone || null,
               admin_role: profile.admin_role || 'member',
               pastor_role: profile.pastor_role || false,
@@ -2254,7 +2246,6 @@ const Admin = () => {
             id: profile.id,
             name: profile.name || '',
             surname: profile.surname || '',
-            email: profile.email,
             phone: profile.phone || null,
             admin_role: profile.admin_role || 'member',
             pastor_role: profile.pastor_role || false,
@@ -2332,7 +2323,7 @@ const Admin = () => {
                             {member.name} {member.surname}
                           </h4>
                           <p className="text-sm text-gray-500">
-                            {member.email || member.phone} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                            {member.phone || 'No phone'} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                           </p>
                           {member.cell_group_id && (
                             <p className="text-xs text-gray-500">
@@ -2381,7 +2372,6 @@ const Admin = () => {
             id: profile.id,
             name: profile.name || '',
             surname: profile.surname || '',
-            email: profile.email,
             phone: profile.phone || null,
             admin_role: profile.admin_role || 'member',
             pastor_role: profile.pastor_role || false,

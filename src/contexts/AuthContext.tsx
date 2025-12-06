@@ -441,17 +441,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       if (!profile) return;
       
-      await supabase.from('audit_logs').insert({
-        user_id: profile.id,
+      await supabase.from('audit_logs').insert([{
         action,
         table_name: tableName,
-        record_id: recordId,
+        record_id: recordId || '',
         old_data: oldData,
         new_data: newData,
-        ip_address: 'web-app',
-        user_agent: typeof window !== 'undefined' ? window.navigator.userAgent : 'server',
         created_at: new Date().toISOString()
-      });
+      }]);
     } catch (error) {
       console.error('Failed to log audit action:', error);
     }
@@ -468,13 +465,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       if (id) {
         result = await supabase
-          .from(table)
+          .from(table as any)
           .update(data)
           .eq('id', id)
           .select();
       } else {
         result = await supabase
-          .from(table)
+          .from(table as any)
           .insert(data)
           .select();
       }
@@ -501,7 +498,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     try {
       const result = await supabase
-        .from(table)
+        .from(table as any)
         .delete()
         .eq('id', id);
 
@@ -524,9 +521,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // In production, you should use Supabase functions or RPC calls
       console.warn('Direct SQL queries are not recommended. Use Supabase RPC instead.');
       
-      // This is a placeholder - you should create RPC functions in Supabase
-      // and call them here instead of executing raw SQL
-      const result = await supabase.rpc('execute_developer_query', { query_text: query });
+      // This is a placeholder - return a message instead of executing raw SQL
+      const result = { 
+        message: 'Direct SQL execution is disabled for security. Use the Data tab to browse tables.',
+        query 
+      };
       
       await logAuditAction('EXECUTE_QUERY', 'system', undefined, undefined, { query });
       

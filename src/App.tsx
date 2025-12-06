@@ -13,8 +13,7 @@ import {
   X,
   Building,
   BookOpen,
-  Shield,
-  Database
+  Shield
 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import churchLogo from '@/assets/church-logo.png';
@@ -34,6 +33,7 @@ const Admin = lazy(() => import('./pages/Admin'));
 const UserManual = lazy(() => import('./pages/UserManual'));
 const Login = lazy(() => import('./pages/Login'));
 const DeveloperDashboard = lazy(() => import('./pages/DeveloperDashboard'));
+const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 
 // Loading spinner for lazy-loaded pages
 const PageLoader = () => (
@@ -42,7 +42,10 @@ const PageLoader = () => (
   </div>
 );
 
-// Protected Route component
+// Role-based route access configuration
+type RouteAccess = 'all' | 'admin_only' | 'no_settings' | 'developer_only';
+
+// Protected Route component with role-based access
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile, loading } = useAuth();
   
@@ -61,10 +64,54 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
-// Layout component with responsive sidebar
+const RouteGuard: React.FC<{ 
+  children: React.ReactNode; 
+  access: RouteAccess;
+}> = ({ children, access }) => {
+  const { profile, isDeveloper, isAdmin } = useAuth();
+
+  if (!profile) {
+    return <Navigate to="/login" />;
+  }
+
+  // Developer has access to everything
+  if (isDeveloper()) {
+    return <>{children}</>;
+  }
+
+  // Check access based on role
+  switch (access) {
+    case 'developer_only':
+      if (!isDeveloper()) {
+        return <Navigate to="/unauthorized" />;
+      }
+      break;
+    
+    case 'admin_only':
+      // Only developer and admin can access settings/admin page
+      // Pastor cannot access admin/settings
+      if (!isAdmin() && !isDeveloper()) {
+        return <Navigate to="/unauthorized" />;
+      }
+      break;
+    
+    case 'no_settings':
+      // Pastor can access but not settings - this is handled in the admin page itself
+      break;
+    
+    case 'all':
+    default:
+      // Everyone can access
+      break;
+  }
+
+  return <>{children}</>;
+};
+
+// Layout component with responsive sidebar and role-based navigation
 const Layout = () => {
   const location = useLocation();
-  const { logout, profile, isDeveloper } = useAuth();
+  const { logout, profile, isDeveloper, isAdmin, isPastor, isDeacon, isGroupLeader, isDepartmentLeader } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -79,22 +126,78 @@ const Layout = () => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const navigationItems = [
-    { path: '/', icon: Home, label: 'Dashboard' },
-    { path: '/members', icon: Users, label: 'Members' },
-    { path: '/groups', icon: Users, label: 'Cell Groups' },
-    { path: '/departments', icon: Building, label: 'Departments' },
-    { path: '/events', icon: Calendar, label: 'Events' },
-    { path: '/trends', icon: TrendingUp, label: 'Trends' },
-    { path: '/analytics', icon: BarChart3, label: 'Analytics' },
-    { path: '/admin', icon: Settings, label: 'Admin' },
-    { path: '/manual', icon: BookOpen, label: 'User Manual' },
-  ];
+  // Build navigation items based on user role
+  const getNavigationItems = () => {
+    const items = [
+      { path: '/', icon: Home, label: 'Dashboard' },
+      { path: '/trends', icon: TrendingUp, label: 'Trends' },
+    ];
 
-  // Add developer dashboard for developer user
-  if (isDeveloper()) {
-    navigationItems.push({ path: '/developer', icon: Shield, label: 'Developer' });
-  }
+    // Developer and Admin see everything
+    if (isDeveloper() || isAdmin()) {
+      items.push(
+        { path: '/members', icon: Users, label: 'Members' },
+        { path: '/groups', icon: Users, label: 'Cell Groups' },
+        { path: '/departments', icon: Building, label: 'Departments' },
+        { path: '/events', icon: Calendar, label: 'Events' },
+        { path: '/analytics', icon: BarChart3, label: 'Analytics' },
+        { path: '/admin', icon: Settings, label: 'Admin' }
+      );
+    } 
+    // Pastor sees everything except admin/settings
+    else if (isPastor()) {
+      items.push(
+        { path: '/members', icon: Users, label: 'Members' },
+        { path: '/groups', icon: Users, label: 'Cell Groups' },
+        { path: '/departments', icon: Building, label: 'Departments' },
+        { path: '/events', icon: Calendar, label: 'Events' },
+        { path: '/analytics', icon: BarChart3, label: 'Analytics' }
+      );
+    }
+    // Deacon sees everything but can only edit where they are leader
+    else if (isDeacon()) {
+      items.push(
+        { path: '/members', icon: Users, label: 'Members' },
+        { path: '/groups', icon: Users, label: 'Cell Groups' },
+        { path: '/departments', icon: Building, label: 'Departments' },
+        { path: '/events', icon: Calendar, label: 'Events' },
+        { path: '/analytics', icon: BarChart3, label: 'Analytics' }
+      );
+    }
+    // Group/Department leaders see their allocated areas
+    else if (isGroupLeader() || isDepartmentLeader()) {
+      if (isGroupLeader()) {
+        items.push({ path: '/groups', icon: Users, label: 'Cell Groups' });
+      }
+      if (isDepartmentLeader()) {
+        items.push({ path: '/departments', icon: Building, label: 'Departments' });
+      }
+      items.push(
+        { path: '/members', icon: Users, label: 'Members' },
+        { path: '/events', icon: Calendar, label: 'Events' }
+      );
+    }
+    // Regular members see limited views
+    else {
+      items.push(
+        { path: '/groups', icon: Users, label: 'Cell Groups' },
+        { path: '/departments', icon: Building, label: 'Departments' },
+        { path: '/events', icon: Calendar, label: 'Events' }
+      );
+    }
+
+    // User manual for everyone
+    items.push({ path: '/manual', icon: BookOpen, label: 'User Manual' });
+
+    // Developer dashboard only for developers
+    if (isDeveloper()) {
+      items.push({ path: '/developer', icon: Shield, label: 'Developer' });
+    }
+
+    return items;
+  };
+
+  const navigationItems = getNavigationItems();
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -110,7 +213,8 @@ const Layout = () => {
     if (!profile) return 'Guest';
     if (profile.is_developer) return 'Developer';
     if (profile.admin_role === 'super_admin') return 'Super Admin';
-    if (profile.admin_role === 'admin' || profile.pastor_role) return 'Administrator';
+    if (profile.admin_role === 'admin') return 'Administrator';
+    if (profile.pastor_role) return 'Pastor';
     if (profile.deacon_role) return 'Deacon';
     if (profile.group_leader) return 'Group Leader';
     if (profile.department_leader) return 'Department Leader';
@@ -122,7 +226,8 @@ const Layout = () => {
     if (!profile) return 'text-gray-500';
     if (profile.is_developer) return 'text-purple-600 dark:text-purple-400';
     if (profile.admin_role === 'super_admin') return 'text-red-600 dark:text-red-400';
-    if (profile.admin_role === 'admin' || profile.pastor_role) return 'text-blue-600 dark:text-blue-400';
+    if (profile.admin_role === 'admin') return 'text-blue-600 dark:text-blue-400';
+    if (profile.pastor_role) return 'text-indigo-600 dark:text-indigo-400';
     if (profile.deacon_role) return 'text-green-600 dark:text-green-400';
     return 'text-gray-600 dark:text-gray-400';
   };
@@ -260,6 +365,7 @@ function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/unauthorized" element={<Unauthorized />} />
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="members" element={<Members />} />
@@ -268,9 +374,17 @@ function App() {
               <Route path="departments" element={<Departments />} />
               <Route path="trends" element={<Trends />} />
               <Route path="analytics" element={<Analytics />} />
-              <Route path="admin" element={<Admin />} />
+              <Route path="admin" element={
+                <RouteGuard access="admin_only">
+                  <Admin />
+                </RouteGuard>
+              } />
               <Route path="manual" element={<UserManual />} />
-              <Route path="developer" element={<DeveloperDashboard />} />
+              <Route path="developer" element={
+                <RouteGuard access="developer_only">
+                  <DeveloperDashboard />
+                </RouteGuard>
+              } />
             </Route>
           </Routes>
         </Suspense>
