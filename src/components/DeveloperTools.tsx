@@ -4,7 +4,7 @@ import { supabase } from '../integrations/supabase/client';
 import { Database, Terminal, X, RefreshCw, Download, Trash2 } from 'lucide-react';
 
 const DeveloperTools: React.FC = () => {
-  const { isDeveloper, profile, updateSupabaseData, deleteSupabaseData, logAuditAction } = useAuth();
+  const { isDeveloper, profile, logAuditAction } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'query' | 'data' | 'audit'>('dashboard');
   const [sqlQuery, setSqlQuery] = useState('');
   const [queryResult, setQueryResult] = useState<any>(null);
@@ -24,7 +24,7 @@ const DeveloperTools: React.FC = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from(table)
+        .from(table as any)
         .select('*')
         .limit(100);
 
@@ -45,14 +45,15 @@ const DeveloperTools: React.FC = () => {
     
     setLoading(true);
     try {
-      // For security, you should use RPC functions instead of direct SQL
-      const result = await supabase.rpc('execute_developer_query', { 
-        query_text: sqlQuery 
+      // Display a message that direct SQL execution is not supported
+      // This is for security reasons
+      setQueryResult({ 
+        message: 'Direct SQL execution is disabled for security. Use the Data tab to browse tables.',
+        query: sqlQuery 
       });
-      
-      setQueryResult(result);
       await logAuditAction('EXECUTE_DEV_QUERY', 'system', undefined, undefined, { query: sqlQuery });
-    } catch (error) {
+    } catch (err) {
+      const error = err as Error;
       console.error('Query execution error:', error);
       setQueryResult({ error: error.message });
     } finally {
@@ -94,7 +95,7 @@ const DeveloperTools: React.FC = () => {
   const exportData = async (table: string) => {
     try {
       const { data, error } = await supabase
-        .from(table)
+        .from(table as any)
         .select('*');
 
       if (!error && data) {

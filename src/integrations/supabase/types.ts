@@ -712,6 +712,7 @@ export type Database = {
           admin_role: string | null
           assigned_departments: string[] | null
           assigned_groups: string[] | null
+          auth_user_id: string | null
           baptism: string | null
           can_add_members: boolean | null
           can_edit_members: boolean | null
@@ -725,6 +726,9 @@ export type Database = {
           group_leader: boolean | null
           id: string
           invited_by: string | null
+          is_admin: boolean | null
+          is_developer: boolean | null
+          is_hidden: boolean | null
           is_leader: boolean | null
           is_permanent_member: boolean | null
           login_pin: string | null
@@ -746,6 +750,7 @@ export type Database = {
           admin_role?: string | null
           assigned_departments?: string[] | null
           assigned_groups?: string[] | null
+          auth_user_id?: string | null
           baptism?: string | null
           can_add_members?: boolean | null
           can_edit_members?: boolean | null
@@ -759,6 +764,9 @@ export type Database = {
           group_leader?: boolean | null
           id?: string
           invited_by?: string | null
+          is_admin?: boolean | null
+          is_developer?: boolean | null
+          is_hidden?: boolean | null
           is_leader?: boolean | null
           is_permanent_member?: boolean | null
           login_pin?: string | null
@@ -780,6 +788,7 @@ export type Database = {
           admin_role?: string | null
           assigned_departments?: string[] | null
           assigned_groups?: string[] | null
+          auth_user_id?: string | null
           baptism?: string | null
           can_add_members?: boolean | null
           can_edit_members?: boolean | null
@@ -793,6 +802,9 @@ export type Database = {
           group_leader?: boolean | null
           id?: string
           invited_by?: string | null
+          is_admin?: boolean | null
+          is_developer?: boolean | null
+          is_hidden?: boolean | null
           is_leader?: boolean | null
           is_permanent_member?: boolean | null
           login_pin?: string | null
@@ -995,7 +1007,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_user_admin: { Args: { user_id: string }; Returns: boolean }
     }
     Enums: {
       gender_type: "male" | "female"
