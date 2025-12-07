@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2, Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,10 +45,10 @@ interface Member {
   phone: string | null;
   cell_group_id: string | null;
   ministry_group_id: string | null;
-  cell_groups: { name: string } | null;
-  ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   department_ids?: string[];
+  cell_groups: { name: string } | null;
+  ministry_groups: { name: string } | null;
 }
 
 interface CellGroup {
@@ -114,9 +114,15 @@ const Events = () => {
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   
+  const [operationInProgress, setOperationInProgress] = useState<{
+    type: 'create' | 'update' | 'delete' | 'sync' | 'export' | 'attendance' | 'complete' | 'upload' | 'remove';
+    entity: string;
+    id?: string;
+    progress?: number;
+    details?: string;
+  } | null>(null);
+
   const attendanceNotesRef = useRef<Record<string, string>>({});
-  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
-  const [savingProgress, setSavingProgress] = useState({ current: 0, total: 0, isSaving: false });
 
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
@@ -151,6 +157,7 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
@@ -165,453 +172,58 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Helper function to fix date timezone issue
-  const fixTimezoneIssue = (dateString: string) => {
-    if (!dateString) return dateString;
-    
-    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-    if (datePattern.test(dateString)) {
-      const date = new Date(dateString);
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      
-      return `${year}-${month}-${day}`;
-    }
-    
-    return dateString;
+  const startOperation = (type: string, entity: string, id?: string, details?: string) => {
+    setOperationInProgress({ type: type as any, entity, id, details });
   };
 
-  // Helper function to format date for display
-  const formatDateForDisplay = (dateString: string) => {
-    if (!dateString) return '';
-    
-    const date = new Date(dateString);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    
-    return `${year}-${month}-${day}`;
+  const endOperation = () => {
+    setOperationInProgress(null);
   };
 
-  // Helper function to initialize bulk attendance with all target members as ABSENT by default
-  const initializeBulkAttendance = async (eventId: string) => {
-    const event = events.find(e => e.id === eventId);
-    if (!event) return {};
+  const LoadingButton = ({ 
+    loading, 
+    children, 
+    onClick, 
+    disabled,
+    type = 'button',
+    className = '',
+    loadingText = 'Processing...',
+    loadingClassName = ''
+  }: {
+    loading: boolean;
+    children: React.ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+    type?: 'button' | 'submit';
+    className?: string;
+    loadingText?: string;
+    loadingClassName?: string;
+  }) => (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled || loading}
+      className={`relative overflow-hidden transition-all duration-200 ${className} ${(disabled || loading) ? 'opacity-70 cursor-not-allowed' : ''}`}
+    >
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-inherit">
+          <Loader2 className={`h-5 w-5 animate-spin ${loadingClassName}`} />
+        </div>
+      )}
+      <span className={loading ? 'invisible' : 'visible flex items-center gap-2'}>{children}</span>
+      <span className={loading ? 'visible flex items-center gap-2 justify-center' : 'hidden'}>{loadingText}</span>
+    </button>
+  );
 
-    const initialAttendance: Record<string, 'present' | 'absent'> = {};
-
-    for (const member of members) {
-      if (member.status === 'not_attending') continue;
-      
-      const shouldAttend = await isMemberInTargetGroups(member, event);
-      if (shouldAttend) {
-        initialAttendance[member.id] = 'absent';
-      }
-    }
-
-    const existingAttendees = getEventAttendees(eventId);
-    existingAttendees.forEach(attendee => {
-      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
-    });
-
-    return initialAttendance;
-  };
-
-  // ==================== FIXED SYNC FUNCTION - ACTUALLY SENDS DATA TO CLOUD ====================
-  const syncEventToCloud = async (eventId: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
-
-      // Get all attendees for this event
-      const eventAttendees = getEventAttendees(eventId);
-      
-      if (eventAttendees.length === 0) {
-        setError('No attendance data to sync. Please add attendees first.');
-        setTimeout(() => setError(null), 3000);
-        return;
-      }
-
-      // Prepare attendance data for syncing
-      const attendanceRecords = eventAttendees.map(attendee => ({
-        event_id: eventId,
-        members_id: attendee.members_id,
-        first_time: attendee.first_time || false,
-        invited_by_id: attendee.invited_by_id || null,
-        attendance_status: attendee.attendance_status || 'absent',
-        attended_at: attendee.attended_at || null,
-        notes: attendee.notes || null,
-        updated_at: new Date().toISOString()
-      }));
-
-      // 1. Send attendance data to cloud in batches (for performance)
-      const batchSize = 50;
-      for (let i = 0; i < attendanceRecords.length; i += batchSize) {
-        const batch = attendanceRecords.slice(i, i + batchSize);
-        
-        const { error: batchError } = await supabase
-          .from('event_attendees')
-          .upsert(batch, {
-            onConflict: 'event_id,members_id',
-            ignoreDuplicates: false
-          });
-
-        if (batchError) {
-          console.error('Batch sync error:', batchError);
-          throw new Error(`Failed to sync batch ${Math.floor(i/batchSize) + 1}`);
-        }
-      }
-
-      // 2. Update event timestamp in cloud to mark as synced
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ 
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', eventId);
-
-      if (updateError) throw updateError;
-
-      // 3. Update local state
-      setEvents(prev => prev.map(ev => 
-        ev.id === eventId 
-          ? { ...ev, updated_at: new Date().toISOString() }
-          : ev
-      ));
-
-      // 4. Force refresh of attendees from cloud to ensure consistency
-      await fetchEventAttendees(eventId);
-
-      setSuccess(`Successfully synced ${eventAttendees.length} attendance records for "${event.name}" to cloud!`);
-      setTimeout(() => setSuccess(null), 5000);
-      
-      // Close modal after a delay to show success message
-      setTimeout(() => setShowSyncModal(null), 2000);
-      
-    } catch (error: any) {
-      console.error('Error syncing event to cloud:', error);
-      setError(`Failed to sync: ${error.message || 'Please try again.'}`);
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== NEW: CHECK CLOUD SYNC STATUS ====================
-  const checkCloudSyncStatus = async (eventId: string) => {
-    try {
-      // First check local state
-      const event = events.find(e => e.id === eventId);
-      if (!event) return false;
-
-      // Then check cloud for the latest data
-      const { data: cloudData } = await supabase
-        .from('events')
-        .select('updated_at')
-        .eq('id', eventId)
-        .single();
-
-      if (!cloudData) return false;
-
-      // Compare timestamps to see if sync is needed
-      const localUpdated = new Date(event.updated_at || 0).getTime();
-      const cloudUpdated = new Date(cloudData.updated_at || 0).getTime();
-      
-      // If cloud timestamp is older or equal, consider it synced
-      return cloudUpdated >= localUpdated;
-    } catch (error) {
-      console.error('Error checking cloud sync:', error);
-      return false;
-    }
-  };
-
-  // ==================== NEW: SYNC SINGLE ATTENDEE TO CLOUD ====================
-  const syncSingleAttendeeToCloud = async (attendee: EventAttendee) => {
-    try {
-      const attendeeData = {
-        event_id: attendee.event_id,
-        members_id: attendee.members_id,
-        first_time: attendee.first_time || false,
-        invited_by_id: attendee.invited_by_id || null,
-        attendance_status: attendee.attendance_status || 'absent',
-        attended_at: attendee.attended_at || null,
-        notes: attendee.notes || null,
-        updated_at: new Date().toISOString()
-      };
-
-      const { error } = await supabase
-        .from('event_attendees')
-        .upsert([attendeeData], {
-          onConflict: 'event_id,members_id',
-          ignoreDuplicates: false
-        });
-
-      if (error) throw error;
-      return true;
-    } catch (error: any) {
-      console.error('Error syncing single attendee:', error);
-      return false;
-    }
-  };
-
-  // ==================== NEW: AUTOSYNC FUNCTION ====================
-  const autoSyncToCloud = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-      
-      // Check sync status for all events
-      const eventsToSync = [];
-      for (const event of events) {
-        const isSynced = await checkCloudSyncStatus(event.id);
-        if (!isSynced) {
-          eventsToSync.push(event.id);
-        }
-      }
-
-      if (eventsToSync.length === 0) {
-        setSuccess('All events are already synced with cloud.');
-        setTimeout(() => setSuccess(null), 3000);
-        setLoading(false);
-        return;
-      }
-
-      setSuccess(`Syncing ${eventsToSync.length} events to cloud...`);
-      
-      // Sync each event
-      let syncedCount = 0;
-      let failedCount = 0;
-      
-      for (const eventId of eventsToSync) {
-        try {
-          await syncEventToCloud(eventId);
-          syncedCount++;
-          
-          // Small delay to prevent rate limiting
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (error) {
-          console.error(`Failed to sync event ${eventId}:`, error);
-          failedCount++;
-        }
-      }
-
-      setSuccess(`Auto-sync completed: ${syncedCount} synced, ${failedCount} failed`);
-      setTimeout(() => setSuccess(null), 5000);
-
-      // Refresh events to get updated timestamps
-      await fetchEvents();
-
-    } catch (error: any) {
-      console.error('Auto-sync error:', error);
-      setError('Auto-sync failed. Please sync events individually.');
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== OPTIMIZED BULK ATTENDANCE SAVING ====================
-  const saveAttendanceBatch = async (eventId: string, attendanceRecords: any[]) => {
-    try {
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .upsert(attendanceRecords, {
-          onConflict: 'event_id,members_id',
-          ignoreDuplicates: false
-        });
-
-      if (error) throw error;
-      return { success: true, count: attendanceRecords.length };
-    } catch (error) {
-      console.error('Error saving attendance batch:', error);
-      return { success: false, error };
-    }
-  };
-
-  const saveAttendanceWithChunking = async (eventId: string) => {
-    setSavingProgress({ current: 0, total: Object.keys(bulkAttendance).length, isSaving: true });
-    setError(null);
-    setSuccess(null);
-
-    const chunkSize = 100; // Process 100 members at a time (increased from 50)
-    const memberIds = Object.keys(bulkAttendance);
-    const results = [];
-    let successCount = 0;
-    let failCount = 0;
-
-    try {
-      // Prepare all records first for better performance
-      const allRecords = [];
-      for (const memberId of memberIds) {
-        const status = bulkAttendance[memberId];
-        const notes = attendanceNotesRef.current[memberId] || '';
-        
-        allRecords.push({
-          event_id: eventId,
-          members_id: memberId,
-          first_time: false,
-          invited_by_id: null,
-          attendance_status: status,
-          attended_at: status === 'present' ? new Date().toISOString() : null,
-          notes: notes || null,
-          updated_at: new Date().toISOString()
-        });
-      }
-
-      // Process in chunks
-      for (let i = 0; i < allRecords.length; i += chunkSize) {
-        const chunk = allRecords.slice(i, i + chunkSize);
-        
-        const result = await saveAttendanceBatch(eventId, chunk);
-        results.push(result);
-        
-        if (result.success) {
-          successCount += chunk.length;
-        } else {
-          failCount += chunk.length;
-        }
-
-        // Update progress
-        setSavingProgress(prev => ({
-          ...prev,
-          current: Math.min(i + chunkSize, allRecords.length)
-        }));
-
-        // Small delay to prevent overwhelming the server
-        if (i + chunkSize < allRecords.length) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-      }
-
-      // Update event timestamp
-      await supabase
-        .from('events')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', eventId);
-
-      // Refresh attendees after saving
-      await fetchEventAttendees(eventId);
-
-      setSavingProgress({ current: 0, total: 0, isSaving: false });
-
-      if (failCount === 0) {
-        setSuccess(`Successfully saved attendance for ${successCount} members!`);
-        closeBulkAttendanceModal();
-      } else {
-        setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
-      }
-
-      setTimeout(() => {
-        setSuccess(null);
-        setError(null);
-      }, 5000);
-
-    } catch (error: any) {
-      console.error('Error in chunked attendance saving:', error);
-      setError(error.message || 'Failed to save bulk attendance.');
-      setSavingProgress({ current: 0, total: 0, isSaving: false });
-    }
-  };
-
-  // ==================== OPTIMIZED EVENT COMPLETION ====================
-  const handleCompleteEvent = async (eventId: string) => {
-    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
-
-      const eventAttendees = getEventAttendees(eventId);
-      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
-
-      const absentMemberIds: string[] = [];
-      const batchSize = 100; // Process in batches
-      
-      // Find absent members in batches
-      for (let i = 0; i < members.length; i += batchSize) {
-        const batch = members.slice(i, i + batchSize);
-        
-        for (const member of batch) {
-          if (member.status === 'not_attending') continue;
-          if (attendeeIds.has(member.id)) continue;
-
-          const shouldAttend = await isMemberInTargetGroups(member, event);
-          if (shouldAttend) {
-            absentMemberIds.push(member.id);
-          }
-        }
-        
-        // Small delay for very large member lists
-        if (members.length > 1000) {
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
-      }
-
-      // Mark absent members in chunks
-      if (absentMemberIds.length > 0) {
-        const absentChunks = [];
-        for (let i = 0; i < absentMemberIds.length; i += 100) {
-          absentChunks.push(absentMemberIds.slice(i, i + 100));
-        }
-
-        for (const chunk of absentChunks) {
-          await markMembersAsAbsent(eventId, chunk);
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-
-      const { error } = await supabase
-        .from('events')
-        .update({
-          is_completed: true,
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', eventId);
-
-      if (error) throw error;
-
-      setEvents(prev => prev.map(event => 
-        event.id === eventId 
-          ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
-          : event
-      ));
-
-      setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
-      setTimeout(() => setSuccess(null), 3000);
-      
-    } catch (error: any) {
-      console.error('Error completing event:', error);
-      setError(error.message || 'Failed to complete event. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== OPTIMIZED DATA FETCHING ====================
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Use specific fields to reduce data transfer
       const { data, error } = await supabase
         .from('events')
-        .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, target_groups, target_departments, created_at')
-        .order('event_date', { ascending: false })
-        .limit(50); // Limit to 50 most recent events
+        .select('*')
+        .order('event_date', { ascending: false });
 
       if (error) throw error;
 
@@ -622,21 +234,15 @@ const Events = () => {
         target_departments: event.target_departments ?? [],
         is_completed: event.is_completed ?? false,
         completed_at: event.completed_at ?? null,
-        pamphlet_url: event.pamphlet_url ?? null,
-        created_at: event.created_at ?? null,
-        updated_at: event.updated_at ?? null
+        pamphlet_url: event.pamphlet_url ?? null
       }));
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Only load attendees for first few events initially (performance optimization)
-      if (eventsWithDefaults.length > 0) {
-        const eventsToLoad = eventsWithDefaults.slice(0, 3);
-        const attendeePromises = eventsToLoad.map((event: Event) => 
-          fetchEventAttendees(event.id)
-        );
-        await Promise.all(attendeePromises);
-      }
+      const attendeePromises = eventsWithDefaults.map((event: Event) => 
+        fetchEventAttendees(event.id)
+      );
+      await Promise.all(attendeePromises);
       
     } catch (error: any) {
       console.error('Error fetching events:', error);
@@ -657,8 +263,7 @@ const Events = () => {
             topic
           )
         `)
-        .order('sermon_date', { ascending: false })
-        .limit(50); // Limit to 50 most recent sermons
+        .order('sermon_date', { ascending: false });
 
       if (error) throw error;
       setSermons(data || []);
@@ -689,8 +294,7 @@ const Events = () => {
             name
           )
         `)
-        .order('name')
-        .limit(500); // Limit to 500 members for performance
+        .order('name');
 
       if (membersError) throw membersError;
 
@@ -702,8 +306,7 @@ const Events = () => {
             id,
             name
           )
-        `)
-        .limit(1000);
+        `);
 
       if (deptError && deptError.code !== 'PGRST116') {
         console.warn('Error fetching department members:', deptError);
@@ -740,8 +343,7 @@ const Events = () => {
       const { data, error } = await supabase
         .from('cell_groups')
         .select('id, name')
-        .order('name')
-        .limit(100);
+        .order('name');
 
       if (error) throw error;
       setCellGroups(data || []);
@@ -755,8 +357,7 @@ const Events = () => {
       const { data, error } = await supabase
         .from('ministry_groups')
         .select('id, name')
-        .order('name')
-        .limit(100);
+        .order('name');
 
       if (error) throw error;
       setMinistryGroups(data || []);
@@ -770,8 +371,7 @@ const Events = () => {
       const { data, error } = await supabase
         .from('departments')
         .select('id, name')
-        .order('name')
-        .limit(100);
+        .order('name');
 
       if (error) throw error;
       setDepartments(data || []);
@@ -782,13 +382,11 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      // Limit attendees per event to prevent overwhelming
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select('*')
         .eq('event_id', eventId)
-        .order('attended_at', { ascending: false })
-        .limit(500); // Limit to 500 attendees per event
+        .order('attended_at', { ascending: false });
 
       if (attendeesError) throw attendeesError;
 
@@ -801,68 +399,57 @@ const Events = () => {
         return [];
       }
 
-      // Fetch members in batch instead of one by one (BIG performance improvement)
-      const memberIds = attendeesData.map(a => a.members_id);
-      const uniqueMemberIds = [...new Set(memberIds)];
-      
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select(`
-          id,
-          name,
-          surname,
-          residence,
-          phone,
-          status,
-          cell_group_id,
-          ministry_group_id
-        `)
-        .in('id', uniqueMemberIds);
+      const attendeesWithMembers = await Promise.all(
+        attendeesData.map(async (attendee: any) => {
+          const { data: memberData, error: memberError } = await supabase
+            .from('members')
+            .select(`
+              id,
+              name,
+              surname,
+              residence,
+              phone,
+              status,
+              cell_group_id,
+              ministry_group_id,
+              cell_groups (
+                name
+              ),
+              ministry_groups (
+                name
+              )
+            `)
+            .eq('id', attendee.members_id)
+            .single();
 
-      if (membersError) throw membersError;
+          if (memberError) {
+            console.error('Error fetching member:', memberError);
+            return null;
+          }
 
-      // Create a Map for O(1) lookups
-      const membersMap = new Map();
-      membersData?.forEach(member => {
-        membersMap.set(member.id, member);
-      });
+          let invited_by_member = null;
+          if (attendee.invited_by_id) {
+            const { data: inviterData } = await supabase
+              .from('members')
+              .select('id, name, surname')
+              .eq('id', attendee.invited_by_id)
+              .single();
+            
+            invited_by_member = inviterData;
+          }
 
-      // Process invitees if any
-      const inviterIds = attendeesData
-        .map(a => a.invited_by_id)
-        .filter(id => id) as string[];
-      
-      const invitersMap = new Map();
-      if (inviterIds.length > 0) {
-        const { data: invitersData } = await supabase
-          .from('members')
-          .select('id, name, surname')
-          .in('id', inviterIds);
-        
-        invitersData?.forEach(inviter => {
-          invitersMap.set(inviter.id, inviter);
-        });
-      }
-
-      const attendeesWithMembers = attendeesData.map((attendee: any) => {
-        const member = membersMap.get(attendee.members_id);
-        const invited_by_member = attendee.invited_by_id ? 
-          invitersMap.get(attendee.invited_by_id) : null;
-
-        if (!member) return null;
-
-        return {
-          ...attendee,
-          attendance_status: attendee.attendance_status || 'present',
-          members: {
-            ...member,
-            cell_groups: null,
-            ministry_groups: null,
-            department_ids: []
-          },
-          invited_by_member
-        };
-      });
+          return {
+            ...attendee,
+            attendance_status: attendee.attendance_status || 'present',
+            members: {
+              ...memberData,
+              cell_groups: memberData.cell_groups?.[0] || null,
+              ministry_groups: memberData.ministry_groups?.[0] || null
+            },
+            invited_by_member
+          };
+        })
+      );
 
       const validAttendees = attendeesWithMembers.filter(
         (attendee): attendee is EventAttendee => attendee !== null
@@ -964,6 +551,7 @@ const Events = () => {
 
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
+      startOperation('attendance', 'attendance', `${eventId}-${memberId}`, `Saving ${status} status...`);
       setLoading(true);
       setError(null);
 
@@ -982,7 +570,6 @@ const Events = () => {
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
         notes: notes || null,
-        updated_at: new Date().toISOString()
       };
 
       let error;
@@ -1008,6 +595,54 @@ const Events = () => {
       setError(error.message || 'Failed to save attendance.');
       return false;
     } finally {
+      endOperation();
+      setLoading(false);
+    }
+  };
+
+  const saveBulkAttendance = async (eventId: string) => {
+    startOperation('attendance', 'bulk-attendance', eventId, 'Saving attendance for all members...');
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const memberIds = Object.keys(bulkAttendance);
+      const savePromises = memberIds.map(async (memberId, index) => {
+        const status = bulkAttendance[memberId];
+        const notes = attendanceNotesRef.current[memberId] || '';
+        
+        setOperationInProgress(prev => prev ? {
+          ...prev,
+          progress: Math.round((index + 1) / memberIds.length * 100),
+          details: `Saving ${index + 1} of ${memberIds.length} members...`
+        } : null);
+        
+        return await saveAttendance(eventId, memberId, status, notes);
+      });
+
+      const results = await Promise.all(savePromises);
+      const successfulSaves = results.filter(result => result).length;
+      const totalSaves = memberIds.length;
+
+      if (successfulSaves === totalSaves) {
+        setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
+        closeBulkAttendanceModal();
+        
+        await fetchEventAttendees(eventId);
+      } else {
+        setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
+    } catch (error: any) {
+      console.error('Error saving bulk attendance:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+    } finally {
+      endOperation();
       setLoading(false);
     }
   };
@@ -1025,7 +660,65 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
+  const syncEventToCloud = async (eventId: string) => {
+    startOperation('sync', 'event', eventId, 'Syncing event data to cloud...');
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      const eventAttendees = getEventAttendees(eventId);
+
+      const syncData = {
+        event_id: event.id,
+        event_name: event.name,
+        event_date: event.event_date,
+        event_time: event.event_time,
+        location: event.location,
+        is_completed: event.is_completed,
+        total_attendees: eventAttendees.length,
+        present_count: getAttendanceStats(eventId).present,
+        absent_count: getAttendanceStats(eventId).absent,
+        attendees: eventAttendees.map(attendee => ({
+          member_id: attendee.members_id,
+          member_name: `${attendee.members.name} ${attendee.members.surname}`,
+          status: attendee.attendance_status,
+          first_time: attendee.first_time,
+          attended_at: attendee.attended_at
+        })),
+        synced_at: new Date().toISOString(),
+        synced_by: user?.id,
+        synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+      };
+
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ 
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', eventId);
+
+      if (updateError) throw updateError;
+
+      setSuccess(`Event "${event.name}" successfully synced to cloud!`);
+      setTimeout(() => setSuccess(null), 3000);
+      
+      setShowSyncModal(null);
+      
+    } catch (error: any) {
+      console.error('Error syncing event to cloud:', error);
+      setError(error.message || 'Failed to sync event to cloud. Please try again.');
+    } finally {
+      endOperation();
+      setLoading(false);
+    }
+  };
+
   const exportEventData = (eventId: string) => {
+    startOperation('export', 'event', eventId, 'Exporting data to CSV...');
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
@@ -1071,10 +764,12 @@ const Events = () => {
     
     setSuccess(`Event data exported successfully!`);
     setTimeout(() => setSuccess(null), 3000);
+    endOperation();
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
+      startOperation('upload', 'pamphlet', eventId, 'Uploading pamphlet...');
       setUploadingPamphlet(eventId);
       setError(null);
 
@@ -1128,6 +823,7 @@ const Events = () => {
       console.error('Error uploading pamphlet:', error);
       setError(error.message || 'Failed to upload pamphlet.');
     } finally {
+      endOperation();
       setUploadingPamphlet(null);
     }
   };
@@ -1136,6 +832,7 @@ const Events = () => {
     try {
       if (!confirm('Are you sure you want to delete this pamphlet?')) return;
 
+      startOperation('delete', 'pamphlet', eventId, 'Deleting pamphlet...');
       setError(null);
       const event = events.find(e => e.id === eventId);
       if (!event?.pamphlet_url) return;
@@ -1168,6 +865,8 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error deleting pamphlet:', error);
       setError(error.message || 'Failed to delete pamphlet.');
+    } finally {
+      endOperation();
     }
   };
 
@@ -1247,6 +946,7 @@ const Events = () => {
       return;
     }
 
+    startOperation(editingSermon ? 'update' : 'create', 'sermon', undefined, editingSermon ? 'Updating sermon...' : 'Creating sermon...');
     setSermonLoading('saving');
     setError(null);
     setSuccess(null);
@@ -1276,7 +976,7 @@ const Events = () => {
         title: sermonFormData.title.trim(),
         summary: sermonFormData.summary.trim(),
         pastor_name: sermonFormData.pastorName.trim(),
-        sermon_date: fixTimezoneIssue(sermonFormData.sermonDate),
+        sermon_date: sermonFormData.sermonDate,
         event_id: sermonFormData.eventId || null,
         video_url: videoUrl,
         document_url: documentUrl,
@@ -1321,6 +1021,7 @@ const Events = () => {
       console.error('Error saving sermon:', error);
       setError(error.message || `Failed to ${editingSermon ? 'update' : 'save'} sermon. Please try again.`);
     } finally {
+      endOperation();
       setSermonLoading(null);
       setUploadingSermonFile(null);
     }
@@ -1330,6 +1031,7 @@ const Events = () => {
     if (!confirm('Are you sure you want to delete this sermon? This action cannot be undone.')) return;
 
     try {
+      startOperation('delete', 'sermon', sermonId, 'Deleting sermon...');
       setError(null);
       setSermonLoading(sermonId);
 
@@ -1358,6 +1060,7 @@ const Events = () => {
       setError(error.message || 'Failed to delete sermon.');
       await fetchSermons();
     } finally {
+      endOperation();
       setSermonLoading(null);
     }
   };
@@ -1369,7 +1072,7 @@ const Events = () => {
         title: sermonToEdit.title,
         summary: sermonToEdit.summary,
         pastorName: sermonToEdit.pastor_name,
-        sermonDate: formatDateForDisplay(sermonToEdit.sermon_date),
+        sermonDate: sermonToEdit.sermon_date,
         eventId: sermonToEdit.event_id || '',
         videoFile: null,
         documentFile: null,
@@ -1383,7 +1086,7 @@ const Events = () => {
         title: event?.name || '',
         summary: '',
         pastorName: '',
-        sermonDate: event?.event_date ? formatDateForDisplay(event.event_date) : new Date().toISOString().split('T')[0],
+        sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
         eventId: eventId || '',
         videoFile: null,
         documentFile: null,
@@ -1416,6 +1119,7 @@ const Events = () => {
     if (!confirm(`Are you sure you want to remove the ${fileType} file?`)) return;
 
     try {
+      startOperation('remove', `${fileType}-file`, sermonId, `Removing ${fileType}...`);
       setSermonLoading(`remove-${fileType}-${sermonId}`);
       setError(null);
 
@@ -1445,6 +1149,7 @@ const Events = () => {
       console.error(`Error removing ${fileType}:`, error);
       setError(error.message || `Failed to remove ${fileType}.`);
     } finally {
+      endOperation();
       setSermonLoading(null);
     }
   };
@@ -1457,8 +1162,7 @@ const Events = () => {
         first_time: false,
         invited_by_id: null,
         attendance_status: 'absent' as const,
-        attended_at: null,
-        updated_at: new Date().toISOString()
+        attended_at: null
       }));
 
       for (const record of absentRecords) {
@@ -1488,6 +1192,66 @@ const Events = () => {
     }
   };
 
+  const handleCompleteEvent = async (eventId: string) => {
+    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
+      return;
+    }
+
+    startOperation('complete', 'event', eventId, 'Completing event and marking absentees...');
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      const eventAttendees = getEventAttendees(eventId);
+      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
+
+      const absentMemberIds: string[] = [];
+
+      for (const member of members) {
+        if (member.status === 'not_attending') continue;
+        if (attendeeIds.has(member.id)) continue;
+
+        const shouldAttend = await isMemberInTargetGroups(member, event);
+        if (shouldAttend) {
+          absentMemberIds.push(member.id);
+        }
+      }
+
+      if (absentMemberIds.length > 0) {
+        await markMembersAsAbsent(eventId, absentMemberIds);
+      }
+
+      const { error } = await supabase
+        .from('events')
+        .update({
+          is_completed: true,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', eventId);
+
+      if (error) throw error;
+
+      setEvents(prev => prev.map(event => 
+        event.id === eventId 
+          ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
+          : event
+      ));
+
+      setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error completing event:', error);
+      setError(error.message || 'Failed to complete event. Please try again.');
+    } finally {
+      endOperation();
+      setLoading(false);
+    }
+  };
+
   const handleEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1497,17 +1261,16 @@ const Events = () => {
       return;
     }
 
+    startOperation('create', 'event');
     setLoading(true);
     setError(null);
     setSuccess(null);
     
     try {
-      const fixedEventDate = fixTimezoneIssue(eventFormData.eventDate);
-      
       const eventData = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
-        event_date: fixedEventDate,
+        event_date: eventFormData.eventDate,
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
         is_whole_church: eventFormData.isWholeChurch,
@@ -1546,6 +1309,7 @@ const Events = () => {
       console.error('Error creating event:', error);
       setError(error.message || 'Failed to create event. Please try again.');
     } finally {
+      endOperation();
       setLoading(false);
     }
   };
@@ -1569,6 +1333,7 @@ const Events = () => {
       return;
     }
 
+    startOperation('create', 'attendee', eventId, 'Adding attendee...');
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -1583,8 +1348,7 @@ const Events = () => {
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { data: newAttendee, error: attendeeError } = await supabase
@@ -1652,6 +1416,7 @@ const Events = () => {
       console.error('Error adding attendee:', error);
       setError(error.message || 'Failed to add attendee. Please try again.');
     } finally {
+      endOperation();
       setLoading(false);
     }
   };
@@ -1660,6 +1425,7 @@ const Events = () => {
     if (!confirm('Are you sure you want to remove this attendee?')) return;
 
     try {
+      startOperation('delete', 'attendee', attendeeId, 'Removing attendee...');
       setError(null);
       setSuccess(null);
       
@@ -1678,6 +1444,8 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error removing attendee:', error);
       setError(error.message || 'Failed to remove attendee.');
+    } finally {
+      endOperation();
     }
   };
 
@@ -1726,17 +1494,29 @@ const Events = () => {
 
   const openBulkAttendanceModal = async (eventId: string) => {
     setShowBulkAttendanceModal(eventId);
-    setLoading(true);
     
-    try {
-      const initialAttendance = await initializeBulkAttendance(eventId);
-      setBulkAttendance(initialAttendance);
-    } catch (error: any) {
-      console.error('Error initializing bulk attendance:', error);
-      setError('Failed to load attendance data.');
-    } finally {
-      setLoading(false);
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
+    const initialNotes: Record<string, string> = {};
+
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
+      
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        initialAttendance[member.id] = 'present';
+      }
     }
+
+    const existingAttendees = getEventAttendees(eventId);
+    existingAttendees.forEach(attendee => {
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+    });
+
+    setBulkAttendance(initialAttendance);
+    setAttendanceNotes(initialNotes);
   };
 
   const closeBulkAttendanceModal = () => {
@@ -1744,7 +1524,6 @@ const Events = () => {
     setBulkAttendance({});
     setAttendanceNotes({});
     attendanceNotesRef.current = {};
-    setSavingProgress({ current: 0, total: 0, isSaving: false });
   };
 
   const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
@@ -1775,6 +1554,7 @@ const Events = () => {
       return;
     }
 
+    startOperation('create', 'newcomer', eventId, 'Adding newcomer...');
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -1832,8 +1612,7 @@ const Events = () => {
         first_time: true,
         invited_by_id: null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { error: attendeeError } = await supabase
@@ -1851,6 +1630,7 @@ const Events = () => {
       console.error('Error adding newcomer:', error);
       setError(error.message || 'Failed to add newcomer.');
     } finally {
+      endOperation();
       setLoading(false);
     }
   };
@@ -1894,26 +1674,16 @@ const Events = () => {
   };
 
   const formatDate = (dateString: string) => {
-    if (!dateString) return 'Invalid date';
-    
-    const date = new Date(dateString + 'T00:00:00');
-    
-    if (isNaN(date.getTime())) {
-      return 'Invalid date';
-    }
-    
+    const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
-      day: 'numeric',
-      timeZone: 'UTC'
+      day: 'numeric'
     });
   };
 
   const formatTime = (timeString: string) => {
-    if (!timeString) return '';
-    
     const [hours, minutes] = timeString.split(':');
     const hour = parseInt(hours);
     const ampm = hour >= 12 ? 'PM' : 'AM';
@@ -1966,6 +1736,132 @@ const Events = () => {
     }
   };
 
+  const GlobalLoadingOverlay = () => {
+    if (!operationInProgress) return null;
+
+    const getOperationText = () => {
+      const { type, entity, progress, details } = operationInProgress;
+      const entityMap = {
+        'event': 'Event',
+        'sermon': 'Sermon',
+        'attendance': 'Attendance',
+        'bulk-attendance': 'Bulk Attendance',
+        'pamphlet': 'Pamphlet',
+        'sync': 'Cloud Sync',
+        'attendee': 'Attendee',
+        'newcomer': 'Newcomer'
+      };
+
+      const actionMap = {
+        'create': 'Creating',
+        'update': 'Updating',
+        'delete': 'Deleting',
+        'sync': 'Syncing',
+        'export': 'Exporting',
+        'attendance': 'Saving',
+        'complete': 'Completing',
+        'upload': 'Uploading',
+        'remove': 'Removing'
+      };
+
+      const entityText = entityMap[entity as keyof typeof entityMap] || entity;
+      const actionText = actionMap[type as keyof typeof actionMap] || type;
+      
+      return details || `${actionText} ${entityText}${progress !== undefined ? ` (${progress}%)` : '...'}`;
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+          <div className="flex flex-col items-center text-center">
+            <div className="relative mb-6">
+              <div className="w-20 h-20 rounded-full border-4 border-blue-200 dark:border-blue-800 flex items-center justify-center">
+                <Loader2 className="h-10 w-10 text-blue-600 animate-spin" />
+              </div>
+              {operationInProgress.progress !== undefined && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-lg font-bold text-blue-700 dark:text-blue-300">
+                    {operationInProgress.progress}%
+                  </span>
+                </div>
+              )}
+            </div>
+            
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+              {getOperationText()}
+            </h3>
+            
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Please wait while we process your request...
+            </p>
+            
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
+              <div 
+                className="bg-gradient-to-r from-blue-600 to-purple-600 h-full rounded-full transition-all duration-300"
+                style={{ width: `${operationInProgress.progress || 30}%` }}
+              />
+            </div>
+            
+            <p className="text-sm text-gray-500 dark:text-gray-500">
+              Do not close or refresh the page
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const DataSendingIndicators = () => (
+    <div className="fixed bottom-4 right-4 z-40 space-y-2">
+      {operationInProgress && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-3 min-w-64">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
+            </div>
+            <div className="flex-1">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">
+                {operationInProgress.details || 'Processing...'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {operationInProgress.entity} • {operationInProgress.type}
+              </div>
+            </div>
+            {operationInProgress.progress !== undefined && (
+              <div className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                {operationInProgress.progress}%
+              </div>
+            )}
+          </div>
+          {operationInProgress.progress !== undefined && (
+            <div className="mt-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+              <div 
+                className="bg-gradient-to-r from-blue-600 to-purple-600 h-full rounded-full transition-all duration-300"
+                style={{ width: `${operationInProgress.progress}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+      
+      {uploadingPamphlet && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-3">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">
+                Uploading Pamphlet
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Please wait...
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   const SyncModal = () => {
     if (!showSyncModal) return null;
 
@@ -1974,6 +1870,8 @@ const Events = () => {
 
     const stats = getAttendanceStats(event.id);
     const eventAttendees = getEventAttendees(event.id);
+
+    const isSyncing = operationInProgress?.type === 'sync' && operationInProgress?.entity === 'event' && operationInProgress?.id === event.id;
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1985,23 +1883,45 @@ const Events = () => {
                 Sync to Cloud - {event.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Send attendance data to cloud storage
+                Backup event data to cloud storage
               </p>
-              <div className="mt-2">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300`}>
-                  Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
-                </span>
-              </div>
             </div>
             <button
               onClick={() => setShowSyncModal(null)}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              disabled={isSyncing}
             >
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
 
           <div className="p-6">
+            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">What will be synced:</h4>
+              <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Event details (name, date, time, location)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendance statistics ({stats.present} present, {stats.absent} absent)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendee list ({eventAttendees.length} members)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  First-time visitor information
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Sync timestamp and user information
+                </li>
+              </ul>
+            </div>
+
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.present}</div>
@@ -2017,31 +1937,35 @@ const Events = () => {
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
-                <div className="text-sm text-blue-700 dark:text-blue-300">First Timers</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <button
+                <LoadingButton
+                  loading={operationInProgress?.type === 'export' && operationInProgress?.entity === 'event'}
                   onClick={() => exportEventData(event.id)}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 font-medium"
+                  loadingText="Exporting..."
                 >
                   <Download className="h-4 w-4" />
                   Export as CSV
-                </button>
-                <button
+                </LoadingButton>
+                <LoadingButton
+                  loading={isSyncing}
                   onClick={() => syncEventToCloud(event.id)}
                   disabled={loading}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  loadingText="Syncing..."
                 >
                   <Upload className="h-4 w-4" />
-                  {loading ? 'Syncing...' : 'Sync to Cloud'}
-                </button>
+                  Sync to Cloud
+                </LoadingButton>
               </div>
               
               <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
-                Note: Sync ensures all attendance data is saved to the cloud database
+                Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
               </p>
             </div>
           </div>
@@ -2049,7 +1973,8 @@ const Events = () => {
           <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={() => setShowSyncModal(null)}
-              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              disabled={isSyncing}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Close
             </button>
@@ -2066,9 +1991,11 @@ const Events = () => {
     if (!event) return null;
 
     const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    const [loadingTargetMembers, setLoadingTargetMembers] = useState(true);
     
     useEffect(() => {
       const loadTargetMembers = async () => {
+        setLoadingTargetMembers(true);
         const membersList: Member[] = [];
         for (const member of members) {
           if (member.status === 'not_attending') continue;
@@ -2078,6 +2005,7 @@ const Events = () => {
           }
         }
         setTargetMembers(membersList);
+        setLoadingTargetMembers(false);
       };
       
       loadTargetMembers();
@@ -2088,6 +2016,8 @@ const Events = () => {
       absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
       total: targetMembers.length
     };
+
+    const isSaving = operationInProgress?.type === 'attendance' && operationInProgress?.entity === 'bulk-attendance' && operationInProgress?.id === event.id;
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2100,41 +2030,17 @@ const Events = () => {
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Manage attendance for all target members - {targetMembers.length} members found
               </p>
-              <div className="mt-2 text-sm text-blue-600 dark:text-blue-400">
-                <span className="font-medium">Note:</span> All members are marked as ABSENT by default. Click "Present" for members who attended.
-              </div>
             </div>
             <button
               onClick={closeBulkAttendanceModal}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              disabled={isSaving}
             >
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            {savingProgress.isSaving && (
-              <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-blue-700 dark:text-blue-300">
-                    Saving attendance...
-                  </span>
-                  <span className="text-sm text-blue-600 dark:text-blue-400">
-                    {savingProgress.current} of {savingProgress.total}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                    style={{ width: `${(savingProgress.current / savingProgress.total) * 100}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                  Processing in batches for optimal performance...
-                </p>
-              </div>
-            )}
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
@@ -2151,7 +2057,8 @@ const Events = () => {
             </div>
 
             <div className="flex gap-2 mb-6 flex-wrap">
-              <button
+              <LoadingButton
+                loading={loadingTargetMembers}
                 onClick={() => {
                   const newAttendance = { ...bulkAttendance };
                   targetMembers.forEach(member => {
@@ -2159,11 +2066,14 @@ const Events = () => {
                   });
                   setBulkAttendance(newAttendance);
                 }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50"
+                disabled={loadingTargetMembers}
+                loadingText="Loading..."
               >
                 Mark All Present
-              </button>
-              <button
+              </LoadingButton>
+              <LoadingButton
+                loading={loadingTargetMembers}
                 onClick={() => {
                   const newAttendance = { ...bulkAttendance };
                   targetMembers.forEach(member => {
@@ -2171,22 +2081,30 @@ const Events = () => {
                   });
                   setBulkAttendance(newAttendance);
                 }}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50"
+                disabled={loadingTargetMembers}
+                loadingText="Loading..."
               >
                 Mark All Absent
-              </button>
+              </LoadingButton>
               <button
                 onClick={() => {
                   setBulkAttendance({});
                 }}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                disabled={isSaving}
               >
                 Clear All
               </button>
             </div>
 
             <div className="space-y-3">
-              {targetMembers.length === 0 ? (
+              {loadingTargetMembers ? (
+                <div className="text-center py-8">
+                  <Loader2 className="h-8 w-8 text-gray-400 animate-spin mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">Loading target members...</p>
+                </div>
+              ) : targetMembers.length === 0 ? (
                 <div className="text-center py-8">
                   <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
@@ -2223,22 +2141,24 @@ const Events = () => {
                         <div className="flex items-center gap-2 flex-wrap">
                           <button
                             onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                            disabled={isSaving}
                             className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
                               bulkAttendance[member.id] === 'present'
                                 ? 'bg-green-600 text-white shadow-lg'
                                 : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
+                            } ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
                           >
                             <CheckCircle className="h-4 w-4" />
                             <span className="hidden sm:inline">Present</span>
                           </button>
                           <button
                             onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                            disabled={isSaving}
                             className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
                               bulkAttendance[member.id] === 'absent'
                                 ? 'bg-red-600 text-white shadow-lg'
                                 : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
+                            } ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
                           >
                             <X className="h-4 w-4" />
                             <span className="hidden sm:inline">Absent</span>
@@ -2259,6 +2179,7 @@ const Events = () => {
                             placeholder="Enter reason for absence..."
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
                             rows={2}
+                            disabled={isSaving}
                           />
                         </div>
                       )}
@@ -2272,34 +2193,27 @@ const Events = () => {
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div className="text-sm text-gray-600 dark:text-gray-400">
-                {stats.present} present, {stats.absent} absent of {targetMembers.length} members
+                {stats.present + stats.absent} of {targetMembers.length} members marked
               </div>
               <div className="flex gap-3 w-full sm:w-auto">
                 <button
                   onClick={closeBulkAttendanceModal}
-                  disabled={savingProgress.isSaving}
-                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50"
+                  disabled={isSaving}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={() => saveAttendanceWithChunking(showBulkAttendanceModal)}
-                  disabled={savingProgress.isSaving || Object.keys(bulkAttendance).length === 0}
+                <LoadingButton
+                  loading={isSaving}
+                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                  disabled={Object.keys(bulkAttendance).length === 0 || isSaving}
                   className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                  loadingText={`Saving... ${operationInProgress?.progress || 0}%`}
                 >
-                  {savingProgress.isSaving ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>Saving ({savingProgress.current}/{savingProgress.total})...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="hidden sm:inline">Save Attendance</span>
-                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
-                    </>
-                  )}
-                </button>
+                  <CheckCircle className="h-4 w-4" />
+                  <span className="hidden sm:inline">Save Attendance</span>
+                  <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
+                </LoadingButton>
               </div>
             </div>
           </div>
@@ -2314,6 +2228,8 @@ const Events = () => {
     const event = events.find(e => e.id === showNewcomerModal);
     if (!event) return null;
 
+    const isAdding = operationInProgress?.type === 'create' && operationInProgress?.entity === 'newcomer' && operationInProgress?.id === event.id;
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -2324,6 +2240,7 @@ const Events = () => {
             <button
               onClick={closeNewcomerModal}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              disabled={isAdding}
             >
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
@@ -2344,6 +2261,7 @@ const Events = () => {
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter first name"
                     required
+                    disabled={isAdding}
                   />
                 </div>
               </div>
@@ -2358,6 +2276,7 @@ const Events = () => {
                   className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   placeholder="Enter last name"
                   required
+                  disabled={isAdding}
                 />
               </div>
             </div>
@@ -2376,6 +2295,7 @@ const Events = () => {
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter residence"
                     required
+                    disabled={isAdding}
                   />
                 </div>
               </div>
@@ -2391,6 +2311,7 @@ const Events = () => {
                     onChange={(e) => setNewcomerFormData({ ...newcomerFormData, phone: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter phone number"
+                    disabled={isAdding}
                   />
                 </div>
               </div>
@@ -2406,22 +2327,26 @@ const Events = () => {
                 rows={3}
                 className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                 placeholder="Any additional notes about the newcomer..."
+                disabled={isAdding}
               />
             </div>
 
             <div className="flex gap-3 pt-4">
-              <button
+              <LoadingButton
                 type="submit"
-                disabled={loading}
+                loading={isAdding}
+                disabled={isAdding}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors disabled:opacity-50 font-medium"
+                loadingText="Adding Newcomer..."
               >
                 <User className="h-4 w-4" />
-                {loading ? 'Adding Newcomer...' : 'Add Newcomer'}
-              </button>
+                Add Newcomer
+              </LoadingButton>
               <button
                 type="button"
                 onClick={closeNewcomerModal}
-                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                disabled={isAdding}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
@@ -2518,13 +2443,16 @@ const Events = () => {
                       </div>
                     </div>
                     {type === 'present' && hasAccess() && (
-                      <button
+                      <LoadingButton
+                        loading={operationInProgress?.type === 'delete' && operationInProgress?.entity === 'attendee' && operationInProgress?.id === attendee.id}
                         onClick={() => handleRemoveAttendee(attendee.id, eventId)}
                         className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
                         title="Remove Attendee"
+                        loadingText=""
+                        loadingClassName="h-4 w-4"
                       >
                         <X className="h-4 w-4 text-red-500" />
-                      </button>
+                      </LoadingButton>
                     )}
                   </div>
                 ))}
@@ -2547,6 +2475,8 @@ const Events = () => {
   const SermonModal = () => {
     if (!showSermonModal) return null;
 
+    const isSaving = operationInProgress?.type === 'create' && operationInProgress?.entity === 'sermon';
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -2557,6 +2487,7 @@ const Events = () => {
             <button
               onClick={closeSermonModal}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              disabled={isSaving}
             >
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
@@ -2574,6 +2505,7 @@ const Events = () => {
                   className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   placeholder="Enter sermon title"
                   required
+                  disabled={isSaving}
                 />
               </div>
 
@@ -2588,6 +2520,7 @@ const Events = () => {
                   className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
                   placeholder="Enter the sermon summary, key points, scriptures, and main message..."
                   required
+                  disabled={isSaving}
                 />
               </div>
 
@@ -2603,6 +2536,7 @@ const Events = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter pastor's name"
                     required
+                    disabled={isSaving}
                   />
                 </div>
 
@@ -2616,6 +2550,7 @@ const Events = () => {
                     onChange={(e) => setSermonFormData({ ...sermonFormData, sermonDate: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     required
+                    disabled={isSaving}
                   />
                 </div>
               </div>
@@ -2651,14 +2586,20 @@ const Events = () => {
                     </div>
                   )}
 
-                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200">
+                  <label className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 dark:hover:border-purple-400 transition-all duration-200 ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}>
                     <div className="flex flex-col items-center justify-center pt-3 pb-4">
-                      <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {sermonFormData.videoFile ? sermonFormData.videoFile.name : 'Upload Video'}
-                      </p>
-                      {uploadingSermonFile?.type === 'video' && (
-                        <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                      {uploadingSermonFile?.type === 'video' ? (
+                        <>
+                          <Loader2 className="h-6 w-6 text-blue-600 animate-spin mb-1" />
+                          <p className="text-sm text-blue-600">Uploading Video...</p>
+                        </>
+                      ) : (
+                        <>
+                          <PlayCircle className="h-6 w-6 text-gray-400 mb-1" />
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            {sermonFormData.videoFile ? sermonFormData.videoFile.name : 'Upload Video'}
+                          </p>
+                        </>
                       )}
                     </div>
                     <input
@@ -2666,6 +2607,7 @@ const Events = () => {
                       accept="video/*"
                       onChange={(e) => setSermonFormData({ ...sermonFormData, videoFile: e.target.files?.[0] || null })}
                       className="hidden"
+                      disabled={isSaving || uploadingSermonFile?.type === 'video'}
                     />
                   </label>
                 </div>
@@ -2694,14 +2636,20 @@ const Events = () => {
                     </div>
                   )}
 
-                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200">
+                  <label className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:border-green-500 dark:hover:border-green-400 transition-all duration-200 ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}>
                     <div className="flex flex-col items-center justify-center pt-3 pb-4">
-                      <FileText className="h-6 w-6 text-gray-400 mb-1" />
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {sermonFormData.documentFile ? sermonFormData.documentFile.name : 'Upload Notes'}
-                      </p>
-                      {uploadingSermonFile?.type === 'document' && (
-                        <p className="text-xs text-blue-500 mt-1">Uploading...</p>
+                      {uploadingSermonFile?.type === 'document' ? (
+                        <>
+                          <Loader2 className="h-6 w-6 text-blue-600 animate-spin mb-1" />
+                          <p className="text-sm text-blue-600">Uploading Document...</p>
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="h-6 w-6 text-gray-400 mb-1" />
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            {sermonFormData.documentFile ? sermonFormData.documentFile.name : 'Upload Notes'}
+                          </p>
+                        </>
                       )}
                     </div>
                     <input
@@ -2709,6 +2657,7 @@ const Events = () => {
                       accept=".pdf,.doc,.docx,.txt"
                       onChange={(e) => setSermonFormData({ ...sermonFormData, documentFile: e.target.files?.[0] || null })}
                       className="hidden"
+                      disabled={isSaving || uploadingSermonFile?.type === 'document'}
                     />
                   </label>
                 </div>
@@ -2716,18 +2665,21 @@ const Events = () => {
             </div>
 
             <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <button
+              <LoadingButton
                 type="submit"
-                disabled={sermonLoading === 'saving'}
+                loading={isSaving}
+                disabled={isSaving}
                 className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                loadingText={editingSermon ? 'Updating...' : 'Creating...'}
               >
                 <BookOpen className="h-4 w-4" />
-                {sermonLoading === 'saving' ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
-              </button>
+                {editingSermon ? 'Update Sermon' : 'Save Sermon'}
+              </LoadingButton>
               <button
                 type="button"
                 onClick={closeSermonModal}
-                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                disabled={isSaving}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
@@ -2786,7 +2738,7 @@ const Events = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <Loader2 className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
@@ -2826,6 +2778,9 @@ const Events = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+      <GlobalLoadingOverlay />
+      <DataSendingIndicators />
+      
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -2833,34 +2788,31 @@ const Events = () => {
               Events & Sermons
             </h1>
             <p className="text-gray-600 dark:text-gray-400">Manage church events and sermons</p>
-            <div className="mt-2 flex gap-2 flex-wrap">
+            <div className="mt-2">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                 {isAdmin?.() ? 'Administrator' : isPastor?.() ? 'Pastor' : 'Member'}
               </span>
             </div>
           </div>
-          <div className="flex gap-3 flex-wrap">
-            <button 
+          <div className="flex gap-3">
+            <LoadingButton
+              loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'sermon'}
               onClick={() => setShowSermonList(!showSermonList)}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+              loadingText="Loading..."
             >
               <BookOpen className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
               {showSermonList ? 'Hide Sermons' : 'View Sermons'}
-            </button>
-            <button
-              onClick={autoSyncToCloud}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
-            >
-              <Upload className="h-5 w-5" />
-              Sync All to Cloud
-            </button>
-            <button 
+            </LoadingButton>
+            <LoadingButton
+              loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
               onClick={() => setShowEventForm(!showEventForm)}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+              loadingText="Loading..."
             >
               <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
               {showEventForm ? 'Cancel' : 'Create Event'}
-            </button>
+            </LoadingButton>
           </div>
         </div>
 
@@ -2880,13 +2832,15 @@ const Events = () => {
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sermons</h2>
-              <button
+              <LoadingButton
+                loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'sermon'}
                 onClick={() => openSermonModal()}
                 className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+                loadingText="Loading..."
               >
                 <Plus className="h-4 w-4" />
                 Add Sermon
-              </button>
+              </LoadingButton>
             </div>
 
             {sermons.length === 0 ? (
@@ -2909,26 +2863,30 @@ const Events = () => {
                         </p>
                       </div>
                       <div className="flex gap-1">
-                        <button
+                        <LoadingButton
+                          loading={operationInProgress?.type === 'update' && operationInProgress?.entity === 'sermon' && operationInProgress?.id === sermon.id}
                           onClick={() => openSermonModal(undefined, sermon)}
                           className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
                           title="Edit Sermon"
-                          disabled={sermonLoading === sermon.id}
+                          loadingText=""
+                          loadingClassName="h-4 w-4"
                         >
                           <Edit className="h-4 w-4 text-blue-500" />
-                        </button>
-                        <button
+                        </LoadingButton>
+                        <LoadingButton
+                          loading={sermonLoading === sermon.id}
                           onClick={() => handleDeleteSermon(sermon.id)}
                           className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
                           title="Delete Sermon"
-                          disabled={sermonLoading === sermon.id}
+                          loadingText=""
+                          loadingClassName="h-4 w-4"
                         >
                           {sermonLoading === sermon.id ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500" />
+                            <Loader2 className="h-4 w-4 text-red-500 animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4 text-red-500" />
                           )}
-                        </button>
+                        </LoadingButton>
                       </div>
                     </div>
 
@@ -2960,18 +2918,20 @@ const Events = () => {
                             Video
                           </a>
                           {hasAccess() && (
-                            <button
+                            <LoadingButton
+                              loading={sermonLoading === `remove-video-${sermon.id}`}
                               onClick={() => removeSermonFile(sermon.id, 'video')}
                               className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
                               title="Remove Video"
-                              disabled={sermonLoading === `remove-video-${sermon.id}`}
+                              loadingText=""
+                              loadingClassName="h-3 w-3"
                             >
                               {sermonLoading === `remove-video-${sermon.id}` ? (
-                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
+                                <Loader2 className="h-3 w-3 text-red-500 animate-spin" />
                               ) : (
                                 <X className="h-3 w-3 text-red-500" />
                               )}
-                            </button>
+                            </LoadingButton>
                           )}
                         </div>
                       )}
@@ -2987,18 +2947,20 @@ const Events = () => {
                             Notes
                           </a>
                           {hasAccess() && (
-                            <button
+                            <LoadingButton
+                              loading={sermonLoading === `remove-document-${sermon.id}`}
                               onClick={() => removeSermonFile(sermon.id, 'document')}
                               className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
                               title="Remove Document"
-                              disabled={sermonLoading === `remove-document-${sermon.id}`}
+                              loadingText=""
+                              loadingClassName="h-3 w-3"
                             >
                               {sermonLoading === `remove-document-${sermon.id}` ? (
-                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
+                                <Loader2 className="h-3 w-3 text-red-500 animate-spin" />
                               ) : (
                                 <X className="h-3 w-3 text-red-500" />
                               )}
-                            </button>
+                            </LoadingButton>
                           )}
                         </div>
                       )}
@@ -3022,6 +2984,7 @@ const Events = () => {
                       type="button"
                       onClick={() => setEventFormData({ ...eventFormData, eventType: 'sunday', name: 'Sunday' })}
                       className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200"
+                      disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                     >
                       <CalendarIcon className="h-8 w-8 text-blue-600" />
                       <div className="text-left">
@@ -3033,6 +2996,7 @@ const Events = () => {
                       type="button"
                       onClick={() => setEventFormData({ ...eventFormData, eventType: 'other', name: '' })}
                       className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200"
+                      disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                     >
                       <Plus className="h-8 w-8 text-purple-600" />
                       <div className="text-left">
@@ -3054,6 +3018,7 @@ const Events = () => {
                       type="button"
                       onClick={() => setEventFormData({ ...eventFormData, eventType: '', name: '' })}
                       className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm underline"
+                      disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                     >
                       Change type
                     </button>
@@ -3076,6 +3041,7 @@ const Events = () => {
                       className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                       placeholder="Enter event name"
                       required
+                      disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                     />
                   </div>
                 )}
@@ -3087,6 +3053,7 @@ const Events = () => {
                     onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Event topic or theme"
+                    disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -3097,6 +3064,7 @@ const Events = () => {
                     onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     required
+                    disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -3107,6 +3075,7 @@ const Events = () => {
                     onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     required
+                    disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                   />
                 </div>
                 <div className="md:col-span-2 space-y-2">
@@ -3117,19 +3086,21 @@ const Events = () => {
                     onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Event location"
+                    disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                   />
                 </div>
 
                 <div className="md:col-span-2 space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
                   <div className="flex flex-col sm:flex-row gap-4">
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                    <label className={`flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1 ${(operationInProgress?.type === 'create' && operationInProgress?.entity === 'event') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       <input
                         type="radio"
                         name="eventScope"
                         checked={eventFormData.isWholeChurch}
                         onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
                         className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                        disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                       />
                       <Building className="h-5 w-5 text-purple-600" />
                       <div>
@@ -3137,13 +3108,14 @@ const Events = () => {
                         <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
                       </div>
                     </label>
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                    <label className={`flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1 ${(operationInProgress?.type === 'create' && operationInProgress?.entity === 'event') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       <input
                         type="radio"
                         name="eventScope"
                         checked={!eventFormData.isWholeChurch}
                         onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
                         className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                        disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                       />
                       <UsersIcon className="h-5 w-5 text-orange-600" />
                       <div>
@@ -3160,7 +3132,7 @@ const Events = () => {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
                       <div className="space-y-2 max-h-40 overflow-y-auto">
                         {cellGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                          <label key={group.id} className={`flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 ${(operationInProgress?.type === 'create' && operationInProgress?.entity === 'event') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <input
                               type="checkbox"
                               checked={eventFormData.targetCellGroups.includes(group.id)}
@@ -3178,6 +3150,7 @@ const Events = () => {
                                 }
                               }}
                               className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                              disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                             />
                             <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
                           </label>
@@ -3188,7 +3161,7 @@ const Events = () => {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
                       <div className="space-y-2 max-h-40 overflow-y-auto">
                         {ministryGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                          <label key={group.id} className={`flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 ${(operationInProgress?.type === 'create' && operationInProgress?.entity === 'event') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <input
                               type="checkbox"
                               checked={eventFormData.targetMinistryGroups.includes(group.id)}
@@ -3206,6 +3179,7 @@ const Events = () => {
                                 }
                               }}
                               className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                              disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                             />
                             <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
                           </label>
@@ -3216,7 +3190,7 @@ const Events = () => {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
                       <div className="space-y-2 max-h-40 overflow-y-auto">
                         {departments.map((dept) => (
-                          <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                          <label key={dept.id} className={`flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 ${(operationInProgress?.type === 'create' && operationInProgress?.entity === 'event') ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             <input
                               type="checkbox"
                               checked={eventFormData.targetDepartments.includes(dept.id)}
@@ -3234,6 +3208,7 @@ const Events = () => {
                                 }
                               }}
                               className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                              disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                             />
                             <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
                           </label>
@@ -3244,17 +3219,20 @@ const Events = () => {
                 )}
               </div>
               <div className="flex gap-3">
-                <button
+                <LoadingButton
                   type="submit"
-                  disabled={loading}
+                  loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
+                  disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
                   className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  loadingText="Creating Event..."
                 >
-                  {loading ? 'Creating...' : 'Create Event'}
-                </button>
+                  Create Event
+                </LoadingButton>
                 <button
                   type="button"
                   onClick={() => setShowEventForm(false)}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                  disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'event'}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
@@ -3267,7 +3245,7 @@ const Events = () => {
 
         {loading && events.length === 0 && (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <Loader2 className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
             <p className="mt-4 text-gray-600 dark:text-gray-400">Loading events...</p>
           </div>
         )}
@@ -3277,6 +3255,7 @@ const Events = () => {
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
+              <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
             </div>
           ) : (
             events.map((event) => {
@@ -3286,6 +3265,9 @@ const Events = () => {
               const StatusIcon = statusBadge.icon;
               const sermon = getSermonForEvent(event.id);
               const stats = getAttendanceStats(event.id);
+              
+              const isCompleting = operationInProgress?.type === 'complete' && operationInProgress?.entity === 'event' && operationInProgress?.id === event.id;
+              const isUploadingPamphlet = uploadingPamphlet === event.id;
               
               return (
                 <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
@@ -3403,13 +3385,15 @@ const Events = () => {
                                 Download
                               </a>
                               {hasAccess() && (
-                                <button
+                                <LoadingButton
+                                  loading={operationInProgress?.type === 'delete' && operationInProgress?.entity === 'pamphlet' && operationInProgress?.id === event.id}
                                   onClick={() => deletePamphlet(event.id)}
                                   className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200"
+                                  loadingText="Deleting..."
                                 >
                                   <X className="h-4 w-4" />
                                   Remove
-                                </button>
+                                </LoadingButton>
                               )}
                             </div>
                           </div>
@@ -3418,9 +3402,18 @@ const Events = () => {
 
                       {hasAccess() && !event.pamphlet_url && (
                         <div className="mt-4">
-                          <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
-                            <Upload className="h-4 w-4" />
-                            {uploadingPamphlet === event.id ? 'Uploading...' : 'Upload Pamphlet'}
+                          <label className={`inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer ${isUploadingPamphlet ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                            {isUploadingPamphlet ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Uploading...
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="h-4 w-4" />
+                                Upload Pamphlet
+                              </>
+                            )}
                             <input
                               type="file"
                               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
@@ -3431,7 +3424,7 @@ const Events = () => {
                                 }
                               }}
                               className="hidden"
-                              disabled={uploadingPamphlet === event.id}
+                              disabled={isUploadingPamphlet}
                             />
                           </label>
                         </div>
@@ -3475,49 +3468,65 @@ const Events = () => {
                           <button
                             onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
                             className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                            disabled={isCompleting || isUploadingPamphlet}
                           >
                             <Plus className="h-4 w-4" />
                             Add Attendee
                           </button>
-                          <button
+                          <LoadingButton
+                            loading={operationInProgress?.type === 'attendance' && operationInProgress?.entity === 'bulk-attendance' && operationInProgress?.id === event.id}
                             onClick={() => openBulkAttendanceModal(event.id)}
+                            disabled={isCompleting || isUploadingPamphlet}
                             className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                            loadingText="Loading..."
                           >
                             <UsersIcon className="h-4 w-4" />
                             Bulk Attendance
-                          </button>
-                          <button
+                          </LoadingButton>
+                          <LoadingButton
+                            loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'newcomer' && operationInProgress?.id === event.id}
                             onClick={() => openNewcomerModal(event.id)}
+                            disabled={isCompleting || isUploadingPamphlet}
                             className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                            loadingText="Loading..."
                           >
                             <User className="h-4 w-4" />
                             Add Newcomer
-                          </button>
+                          </LoadingButton>
                           {hasAccess() && (
-                            <button
+                            <LoadingButton
+                              loading={isCompleting}
                               onClick={() => handleCompleteEvent(event.id)}
+                              disabled={isCompleting || isUploadingPamphlet}
                               className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                              loadingText="Completing..."
                             >
                               <CheckCircle className="h-4 w-4" />
                               Complete Event
-                            </button>
+                            </LoadingButton>
                           )}
                         </>
                       )}
-                      <button
+                      <LoadingButton
+                        loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'sermon'}
                         onClick={() => openSermonModal(event.id)}
+                        disabled={isCompleting || isUploadingPamphlet}
                         className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                        loadingText="Loading..."
                       >
                         <BookOpen className="h-4 w-4" />
                         {sermon ? 'Edit Sermon' : 'Add Sermon'}
-                      </button>
-                      <button
+                      </LoadingButton>
+                      <LoadingButton
+                        loading={operationInProgress?.type === 'sync' && operationInProgress?.entity === 'event' && operationInProgress?.id === event.id}
                         onClick={() => setShowSyncModal(event.id)}
+                        disabled={isCompleting || isUploadingPamphlet}
                         className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                        loadingText="Loading..."
                       >
                         <Upload className="h-4 w-4" />
                         Sync to Cloud
-                      </button>
+                      </LoadingButton>
                       <button
                         onClick={() => openAttendeeModal('present', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
@@ -3553,6 +3562,7 @@ const Events = () => {
                                 onFocus={() => setIsMemberDropdownOpen(true)}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                                 placeholder="Search members..."
+                                disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee'}
                               />
                               <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
                               
@@ -3598,6 +3608,7 @@ const Events = () => {
                                 onFocus={() => setIsInviterDropdownOpen(true)}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                                 placeholder="Search inviter..."
+                                disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee'}
                               />
                               <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
                               
@@ -3635,6 +3646,7 @@ const Events = () => {
                             checked={attendeeFormData.firstTime}
                             onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
                             className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee'}
                           />
                           <label htmlFor="firstTime" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                             First time attending an event
@@ -3666,6 +3678,7 @@ const Events = () => {
                                   setSearchTerm('');
                                 }}
                                 className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                                disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee'}
                               >
                                 <X className="h-4 w-4 text-red-500" />
                               </button>
@@ -3697,6 +3710,7 @@ const Events = () => {
                                   setInviterSearchTerm('');
                                 }}
                                 className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                                disabled={operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee'}
                               >
                                 <X className="h-4 w-4 text-red-500" />
                               </button>
@@ -3705,14 +3719,16 @@ const Events = () => {
                         )}
 
                         <div className="flex gap-3">
-                          <button
+                          <LoadingButton
                             type="submit"
-                            disabled={loading || !attendeeFormData.memberId}
+                            loading={operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee'}
+                            disabled={!attendeeFormData.memberId || (operationInProgress?.type === 'create' && operationInProgress?.entity === 'attendee')}
                             className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            loadingText="Adding..."
                           >
                             <Plus className="h-4 w-4" />
-                            {loading ? 'Adding...' : 'Add Attendee'}
-                          </button>
+                            Add Attendee
+                          </LoadingButton>
                           <button
                             type="button"
                             onClick={resetAttendeeForm}
