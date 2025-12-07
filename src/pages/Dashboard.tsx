@@ -151,7 +151,7 @@ const Dashboard = () => {
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [_cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
 
@@ -280,13 +280,12 @@ const Dashboard = () => {
       setDebugInfo(prev => prev + ' Starting to load absent members... ');
       
       // Get all Sunday Service events in descending order
-      // First, let's try to find Sunday services by name pattern
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
         .or('name.ilike.%sunday%,name.ilike.%service%')
         .order('event_date', { ascending: false })
-        .limit(10);
+        .limit(20);
 
       if (eventsError) {
         console.error('Error loading Sunday events:', eventsError);
@@ -297,21 +296,44 @@ const Dashboard = () => {
 
       setDebugInfo(prev => prev + ` Found ${sundayEvents?.length || 0} potential Sunday events. `);
       
-      if (!sundayEvents || sundayEvents.length < 2) {
-        setDebugInfo(prev => prev + ' Not enough Sunday events found (need at least 2). ');
+      if (!sundayEvents || sundayEvents.length === 0) {
+        setDebugInfo(prev => prev + ' No Sunday events found. ');
         setAbsentMembers([]);
         return;
       }
 
-      // Get the last 2 events that are likely Sunday services
-      const lastTwoEvents = sundayEvents.slice(0, 2);
-      setDebugInfo(prev => prev + ` Using last 2 events: ${lastTwoEvents.map(e => e.name).join(', ')} `);
+      // Get unique dates and pick one event per date (to handle duplicates)
+      const uniqueDatesMap = new Map<string, string>();
+      sundayEvents.forEach(e => {
+        if (!uniqueDatesMap.has(e.event_date)) {
+          uniqueDatesMap.set(e.event_date, e.id);
+        }
+      });
+      
+      const uniqueDates = Array.from(uniqueDatesMap.keys()).sort((a, b) => 
+        new Date(b).getTime() - new Date(a).getTime()
+      );
+      
+      if (uniqueDates.length < 2) {
+        setDebugInfo(prev => prev + ` Not enough unique Sunday dates (found ${uniqueDates.length}, need 2). `);
+        setAbsentMembers([]);
+        return;
+      }
 
-      // Get attendance for the last 2 events
+      // Get the last 2 unique Sunday dates
+      const lastTwoSundayDates = uniqueDates.slice(0, 2);
+      setDebugInfo(prev => prev + ` Using last 2 Sunday dates: ${lastTwoSundayDates.join(', ')} `);
+
+      // Get all event IDs for these dates (in case of duplicates)
+      const eventIdsForLastTwoSundays = sundayEvents
+        .filter(e => lastTwoSundayDates.includes(e.event_date))
+        .map(e => e.id);
+
+      // Get attendance records for these events - check for 'absent' status
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
-        .select('members_id, event_id')
-        .in('event_id', lastTwoEvents.map(e => e.id));
+        .select('members_id, event_id, attendance_status')
+        .in('event_id', eventIdsForLastTwoSundays);
 
       if (attendanceError) {
         console.error('Error loading attendances:', attendanceError);
@@ -320,37 +342,43 @@ const Dashboard = () => {
         return;
       }
 
-      setDebugInfo(prev => prev + ` Found ${attendances?.length || 0} attendance records. `);
+      setDebugInfo(prev => prev + ` Found ${attendances?.length || 0} attendance records for last 2 Sundays. `);
 
-      // Also get last attendance date for each member
-      const { data: lastAttendances, error: lastAttendanceError } = await supabase
-        .from('event_attendees')
-        .select('members_id, events!inner(event_date)')
-        .in('event_id', sundayEvents.map(e => e.id))
-        .order('events(event_date)', { ascending: false });
-
-      if (lastAttendanceError) {
-        console.error('Error loading last attendances:', lastAttendanceError);
-        setDebugInfo(prev => prev + ' Error loading last attendances: ' + lastAttendanceError.message);
-      }
-
-      // Find members who were absent for both services
+      // Find members who were absent for both Sundays
       const absent: AbsentMember[] = [];
       
       allMembers.forEach(member => {
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
-        // Check if member was absent for both events (no attendance record = absent)
-        const absentCount = lastTwoEvents.filter(event => {
-          const hasAttendance = memberAttendances.some(a => a.event_id === event.id);
-          return !hasAttendance; // No attendance record means absent
-        }).length;
+        // Count absences across the last 2 Sunday dates
+        let absentCount = 0;
+        
+        lastTwoSundayDates.forEach(sundayDate => {
+          // Get all event IDs for this Sunday date
+          const eventsOnThisDate = sundayEvents
+            .filter(e => e.event_date === sundayDate)
+            .map(e => e.id);
+          
+          // Check if member has any attendance record for this date
+          const attendanceForDate = memberAttendances.filter(a => 
+            eventsOnThisDate.includes(a.event_id)
+          );
+          
+          if (attendanceForDate.length === 0) {
+            // No record at all means absent
+            absentCount++;
+          } else {
+            // Check if all records show 'absent' status
+            const allAbsent = attendanceForDate.every(a => 
+              a.attendance_status === 'absent'
+            );
+            if (allAbsent) {
+              absentCount++;
+            }
+          }
+        });
 
-        if (absentCount === 2) {
-          // Find the member's last attendance date
-          const lastAttendance = lastAttendances?.find(a => a.members_id === member.id);
-          const lastAttendedDate = lastAttendance?.events?.event_date || null;
-
+        if (absentCount >= 2) {
           // Get cell group name
           const cellGroup = cellGroupsData.find(g => g.id === member.cell_group_id);
           
@@ -359,8 +387,8 @@ const Dashboard = () => {
             name: member.name,
             surname: member.surname,
             phone: member.phone,
-            consecutiveAbsences: 2,
-            lastAttendedDate,
+            consecutiveAbsences: absentCount,
+            lastAttendedDate: null,
             cellGroupId: member.cell_group_id,
             cellGroupName: cellGroup?.name || null,
             status: member.status
@@ -368,7 +396,7 @@ const Dashboard = () => {
         }
       });
 
-      setDebugInfo(prev => prev + ` Found ${absent.length} absent members. `);
+      setDebugInfo(prev => prev + ` Found ${absent.length} members absent for 2 consecutive Sundays. `);
       setAbsentMembers(absent);
     } catch (error) {
       console.error('Error loading absent members:', error);
@@ -616,11 +644,11 @@ const Dashboard = () => {
     setError(null);
   };
 
-  const openMemberDetail = (member: Member) => {
+  const openMemberDetail = (_member: Member) => {
     setActiveModal('memberDetail');
   };
 
-  const openEventDetail = (event: Event) => {
+  const openEventDetail = (_event: Event) => {
     setActiveModal('eventDetail');
   };
 
