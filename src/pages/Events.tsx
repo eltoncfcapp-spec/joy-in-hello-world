@@ -2,6 +2,7 @@ import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+import debounce from 'lodash/debounce';
 
 interface Event {
   id: string;
@@ -83,6 +84,15 @@ interface EventAttendee {
   } | null;
 }
 
+interface SyncLog {
+  id: string;
+  event_id: string;
+  sync_data: any;
+  synced_at: string;
+  synced_by: string;
+  synced_by_name: string;
+}
+
 const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
@@ -117,6 +127,8 @@ const Events = () => {
   const attendanceNotesRef = useRef<Record<string, string>>({});
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [savingProgress, setSavingProgress] = useState({ current: 0, total: 0, isSaving: false });
+  const [syncHistory, setSyncHistory] = useState<SyncLog[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
@@ -165,6 +177,21 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
+  // Debounced search functions
+  const debouncedSearch = useCallback(
+    debounce((value: string) => {
+      setSearchTerm(value);
+    }, 300),
+    []
+  );
+
+  const debouncedInviterSearch = useCallback(
+    debounce((value: string) => {
+      setInviterSearchTerm(value);
+    }, 300),
+    []
+  );
+
   // Helper function to fix date timezone issue
   const fixTimezoneIssue = (dateString: string) => {
     if (!dateString) return dateString;
@@ -194,29 +221,56 @@ const Events = () => {
     return `${year}-${month}-${day}`;
   };
 
-  // Helper function to initialize bulk attendance with all target members as ABSENT by default
-  const initializeBulkAttendance = async (eventId: string) => {
+  // Optimized helper function to initialize bulk attendance
+  const initializeBulkAttendance = useCallback(async (eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return {};
 
     const initialAttendance: Record<string, 'present' | 'absent'> = {};
+    
+    // Create sets for faster lookups
+    const targetCellGroups = new Set(event.target_groups || []);
+    const targetDepartments = new Set(event.target_departments || []);
 
-    for (const member of members) {
-      if (member.status === 'not_attending') continue;
+    // Filter members in memory (much faster)
+    const filteredMembers = members.filter(member => {
+      if (member.status === 'not_attending') return false;
       
-      const shouldAttend = await isMemberInTargetGroups(member, event);
-      if (shouldAttend) {
-        initialAttendance[member.id] = 'absent';
-      }
-    }
+      if (event.is_whole_church) return true;
 
+      // Check cell groups
+      if (member.cell_group_id && targetCellGroups.has(member.cell_group_id)) {
+        return true;
+      }
+
+      // Check ministry groups
+      if (member.ministry_group_id && targetDepartments.has(member.ministry_group_id)) {
+        return true;
+      }
+
+      // Check departments
+      if (member.department_ids && member.department_ids.some(deptId => targetDepartments.has(deptId))) {
+        return true;
+      }
+
+      return false;
+    });
+
+    // Initialize all filtered members as absent
+    filteredMembers.forEach(member => {
+      initialAttendance[member.id] = 'absent';
+    });
+
+    // Get existing attendees and update their status
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
-      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+      if (attendee.attendance_status === 'present' || attendee.attendance_status === 'absent') {
+        initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+      }
     });
 
     return initialAttendance;
-  };
+  }, [events, members]);
 
   // ==================== BATCH ATTENDANCE FUNCTIONS ====================
 
@@ -242,7 +296,7 @@ const Events = () => {
     setError(null);
     setSuccess(null);
 
-    const chunkSize = 50; // Process 50 members at a time
+    const chunkSize = 50;
     const memberIds = Object.keys(bulkAttendance);
     const results = [];
     let successCount = 0;
@@ -565,6 +619,25 @@ const Events = () => {
     }
   }, []);
 
+  const fetchSyncHistory = useCallback(async (eventId: string) => {
+    try {
+      setLoadingHistory(true);
+      const { data, error } = await supabase
+        .from('event_sync_logs')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('synced_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setSyncHistory(data || []);
+    } catch (error: any) {
+      console.error('Error fetching sync history:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
@@ -598,54 +671,11 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('department_members')
-        .select('id')
-        .eq('member_id', memberId)
-        .eq('department_id', departmentId)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return false;
-        }
-        throw error;
-      }
-
-      return !!data;
-    } catch (error) {
-      console.error('Error checking department membership:', error);
-      return false;
+  useEffect(() => {
+    if (showSyncModal) {
+      fetchSyncHistory(showSyncModal);
     }
-  };
-
-  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
-    if (event.is_whole_church) return true;
-
-    if (event.target_groups && event.target_groups.length > 0) {
-      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
-        return true;
-      }
-    }
-
-    if (event.target_departments && event.target_departments.length > 0) {
-      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
-        return true;
-      }
-
-      if (member.department_ids && member.department_ids.length > 0) {
-        for (const deptId of event.target_departments) {
-          if (member.department_ids.includes(deptId)) {
-            return true;
-          }
-        }
-      }
-    }
-
-    return false;
-  };
+  }, [showSyncModal, fetchSyncHistory]);
 
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
@@ -696,11 +726,6 @@ const Events = () => {
     }
   };
 
-  // Old function - replaced with chunking version
-  // const saveBulkAttendance = async (eventId: string) => {
-  //   // This is now replaced by saveAttendanceWithChunking
-  // };
-
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
@@ -724,6 +749,7 @@ const Events = () => {
       if (!event) throw new Error('Event not found');
 
       const eventAttendees = getEventAttendees(eventId);
+      const stats = getAttendanceStats(eventId);
 
       const syncData = {
         event_id: event.id,
@@ -731,15 +757,22 @@ const Events = () => {
         event_date: event.event_date,
         event_time: event.event_time,
         location: event.location,
+        topic: event.topic,
         is_completed: event.is_completed,
+        is_whole_church: event.is_whole_church,
+        target_groups: event.target_groups,
+        target_departments: event.target_departments,
         total_attendees: eventAttendees.length,
-        present_count: getAttendanceStats(eventId).present,
-        absent_count: getAttendanceStats(eventId).absent,
+        present_count: stats.present,
+        absent_count: stats.absent,
+        first_timers_count: stats.firstTimers,
         attendees: eventAttendees.map(attendee => ({
           member_id: attendee.members_id,
           member_name: `${attendee.members.name} ${attendee.members.surname}`,
           status: attendee.attendance_status,
           first_time: attendee.first_time,
+          invited_by: attendee.invited_by_member ? 
+            `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null,
           attended_at: attendee.attended_at
         })),
         synced_at: new Date().toISOString(),
@@ -747,6 +780,19 @@ const Events = () => {
         synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
       };
 
+      // Store sync data in the database
+      const { error: syncError } = await supabase
+        .from('event_sync_logs')
+        .insert([{
+          event_id: eventId,
+          sync_data: syncData,
+          synced_by: user?.id,
+          synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+        }]);
+
+      if (syncError) throw syncError;
+
+      // Also update the event's updated_at timestamp
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
@@ -756,10 +802,11 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
+      // Refresh sync history
+      await fetchSyncHistory(eventId);
+
       setSuccess(`Event "${event.name}" successfully synced to cloud!`);
       setTimeout(() => setSuccess(null), 3000);
-      
-      setShowSyncModal(null);
       
     } catch (error: any) {
       console.error('Error syncing event to cloud:', error);
@@ -1248,12 +1295,32 @@ const Events = () => {
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
       const absentMemberIds: string[] = [];
+      const targetCellGroups = new Set(event.target_groups || []);
+      const targetDepartments = new Set(event.target_departments || []);
 
       for (const member of members) {
         if (member.status === 'not_attending') continue;
         if (attendeeIds.has(member.id)) continue;
 
-        const shouldAttend = await isMemberInTargetGroups(member, event);
+        let shouldAttend = false;
+        
+        if (event.is_whole_church) {
+          shouldAttend = true;
+        } else {
+          // Check cell groups
+          if (member.cell_group_id && targetCellGroups.has(member.cell_group_id)) {
+            shouldAttend = true;
+          }
+          // Check ministry groups
+          if (member.ministry_group_id && targetDepartments.has(member.ministry_group_id)) {
+            shouldAttend = true;
+          }
+          // Check departments
+          if (member.department_ids && member.department_ids.some(deptId => targetDepartments.has(deptId))) {
+            shouldAttend = true;
+          }
+        }
+
         if (shouldAttend) {
           absentMemberIds.push(member.id);
         }
@@ -1776,7 +1843,7 @@ const Events = () => {
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
             <div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
@@ -1801,7 +1868,7 @@ const Events = () => {
               <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
-                  Event details (name, date, time, location)
+                  Event details (name, date, time, location, topic)
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
@@ -1839,6 +1906,40 @@ const Events = () => {
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
               </div>
+            </div>
+
+            {/* Sync History */}
+            <div className="mb-6">
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Sync History</h4>
+              {loadingHistory ? (
+                <div className="text-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                </div>
+              ) : syncHistory.length === 0 ? (
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                  No sync history yet
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-60 overflow-y-auto">
+                  {syncHistory.map((sync) => (
+                    <div key={sync.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {new Date(sync.synced_at).toLocaleString()}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            By: {sync.synced_by_name}
+                          </div>
+                        </div>
+                        <div className="text-sm text-gray-500 dark:text-gray-500">
+                          {sync.sync_data?.attendees?.length || 0} attendees
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -1886,18 +1987,46 @@ const Events = () => {
     if (!event) return null;
 
     const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    const [loadingTargetMembers, setLoadingTargetMembers] = useState(true);
     
     useEffect(() => {
       const loadTargetMembers = async () => {
-        const membersList: Member[] = [];
-        for (const member of members) {
-          if (member.status === 'not_attending') continue;
-          const shouldAttend = await isMemberInTargetGroups(member, event);
-          if (shouldAttend) {
-            membersList.push(member);
-          }
+        setLoadingTargetMembers(true);
+        try {
+          // Create sets for faster lookups
+          const targetCellGroups = new Set(event.target_groups || []);
+          const targetDepartments = new Set(event.target_departments || []);
+          
+          // Filter members in memory (much faster than async checks)
+          const filteredMembers = members.filter(member => {
+            if (member.status === 'not_attending') return false;
+            
+            if (event.is_whole_church) return true;
+
+            // Check cell groups
+            if (member.cell_group_id && targetCellGroups.has(member.cell_group_id)) {
+              return true;
+            }
+
+            // Check ministry groups
+            if (member.ministry_group_id && targetDepartments.has(member.ministry_group_id)) {
+              return true;
+            }
+
+            // Check departments
+            if (member.department_ids && member.department_ids.some(deptId => targetDepartments.has(deptId))) {
+              return true;
+            }
+
+            return false;
+          });
+          
+          setTargetMembers(filteredMembers);
+        } catch (error) {
+          console.error('Error loading target members:', error);
+        } finally {
+          setLoadingTargetMembers(false);
         }
-        setTargetMembers(membersList);
       };
       
       loadTargetMembers();
@@ -1918,7 +2047,7 @@ const Events = () => {
                 Bulk Attendance - {event.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Manage attendance for all target members - {targetMembers.length} members found
+                {loadingTargetMembers ? 'Loading members...' : `Manage attendance for ${targetMembers.length} target members`}
               </p>
               <div className="mt-2 text-sm text-blue-600 dark:text-blue-400">
                 <span className="font-medium">Note:</span> All members are marked as ABSENT by default. Click "Present" for members who attended.
@@ -2007,7 +2136,12 @@ const Events = () => {
             </div>
 
             <div className="space-y-3">
-              {targetMembers.length === 0 ? (
+              {loadingTargetMembers ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-3 text-gray-600 dark:text-gray-400">Loading target members...</span>
+                </div>
+              ) : targetMembers.length === 0 ? (
                 <div className="text-center py-8">
                   <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
@@ -3362,7 +3496,7 @@ const Events = () => {
                                 type="text"
                                 value={searchTerm}
                                 onChange={(e) => {
-                                  setSearchTerm(e.target.value);
+                                  debouncedSearch(e.target.value);
                                   setIsMemberDropdownOpen(true);
                                 }}
                                 onFocus={() => setIsMemberDropdownOpen(true)}
@@ -3407,7 +3541,7 @@ const Events = () => {
                                 type="text"
                                 value={inviterSearchTerm}
                                 onChange={(e) => {
-                                  setInviterSearchTerm(e.target.value);
+                                  debouncedInviterSearch(e.target.value);
                                   setIsInviterDropdownOpen(true);
                                 }}
                                 onFocus={() => setIsInviterDropdownOpen(true)}
