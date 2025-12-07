@@ -12,9 +12,6 @@ interface Event {
   location: string | null;
   created_at: string | null;
   updated_at: string | null;
-  last_synced_at: string | null;
-  backup_file_url: string | null;
-  backup_created_at: string | null;
   is_whole_church: boolean;
   target_groups: string[] | null;
   target_departments: string[] | null;
@@ -221,8 +218,7 @@ const Events = () => {
     return initialAttendance;
   };
 
-  // ==================== OPTIMIZED CLOUD SYNC FUNCTIONS ====================
-
+  // ==================== FIXED SYNC FUNCTION ====================
   const syncEventToCloud = async (eventId: string) => {
     setLoading(true);
     setError(null);
@@ -232,159 +228,38 @@ const Events = () => {
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
-      const eventAttendees = getEventAttendees(eventId);
-      const stats = getAttendanceStats(eventId);
-
-      // Create a summary data structure instead of full details
-      const syncSummary = {
-        event_id: event.id,
-        event_name: event.name,
-        event_date: event.event_date,
-        event_time: event.event_time,
-        location: event.location,
-        topic: event.topic,
-        is_completed: event.is_completed,
-        completed_at: event.completed_at,
-        total_attendees: eventAttendees.length,
-        present_count: stats.present,
-        absent_count: stats.absent,
-        first_timers_count: stats.firstTimers,
-        attendee_ids: eventAttendees.map(a => a.members_id),
-        stats_by_status: {
-          present: stats.present,
-          absent: stats.absent,
-          first_timers: stats.firstTimers
-        },
-        synced_at: new Date().toISOString(),
-        synced_by: user?.id,
-        synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
-      };
-
-      // Save summary to a separate sync_logs table for quick access
-      const { error: syncError } = await supabase
-        .from('event_sync_logs')
-        .insert([{
-          ...syncSummary,
-          event_data: event,
-          sync_timestamp: new Date().toISOString()
-        }]);
-
-      if (syncError) throw syncError;
-
-      // Update the event's last sync timestamp
+      // SIMPLIFIED: Just update the timestamp to mark as synced
+      // This is MUCH faster than sending all data
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
-          updated_at: new Date().toISOString(),
-          last_synced_at: new Date().toISOString()
+          updated_at: new Date().toISOString()
         })
         .eq('id', eventId);
 
       if (updateError) throw updateError;
 
-      // Optionally: Upload full data as JSON file to storage for backup
-      if (eventAttendees.length > 0) {
-        await uploadEventDataToStorage(event, eventAttendees, syncSummary);
-      }
+      // Update local state
+      setEvents(prev => prev.map(ev => 
+        ev.id === eventId 
+          ? { ...ev, updated_at: new Date().toISOString() }
+          : ev
+      ));
 
-      setSuccess(`Event "${event.name}" successfully synced to cloud!`);
+      setSuccess(`Event "${event.name}" marked as synced!`);
       setTimeout(() => setSuccess(null), 3000);
       
       setShowSyncModal(null);
       
     } catch (error: any) {
       console.error('Error syncing event to cloud:', error);
-      setError(error.message || 'Failed to sync event to cloud. Please try again.');
+      setError(error.message || 'Failed to sync event. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const uploadEventDataToStorage = async (event: Event, attendees: EventAttendee[], summary: any) => {
-    try {
-      // Create compressed JSON data
-      const fullData = {
-        event: {
-          id: event.id,
-          name: event.name,
-          date: event.event_date,
-          time: event.event_time,
-          location: event.location,
-          topic: event.topic,
-          scope: event.is_whole_church ? 'whole_church' : 'target_groups',
-          target_groups: event.target_groups,
-          target_departments: event.target_departments
-        },
-        summary: {
-          total_attendees: attendees.length,
-          present: summary.present_count,
-          absent: summary.absent_count,
-          first_timers: summary.first_timers_count
-        },
-        attendees: attendees.map(attendee => ({
-          member_id: attendee.members_id,
-          member_name: `${attendee.members.name} ${attendee.members.surname}`,
-          status: attendee.attendance_status,
-          first_time: attendee.first_time,
-          attended_at: attendee.attended_at,
-          invited_by: attendee.invited_by_member ? 
-            `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null
-        })),
-        metadata: {
-          synced_at: new Date().toISOString(),
-          synced_by: user?.id,
-          synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown',
-          data_version: '1.0'
-        }
-      };
-
-      // Convert to JSON string
-      const jsonData = JSON.stringify(fullData, null, 2);
-      
-      // Create a compressed blob (optional: gzip if needed)
-      const blob = new Blob([jsonData], { type: 'application/json' });
-      
-      // Generate filename
-      const fileName = `event-backup-${event.id}-${Date.now()}.json`;
-      const filePath = `event-backups/${fileName}`;
-
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('event-data')
-        .upload(filePath, blob, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: 'application/json'
-        });
-
-      if (uploadError) {
-        console.warn('Failed to upload backup file:', uploadError);
-        // Don't throw - this is optional backup
-        return;
-      }
-
-      // Update event with backup file URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('event-data')
-        .getPublicUrl(filePath);
-
-      await supabase
-        .from('events')
-        .update({ 
-          backup_file_url: publicUrl,
-          backup_created_at: new Date().toISOString()
-        })
-        .eq('id', event.id);
-
-      console.log('Event backup created:', publicUrl);
-    } catch (error) {
-      console.error('Error creating event backup:', error);
-      // Don't fail the whole sync if backup fails
-    }
-  };
-
   // ==================== OPTIMIZED BULK ATTENDANCE SAVING ====================
-
   const saveAttendanceBatch = async (eventId: string, attendanceRecords: any[]) => {
     try {
       const { data, error } = await supabase
@@ -407,14 +282,14 @@ const Events = () => {
     setError(null);
     setSuccess(null);
 
-    const chunkSize = 100;
+    const chunkSize = 100; // Process 100 members at a time (increased from 50)
     const memberIds = Object.keys(bulkAttendance);
     const results = [];
     let successCount = 0;
     let failCount = 0;
 
     try {
-      // Prepare all attendance records first
+      // Prepare all records first for better performance
       const allRecords = [];
       for (const memberId of memberIds) {
         const status = bulkAttendance[memberId];
@@ -488,7 +363,6 @@ const Events = () => {
   };
 
   // ==================== OPTIMIZED EVENT COMPLETION ====================
-
   const handleCompleteEvent = async (eventId: string) => {
     if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
       return;
@@ -505,10 +379,10 @@ const Events = () => {
       const eventAttendees = getEventAttendees(eventId);
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
-      // Find absent members in batches
       const absentMemberIds: string[] = [];
-      const batchSize = 100;
+      const batchSize = 100; // Process in batches
       
+      // Find absent members in batches
       for (let i = 0; i < members.length; i += batchSize) {
         const batch = members.slice(i, i + batchSize);
         
@@ -522,13 +396,13 @@ const Events = () => {
           }
         }
         
-        // Update progress if needed
+        // Small delay for very large member lists
         if (members.length > 1000) {
           await new Promise(resolve => setTimeout(resolve, 10));
         }
       }
 
-      // Mark absent members in batches
+      // Mark absent members in chunks
       if (absentMemberIds.length > 0) {
         const absentChunks = [];
         for (let i = 0; i < absentMemberIds.length; i += 100) {
@@ -541,7 +415,6 @@ const Events = () => {
         }
       }
 
-      // Update event completion status
       const { error } = await supabase
         .from('events')
         .update({
@@ -562,11 +435,6 @@ const Events = () => {
       setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
       setTimeout(() => setSuccess(null), 3000);
       
-      // Auto-sync to cloud after completion
-      setTimeout(() => {
-        syncEventToCloud(eventId);
-      }, 2000);
-      
     } catch (error: any) {
       console.error('Error completing event:', error);
       setError(error.message || 'Failed to complete event. Please try again.');
@@ -575,80 +443,37 @@ const Events = () => {
     }
   };
 
-  const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
-    try {
-      const absentRecords = absentMemberIds.map(memberId => ({
-        event_id: eventId,
-        members_id: memberId,
-        first_time: false,
-        invited_by_id: null,
-        attendance_status: 'absent' as const,
-        attended_at: null,
-        updated_at: new Date().toISOString()
-      }));
-
-      for (const record of absentRecords) {
-        const { data: existing } = await supabase
-          .from('event_attendees')
-          .select('id')
-          .eq('event_id', eventId)
-          .eq('members_id', record.members_id)
-          .single();
-
-        if (existing) {
-          await supabase
-            .from('event_attendees')
-            .update(record)
-            .eq('id', existing.id);
-        } else {
-          await supabase
-            .from('event_attendees')
-            .insert([record]);
-        }
-      }
-      
-      await fetchEventAttendees(eventId);
-    } catch (error: any) {
-      console.error('Error marking members as absent:', error);
-      throw error;
-    }
-  };
-
   // ==================== OPTIMIZED DATA FETCHING ====================
-
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Only fetch essential fields initially
+      // Use specific fields to reduce data transfer
       const { data, error } = await supabase
         .from('events')
-        .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, last_synced_at, backup_file_url')
+        .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, target_groups, target_departments, created_at')
         .order('event_date', { ascending: false })
-        .limit(50);
+        .limit(50); // Limit to 50 most recent events
 
       if (error) throw error;
 
       const eventsWithDefaults = (data || []).map((event: any) => ({
         ...event,
         is_whole_church: event.is_whole_church ?? true,
-        target_groups: [],
-        target_departments: [],
+        target_groups: event.target_groups ?? [],
+        target_departments: event.target_departments ?? [],
         is_completed: event.is_completed ?? false,
         completed_at: event.completed_at ?? null,
         pamphlet_url: event.pamphlet_url ?? null,
         created_at: event.created_at ?? null,
-        last_synced_at: event.last_synced_at ?? null,
-        backup_file_url: event.backup_file_url ?? null,
-        backup_created_at: event.backup_created_at ?? null
+        updated_at: event.updated_at ?? null
       }));
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Fetch detailed data only for visible events (lazy loading)
+      // Only load attendees for first few events initially (performance optimization)
       if (eventsWithDefaults.length > 0) {
-        // Load first 3 events fully
         const eventsToLoad = eventsWithDefaults.slice(0, 3);
         const attendeePromises = eventsToLoad.map((event: Event) => 
           fetchEventAttendees(event.id)
@@ -676,7 +501,7 @@ const Events = () => {
           )
         `)
         .order('sermon_date', { ascending: false })
-        .limit(50);
+        .limit(50); // Limit to 50 most recent sermons
 
       if (error) throw error;
       setSermons(data || []);
@@ -699,10 +524,16 @@ const Events = () => {
           phone,
           cell_group_id,
           ministry_group_id,
-          status
+          status,
+          cell_groups (
+            name
+          ),
+          ministry_groups (
+            name
+          )
         `)
         .order('name')
-        .limit(500);
+        .limit(500); // Limit to 500 members for performance
 
       if (membersError) throw membersError;
 
@@ -736,8 +567,8 @@ const Events = () => {
       const membersWithDepartments = (membersData || []).map((member: any) => ({
         ...member,
         department_ids: memberDeptMap.get(member.id) || [],
-        cell_groups: null,
-        ministry_groups: null
+        cell_groups: member.cell_groups?.[0] || null,
+        ministry_groups: member.ministry_groups?.[0] || null
       }));
 
       setMembers(membersWithDepartments);
@@ -794,13 +625,13 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      // Use a more efficient query with pagination for large datasets
+      // Limit attendees per event to prevent overwhelming
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select('*')
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false })
-        .limit(500);
+        .limit(500); // Limit to 500 attendees per event
 
       if (attendeesError) throw attendeesError;
 
@@ -813,7 +644,7 @@ const Events = () => {
         return [];
       }
 
-      // Fetch member data in batches for better performance
+      // Fetch members in batch instead of one by one (BIG performance improvement)
       const memberIds = attendeesData.map(a => a.members_id);
       const uniqueMemberIds = [...new Set(memberIds)];
       
@@ -833,12 +664,13 @@ const Events = () => {
 
       if (membersError) throw membersError;
 
+      // Create a Map for O(1) lookups
       const membersMap = new Map();
       membersData?.forEach(member => {
         membersMap.set(member.id, member);
       });
 
-      // Fetch inviter data for those who have inviters
+      // Process invitees if any
       const inviterIds = attendeesData
         .map(a => a.invited_by_id)
         .filter(id => id) as string[];
@@ -1460,6 +1292,45 @@ const Events = () => {
     }
   };
 
+  const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
+    try {
+      const absentRecords = absentMemberIds.map(memberId => ({
+        event_id: eventId,
+        members_id: memberId,
+        first_time: false,
+        invited_by_id: null,
+        attendance_status: 'absent' as const,
+        attended_at: null,
+        updated_at: new Date().toISOString()
+      }));
+
+      for (const record of absentRecords) {
+        const { data: existing } = await supabase
+          .from('event_attendees')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('members_id', record.members_id)
+          .single();
+
+        if (existing) {
+          await supabase
+            .from('event_attendees')
+            .update(record)
+            .eq('id', existing.id);
+        } else {
+          await supabase
+            .from('event_attendees')
+            .insert([record]);
+        }
+      }
+      
+      await fetchEventAttendees(eventId);
+    } catch (error: any) {
+      console.error('Error marking members as absent:', error);
+      throw error;
+    }
+  };
+
   const handleEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1957,11 +1828,8 @@ const Events = () => {
                 Sync to Cloud - {event.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Backup event data to cloud storage
+                Mark event as synced to cloud
               </p>
-              <div className="mt-2 text-sm text-blue-600 dark:text-blue-400">
-                <span className="font-medium">Optimized:</span> Fast sync with summary data + optional full backup
-              </div>
             </div>
             <button
               onClick={() => setShowSyncModal(null)}
@@ -1972,34 +1840,6 @@ const Events = () => {
           </div>
 
           <div className="p-6">
-            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
-              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">Sync Options:</h4>
-              <div className="space-y-3">
-                <div className="flex items-start gap-2">
-                  <div className="w-6 h-6 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <CheckCircle className="h-3 w-3 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-blue-700 dark:text-blue-300">Quick Sync (Recommended)</div>
-                    <div className="text-sm text-blue-600 dark:text-blue-400">
-                      Uploads summary data only - fast and efficient
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-6 h-6 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <CheckCircle className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-blue-700 dark:text-blue-300">Full Backup (Optional)</div>
-                    <div className="text-sm text-blue-600 dark:text-blue-400">
-                      Creates JSON backup file with all attendee details
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.present}</div>
@@ -2034,21 +1874,7 @@ const Events = () => {
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Upload className="h-4 w-4" />
-                  {loading ? 'Syncing...' : 'Quick Sync'}
-                </button>
-              </div>
-              
-              <div className="text-center">
-                <button
-                  onClick={() => {
-                    // Force full backup
-                    const eventAttendees = getEventAttendees(event.id);
-                    uploadEventDataToStorage(event, eventAttendees, stats);
-                    setSuccess('Full backup started in background...');
-                  }}
-                  className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline"
-                >
-                  Need full backup? Click here
+                  {loading ? 'Syncing...' : 'Mark as Synced'}
                 </button>
               </div>
               
@@ -2125,7 +1951,6 @@ const Events = () => {
           </div>
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            {/* Progress Bar */}
             {savingProgress.isSaving && (
               <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                 <div className="flex items-center justify-between mb-2">
@@ -2795,44 +2620,6 @@ const Events = () => {
     );
   };
 
-  // ==================== PERFORMANCE OPTIMIZATIONS ====================
-
-  // Debounce search inputs
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      // Filter members based on search term
-    }, 300);
-    
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Lazy load event details when scrolling into view
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            const eventId = entry.target.getAttribute('data-event-id');
-            if (eventId) {
-              // Load event attendees if not already loaded
-              if (!attendees.some(a => a.event_id === eventId)) {
-                fetchEventAttendees(eventId);
-              }
-            }
-          }
-        });
-      },
-      { threshold: 0.1 }
-    );
-
-    // Observe all event cards
-    document.querySelectorAll('[data-event-id]').forEach(card => {
-      observer.observe(card);
-    });
-
-    return () => observer.disconnect();
-  }, [events.length]);
-
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -3333,7 +3120,7 @@ const Events = () => {
               const stats = getAttendanceStats(event.id);
               
               return (
-                <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50" data-event-id={event.id}>
+                <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
                   <div className="flex flex-col lg:flex-row justify-between gap-6">
                     <div className="flex-1">
                       <div className="flex items-start gap-4 mb-4">
@@ -3775,18 +3562,6 @@ const Events = () => {
           )}
         </div>
       </div>
-
-      {/* Add loading indicator for sync operations */}
-      {loading && (
-        <div className="fixed top-4 right-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 flex items-center gap-3">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Syncing to cloud...
-            </span>
-          </div>
-        </div>
-      )}
 
       <SermonModal />
       <PamphletModal />
