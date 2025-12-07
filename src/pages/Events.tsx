@@ -115,6 +115,8 @@ const Events = () => {
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   
   const attendanceNotesRef = useRef<Record<string, string>>({});
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
+  const [savingProgress, setSavingProgress] = useState({ current: 0, total: 0, isSaving: false });
 
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
@@ -149,7 +151,6 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
-  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
@@ -168,17 +169,13 @@ const Events = () => {
   const fixTimezoneIssue = (dateString: string) => {
     if (!dateString) return dateString;
     
-    // If the date string is already in YYYY-MM-DD format, ensure it stays as local date
     const datePattern = /^\d{4}-\d{2}-\d{2}$/;
     if (datePattern.test(dateString)) {
-      // Create a new date in local timezone
       const date = new Date(dateString);
-      // Get the date components in local timezone
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
       
-      // Return as YYYY-MM-DD without timezone conversion
       return `${year}-${month}-${day}`;
     }
     
@@ -190,7 +187,6 @@ const Events = () => {
     if (!dateString) return '';
     
     const date = new Date(dateString);
-    // Force to local timezone
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -210,20 +206,112 @@ const Events = () => {
       
       const shouldAttend = await isMemberInTargetGroups(member, event);
       if (shouldAttend) {
-        // By default, mark all expected members as ABSENT
-        // The user will then mark present members
         initialAttendance[member.id] = 'absent';
       }
     }
 
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
-      // Override with existing attendance status
       initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
     });
 
     return initialAttendance;
   };
+
+  // ==================== BATCH ATTENDANCE FUNCTIONS ====================
+
+  const saveAttendanceBatch = async (eventId: string, attendanceRecords: any[]) => {
+    try {
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .upsert(attendanceRecords, {
+          onConflict: 'event_id,members_id',
+          ignoreDuplicates: false
+        });
+
+      if (error) throw error;
+      return { success: true, count: attendanceRecords.length };
+    } catch (error) {
+      console.error('Error saving attendance batch:', error);
+      return { success: false, error };
+    }
+  };
+
+  const saveAttendanceWithChunking = async (eventId: string) => {
+    setSavingProgress({ current: 0, total: Object.keys(bulkAttendance).length, isSaving: true });
+    setError(null);
+    setSuccess(null);
+
+    const chunkSize = 50; // Process 50 members at a time
+    const memberIds = Object.keys(bulkAttendance);
+    const results = [];
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      for (let i = 0; i < memberIds.length; i += chunkSize) {
+        const chunk = memberIds.slice(i, i + chunkSize);
+        const attendanceRecords = [];
+
+        for (const memberId of chunk) {
+          const status = bulkAttendance[memberId];
+          const notes = attendanceNotesRef.current[memberId] || '';
+          
+          attendanceRecords.push({
+            event_id: eventId,
+            members_id: memberId,
+            first_time: false,
+            invited_by_id: null,
+            attendance_status: status,
+            attended_at: status === 'present' ? new Date().toISOString() : null,
+            notes: notes || null,
+          });
+        }
+
+        const result = await saveAttendanceBatch(eventId, attendanceRecords);
+        results.push(result);
+        
+        if (result.success) {
+          successCount += attendanceRecords.length;
+        } else {
+          failCount += attendanceRecords.length;
+        }
+
+        // Update progress
+        setSavingProgress(prev => ({
+          ...prev,
+          current: Math.min(i + chunkSize, memberIds.length)
+        }));
+
+        // Small delay to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Refresh attendees after saving
+      await fetchEventAttendees(eventId);
+
+      setSavingProgress({ current: 0, total: 0, isSaving: false });
+
+      if (failCount === 0) {
+        setSuccess(`Successfully saved attendance for ${successCount} members!`);
+        closeBulkAttendanceModal();
+      } else {
+        setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
+
+    } catch (error: any) {
+      console.error('Error in chunked attendance saving:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+      setSavingProgress({ current: 0, total: 0, isSaving: false });
+    }
+  };
+
+  // ==================== END BATCH FUNCTIONS ====================
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -286,7 +374,6 @@ const Events = () => {
     try {
       setError(null);
       
-      // Fetch members with their cell groups and ministry groups
       const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
@@ -309,7 +396,6 @@ const Events = () => {
 
       if (membersError) throw membersError;
 
-      // Fetch department memberships separately
       const { data: deptMembersData, error: deptError } = await supabase
         .from('department_members')
         .select(`
@@ -394,7 +480,6 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      // First fetch the attendees
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select('*')
@@ -412,10 +497,8 @@ const Events = () => {
         return [];
       }
 
-      // Fetch member details for each attendee
       const attendeesWithMembers = await Promise.all(
         attendeesData.map(async (attendee: any) => {
-          // Fetch member details
           const { data: memberData, error: memberError } = await supabase
             .from('members')
             .select(`
@@ -442,7 +525,6 @@ const Events = () => {
             return null;
           }
 
-          // Fetch inviter details if exists
           let invited_by_member = null;
           if (attendee.invited_by_id) {
             const { data: inviterData } = await supabase
@@ -614,41 +696,10 @@ const Events = () => {
     }
   };
 
-  const saveBulkAttendance = async (eventId: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
-        const notes = attendanceNotesRef.current[memberId] || '';
-        return await saveAttendance(eventId, memberId, status, notes);
-      });
-
-      const results = await Promise.all(savePromises);
-      const successfulSaves = results.filter(result => result).length;
-      const totalSaves = Object.keys(bulkAttendance).length;
-
-      if (successfulSaves === totalSaves) {
-        setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
-        closeBulkAttendanceModal();
-        
-        await fetchEventAttendees(eventId);
-      } else {
-        setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
-      }
-
-      setTimeout(() => {
-        setSuccess(null);
-        setError(null);
-      }, 5000);
-    } catch (error: any) {
-      console.error('Error saving bulk attendance:', error);
-      setError(error.message || 'Failed to save bulk attendance.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Old function - replaced with chunking version
+  // const saveBulkAttendance = async (eventId: string) => {
+  //   // This is now replaced by saveAttendanceWithChunking
+  // };
 
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
@@ -969,7 +1020,7 @@ const Events = () => {
         title: sermonFormData.title.trim(),
         summary: sermonFormData.summary.trim(),
         pastor_name: sermonFormData.pastorName.trim(),
-        sermon_date: fixTimezoneIssue(sermonFormData.sermonDate), // Fix timezone
+        sermon_date: fixTimezoneIssue(sermonFormData.sermonDate),
         event_id: sermonFormData.eventId || null,
         video_url: videoUrl,
         document_url: documentUrl,
@@ -1062,7 +1113,7 @@ const Events = () => {
         title: sermonToEdit.title,
         summary: sermonToEdit.summary,
         pastorName: sermonToEdit.pastor_name,
-        sermonDate: formatDateForDisplay(sermonToEdit.sermon_date), // Format for display
+        sermonDate: formatDateForDisplay(sermonToEdit.sermon_date),
         eventId: sermonToEdit.event_id || '',
         videoFile: null,
         documentFile: null,
@@ -1252,13 +1303,12 @@ const Events = () => {
     setSuccess(null);
     
     try {
-      // Fix the date timezone issue before saving
       const fixedEventDate = fixTimezoneIssue(eventFormData.eventDate);
       
       const eventData = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
-        event_date: fixedEventDate, // Use fixed date
+        event_date: fixedEventDate,
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
         is_whole_church: eventFormData.isWholeChurch,
@@ -1337,7 +1387,6 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      // Insert attendee
       const { data: newAttendee, error: attendeeError } = await supabase
         .from('event_attendees')
         .insert([attendeeData])
@@ -1349,7 +1398,6 @@ const Events = () => {
         throw attendeeError;
       }
 
-      // Fetch the newly created attendee with member details
       const { data: attendeeWithDetails } = await supabase
         .from('event_attendees')
         .select(`
@@ -1369,7 +1417,6 @@ const Events = () => {
         .single();
 
       if (attendeeWithDetails) {
-        // Fetch inviter details if exists
         let invited_by_member = null;
         if (attendeeWithDetails.invited_by_id) {
           const { data: inviterData } = await supabase
@@ -1497,6 +1544,7 @@ const Events = () => {
     setBulkAttendance({});
     setAttendanceNotes({});
     attendanceNotesRef.current = {};
+    setSavingProgress({ current: 0, total: 0, isSaving: false });
   };
 
   const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
@@ -1647,10 +1695,8 @@ const Events = () => {
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Invalid date';
     
-    // Parse the date as local time
-    const date = new Date(dateString + 'T00:00:00'); // Add time to ensure it's treated as local
+    const date = new Date(dateString + 'T00:00:00');
     
-    // Check if date is valid
     if (isNaN(date.getTime())) {
       return 'Invalid date';
     }
@@ -1660,7 +1706,7 @@ const Events = () => {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-      timeZone: 'UTC' // Force UTC to avoid timezone conversion
+      timeZone: 'UTC'
     });
   };
 
@@ -1887,6 +1933,29 @@ const Events = () => {
           </div>
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Progress Bar */}
+            {savingProgress.isSaving && (
+              <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-blue-700 dark:text-blue-300">
+                    Saving attendance...
+                  </span>
+                  <span className="text-sm text-blue-600 dark:text-blue-400">
+                    {savingProgress.current} of {savingProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                  <div 
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                    style={{ width: `${(savingProgress.current / savingProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                  Processing in batches of 50 members for optimal performance...
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
@@ -2029,19 +2098,20 @@ const Events = () => {
               <div className="flex gap-3 w-full sm:w-auto">
                 <button
                   onClick={closeBulkAttendanceModal}
-                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                  disabled={savingProgress.isSaving}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
-                  disabled={loading || Object.keys(bulkAttendance).length === 0}
+                  onClick={() => saveAttendanceWithChunking(showBulkAttendanceModal)}
+                  disabled={savingProgress.isSaving || Object.keys(bulkAttendance).length === 0}
                   className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                 >
-                  {loading ? (
+                  {savingProgress.isSaving ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>Saving...</span>
+                      <span>Saving ({savingProgress.current}/{savingProgress.total})...</span>
                     </>
                   ) : (
                     <>
