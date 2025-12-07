@@ -18,8 +18,6 @@ interface Event {
   is_completed: boolean;
   completed_at: string | null;
   pamphlet_url: string | null;
-  is_synced?: boolean;
-  last_synced_at?: string | null;
 }
 
 interface Sermon {
@@ -269,27 +267,20 @@ const Events = () => {
         }
       }
 
-      // 2. Update event sync status in cloud
+      // 2. Update event timestamp in cloud to mark as synced
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
-          updated_at: new Date().toISOString(),
-          last_synced_at: new Date().toISOString(),
-          is_synced: true
+          updated_at: new Date().toISOString()
         })
         .eq('id', eventId);
 
       if (updateError) throw updateError;
 
-      // 3. Update local state to reflect cloud sync
+      // 3. Update local state
       setEvents(prev => prev.map(ev => 
         ev.id === eventId 
-          ? { 
-              ...ev, 
-              updated_at: new Date().toISOString(),
-              last_synced_at: new Date().toISOString(),
-              is_synced: true
-            }
+          ? { ...ev, updated_at: new Date().toISOString() }
           : ev
       ));
 
@@ -321,7 +312,7 @@ const Events = () => {
       // Then check cloud for the latest data
       const { data: cloudData } = await supabase
         .from('events')
-        .select('updated_at, last_synced_at, is_synced')
+        .select('updated_at')
         .eq('id', eventId)
         .single();
 
@@ -331,7 +322,8 @@ const Events = () => {
       const localUpdated = new Date(event.updated_at || 0).getTime();
       const cloudUpdated = new Date(cloudData.updated_at || 0).getTime();
       
-      return cloudUpdated >= localUpdated && cloudData.is_synced;
+      // If cloud timestamp is older or equal, consider it synced
+      return cloudUpdated >= localUpdated;
     } catch (error) {
       console.error('Error checking cloud sync:', error);
       return false;
@@ -370,10 +362,11 @@ const Events = () => {
   // ==================== NEW: AUTOSYNC FUNCTION ====================
   const autoSyncToCloud = async () => {
     try {
+      setLoading(true);
       setError(null);
       setSuccess(null);
       
-      // Find events that need syncing (not synced or older than cloud)
+      // Check sync status for all events
       const eventsToSync = [];
       for (const event of events) {
         const isSynced = await checkCloudSyncStatus(event.id);
@@ -385,6 +378,7 @@ const Events = () => {
       if (eventsToSync.length === 0) {
         setSuccess('All events are already synced with cloud.');
         setTimeout(() => setSuccess(null), 3000);
+        setLoading(false);
         return;
       }
 
@@ -410,10 +404,15 @@ const Events = () => {
       setSuccess(`Auto-sync completed: ${syncedCount} synced, ${failedCount} failed`);
       setTimeout(() => setSuccess(null), 5000);
 
+      // Refresh events to get updated timestamps
+      await fetchEvents();
+
     } catch (error: any) {
       console.error('Auto-sync error:', error);
       setError('Auto-sync failed. Please sync events individually.');
       setTimeout(() => setError(null), 5000);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -493,7 +492,7 @@ const Events = () => {
       // Update event timestamp
       await supabase
         .from('events')
-        .update({ updated_at: new Date().toISOString(), is_synced: false })
+        .update({ updated_at: new Date().toISOString() })
         .eq('id', eventId);
 
       // Refresh attendees after saving
@@ -578,8 +577,7 @@ const Events = () => {
         .update({
           is_completed: true,
           completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          is_synced: false
+          updated_at: new Date().toISOString()
         })
         .eq('id', eventId);
 
@@ -587,7 +585,7 @@ const Events = () => {
 
       setEvents(prev => prev.map(event => 
         event.id === eventId 
-          ? { ...event, is_completed: true, completed_at: new Date().toISOString(), is_synced: false }
+          ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
           : event
       ));
 
@@ -611,7 +609,7 @@ const Events = () => {
       // Use specific fields to reduce data transfer
       const { data, error } = await supabase
         .from('events')
-        .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, target_groups, target_departments, created_at, last_synced_at, is_synced')
+        .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, target_groups, target_departments, created_at')
         .order('event_date', { ascending: false })
         .limit(50); // Limit to 50 most recent events
 
@@ -626,9 +624,7 @@ const Events = () => {
         completed_at: event.completed_at ?? null,
         pamphlet_url: event.pamphlet_url ?? null,
         created_at: event.created_at ?? null,
-        updated_at: event.updated_at ?? null,
-        last_synced_at: event.last_synced_at ?? null,
-        is_synced: event.is_synced ?? false
+        updated_at: event.updated_at ?? null
       }));
 
       setEvents(eventsWithDefaults as Event[]);
@@ -1005,12 +1001,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Mark event as unsynced when attendance changes
-      await supabase
-        .from('events')
-        .update({ updated_at: new Date().toISOString(), is_synced: false })
-        .eq('id', eventId);
-
       await fetchEventAttendees(eventId);
       return true;
     } catch (error: any) {
@@ -1122,15 +1112,14 @@ const Events = () => {
         .from('events')
         .update({ 
           pamphlet_url: publicUrl,
-          updated_at: new Date().toISOString(),
-          is_synced: false
+          updated_at: new Date().toISOString()
         })
         .eq('id', eventId);
 
       if (updateError) throw updateError;
 
       setEvents(prev => prev.map(event => 
-        event.id === eventId ? { ...event, pamphlet_url: publicUrl, is_synced: false } : event
+        event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
 
       setSuccess('Pamphlet uploaded successfully!');
@@ -1165,13 +1154,13 @@ const Events = () => {
 
       const { error: updateError } = await supabase
         .from('events')
-        .update({ pamphlet_url: null, is_synced: false })
+        .update({ pamphlet_url: null })
         .eq('id', eventId);
 
       if (updateError) throw updateError;
 
       setEvents(prev => prev.map(event => 
-        event.id === eventId ? { ...event, pamphlet_url: null, is_synced: false } : event
+        event.id === eventId ? { ...event, pamphlet_url: null } : event
       ));
 
       setSuccess('Pamphlet deleted successfully!');
@@ -1529,7 +1518,6 @@ const Events = () => {
         target_departments: !eventFormData.isWholeChurch && [...eventFormData.targetMinistryGroups, ...eventFormData.targetDepartments].length > 0 
           ? [...eventFormData.targetMinistryGroups, ...eventFormData.targetDepartments] 
           : null,
-        is_synced: false
       };
 
       const { error } = await supabase.from('events').insert([eventData]);
@@ -1854,12 +1842,6 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Mark event as unsynced when adding new attendee
-      await supabase
-        .from('events')
-        .update({ updated_at: new Date().toISOString(), is_synced: false })
-        .eq('id', eventId);
-
       await fetchEventAttendees(eventId);
       await fetchMembers();
       closeNewcomerModal();
@@ -2006,12 +1988,8 @@ const Events = () => {
                 Send attendance data to cloud storage
               </p>
               <div className="mt-2">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  event.is_synced 
-                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' 
-                    : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-                }`}>
-                  {event.is_synced ? 'Last synced: ' + (event.last_synced_at ? new Date(event.last_synced_at).toLocaleString() : 'Never') : 'Not synced'}
+                <span className={`px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300`}>
+                  Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
                 </span>
               </div>
             </div>
@@ -2063,7 +2041,7 @@ const Events = () => {
               </div>
               
               <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
-                Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
+                Note: Sync ensures all attendance data is saved to the cloud database
               </p>
             </div>
           </div>
@@ -2859,12 +2837,6 @@ const Events = () => {
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                 {isAdmin?.() ? 'Administrator' : isPastor?.() ? 'Pastor' : 'Member'}
               </span>
-              {events.some(e => !e.is_synced) && (
-                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
-                  <AlertCircle className="h-3 w-3" />
-                  {events.filter(e => !e.is_synced).length} events need sync
-                </span>
-              )}
             </div>
           </div>
           <div className="flex gap-3 flex-wrap">
@@ -3305,7 +3277,6 @@ const Events = () => {
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
-              <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
             </div>
           ) : (
             events.map((event) => {
@@ -3335,17 +3306,6 @@ const Events = () => {
                               <ScopeIcon className="h-3 w-3" />
                               {scopeBadge.text}
                             </span>
-                            {event.is_synced ? (
-                              <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
-                                <CheckCircle className="h-3 w-3" />
-                                Synced
-                              </span>
-                            ) : (
-                              <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
-                                <AlertCircle className="h-3 w-3" />
-                                Not Synced
-                              </span>
-                            )}
                             {sermon && (
                               <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                                 <BookOpen className="h-3 w-3" />
