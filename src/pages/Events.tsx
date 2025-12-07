@@ -2,7 +2,6 @@ import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import debounce from 'lodash/debounce';
 
 interface Event {
   id: string;
@@ -177,21 +176,6 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Debounced search functions
-  const debouncedSearch = useCallback(
-    debounce((value: string) => {
-      setSearchTerm(value);
-    }, 300),
-    []
-  );
-
-  const debouncedInviterSearch = useCallback(
-    debounce((value: string) => {
-      setInviterSearchTerm(value);
-    }, 300),
-    []
-  );
-
   // Helper function to fix date timezone issue
   const fixTimezoneIssue = (dateString: string) => {
     if (!dateString) return dateString;
@@ -221,56 +205,29 @@ const Events = () => {
     return `${year}-${month}-${day}`;
   };
 
-  // Optimized helper function to initialize bulk attendance
-  const initializeBulkAttendance = useCallback(async (eventId: string) => {
+  // Helper function to initialize bulk attendance with all target members as ABSENT by default
+  const initializeBulkAttendance = async (eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return {};
 
     const initialAttendance: Record<string, 'present' | 'absent'> = {};
-    
-    // Create sets for faster lookups
-    const targetCellGroups = new Set(event.target_groups || []);
-    const targetDepartments = new Set(event.target_departments || []);
 
-    // Filter members in memory (much faster)
-    const filteredMembers = members.filter(member => {
-      if (member.status === 'not_attending') return false;
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
       
-      if (event.is_whole_church) return true;
-
-      // Check cell groups
-      if (member.cell_group_id && targetCellGroups.has(member.cell_group_id)) {
-        return true;
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        initialAttendance[member.id] = 'absent';
       }
+    }
 
-      // Check ministry groups
-      if (member.ministry_group_id && targetDepartments.has(member.ministry_group_id)) {
-        return true;
-      }
-
-      // Check departments
-      if (member.department_ids && member.department_ids.some(deptId => targetDepartments.has(deptId))) {
-        return true;
-      }
-
-      return false;
-    });
-
-    // Initialize all filtered members as absent
-    filteredMembers.forEach(member => {
-      initialAttendance[member.id] = 'absent';
-    });
-
-    // Get existing attendees and update their status
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
-      if (attendee.attendance_status === 'present' || attendee.attendance_status === 'absent') {
-        initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
-      }
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
     });
 
     return initialAttendance;
-  }, [events, members]);
+  };
 
   // ==================== BATCH ATTENDANCE FUNCTIONS ====================
 
@@ -677,6 +634,55 @@ const Events = () => {
     }
   }, [showSyncModal, fetchSyncHistory]);
 
+  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('department_members')
+        .select('id')
+        .eq('member_id', memberId)
+        .eq('department_id', departmentId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return false;
+        }
+        throw error;
+      }
+
+      return !!data;
+    } catch (error) {
+      console.error('Error checking department membership:', error);
+      return false;
+    }
+  };
+
+  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
+    if (event.is_whole_church) return true;
+
+    if (event.target_groups && event.target_groups.length > 0) {
+      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
+        return true;
+      }
+    }
+
+    if (event.target_departments && event.target_departments.length > 0) {
+      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
+        return true;
+      }
+
+      if (member.department_ids && member.department_ids.length > 0) {
+        for (const deptId of event.target_departments) {
+          if (member.department_ids.includes(deptId)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  };
+
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
@@ -726,6 +732,11 @@ const Events = () => {
     }
   };
 
+  // Old function - replaced with chunking version
+  // const saveBulkAttendance = async (eventId: string) => {
+  //   // This is now replaced by saveAttendanceWithChunking
+  // };
+
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
@@ -739,6 +750,7 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
+  // FIXED: Now properly stores sync data to the database
   const syncEventToCloud = async (eventId: string) => {
     setLoading(true);
     setError(null);
@@ -751,6 +763,7 @@ const Events = () => {
       const eventAttendees = getEventAttendees(eventId);
       const stats = getAttendanceStats(eventId);
 
+      // Create comprehensive sync data
       const syncData = {
         event_id: event.id,
         event_name: event.name,
@@ -773,14 +786,15 @@ const Events = () => {
           first_time: attendee.first_time,
           invited_by: attendee.invited_by_member ? 
             `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null,
-          attended_at: attendee.attended_at
+          attended_at: attendee.attended_at,
+          notes: attendee.notes
         })),
         synced_at: new Date().toISOString(),
         synced_by: user?.id,
         synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
       };
 
-      // Store sync data in the database
+      // FIRST: Store sync data in the event_sync_logs table
       const { error: syncError } = await supabase
         .from('event_sync_logs')
         .insert([{
@@ -792,7 +806,7 @@ const Events = () => {
 
       if (syncError) throw syncError;
 
-      // Also update the event's updated_at timestamp
+      // SECOND: Also update the event's updated_at timestamp
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
@@ -802,10 +816,10 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
-      // Refresh sync history
+      // Refresh sync history to show the new sync
       await fetchSyncHistory(eventId);
 
-      setSuccess(`Event "${event.name}" successfully synced to cloud!`);
+      setSuccess(`Event "${event.name}" successfully synced to cloud! All data has been saved.`);
       setTimeout(() => setSuccess(null), 3000);
       
     } catch (error: any) {
@@ -833,7 +847,7 @@ const Events = () => {
     csvRows.push(['']);
     
     csvRows.push(['Attendees List']);
-    csvRows.push(['Name', 'Surname', 'Residence', 'Phone', 'Status', 'First Time', 'Attended At', 'Invited By']);
+    csvRows.push(['Name', 'Surname', 'Residence', 'Phone', 'Status', 'First Time', 'Attended At', 'Invited By', 'Notes']);
     
     eventAttendees.forEach(attendee => {
       csvRows.push([
@@ -844,7 +858,8 @@ const Events = () => {
         attendee.attendance_status,
         attendee.first_time ? 'Yes' : 'No',
         attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
-        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : ''
+        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : '',
+        attendee.notes || ''
       ]);
     });
     
@@ -1295,32 +1310,12 @@ const Events = () => {
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
       const absentMemberIds: string[] = [];
-      const targetCellGroups = new Set(event.target_groups || []);
-      const targetDepartments = new Set(event.target_departments || []);
 
       for (const member of members) {
         if (member.status === 'not_attending') continue;
         if (attendeeIds.has(member.id)) continue;
 
-        let shouldAttend = false;
-        
-        if (event.is_whole_church) {
-          shouldAttend = true;
-        } else {
-          // Check cell groups
-          if (member.cell_group_id && targetCellGroups.has(member.cell_group_id)) {
-            shouldAttend = true;
-          }
-          // Check ministry groups
-          if (member.ministry_group_id && targetDepartments.has(member.ministry_group_id)) {
-            shouldAttend = true;
-          }
-          // Check departments
-          if (member.department_ids && member.department_ids.some(deptId => targetDepartments.has(deptId))) {
-            shouldAttend = true;
-          }
-        }
-
+        const shouldAttend = await isMemberInTargetGroups(member, event);
         if (shouldAttend) {
           absentMemberIds.push(member.id);
         }
@@ -1876,11 +1871,11 @@ const Events = () => {
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
-                  Attendee list ({eventAttendees.length} members)
+                  Attendee list ({eventAttendees.length} members with details)
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
-                  First-time visitor information
+                  Event scope and target groups information
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
@@ -1917,7 +1912,7 @@ const Events = () => {
                 </div>
               ) : syncHistory.length === 0 ? (
                 <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                  No sync history yet
+                  No sync history yet. Sync this event to create the first record.
                 </div>
               ) : (
                 <div className="space-y-3 max-h-60 overflow-y-auto">
@@ -1936,6 +1931,11 @@ const Events = () => {
                           {sync.sync_data?.attendees?.length || 0} attendees
                         </div>
                       </div>
+                      {sync.sync_data?.present_count && (
+                        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                          {sync.sync_data.present_count} present, {sync.sync_data.absent_count} absent
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1993,35 +1993,15 @@ const Events = () => {
       const loadTargetMembers = async () => {
         setLoadingTargetMembers(true);
         try {
-          // Create sets for faster lookups
-          const targetCellGroups = new Set(event.target_groups || []);
-          const targetDepartments = new Set(event.target_departments || []);
-          
-          // Filter members in memory (much faster than async checks)
-          const filteredMembers = members.filter(member => {
-            if (member.status === 'not_attending') return false;
-            
-            if (event.is_whole_church) return true;
-
-            // Check cell groups
-            if (member.cell_group_id && targetCellGroups.has(member.cell_group_id)) {
-              return true;
+          const membersList: Member[] = [];
+          for (const member of members) {
+            if (member.status === 'not_attending') continue;
+            const shouldAttend = await isMemberInTargetGroups(member, event);
+            if (shouldAttend) {
+              membersList.push(member);
             }
-
-            // Check ministry groups
-            if (member.ministry_group_id && targetDepartments.has(member.ministry_group_id)) {
-              return true;
-            }
-
-            // Check departments
-            if (member.department_ids && member.department_ids.some(deptId => targetDepartments.has(deptId))) {
-              return true;
-            }
-
-            return false;
-          });
-          
-          setTargetMembers(filteredMembers);
+          }
+          setTargetMembers(membersList);
         } catch (error) {
           console.error('Error loading target members:', error);
         } finally {
@@ -2047,7 +2027,7 @@ const Events = () => {
                 Bulk Attendance - {event.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                {loadingTargetMembers ? 'Loading members...' : `Manage attendance for ${targetMembers.length} target members`}
+                Manage attendance for all target members - {targetMembers.length} members found
               </p>
               <div className="mt-2 text-sm text-blue-600 dark:text-blue-400">
                 <span className="font-medium">Note:</span> All members are marked as ABSENT by default. Click "Present" for members who attended.
@@ -3496,7 +3476,7 @@ const Events = () => {
                                 type="text"
                                 value={searchTerm}
                                 onChange={(e) => {
-                                  debouncedSearch(e.target.value);
+                                  setSearchTerm(e.target.value);
                                   setIsMemberDropdownOpen(true);
                                 }}
                                 onFocus={() => setIsMemberDropdownOpen(true)}
@@ -3541,7 +3521,7 @@ const Events = () => {
                                 type="text"
                                 value={inviterSearchTerm}
                                 onChange={(e) => {
-                                  debouncedInviterSearch(e.target.value);
+                                  setInviterSearchTerm(e.target.value);
                                   setIsInviterDropdownOpen(true);
                                 }}
                                 onFocus={() => setIsInviterDropdownOpen(true)}
