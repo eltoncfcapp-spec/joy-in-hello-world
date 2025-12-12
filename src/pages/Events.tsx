@@ -1309,6 +1309,7 @@ const Events = () => {
     }
   };
 
+  // FIXED: Optimized handleAttendeeSubmit function
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
@@ -1346,63 +1347,45 @@ const Events = () => {
         updated_at: new Date().toISOString()
       };
 
-      const { data: newAttendee, error: attendeeError } = await supabase
+      // FIX: Direct insert without unnecessary select
+      const { error: attendeeError } = await supabase
         .from('event_attendees')
-        .insert([attendeeData])
-        .select()
-        .single();
+        .insert([attendeeData]);
 
       if (attendeeError) {
         console.error('Supabase error details:', attendeeError);
         throw attendeeError;
       }
 
-      const { data: attendeeWithDetails } = await supabase
-        .from('event_attendees')
-        .select(`
-          *,
-          members (
-            id,
-            name,
-            surname,
-            residence,
-            phone,
-            status,
-            cell_group_id,
-            ministry_group_id
-          )
-        `)
-        .eq('id', newAttendee.id)
-        .single();
+      // Create attendee object with member data
+      const newAttendee: EventAttendee = {
+        id: Date.now().toString(), // Temporary ID
+        event_id: eventId,
+        members_id: attendeeFormData.memberId,
+        first_time: attendeeFormData.firstTime,
+        invited_by_id: attendeeFormData.invitedById || null,
+        attendance_status: 'present',
+        attended_at: new Date().toISOString(),
+        members: {
+          ...selectedMember,
+          cell_groups: selectedMember.cell_groups,
+          ministry_groups: selectedMember.ministry_groups,
+          department_ids: selectedMember.department_ids || []
+        },
+        invited_by_member: selectedInviter ? {
+          id: selectedInviter.id,
+          name: selectedInviter.name,
+          surname: selectedInviter.surname
+        } : undefined
+      };
 
-      if (attendeeWithDetails) {
-        let invited_by_member = null;
-        if (attendeeWithDetails.invited_by_id) {
-          const { data: inviterData } = await supabase
-            .from('members')
-            .select('id, name, surname')
-            .eq('id', attendeeWithDetails.invited_by_id)
-            .single();
-          
-          invited_by_member = inviterData;
-        }
-
-        const attendeeToAdd: EventAttendee = {
-          ...attendeeWithDetails,
-          members: {
-            ...attendeeWithDetails.members,
-            cell_groups: null,
-            ministry_groups: null,
-            department_ids: []
-          },
-          invited_by_member
-        };
-
-        setAttendees(prev => [...prev, attendeeToAdd]);
-      }
+      // Add to local state
+      setAttendees(prev => [...prev, newAttendee]);
 
       // Invalidate cache
       supabaseCache.delete(`event_attendees_${eventId}`);
+
+      // Refresh attendees to get the actual ID from database
       await fetchEventAttendees(eventId);
 
       resetAttendeeForm();
@@ -1623,20 +1606,30 @@ const Events = () => {
     }
   };
 
-  // Optimized saveAttendanceWithChunking
+  // FIXED: Optimized bulk attendance saving
   const saveAttendanceWithChunking = async (eventId: string) => {
-    setSavingProgress({ current: 0, total: Object.keys(bulkAttendance).length, isSaving: true });
+    if (Object.keys(bulkAttendance).length === 0) {
+      setError('No attendance data to save');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setSavingProgress({ 
+      current: 0, 
+      total: Object.keys(bulkAttendance).length, 
+      isSaving: true 
+    });
     setError(null);
     setSuccess(null);
 
-    const chunkSize = 200; // Increased chunk size for better performance
-    const memberIds = Object.keys(bulkAttendance);
-    let successCount = 0;
-    let failCount = 0;
-
     try {
-      // Prepare all records first for better performance
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      // Prepare all records in a single array
       const allRecords = [];
+      const memberIds = Object.keys(bulkAttendance);
+      
       for (const memberId of memberIds) {
         const status = bulkAttendance[memberId];
         const notes = attendanceNotesRef.current[memberId] || '';
@@ -1653,14 +1646,88 @@ const Events = () => {
         });
       }
 
-      // Use a single RPC call for bulk insert instead of multiple chunks
-      const { data, error } = await supabase.rpc('bulk_upsert_event_attendees', {
-        attendance_records: allRecords
-      });
+      // Use Supabase's upsert for bulk operations
+      const { error: bulkError } = await supabase
+        .from('event_attendees')
+        .upsert(allRecords, {
+          onConflict: 'event_id,members_id',
+          ignoreDuplicates: false
+        });
 
-      if (error) throw error;
-
-      successCount = allRecords.length;
+      if (bulkError) {
+        console.error('Bulk upsert error:', bulkError);
+        
+        // Fallback to individual inserts if bulk fails
+        console.log('Falling back to individual inserts...');
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (let i = 0; i < allRecords.length; i++) {
+          try {
+            const record = allRecords[i];
+            
+            // Check if record exists
+            const { data: existing } = await supabase
+              .from('event_attendees')
+              .select('id')
+              .eq('event_id', record.event_id)
+              .eq('members_id', record.members_id)
+              .single();
+            
+            if (existing) {
+              // Update existing
+              const { error: updateError } = await supabase
+                .from('event_attendees')
+                .update(record)
+                .eq('id', existing.id);
+              
+              if (updateError) {
+                console.error(`Update error for member ${record.members_id}:`, updateError);
+                failCount++;
+              } else {
+                successCount++;
+              }
+            } else {
+              // Insert new
+              const { error: insertError } = await supabase
+                .from('event_attendees')
+                .insert([record]);
+              
+              if (insertError) {
+                console.error(`Insert error for member ${record.members_id}:`, insertError);
+                failCount++;
+              } else {
+                successCount++;
+              }
+            }
+            
+            // Update progress
+            setSavingProgress(prev => ({
+              ...prev,
+              current: i + 1
+            }));
+            
+            // Small delay to prevent rate limiting
+            await new Promise(resolve => setTimeout(resolve, 10));
+            
+          } catch (error) {
+            console.error(`Error processing member at index ${i}:`, error);
+            failCount++;
+          }
+        }
+        
+        if (failCount > 0) {
+          setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
+        } else {
+          setSuccess(`Successfully saved attendance for ${successCount} members!`);
+          closeBulkAttendanceModal();
+        }
+      } else {
+        // Bulk upsert succeeded
+        setSuccess(`Successfully saved attendance for ${allRecords.length} members!`);
+        closeBulkAttendanceModal();
+      }
 
       // Update event timestamp
       await supabase
@@ -1674,23 +1741,10 @@ const Events = () => {
       // Refresh attendees after saving
       await fetchEventAttendees(eventId);
 
-      setSavingProgress({ current: 0, total: 0, isSaving: false });
-
-      if (failCount === 0) {
-        setSuccess(`Successfully saved attendance for ${successCount} members!`);
-        closeBulkAttendanceModal();
-      } else {
-        setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
-      }
-
-      setTimeout(() => {
-        setSuccess(null);
-        setError(null);
-      }, 5000);
-
     } catch (error: any) {
-      console.error('Error in chunked attendance saving:', error);
+      console.error('Error in bulk attendance saving:', error);
       setError(error.message || 'Failed to save bulk attendance.');
+    } finally {
       setSavingProgress({ current: 0, total: 0, isSaving: false });
     }
   };
@@ -1978,18 +2032,43 @@ const Events = () => {
     if (!event) return null;
 
     const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    const [loadingMembers, setLoadingMembers] = useState(true);
     
     useEffect(() => {
       const loadTargetMembers = async () => {
-        const membersList: Member[] = [];
-        for (const member of members) {
-          if (member.status === 'not_attending') continue;
-          const shouldAttend = await isMemberInTargetGroups(member, event);
-          if (shouldAttend) {
-            membersList.push(member);
+        try {
+          setLoadingMembers(true);
+          const membersList: Member[] = [];
+          
+          // Optimize: Filter members client-side first
+          const eligibleMembers = members.filter(member => member.status !== 'not_attending');
+          
+          // Process in smaller batches to avoid blocking
+          const batchSize = 20;
+          for (let i = 0; i < eligibleMembers.length; i += batchSize) {
+            const batch = eligibleMembers.slice(i, i + batchSize);
+            const batchPromises = batch.map(member => 
+              isMemberInTargetGroups(member, event)
+            );
+            
+            const results = await Promise.all(batchPromises);
+            
+            results.forEach((shouldAttend, index) => {
+              if (shouldAttend) {
+                membersList.push(batch[index]);
+              }
+            });
+            
+            // Update state progressively for better UX
+            if (i + batchSize >= eligibleMembers.length) {
+              setTargetMembers([...membersList]);
+            }
           }
+        } catch (error) {
+          console.error('Error loading target members:', error);
+        } finally {
+          setLoadingMembers(false);
         }
-        setTargetMembers(membersList);
       };
       
       loadTargetMembers();
@@ -2097,14 +2176,19 @@ const Events = () => {
               </button>
             </div>
 
-            <div className="space-y-3">
-              {targetMembers.length === 0 ? (
-                <div className="text-center py-8">
-                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
-                </div>
-              ) : (
-                targetMembers.map((member) => (
+            {loadingMembers ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-4 text-gray-600 dark:text-gray-400">Loading target members...</p>
+              </div>
+            ) : targetMembers.length === 0 ? (
+              <div className="text-center py-8">
+                <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {targetMembers.map((member) => (
                   <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2176,9 +2260,9 @@ const Events = () => {
                       )}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
@@ -2196,7 +2280,7 @@ const Events = () => {
                 </button>
                 <button
                   onClick={() => saveAttendanceWithChunking(showBulkAttendanceModal)}
-                  disabled={savingProgress.isSaving || Object.keys(bulkAttendance).length === 0}
+                  disabled={savingProgress.isSaving || targetMembers.length === 0}
                   className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                 >
                   {savingProgress.isSaving ? (
@@ -2548,7 +2632,7 @@ const Events = () => {
                     <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                                                    <PlayCircle className="h-4 w-4 text-purple-600" />
+                          <PlayCircle className="h-4 w-4 text-purple-600" />
                           <span className="text-sm text-purple-700">Video file already uploaded</span>
                         </div>
                         <a
