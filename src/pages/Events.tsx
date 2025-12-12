@@ -312,7 +312,7 @@ const Events = () => {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      // Refresh attendees after saving
+      // IMPORTANT: Refresh attendees from database to get all changes
       await fetchEventAttendees(eventId);
 
       setSavingProgress({ current: 0, total: 0, isSaving: false });
@@ -1469,51 +1469,70 @@ const Events = () => {
         throw attendeeError;
       }
 
-      const { data: attendeeWithDetails } = await supabase
-        .from('event_attendees')
+      // Get the full member data for the new attendee
+      const { data: memberData } = await supabase
+        .from('members')
         .select(`
-          *,
-          members (
-            id,
-            name,
-            surname,
-            residence,
-            phone,
-            status,
-            cell_group_id,
-            ministry_group_id
+          id,
+          name,
+          surname,
+          residence,
+          phone,
+          status,
+          cell_group_id,
+          ministry_group_id,
+          cell_groups (
+            name
+          ),
+          ministry_groups (
+            name
           )
         `)
-        .eq('id', newAttendee.id)
+        .eq('id', attendeeFormData.memberId)
         .single();
 
-      if (attendeeWithDetails) {
-        let invited_by_member = null;
-        if (attendeeWithDetails.invited_by_id) {
-          const { data: inviterData } = await supabase
-            .from('members')
-            .select('id, name, surname')
-            .eq('id', attendeeWithDetails.invited_by_id)
-            .single();
-          
-          invited_by_member = inviterData;
-        }
+      if (!memberData) throw new Error('Member data not found');
 
-        const attendeeToAdd: EventAttendee = {
-          ...attendeeWithDetails,
-          members: {
-            ...attendeeWithDetails.members,
-            cell_groups: null,
-            ministry_groups: null,
-            department_ids: []
-          },
-          invited_by_member
-        };
-
-        setAttendees(prev => [...prev, attendeeToAdd]);
+      // Get inviter data if exists
+      let invited_by_member = null;
+      if (attendeeFormData.invitedById) {
+        const { data: inviterData } = await supabase
+          .from('members')
+          .select('id, name, surname')
+          .eq('id', attendeeFormData.invitedById)
+          .single();
+        
+        invited_by_member = inviterData;
       }
 
-      await fetchEventAttendees(eventId);
+      // Create the complete attendee object
+      const attendeeToAdd: EventAttendee = {
+        id: newAttendee.id,
+        event_id: newAttendee.event_id,
+        members_id: newAttendee.members_id,
+        first_time: newAttendee.first_time,
+        invited_by_id: newAttendee.invited_by_id,
+        attended_at: newAttendee.attended_at,
+        attendance_status: newAttendee.attendance_status,
+        notes: newAttendee.notes,
+        members: {
+          id: memberData.id,
+          name: memberData.name,
+          surname: memberData.surname,
+          residence: memberData.residence,
+          phone: memberData.phone,
+          cell_group_id: memberData.cell_group_id,
+          ministry_group_id: memberData.ministry_group_id,
+          status: memberData.status,
+          cell_groups: memberData.cell_groups?.[0] || null,
+          ministry_groups: memberData.ministry_groups?.[0] || null,
+          department_ids: []
+        },
+        invited_by_member
+      };
+
+      // Update local state immediately
+      setAttendees(prev => [...prev, attendeeToAdd]);
 
       resetAttendeeForm();
       
@@ -1541,8 +1560,8 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Update local state immediately
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
-      await fetchEventAttendees(eventId);
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1712,6 +1731,7 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
+      // Refresh attendees to show the new member
       await fetchEventAttendees(eventId);
       await fetchMembers();
       closeNewcomerModal();
