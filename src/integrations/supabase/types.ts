@@ -1146,3 +1146,28 @@ export const Constants = {
     },
   },
 } as const
+// Simplified type exports for easier usage
+export type Event = Tables<'events'>;
+export type Sermon = Tables<'sermons'>;
+export type Member = Tables<'members'>;
+export type CellGroup = Tables<'cell_groups'>;
+export type MinistryGroup = Tables<'ministry_groups'>;
+export type Department = Tables<'departments'>;
+export type EventAttendee = Tables<'event_attendees'>;
+export type Profile = Tables<'profiles'>;
+export type SermonSummary = Tables<'sermon_summaries'>;
+
+// Insert types
+export type EventInsert = TablesInsert<'events'>;
+export type SermonInsert = TablesInsert<'sermons'>;
+export type MemberInsert = TablesInsert<'members'>;
+export type EventAttendeeInsert = TablesInsert<'event_attendees'>;
+
+// Update types
+export type EventUpdate = TablesUpdate<'events'>;
+export type SermonUpdate = TablesUpdate<'sermons'>;
+
+// Enum types
+export type GenderType = Enums<'gender_type'>;
+export type MemberStatus = Enums<'member_status'>;
+export type UserRole = Enums<'user_role'>;
