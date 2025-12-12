@@ -284,7 +284,7 @@ const Events = () => {
         updated_at: new Date().toISOString()
       }));
 
-      // Use a single batch operation instead of multiple smaller ones
+      // Use the optimized RPC function for bulk sync
       const { error: batchError } = await supabase.rpc('bulk_upsert_event_attendees', {
         attendance_records: attendanceRecords
       });
@@ -341,7 +341,7 @@ const Events = () => {
           .from('events')
           .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, target_groups, target_departments, created_at')
           .order('event_date', { ascending: false })
-          .limit(50) // Limit to 50 most recent events
+          .limit(50)
       );
 
       if (result.error) throw result.error;
@@ -360,7 +360,7 @@ const Events = () => {
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Only load attendees for first few events initially (performance optimization)
+      // Only load attendees for first few events initially
       if (eventsWithDefaults.length > 0) {
         const eventsToLoad = eventsWithDefaults.slice(0, 3);
         const attendeePromises = eventsToLoad.map((event: Event) => 
@@ -391,7 +391,7 @@ const Events = () => {
             )
           `)
           .order('sermon_date', { ascending: false })
-          .limit(50) // Limit to 50 most recent sermons
+          .limit(50)
       );
 
       if (result.error) throw result.error;
@@ -426,7 +426,7 @@ const Events = () => {
             )
           `)
           .order('name')
-          .limit(500); // Limit to 500 members for performance
+          .limit(500);
 
         if (membersError) throw membersError;
 
@@ -542,13 +542,12 @@ const Events = () => {
         return cached.data;
       }
 
-      // Use a more efficient query with specific fields
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select('id, event_id, members_id, first_time, invited_by_id, attendance_status, attended_at, notes')
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false })
-        .limit(500); // Limit to 500 attendees per event
+        .limit(500);
 
       if (attendeesError) throw attendeesError;
 
@@ -640,7 +639,6 @@ const Events = () => {
       const initializeData = async () => {
         try {
           setLoading(true);
-          // Load all data in parallel for better performance
           await Promise.all([
             fetchEvents(),
             fetchSermons(),
@@ -757,7 +755,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache for this event
       supabaseCache.delete(`event_attendees_${eventId}`);
       await fetchEventAttendees(eventId);
       return true;
@@ -1057,7 +1054,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache
       supabaseCache.delete('sermons');
 
       setShowSermonModal(null);
@@ -1111,7 +1107,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache
       supabaseCache.delete('sermons');
 
       setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
@@ -1202,7 +1197,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache
       supabaseCache.delete('sermons');
 
       await fetchSermons();
@@ -1228,14 +1222,13 @@ const Events = () => {
         updated_at: new Date().toISOString()
       }));
 
-      // Use batch operation
+      // Use the optimized RPC function
       const { error } = await supabase.rpc('bulk_upsert_event_attendees', {
         attendance_records: absentRecords
       });
       
       if (error) throw error;
       
-      // Invalidate cache
       supabaseCache.delete(`event_attendees_${eventId}`);
       await fetchEventAttendees(eventId);
     } catch (error: any) {
@@ -1280,7 +1273,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache
       supabaseCache.delete('events');
 
       setShowEventForm(false);
@@ -1347,10 +1339,12 @@ const Events = () => {
         updated_at: new Date().toISOString()
       };
 
-      // FIX: Direct insert without unnecessary select
+      // Use upsert to handle both insert and update
       const { error: attendeeError } = await supabase
         .from('event_attendees')
-        .insert([attendeeData]);
+        .upsert([attendeeData], {
+          onConflict: 'event_id,members_id'
+        });
 
       if (attendeeError) {
         console.error('Supabase error details:', attendeeError);
@@ -1359,7 +1353,7 @@ const Events = () => {
 
       // Create attendee object with member data
       const newAttendee: EventAttendee = {
-        id: Date.now().toString(), // Temporary ID
+        id: `${eventId}-${attendeeFormData.memberId}-${Date.now()}`, // Temporary composite ID
         event_id: eventId,
         members_id: attendeeFormData.memberId,
         first_time: attendeeFormData.firstTime,
@@ -1379,13 +1373,11 @@ const Events = () => {
         } : undefined
       };
 
-      // Add to local state
+      // Add to local state immediately for better UX
       setAttendees(prev => [...prev, newAttendee]);
 
-      // Invalidate cache
+      // Invalidate cache and refresh to get actual database ID
       supabaseCache.delete(`event_attendees_${eventId}`);
-
-      // Refresh attendees to get the actual ID from database
       await fetchEventAttendees(eventId);
 
       resetAttendeeForm();
@@ -1414,7 +1406,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache
       supabaseCache.delete(`event_attendees_${eventId}`);
 
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
@@ -1589,7 +1580,6 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Invalidate caches
       supabaseCache.delete('members');
       supabaseCache.delete(`event_attendees_${eventId}`);
 
@@ -1606,7 +1596,7 @@ const Events = () => {
     }
   };
 
-  // FIXED: Optimized bulk attendance saving
+  // FIXED: Optimized bulk attendance saving using RPC function
   const saveAttendanceWithChunking = async (eventId: string) => {
     if (Object.keys(bulkAttendance).length === 0) {
       setError('No attendance data to save');
@@ -1626,7 +1616,7 @@ const Events = () => {
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
-      // Prepare all records in a single array
+      // Prepare all records
       const allRecords = [];
       const memberIds = Object.keys(bulkAttendance);
       
@@ -1646,87 +1636,14 @@ const Events = () => {
         });
       }
 
-      // Use Supabase's upsert for bulk operations
-      const { error: bulkError } = await supabase
-        .from('event_attendees')
-        .upsert(allRecords, {
-          onConflict: 'event_id,members_id',
-          ignoreDuplicates: false
-        });
+      // Use the optimized RPC function for bulk upsert
+      const { data, error } = await supabase.rpc('bulk_upsert_event_attendees', {
+        attendance_records: allRecords
+      });
 
-      if (bulkError) {
-        console.error('Bulk upsert error:', bulkError);
-        
-        // Fallback to individual inserts if bulk fails
-        console.log('Falling back to individual inserts...');
-        
-        let successCount = 0;
-        let failCount = 0;
-        
-        for (let i = 0; i < allRecords.length; i++) {
-          try {
-            const record = allRecords[i];
-            
-            // Check if record exists
-            const { data: existing } = await supabase
-              .from('event_attendees')
-              .select('id')
-              .eq('event_id', record.event_id)
-              .eq('members_id', record.members_id)
-              .single();
-            
-            if (existing) {
-              // Update existing
-              const { error: updateError } = await supabase
-                .from('event_attendees')
-                .update(record)
-                .eq('id', existing.id);
-              
-              if (updateError) {
-                console.error(`Update error for member ${record.members_id}:`, updateError);
-                failCount++;
-              } else {
-                successCount++;
-              }
-            } else {
-              // Insert new
-              const { error: insertError } = await supabase
-                .from('event_attendees')
-                .insert([record]);
-              
-              if (insertError) {
-                console.error(`Insert error for member ${record.members_id}:`, insertError);
-                failCount++;
-              } else {
-                successCount++;
-              }
-            }
-            
-            // Update progress
-            setSavingProgress(prev => ({
-              ...prev,
-              current: i + 1
-            }));
-            
-            // Small delay to prevent rate limiting
-            await new Promise(resolve => setTimeout(resolve, 10));
-            
-          } catch (error) {
-            console.error(`Error processing member at index ${i}:`, error);
-            failCount++;
-          }
-        }
-        
-        if (failCount > 0) {
-          setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
-        } else {
-          setSuccess(`Successfully saved attendance for ${successCount} members!`);
-          closeBulkAttendanceModal();
-        }
-      } else {
-        // Bulk upsert succeeded
-        setSuccess(`Successfully saved attendance for ${allRecords.length} members!`);
-        closeBulkAttendanceModal();
+      if (error) {
+        console.error('RPC function error:', error);
+        throw new Error(`Failed to save attendance: ${error.message}`);
       }
 
       // Update event timestamp
@@ -1740,6 +1657,9 @@ const Events = () => {
       
       // Refresh attendees after saving
       await fetchEventAttendees(eventId);
+
+      setSuccess(`Successfully saved attendance for ${allRecords.length} members!`);
+      closeBulkAttendanceModal();
 
     } catch (error: any) {
       console.error('Error in bulk attendance saving:', error);
@@ -1912,7 +1832,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Invalidate cache
       supabaseCache.delete('events');
 
       setEvents(prev => prev.map(event => 
@@ -1932,6 +1851,7 @@ const Events = () => {
     }
   };
 
+  // Modal Components
   const SyncModal = () => {
     if (!showSyncModal) return null;
 
@@ -2040,7 +1960,7 @@ const Events = () => {
           setLoadingMembers(true);
           const membersList: Member[] = [];
           
-          // Optimize: Filter members client-side first
+          // Filter members client-side first
           const eligibleMembers = members.filter(member => member.status !== 'not_attending');
           
           // Process in smaller batches to avoid blocking
@@ -2845,7 +2765,6 @@ const Events = () => {
             </button>
             <button
               onClick={() => {
-                // Invalidate all caches and refresh data
                 supabaseCache.clear();
                 Promise.all([
                   fetchEvents(),
@@ -3072,207 +2991,207 @@ const Events = () => {
                       Change type
                     </button>
                   </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {eventFormData.eventType === 'sunday' ? (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
-                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
-                      Sunday
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
-                    <input
-                      type="text"
-                      value={eventFormData.name}
-                      onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter event name"
-                      required
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
-                  <input
-                    type="text"
-                    value={eventFormData.topic}
-                    onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event topic or theme"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
-                  <input
-                    type="date"
-                    value={eventFormData.eventDate}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
-                  <input
-                    type="time"
-                    value={eventFormData.eventTime}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                  <input
-                    type="text"
-                    value={eventFormData.location}
-                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event location"
-                  />
-                </div>
-
-                <div className="md:col-span-2 space-y-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {eventFormData.eventType === 'sunday' ? (
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
+                        <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
+                          Sunday
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                        <input
+                          type="text"
+                          value={eventFormData.name}
+                          onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          placeholder="Enter event name"
+                          required
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
                       <input
-                        type="radio"
-                        name="eventScope"
-                        checked={eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                        type="text"
+                        value={eventFormData.topic}
+                        onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Event topic or theme"
                       />
-                      <Building className="h-5 w-5 text-purple-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
                       <input
-                        type="radio"
-                        name="eventScope"
-                        checked={!eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                        type="date"
+                        value={eventFormData.eventDate}
+                        onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        required
                       />
-                      <UsersIcon className="h-5 w-5 text-orange-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
+                      <input
+                        type="time"
+                        value={eventFormData.eventTime}
+                        onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        required
+                      />
+                    </div>
+                    <div className="md:col-span-2 space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                      <input
+                        type="text"
+                        value={eventFormData.location}
+                        onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Event location"
+                      />
+                    </div>
 
-                {!eventFormData.isWholeChurch && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {cellGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetCellGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
+                    <div className="md:col-span-2 space-y-4">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                          <input
+                            type="radio"
+                            name="eventScope"
+                            checked={eventFormData.isWholeChurch}
+                            onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
+                            className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                          <Building className="h-5 w-5 text-purple-600" />
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
+                          </div>
+                        </label>
+                        <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                          <input
+                            type="radio"
+                            name="eventScope"
+                            checked={!eventFormData.isWholeChurch}
+                            onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
+                            className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                          <UsersIcon className="h-5 w-5 text-orange-600" />
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
+                          </div>
+                        </label>
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {ministryGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {departments.map((dept) => (
-                          <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetDepartments.includes(dept.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetDepartments: [...eventFormData.targetDepartments, dept.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Creating...' : 'Create Event'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowEventForm(false)}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
+
+                    {!eventFormData.isWholeChurch && (
+                      <>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {cellGroups.map((group) => (
+                              <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={eventFormData.targetCellGroups.includes(group.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetCellGroups: [...eventFormData.targetCellGroups, group.id]
+                                      });
+                                    } else {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
+                                      });
+                                    }
+                                  }}
+                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {ministryGroups.map((group) => (
+                              <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={eventFormData.targetMinistryGroups.includes(group.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
+                                      });
+                                    } else {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
+                                      });
+                                    }
+                                  }}
+                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {departments.map((dept) => (
+                              <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={eventFormData.targetDepartments.includes(dept.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetDepartments: [...eventFormData.targetDepartments, dept.id]
+                                      });
+                                    } else {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
+                                      });
+                                    }
+                                  }}
+                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Creating...' : 'Create Event'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowEventForm(false)}
+                      className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </>
               )}
             </form>
