@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -83,38 +83,14 @@ interface EventAttendee {
   } | null;
 }
 
-// Simple cache implementation
-const supabaseCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-// Debounce hook
-const useDebounce = (value: string, delay: number) => {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-};
-
-// Cached Supabase query wrapper
-const cachedQuery = async (key: string, queryFn: () => Promise<any>) => {
-  const cached = supabaseCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-
-  const result = await queryFn();
-  supabaseCache.set(key, { data: result, timestamp: Date.now() });
-  return result;
-};
+interface SyncLog {
+  id: string;
+  event_id: string;
+  sync_data: any;
+  synced_at: string;
+  synced_by: string;
+  synced_by_name: string;
+}
 
 const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
@@ -135,8 +111,6 @@ const Events = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [inviterSearchTerm, setInviterSearchTerm] = useState('');
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
-  const debouncedInviterSearchTerm = useDebounce(inviterSearchTerm, 300);
   const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
   const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
@@ -152,6 +126,8 @@ const Events = () => {
   const attendanceNotesRef = useRef<Record<string, string>>({});
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [savingProgress, setSavingProgress] = useState({ current: 0, total: 0, isSaving: false });
+  const [syncHistory, setSyncHistory] = useState<SyncLog[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
@@ -253,121 +229,129 @@ const Events = () => {
     return initialAttendance;
   };
 
-  // Optimized batch sync function
-  const syncEventToCloud = async (eventId: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
+  // ==================== BATCH ATTENDANCE FUNCTIONS ====================
 
+  const saveAttendanceBatch = async (eventId: string, attendanceRecords: any[]) => {
     try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .upsert(attendanceRecords, {
+          onConflict: 'event_id,members_id',
+          ignoreDuplicates: false
+        });
 
-      // Get all attendees for this event with optimized query
-      const eventAttendees = getEventAttendees(eventId);
-      
-      if (eventAttendees.length === 0) {
-        setError('No attendance data to sync. Please add attendees first.');
-        setTimeout(() => setError(null), 3000);
-        return;
-      }
-
-      // Prepare attendance data for syncing
-      const attendanceRecords = eventAttendees.map(attendee => ({
-        event_id: eventId,
-        members_id: attendee.members_id,
-        first_time: attendee.first_time || false,
-        invited_by_id: attendee.invited_by_id || null,
-        attendance_status: attendee.attendance_status || 'absent',
-        attended_at: attendee.attended_at || null,
-        notes: attendee.notes || null,
-        updated_at: new Date().toISOString()
-      }));
-
-      // Use the optimized RPC function for bulk sync
-      const { error: batchError } = await supabase.rpc('bulk_upsert_event_attendees', {
-        attendance_records: attendanceRecords
-      });
-
-      if (batchError) {
-        console.error('Batch sync error:', batchError);
-        throw new Error(`Failed to sync attendance data`);
-      }
-
-      // Update event timestamp in cloud to mark as synced
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ 
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', eventId);
-
-      if (updateError) throw updateError;
-
-      // Update local state
-      setEvents(prev => prev.map(ev => 
-        ev.id === eventId 
-          ? { ...ev, updated_at: new Date().toISOString() }
-          : ev
-      ));
-
-      // Invalidate cache for this event
-      supabaseCache.delete(`event_attendees_${eventId}`);
-      
-      setSuccess(`Successfully synced ${eventAttendees.length} attendance records for "${event.name}" to cloud!`);
-      setTimeout(() => setSuccess(null), 5000);
-      
-      // Close modal after a delay to show success message
-      setTimeout(() => setShowSyncModal(null), 2000);
-      
-    } catch (error: any) {
-      console.error('Error syncing event to cloud:', error);
-      setError(`Failed to sync: ${error.message || 'Please try again.'}`);
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setLoading(false);
+      if (error) throw error;
+      return { success: true, count: attendanceRecords.length };
+    } catch (error) {
+      console.error('Error saving attendance batch:', error);
+      return { success: false, error };
     }
   };
 
-  // Optimized data fetching with caching
+  const saveAttendanceWithChunking = async (eventId: string) => {
+    setSavingProgress({ current: 0, total: Object.keys(bulkAttendance).length, isSaving: true });
+    setError(null);
+    setSuccess(null);
+
+    const chunkSize = 50;
+    const memberIds = Object.keys(bulkAttendance);
+    const results = [];
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      for (let i = 0; i < memberIds.length; i += chunkSize) {
+        const chunk = memberIds.slice(i, i + chunkSize);
+        const attendanceRecords = [];
+
+        for (const memberId of chunk) {
+          const status = bulkAttendance[memberId];
+          const notes = attendanceNotesRef.current[memberId] || '';
+          
+          attendanceRecords.push({
+            event_id: eventId,
+            members_id: memberId,
+            first_time: false,
+            invited_by_id: null,
+            attendance_status: status,
+            attended_at: status === 'present' ? new Date().toISOString() : null,
+            notes: notes || null,
+          });
+        }
+
+        const result = await saveAttendanceBatch(eventId, attendanceRecords);
+        results.push(result);
+        
+        if (result.success) {
+          successCount += attendanceRecords.length;
+        } else {
+          failCount += attendanceRecords.length;
+        }
+
+        // Update progress
+        setSavingProgress(prev => ({
+          ...prev,
+          current: Math.min(i + chunkSize, memberIds.length)
+        }));
+
+        // Small delay to prevent overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Refresh attendees after saving
+      await fetchEventAttendees(eventId);
+
+      setSavingProgress({ current: 0, total: 0, isSaving: false });
+
+      if (failCount === 0) {
+        setSuccess(`Successfully saved attendance for ${successCount} members!`);
+        closeBulkAttendanceModal();
+      } else {
+        setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
+
+    } catch (error: any) {
+      console.error('Error in chunked attendance saving:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+      setSavingProgress({ current: 0, total: 0, isSaving: false });
+    }
+  };
+
+  // ==================== END BATCH FUNCTIONS ====================
+
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Use cached query with specific fields to reduce data transfer
-      const result = await cachedQuery('events', () => 
-        supabase
-          .from('events')
-          .select('id, name, topic, event_date, event_time, location, is_whole_church, is_completed, completed_at, pamphlet_url, updated_at, target_groups, target_departments, created_at')
-          .order('event_date', { ascending: false })
-          .limit(50)
-      );
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('event_date', { ascending: false });
 
-      if (result.error) throw result.error;
+      if (error) throw error;
 
-      const eventsWithDefaults = (result.data || []).map((event: any) => ({
+      const eventsWithDefaults = (data || []).map((event: any) => ({
         ...event,
         is_whole_church: event.is_whole_church ?? true,
         target_groups: event.target_groups ?? [],
         target_departments: event.target_departments ?? [],
         is_completed: event.is_completed ?? false,
         completed_at: event.completed_at ?? null,
-        pamphlet_url: event.pamphlet_url ?? null,
-        created_at: event.created_at ?? null,
-        updated_at: event.updated_at ?? null
+        pamphlet_url: event.pamphlet_url ?? null
       }));
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Only load attendees for first few events initially
-      if (eventsWithDefaults.length > 0) {
-        const eventsToLoad = eventsWithDefaults.slice(0, 3);
-        const attendeePromises = eventsToLoad.map((event: Event) => 
-          fetchEventAttendees(event.id)
-        );
-        await Promise.all(attendeePromises);
-      }
+      const attendeePromises = eventsWithDefaults.map((event: Event) => 
+        fetchEventAttendees(event.id)
+      );
+      await Promise.all(attendeePromises);
       
     } catch (error: any) {
       console.error('Error fetching events:', error);
@@ -377,183 +361,146 @@ const Events = () => {
     }
   }, []);
 
-  // Optimized fetchSermons with caching
   const fetchSermons = useCallback(async () => {
     try {
-      const result = await cachedQuery('sermons', () =>
-        supabase
-          .from('sermons')
-          .select(`
-            id, title, summary, pastor_name, sermon_date, event_id, video_url, document_url, created_at, updated_at,
-            events (
-              name,
-              topic
-            )
-          `)
-          .order('sermon_date', { ascending: false })
-          .limit(50)
-      );
+      const { data, error } = await supabase
+        .from('sermons')
+        .select(`
+          *,
+          events (
+            name,
+            topic
+          )
+        `)
+        .order('sermon_date', { ascending: false });
 
-      if (result.error) throw result.error;
-      setSermons(result.data || []);
+      if (error) throw error;
+      setSermons(data || []);
     } catch (error: any) {
       console.error('Error fetching sermons:', error);
     }
   }, []);
 
-  // Optimized fetchMembers with caching
   const fetchMembers = useCallback(async () => {
     try {
       setError(null);
       
-      const result = await cachedQuery('members', async () => {
-        const { data: membersData, error: membersError } = await supabase
-          .from('members')
-          .select(`
+      const { data: membersData, error: membersError } = await supabase
+        .from('members')
+        .select(`
+          id,
+          name,
+          surname,
+          residence,
+          phone,
+          cell_group_id,
+          ministry_group_id,
+          status,
+          cell_groups (
+            name
+          ),
+          ministry_groups (
+            name
+          )
+        `)
+        .order('name');
+
+      if (membersError) throw membersError;
+
+      const { data: deptMembersData, error: deptError } = await supabase
+        .from('department_members')
+        .select(`
+          member_id,
+          departments (
             id,
-            name,
-            surname,
-            residence,
-            phone,
-            cell_group_id,
-            ministry_group_id,
-            status,
-            cell_groups (
-              name
-            ),
-            ministry_groups (
-              name
-            )
-          `)
-          .order('name')
-          .limit(500);
+            name
+          )
+        `);
 
-        if (membersError) throw membersError;
+      if (deptError && deptError.code !== 'PGRST116') {
+        console.warn('Error fetching department members:', deptError);
+      }
 
-        const { data: deptMembersData, error: deptError } = await supabase
-          .from('department_members')
-          .select(`
-            member_id,
-            departments (
-              id,
-              name
-            )
-          `)
-          .limit(1000);
-
-        if (deptError && deptError.code !== 'PGRST116') {
-          console.warn('Error fetching department members:', deptError);
-        }
-
-        const memberDeptMap = new Map<string, string[]>();
-        if (deptMembersData) {
-          deptMembersData.forEach((item: any) => {
-            if (item.departments && item.member_id) {
-              if (!memberDeptMap.has(item.member_id)) {
-                memberDeptMap.set(item.member_id, []);
-              }
-              memberDeptMap.get(item.member_id)?.push(item.departments.id);
+      const memberDeptMap = new Map<string, string[]>();
+      if (deptMembersData) {
+        deptMembersData.forEach((item: any) => {
+          if (item.departments && item.member_id) {
+            if (!memberDeptMap.has(item.member_id)) {
+              memberDeptMap.set(item.member_id, []);
             }
-          });
-        }
+            memberDeptMap.get(item.member_id)?.push(item.departments.id);
+          }
+        });
+      }
 
-        const membersWithDepartments = (membersData || []).map((member: any) => ({
-          ...member,
-          department_ids: memberDeptMap.get(member.id) || [],
-          cell_groups: member.cell_groups?.[0] || null,
-          ministry_groups: member.ministry_groups?.[0] || null
-        }));
+      const membersWithDepartments = (membersData || []).map((member: any) => ({
+        ...member,
+        department_ids: memberDeptMap.get(member.id) || [],
+        cell_groups: member.cell_groups?.[0] || null,
+        ministry_groups: member.ministry_groups?.[0] || null
+      }));
 
-        return membersWithDepartments;
-      });
-
-      setMembers(result);
+      setMembers(membersWithDepartments);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
     }
   }, []);
 
-  // Optimized fetchCellGroups with caching
   const fetchCellGroups = useCallback(async () => {
     try {
-      const result = await cachedQuery('cellGroups', () =>
-        supabase
-          .from('cell_groups')
-          .select('id, name')
-          .order('name')
-          .limit(100)
-      );
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id, name')
+        .order('name');
 
-      if (result.error) throw result.error;
-      setCellGroups(result.data || []);
+      if (error) throw error;
+      setCellGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
     }
   }, []);
 
-  // Optimized fetchMinistryGroups with caching
   const fetchMinistryGroups = useCallback(async () => {
     try {
-      const result = await cachedQuery('ministryGroups', () =>
-        supabase
-          .from('ministry_groups')
-          .select('id, name')
-          .order('name')
-          .limit(100)
-      );
+      const { data, error } = await supabase
+        .from('ministry_groups')
+        .select('id, name')
+        .order('name');
 
-      if (result.error) throw result.error;
-      setMinistryGroups(result.data || []);
+      if (error) throw error;
+      setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
     }
   }, []);
 
-  // Optimized fetchDepartments with caching
   const fetchDepartments = useCallback(async () => {
     try {
-      const result = await cachedQuery('departments', () =>
-        supabase
-          .from('departments')
-          .select('id, name')
-          .order('name')
-          .limit(100)
-      );
+      const { data, error } = await supabase
+        .from('departments')
+        .select('id, name')
+        .order('name');
 
-      if (result.error) throw result.error;
-      setDepartments(result.data || []);
+      if (error) throw error;
+      setDepartments(data || []);
     } catch (error: any) {
       console.error('Error fetching departments:', error);
     }
   }, []);
 
-  // Optimized fetchEventAttendees with caching
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      // Check cache first
-      const cacheKey = `event_attendees_${eventId}`;
-      const cached = supabaseCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        setAttendees(prev => {
-          const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-          return [...filtered, ...cached.data];
-        });
-        return cached.data;
-      }
-
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
-        .select('id, event_id, members_id, first_time, invited_by_id, attendance_status, attended_at, notes')
+        .select('*')
         .eq('event_id', eventId)
-        .order('attended_at', { ascending: false })
-        .limit(500);
+        .order('attended_at', { ascending: false });
 
       if (attendeesError) throw attendeesError;
 
       if (!attendeesData || attendeesData.length === 0) {
         const attendeesWithDefaults: EventAttendee[] = [];
-        supabaseCache.set(cacheKey, { data: attendeesWithDefaults, timestamp: Date.now() });
         setAttendees(prev => {
           const filtered = prev.filter(attendee => attendee.event_id !== eventId);
           return [...filtered, ...attendeesWithDefaults];
@@ -561,66 +508,61 @@ const Events = () => {
         return [];
       }
 
-      // Fetch all members in a single batch query
-      const memberIds = attendeesData.map(a => a.members_id);
-      const uniqueMemberIds = [...new Set(memberIds)];
-      
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select('id, name, surname, residence, phone, status, cell_group_id, ministry_group_id')
-        .in('id', uniqueMemberIds);
+      const attendeesWithMembers = await Promise.all(
+        attendeesData.map(async (attendee: any) => {
+          const { data: memberData, error: memberError } = await supabase
+            .from('members')
+            .select(`
+              id,
+              name,
+              surname,
+              residence,
+              phone,
+              status,
+              cell_group_id,
+              ministry_group_id,
+              cell_groups (
+                name
+              ),
+              ministry_groups (
+                name
+              )
+            `)
+            .eq('id', attendee.members_id)
+            .single();
 
-      if (membersError) throw membersError;
+          if (memberError) {
+            console.error('Error fetching member:', memberError);
+            return null;
+          }
 
-      // Create Maps for O(1) lookups
-      const membersMap = new Map();
-      membersData?.forEach(member => {
-        membersMap.set(member.id, member);
-      });
+          let invited_by_member = null;
+          if (attendee.invited_by_id) {
+            const { data: inviterData } = await supabase
+              .from('members')
+              .select('id, name, surname')
+              .eq('id', attendee.invited_by_id)
+              .single();
+            
+            invited_by_member = inviterData;
+          }
 
-      // Process invitees if any
-      const inviterIds = attendeesData
-        .map(a => a.invited_by_id)
-        .filter(id => id) as string[];
-      
-      const invitersMap = new Map();
-      if (inviterIds.length > 0) {
-        const { data: invitersData } = await supabase
-          .from('members')
-          .select('id, name, surname')
-          .in('id', inviterIds);
-        
-        invitersData?.forEach(inviter => {
-          invitersMap.set(inviter.id, inviter);
-        });
-      }
-
-      const attendeesWithMembers = attendeesData.map((attendee: any) => {
-        const member = membersMap.get(attendee.members_id);
-        const invited_by_member = attendee.invited_by_id ? 
-          invitersMap.get(attendee.invited_by_id) : null;
-
-        if (!member) return null;
-
-        return {
-          ...attendee,
-          attendance_status: attendee.attendance_status || 'present',
-          members: {
-            ...member,
-            cell_groups: null,
-            ministry_groups: null,
-            department_ids: []
-          },
-          invited_by_member
-        };
-      });
+          return {
+            ...attendee,
+            attendance_status: attendee.attendance_status || 'present',
+            members: {
+              ...memberData,
+              cell_groups: memberData.cell_groups?.[0] || null,
+              ministry_groups: memberData.ministry_groups?.[0] || null
+            },
+            invited_by_member
+          };
+        })
+      );
 
       const validAttendees = attendeesWithMembers.filter(
         (attendee): attendee is EventAttendee => attendee !== null
       );
-
-      // Cache the result
-      supabaseCache.set(cacheKey, { data: validAttendees, timestamp: Date.now() });
 
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
@@ -631,6 +573,25 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
       return [];
+    }
+  }, []);
+
+  const fetchSyncHistory = useCallback(async (eventId: string) => {
+    try {
+      setLoadingHistory(true);
+      const { data, error } = await supabase
+        .from('event_sync_logs')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('synced_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setSyncHistory(data || []);
+    } catch (error: any) {
+      console.error('Error fetching sync history:', error);
+    } finally {
+      setLoadingHistory(false);
     }
   }, []);
 
@@ -666,6 +627,12 @@ const Events = () => {
     fetchMinistryGroups, 
     fetchDepartments
   ]);
+
+  useEffect(() => {
+    if (showSyncModal) {
+      fetchSyncHistory(showSyncModal);
+    }
+  }, [showSyncModal, fetchSyncHistory]);
 
   const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
     try {
@@ -736,7 +703,6 @@ const Events = () => {
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
         notes: notes || null,
-        updated_at: new Date().toISOString()
       };
 
       let error;
@@ -755,7 +721,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      supabaseCache.delete(`event_attendees_${eventId}`);
       await fetchEventAttendees(eventId);
       return true;
     } catch (error: any) {
@@ -766,6 +731,11 @@ const Events = () => {
       setLoading(false);
     }
   };
+
+  // Old function - replaced with chunking version
+  // const saveBulkAttendance = async (eventId: string) => {
+  //   // This is now replaced by saveAttendanceWithChunking
+  // };
 
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
@@ -778,6 +748,86 @@ const Events = () => {
 
   const getSermonForEvent = (eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
+  };
+
+  // FIXED: Now properly stores sync data to the database
+  const syncEventToCloud = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      const eventAttendees = getEventAttendees(eventId);
+      const stats = getAttendanceStats(eventId);
+
+      // Create comprehensive sync data
+      const syncData = {
+        event_id: event.id,
+        event_name: event.name,
+        event_date: event.event_date,
+        event_time: event.event_time,
+        location: event.location,
+        topic: event.topic,
+        is_completed: event.is_completed,
+        is_whole_church: event.is_whole_church,
+        target_groups: event.target_groups,
+        target_departments: event.target_departments,
+        total_attendees: eventAttendees.length,
+        present_count: stats.present,
+        absent_count: stats.absent,
+        first_timers_count: stats.firstTimers,
+        attendees: eventAttendees.map(attendee => ({
+          member_id: attendee.members_id,
+          member_name: `${attendee.members.name} ${attendee.members.surname}`,
+          status: attendee.attendance_status,
+          first_time: attendee.first_time,
+          invited_by: attendee.invited_by_member ? 
+            `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null,
+          attended_at: attendee.attended_at,
+          notes: attendee.notes
+        })),
+        synced_at: new Date().toISOString(),
+        synced_by: user?.id,
+        synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+      };
+
+      // FIRST: Store sync data in the event_sync_logs table
+      const { error: syncError } = await supabase
+        .from('event_sync_logs')
+        .insert([{
+          event_id: eventId,
+          sync_data: syncData,
+          synced_by: user?.id,
+          synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+        }]);
+
+      if (syncError) throw syncError;
+
+      // SECOND: Also update the event's updated_at timestamp
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ 
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', eventId);
+
+      if (updateError) throw updateError;
+
+      // Refresh sync history to show the new sync
+      await fetchSyncHistory(eventId);
+
+      setSuccess(`Event "${event.name}" successfully synced to cloud! All data has been saved.`);
+      setTimeout(() => setSuccess(null), 3000);
+      
+    } catch (error: any) {
+      console.error('Error syncing event to cloud:', error);
+      setError(error.message || 'Failed to sync event to cloud. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const exportEventData = (eventId: string) => {
@@ -797,7 +847,7 @@ const Events = () => {
     csvRows.push(['']);
     
     csvRows.push(['Attendees List']);
-    csvRows.push(['Name', 'Surname', 'Residence', 'Phone', 'Status', 'First Time', 'Attended At', 'Invited By']);
+    csvRows.push(['Name', 'Surname', 'Residence', 'Phone', 'Status', 'First Time', 'Attended At', 'Invited By', 'Notes']);
     
     eventAttendees.forEach(attendee => {
       csvRows.push([
@@ -808,7 +858,8 @@ const Events = () => {
         attendee.attendance_status,
         attendee.first_time ? 'Yes' : 'No',
         attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
-        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : ''
+        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : '',
+        attendee.notes || ''
       ]);
     });
     
@@ -1054,8 +1105,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      supabaseCache.delete('sermons');
-
       setShowSermonModal(null);
       setEditingSermon(null);
       setSermonFormData({ 
@@ -1106,8 +1155,6 @@ const Events = () => {
         .eq('id', sermonId);
 
       if (error) throw error;
-
-      supabaseCache.delete('sermons');
 
       setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
       setSuccess('Sermon deleted successfully!');
@@ -1197,8 +1244,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      supabaseCache.delete('sermons');
-
       await fetchSermons();
       setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
       setTimeout(() => setSuccess(null), 3000);
@@ -1218,22 +1263,91 @@ const Events = () => {
         first_time: false,
         invited_by_id: null,
         attendance_status: 'absent' as const,
-        attended_at: null,
-        updated_at: new Date().toISOString()
+        attended_at: null
       }));
 
-      // Use the optimized RPC function
-      const { error } = await supabase.rpc('bulk_upsert_event_attendees', {
-        attendance_records: absentRecords
-      });
+      for (const record of absentRecords) {
+        const { data: existing } = await supabase
+          .from('event_attendees')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('members_id', record.members_id)
+          .single();
+
+        if (existing) {
+          await supabase
+            .from('event_attendees')
+            .update(record)
+            .eq('id', existing.id);
+        } else {
+          await supabase
+            .from('event_attendees')
+            .insert([record]);
+        }
+      }
       
-      if (error) throw error;
-      
-      supabaseCache.delete(`event_attendees_${eventId}`);
       await fetchEventAttendees(eventId);
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
       throw error;
+    }
+  };
+
+  const handleCompleteEvent = async (eventId: string) => {
+    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      const eventAttendees = getEventAttendees(eventId);
+      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
+
+      const absentMemberIds: string[] = [];
+
+      for (const member of members) {
+        if (member.status === 'not_attending') continue;
+        if (attendeeIds.has(member.id)) continue;
+
+        const shouldAttend = await isMemberInTargetGroups(member, event);
+        if (shouldAttend) {
+          absentMemberIds.push(member.id);
+        }
+      }
+
+      if (absentMemberIds.length > 0) {
+        await markMembersAsAbsent(eventId, absentMemberIds);
+      }
+
+      const { error } = await supabase
+        .from('events')
+        .update({
+          is_completed: true,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', eventId);
+
+      if (error) throw error;
+
+      setEvents(prev => prev.map(event => 
+        event.id === eventId 
+          ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
+          : event
+      ));
+
+      setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error completing event:', error);
+      setError(error.message || 'Failed to complete event. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1273,8 +1387,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      supabaseCache.delete('events');
-
       setShowEventForm(false);
       setEventFormData({ 
         eventType: '',
@@ -1301,7 +1413,6 @@ const Events = () => {
     }
   };
 
-  // FIXED: Optimized handleAttendeeSubmit function
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
@@ -1335,49 +1446,64 @@ const Events = () => {
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
-      // Use upsert to handle both insert and update
-      const { error: attendeeError } = await supabase
+      const { data: newAttendee, error: attendeeError } = await supabase
         .from('event_attendees')
-        .upsert([attendeeData], {
-          onConflict: 'event_id,members_id'
-        });
+        .insert([attendeeData])
+        .select()
+        .single();
 
       if (attendeeError) {
         console.error('Supabase error details:', attendeeError);
         throw attendeeError;
       }
 
-      // Create attendee object with member data
-      const newAttendee: EventAttendee = {
-        id: `${eventId}-${attendeeFormData.memberId}-${Date.now()}`, // Temporary composite ID
-        event_id: eventId,
-        members_id: attendeeFormData.memberId,
-        first_time: attendeeFormData.firstTime,
-        invited_by_id: attendeeFormData.invitedById || null,
-        attendance_status: 'present',
-        attended_at: new Date().toISOString(),
-        members: {
-          ...selectedMember,
-          cell_groups: selectedMember.cell_groups,
-          ministry_groups: selectedMember.ministry_groups,
-          department_ids: selectedMember.department_ids || []
-        },
-        invited_by_member: selectedInviter ? {
-          id: selectedInviter.id,
-          name: selectedInviter.name,
-          surname: selectedInviter.surname
-        } : undefined
-      };
+      const { data: attendeeWithDetails } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members (
+            id,
+            name,
+            surname,
+            residence,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id
+          )
+        `)
+        .eq('id', newAttendee.id)
+        .single();
 
-      // Add to local state immediately for better UX
-      setAttendees(prev => [...prev, newAttendee]);
+      if (attendeeWithDetails) {
+        let invited_by_member = null;
+        if (attendeeWithDetails.invited_by_id) {
+          const { data: inviterData } = await supabase
+            .from('members')
+            .select('id, name, surname')
+            .eq('id', attendeeWithDetails.invited_by_id)
+            .single();
+          
+          invited_by_member = inviterData;
+        }
 
-      // Invalidate cache and refresh to get actual database ID
-      supabaseCache.delete(`event_attendees_${eventId}`);
+        const attendeeToAdd: EventAttendee = {
+          ...attendeeWithDetails,
+          members: {
+            ...attendeeWithDetails.members,
+            cell_groups: null,
+            ministry_groups: null,
+            department_ids: []
+          },
+          invited_by_member
+        };
+
+        setAttendees(prev => [...prev, attendeeToAdd]);
+      }
+
       await fetchEventAttendees(eventId);
 
       resetAttendeeForm();
@@ -1405,8 +1531,6 @@ const Events = () => {
         .eq('id', attendeeId);
 
       if (error) throw error;
-
-      supabaseCache.delete(`event_attendees_${eventId}`);
 
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
       await fetchEventAttendees(eventId);
@@ -1570,8 +1694,7 @@ const Events = () => {
         first_time: true,
         invited_by_id: null,
         attendance_status: 'present' as const,
-        attended_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        attended_at: new Date().toISOString()
       };
 
       const { error: attendeeError } = await supabase
@@ -1579,9 +1702,6 @@ const Events = () => {
         .insert([attendeeData]);
 
       if (attendeeError) throw attendeeError;
-
-      supabaseCache.delete('members');
-      supabaseCache.delete(`event_attendees_${eventId}`);
 
       await fetchEventAttendees(eventId);
       await fetchMembers();
@@ -1596,106 +1716,27 @@ const Events = () => {
     }
   };
 
-  // FIXED: Optimized bulk attendance saving using RPC function
-  const saveAttendanceWithChunking = async (eventId: string) => {
-    if (Object.keys(bulkAttendance).length === 0) {
-      setError('No attendance data to save');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-
-    setSavingProgress({ 
-      current: 0, 
-      total: Object.keys(bulkAttendance).length, 
-      isSaving: true 
-    });
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
-
-      // Prepare all records
-      const allRecords = [];
-      const memberIds = Object.keys(bulkAttendance);
-      
-      for (const memberId of memberIds) {
-        const status = bulkAttendance[memberId];
-        const notes = attendanceNotesRef.current[memberId] || '';
-        
-        allRecords.push({
-          event_id: eventId,
-          members_id: memberId,
-          first_time: false,
-          invited_by_id: null,
-          attendance_status: status,
-          attended_at: status === 'present' ? new Date().toISOString() : null,
-          notes: notes || null,
-          updated_at: new Date().toISOString()
-        });
-      }
-
-      // Use the optimized RPC function for bulk upsert
-      const { data, error } = await supabase.rpc('bulk_upsert_event_attendees', {
-        attendance_records: allRecords
-      });
-
-      if (error) {
-        console.error('RPC function error:', error);
-        throw new Error(`Failed to save attendance: ${error.message}`);
-      }
-
-      // Update event timestamp
-      await supabase
-        .from('events')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', eventId);
-
-      // Invalidate cache for this event
-      supabaseCache.delete(`event_attendees_${eventId}`);
-      
-      // Refresh attendees after saving
-      await fetchEventAttendees(eventId);
-
-      setSuccess(`Successfully saved attendance for ${allRecords.length} members!`);
-      closeBulkAttendanceModal();
-
-    } catch (error: any) {
-      console.error('Error in bulk attendance saving:', error);
-      setError(error.message || 'Failed to save bulk attendance.');
-    } finally {
-      setSavingProgress({ current: 0, total: 0, isSaving: false });
-    }
-  };
-
-  // Memoized filtered members to prevent unnecessary re-renders
-  const filteredMembers = useMemo(() => {
-    if (!debouncedSearchTerm) return members;
-    
-    const searchLower = debouncedSearchTerm.toLowerCase();
-    return members.filter(member => (
+  const filteredMembers = members.filter(member => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
       member.name.toLowerCase().includes(searchLower) ||
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.residence.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower)
-    ));
-  }, [members, debouncedSearchTerm]);
+    );
+  });
 
-  // Memoized filtered inviters to prevent unnecessary re-renders
-  const filteredInviters = useMemo(() => {
-    if (!debouncedInviterSearchTerm) return members;
-    
-    const searchLower = debouncedInviterSearchTerm.toLowerCase();
-    return members.filter(member => (
+  const filteredInviters = members.filter(member => {
+    const searchLower = inviterSearchTerm.toLowerCase();
+    return (
       member.name.toLowerCase().includes(searchLower) ||
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.residence.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower)
-    ));
-  }, [members, debouncedInviterSearchTerm]);
+    );
+  });
 
   const getEventAttendees = (eventId: string) => {
     return attendees.filter(attendee => attendee.event_id === eventId);
@@ -1786,72 +1827,6 @@ const Events = () => {
     }
   };
 
-  // Optimized event completion
-  const handleCompleteEvent = async (eventId: string) => {
-    if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
-
-      const eventAttendees = getEventAttendees(eventId);
-      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
-
-      const absentMemberIds: string[] = [];
-      
-      // Find absent members in batches
-      for (const member of members) {
-        if (member.status === 'not_attending') continue;
-        if (attendeeIds.has(member.id)) continue;
-
-        const shouldAttend = await isMemberInTargetGroups(member, event);
-        if (shouldAttend) {
-          absentMemberIds.push(member.id);
-        }
-      }
-
-      // Mark absent members in a single batch operation
-      if (absentMemberIds.length > 0) {
-        await markMembersAsAbsent(eventId, absentMemberIds);
-      }
-
-      const { error } = await supabase
-        .from('events')
-        .update({
-          is_completed: true,
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', eventId);
-
-      if (error) throw error;
-
-      supabaseCache.delete('events');
-
-      setEvents(prev => prev.map(event => 
-        event.id === eventId 
-          ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
-          : event
-      ));
-
-      setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
-      setTimeout(() => setSuccess(null), 3000);
-      
-    } catch (error: any) {
-      console.error('Error completing event:', error);
-      setError(error.message || 'Failed to complete event. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Modal Components
   const SyncModal = () => {
     if (!showSyncModal) return null;
 
@@ -1863,7 +1838,7 @@ const Events = () => {
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
             <div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
@@ -1871,13 +1846,8 @@ const Events = () => {
                 Sync to Cloud - {event.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Send attendance data to cloud storage
+                Backup event data to cloud storage
               </p>
-              <div className="mt-2">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300`}>
-                  Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
-                </span>
-              </div>
             </div>
             <button
               onClick={() => setShowSyncModal(null)}
@@ -1888,6 +1858,32 @@ const Events = () => {
           </div>
 
           <div className="p-6">
+            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">What will be synced:</h4>
+              <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Event details (name, date, time, location, topic)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendance statistics ({stats.present} present, {stats.absent} absent)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendee list ({eventAttendees.length} members with details)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Event scope and target groups information
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Sync timestamp and user information
+                </li>
+              </ul>
+            </div>
+
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.present}</div>
@@ -1903,8 +1899,47 @@ const Events = () => {
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
-                <div className="text-sm text-blue-700 dark:text-blue-300">First Timers</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
               </div>
+            </div>
+
+            {/* Sync History */}
+            <div className="mb-6">
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Sync History</h4>
+              {loadingHistory ? (
+                <div className="text-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                </div>
+              ) : syncHistory.length === 0 ? (
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                  No sync history yet. Sync this event to create the first record.
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-60 overflow-y-auto">
+                  {syncHistory.map((sync) => (
+                    <div key={sync.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {new Date(sync.synced_at).toLocaleString()}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            By: {sync.synced_by_name}
+                          </div>
+                        </div>
+                        <div className="text-sm text-gray-500 dark:text-gray-500">
+                          {sync.sync_data?.attendees?.length || 0} attendees
+                        </div>
+                      </div>
+                      {sync.sync_data?.present_count && (
+                        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                          {sync.sync_data.present_count} present, {sync.sync_data.absent_count} absent
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -1927,7 +1962,7 @@ const Events = () => {
               </div>
               
               <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
-                Note: Sync ensures all attendance data is saved to the cloud database
+                Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
               </p>
             </div>
           </div>
@@ -1952,42 +1987,25 @@ const Events = () => {
     if (!event) return null;
 
     const [targetMembers, setTargetMembers] = useState<Member[]>([]);
-    const [loadingMembers, setLoadingMembers] = useState(true);
+    const [loadingTargetMembers, setLoadingTargetMembers] = useState(true);
     
     useEffect(() => {
       const loadTargetMembers = async () => {
+        setLoadingTargetMembers(true);
         try {
-          setLoadingMembers(true);
           const membersList: Member[] = [];
-          
-          // Filter members client-side first
-          const eligibleMembers = members.filter(member => member.status !== 'not_attending');
-          
-          // Process in smaller batches to avoid blocking
-          const batchSize = 20;
-          for (let i = 0; i < eligibleMembers.length; i += batchSize) {
-            const batch = eligibleMembers.slice(i, i + batchSize);
-            const batchPromises = batch.map(member => 
-              isMemberInTargetGroups(member, event)
-            );
-            
-            const results = await Promise.all(batchPromises);
-            
-            results.forEach((shouldAttend, index) => {
-              if (shouldAttend) {
-                membersList.push(batch[index]);
-              }
-            });
-            
-            // Update state progressively for better UX
-            if (i + batchSize >= eligibleMembers.length) {
-              setTargetMembers([...membersList]);
+          for (const member of members) {
+            if (member.status === 'not_attending') continue;
+            const shouldAttend = await isMemberInTargetGroups(member, event);
+            if (shouldAttend) {
+              membersList.push(member);
             }
           }
+          setTargetMembers(membersList);
         } catch (error) {
           console.error('Error loading target members:', error);
         } finally {
-          setLoadingMembers(false);
+          setLoadingTargetMembers(false);
         }
       };
       
@@ -2024,6 +2042,7 @@ const Events = () => {
           </div>
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Progress Bar */}
             {savingProgress.isSaving && (
               <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                 <div className="flex items-center justify-between mb-2">
@@ -2041,7 +2060,7 @@ const Events = () => {
                   ></div>
                 </div>
                 <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                  Processing in batches for optimal performance...
+                  Processing in batches of 50 members for optimal performance...
                 </p>
               </div>
             )}
@@ -2096,19 +2115,19 @@ const Events = () => {
               </button>
             </div>
 
-            {loadingMembers ? (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-4 text-gray-600 dark:text-gray-400">Loading target members...</p>
-              </div>
-            ) : targetMembers.length === 0 ? (
-              <div className="text-center py-8">
-                <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {targetMembers.map((member) => (
+            <div className="space-y-3">
+              {loadingTargetMembers ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-3 text-gray-600 dark:text-gray-400">Loading target members...</span>
+                </div>
+              ) : targetMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+                </div>
+              ) : (
+                targetMembers.map((member) => (
                   <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2180,9 +2199,9 @@ const Events = () => {
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </div>
           </div>
 
           <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
@@ -2200,7 +2219,7 @@ const Events = () => {
                 </button>
                 <button
                   onClick={() => saveAttendanceWithChunking(showBulkAttendanceModal)}
-                  disabled={savingProgress.isSaving || targetMembers.length === 0}
+                  disabled={savingProgress.isSaving || Object.keys(bulkAttendance).length === 0}
                   className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                 >
                   {savingProgress.isSaving ? (
@@ -2749,43 +2768,19 @@ const Events = () => {
               Events & Sermons
             </h1>
             <p className="text-gray-600 dark:text-gray-400">Manage church events and sermons</p>
-            <div className="mt-2 flex gap-2 flex-wrap">
+            <div className="mt-2">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                 {isAdmin?.() ? 'Administrator' : isPastor?.() ? 'Pastor' : 'Member'}
               </span>
             </div>
           </div>
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-3">
             <button 
               onClick={() => setShowSermonList(!showSermonList)}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
             >
               <BookOpen className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
               {showSermonList ? 'Hide Sermons' : 'View Sermons'}
-            </button>
-            <button
-              onClick={() => {
-                supabaseCache.clear();
-                Promise.all([
-                  fetchEvents(),
-                  fetchSermons(),
-                  fetchMembers(),
-                  fetchCellGroups(),
-                  fetchMinistryGroups(),
-                  fetchDepartments()
-                ]).then(() => {
-                  setSuccess('Data refreshed successfully!');
-                  setTimeout(() => setSuccess(null), 3000);
-                }).catch(error => {
-                  console.error('Error refreshing data:', error);
-                  setError('Failed to refresh data');
-                  setTimeout(() => setError(null), 3000);
-                });
-              }}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
-            >
-              <Upload className="h-5 w-5" />
-              Refresh Data
             </button>
             <button 
               onClick={() => setShowEventForm(!showEventForm)}
@@ -2991,207 +2986,207 @@ const Events = () => {
                       Change type
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {eventFormData.eventType === 'sunday' ? (
-                      <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
-                        <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
-                          Sunday
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
-                        <input
-                          type="text"
-                          value={eventFormData.name}
-                          onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                          placeholder="Enter event name"
-                          required
-                        />
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
-                      <input
-                        type="text"
-                        value={eventFormData.topic}
-                        onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        placeholder="Event topic or theme"
-                      />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {eventFormData.eventType === 'sunday' ? (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
+                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
+                      Sunday
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
-                      <input
-                        type="date"
-                        value={eventFormData.eventDate}
-                        onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
-                      <input
-                        type="time"
-                        value={eventFormData.eventTime}
-                        onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        required
-                      />
-                    </div>
-                    <div className="md:col-span-2 space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                      <input
-                        type="text"
-                        value={eventFormData.location}
-                        onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                        placeholder="Event location"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2 space-y-4">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
-                      <div className="flex flex-col sm:flex-row gap-4">
-                        <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
-                          <input
-                            type="radio"
-                            name="eventScope"
-                            checked={eventFormData.isWholeChurch}
-                            onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
-                            className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
-                          />
-                          <Building className="h-5 w-5 text-purple-600" />
-                          <div>
-                            <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
-                          </div>
-                        </label>
-                        <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
-                          <input
-                            type="radio"
-                            name="eventScope"
-                            checked={!eventFormData.isWholeChurch}
-                            onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
-                            className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
-                          />
-                          <UsersIcon className="h-5 w-5 text-orange-600" />
-                          <div>
-                            <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
-                          </div>
-                        </label>
-                      </div>
-                    </div>
-
-                    {!eventFormData.isWholeChurch && (
-                      <>
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
-                          <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {cellGroups.map((group) => (
-                              <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                                <input
-                                  type="checkbox"
-                                  checked={eventFormData.targetCellGroups.includes(group.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setEventFormData({
-                                        ...eventFormData,
-                                        targetCellGroups: [...eventFormData.targetCellGroups, group.id]
-                                      });
-                                    } else {
-                                      setEventFormData({
-                                        ...eventFormData,
-                                        targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
-                                      });
-                                    }
-                                  }}
-                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                                />
-                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
-                          <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {ministryGroups.map((group) => (
-                              <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                                <input
-                                  type="checkbox"
-                                  checked={eventFormData.targetMinistryGroups.includes(group.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setEventFormData({
-                                        ...eventFormData,
-                                        targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
-                                      });
-                                    } else {
-                                      setEventFormData({
-                                        ...eventFormData,
-                                        targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
-                                      });
-                                    }
-                                  }}
-                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                                />
-                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
-                          <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {departments.map((dept) => (
-                              <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                                <input
-                                  type="checkbox"
-                                  checked={eventFormData.targetDepartments.includes(dept.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setEventFormData({
-                                        ...eventFormData,
-                                        targetDepartments: [...eventFormData.targetDepartments, dept.id]
-                                      });
-                                    } else {
-                                      setEventFormData({
-                                        ...eventFormData,
-                                        targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
-                                      });
-                                    }
-                                  }}
-                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                                />
-                                <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    )}
                   </div>
-                  <div className="flex gap-3">
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loading ? 'Creating...' : 'Create Event'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowEventForm(false)}
-                      className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                    >
-                      Cancel
-                    </button>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                    <input
+                      type="text"
+                      value={eventFormData.name}
+                      onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      placeholder="Enter event name"
+                      required
+                    />
                   </div>
+                )}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
+                  <input
+                    type="text"
+                    value={eventFormData.topic}
+                    onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Event topic or theme"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
+                  <input
+                    type="date"
+                    value={eventFormData.eventDate}
+                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
+                  <input
+                    type="time"
+                    value={eventFormData.eventTime}
+                    onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+                <div className="md:col-span-2 space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                  <input
+                    type="text"
+                    value={eventFormData.location}
+                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Event location"
+                  />
+                </div>
+
+                <div className="md:col-span-2 space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                      <input
+                        type="radio"
+                        name="eventScope"
+                        checked={eventFormData.isWholeChurch}
+                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
+                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <Building className="h-5 w-5 text-purple-600" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                      <input
+                        type="radio"
+                        name="eventScope"
+                        checked={!eventFormData.isWholeChurch}
+                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
+                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <UsersIcon className="h-5 w-5 text-orange-600" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {!eventFormData.isWholeChurch && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {cellGroups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetCellGroups.includes(group.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {ministryGroups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {departments.map((dept) => (
+                          <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                            <input
+                              type="checkbox"
+                              checked={eventFormData.targetDepartments.includes(dept.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetDepartments: [...eventFormData.targetDepartments, dept.id]
+                                  });
+                                } else {
+                                  setEventFormData({
+                                    ...eventFormData,
+                                    targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
+                                  });
+                                }
+                              }}
+                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Creating...' : 'Create Event'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEventForm(false)}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
                 </>
               )}
             </form>
@@ -3210,6 +3205,7 @@ const Events = () => {
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
+              <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
             </div>
           ) : (
             events.map((event) => {
