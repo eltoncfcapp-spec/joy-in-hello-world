@@ -92,8 +92,22 @@ interface SyncLog {
   synced_by_name: string;
 }
 
+interface AuthContextType {
+  user: any;
+  profile: {
+    id?: string;
+    name?: string;
+    surname?: string;
+    admin_role?: string;
+    pastor_role?: boolean;
+  } | null;
+  isAdmin: () => boolean;
+  isPastor: () => boolean;
+  loading: boolean;
+}
+
 const Events = () => {
-  const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth() as AuthContextType;
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
   const [showSermonModal, setShowSermonModal] = useState<string | null>(null);
@@ -162,7 +176,7 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
-  const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+  const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
@@ -731,11 +745,6 @@ const Events = () => {
       setLoading(false);
     }
   };
-
-  // Old function - replaced with chunking version
-  // const saveBulkAttendance = async (eventId: string) => {
-  //   // This is now replaced by saveAttendanceWithChunking
-  // };
 
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
