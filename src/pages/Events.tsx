@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -83,15 +83,6 @@ interface EventAttendee {
   } | null;
 }
 
-interface SyncLog {
-  id: string;
-  event_id: string;
-  sync_data: any;
-  synced_at: string;
-  synced_by: string;
-  synced_by_name: string;
-}
-
 interface AuthContextType {
   user: any;
   profile: {
@@ -131,18 +122,9 @@ const Events = () => {
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
   const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
-  
   const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
-  const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
-  const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   
-  const attendanceNotesRef = useRef<Record<string, string>>({});
-  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
-  const [savingProgress, setSavingProgress] = useState({ current: 0, total: 0, isSaving: false });
-  const [syncHistory, setSyncHistory] = useState<SyncLog[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
     name: '',
@@ -176,7 +158,6 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
-  const [attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
@@ -190,7 +171,6 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Helper function to fix date timezone issue
   const fixTimezoneIssue = (dateString: string) => {
     if (!dateString) return dateString;
     
@@ -207,7 +187,6 @@ const Events = () => {
     return dateString;
   };
 
-  // Helper function to format date for display
   const formatDateForDisplay = (dateString: string) => {
     if (!dateString) return '';
     
@@ -218,125 +197,6 @@ const Events = () => {
     
     return `${year}-${month}-${day}`;
   };
-
-  // Helper function to initialize bulk attendance with all target members as ABSENT by default
-  const initializeBulkAttendance = async (eventId: string) => {
-    const event = events.find(e => e.id === eventId);
-    if (!event) return {};
-
-    const initialAttendance: Record<string, 'present' | 'absent'> = {};
-
-    for (const member of members) {
-      if (member.status === 'not_attending') continue;
-      
-      const shouldAttend = await isMemberInTargetGroups(member, event);
-      if (shouldAttend) {
-        initialAttendance[member.id] = 'absent';
-      }
-    }
-
-    const existingAttendees = getEventAttendees(eventId);
-    existingAttendees.forEach(attendee => {
-      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
-    });
-
-    return initialAttendance;
-  };
-
-  // ==================== BATCH ATTENDANCE FUNCTIONS ====================
-
-  const saveAttendanceBatch = async (eventId: string, attendanceRecords: any[]) => {
-    try {
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .upsert(attendanceRecords, {
-          onConflict: 'event_id,members_id',
-          ignoreDuplicates: false
-        });
-
-      if (error) throw error;
-      return { success: true, count: attendanceRecords.length };
-    } catch (error) {
-      console.error('Error saving attendance batch:', error);
-      return { success: false, error };
-    }
-  };
-
-  const saveAttendanceWithChunking = async (eventId: string) => {
-    setSavingProgress({ current: 0, total: Object.keys(bulkAttendance).length, isSaving: true });
-    setError(null);
-    setSuccess(null);
-
-    const chunkSize = 50;
-    const memberIds = Object.keys(bulkAttendance);
-    const results = [];
-    let successCount = 0;
-    let failCount = 0;
-
-    try {
-      for (let i = 0; i < memberIds.length; i += chunkSize) {
-        const chunk = memberIds.slice(i, i + chunkSize);
-        const attendanceRecords = [];
-
-        for (const memberId of chunk) {
-          const status = bulkAttendance[memberId];
-          const notes = attendanceNotesRef.current[memberId] || '';
-          
-          attendanceRecords.push({
-            event_id: eventId,
-            members_id: memberId,
-            first_time: false,
-            invited_by_id: null,
-            attendance_status: status,
-            attended_at: status === 'present' ? new Date().toISOString() : null,
-            notes: notes || null,
-          });
-        }
-
-        const result = await saveAttendanceBatch(eventId, attendanceRecords);
-        results.push(result);
-        
-        if (result.success) {
-          successCount += attendanceRecords.length;
-        } else {
-          failCount += attendanceRecords.length;
-        }
-
-        // Update progress
-        setSavingProgress(prev => ({
-          ...prev,
-          current: Math.min(i + chunkSize, memberIds.length)
-        }));
-
-        // Small delay to prevent overwhelming the server
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
-      // IMPORTANT: Refresh attendees from database to get all changes
-      await fetchEventAttendees(eventId);
-
-      setSavingProgress({ current: 0, total: 0, isSaving: false });
-
-      if (failCount === 0) {
-        setSuccess(`Successfully saved attendance for ${successCount} members!`);
-        closeBulkAttendanceModal();
-      } else {
-        setError(`Saved ${successCount} members, failed to save ${failCount} members.`);
-      }
-
-      setTimeout(() => {
-        setSuccess(null);
-        setError(null);
-      }, 5000);
-
-    } catch (error: any) {
-      console.error('Error in chunked attendance saving:', error);
-      setError(error.message || 'Failed to save bulk attendance.');
-      setSavingProgress({ current: 0, total: 0, isSaving: false });
-    }
-  };
-
-  // ==================== END BATCH FUNCTIONS ====================
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -590,25 +450,6 @@ const Events = () => {
     }
   }, []);
 
-  const fetchSyncHistory = useCallback(async (eventId: string) => {
-    try {
-      setLoadingHistory(true);
-      const { data, error } = await supabase
-        .from('event_sync_logs')
-        .select('*')
-        .eq('event_id', eventId)
-        .order('synced_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      setSyncHistory(data || []);
-    } catch (error: any) {
-      console.error('Error fetching sync history:', error);
-    } finally {
-      setLoadingHistory(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
@@ -642,110 +483,6 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  useEffect(() => {
-    if (showSyncModal) {
-      fetchSyncHistory(showSyncModal);
-    }
-  }, [showSyncModal, fetchSyncHistory]);
-
-  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('department_members')
-        .select('id')
-        .eq('member_id', memberId)
-        .eq('department_id', departmentId)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return false;
-        }
-        throw error;
-      }
-
-      return !!data;
-    } catch (error) {
-      console.error('Error checking department membership:', error);
-      return false;
-    }
-  };
-
-  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
-    if (event.is_whole_church) return true;
-
-    if (event.target_groups && event.target_groups.length > 0) {
-      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
-        return true;
-      }
-    }
-
-    if (event.target_departments && event.target_departments.length > 0) {
-      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
-        return true;
-      }
-
-      if (member.department_ids && member.department_ids.length > 0) {
-        for (const deptId of event.target_departments) {
-          if (member.department_ids.includes(deptId)) {
-            return true;
-          }
-        }
-      }
-    }
-
-    return false;
-  };
-
-  const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: existingRecord } = await supabase
-        .from('event_attendees')
-        .select('id')
-        .eq('event_id', eventId)
-        .eq('members_id', memberId)
-        .single();
-
-      const attendanceData: any = {
-        event_id: eventId,
-        members_id: memberId,
-        first_time: false,
-        invited_by_id: null,
-        attendance_status: status,
-        attended_at: status === 'present' ? new Date().toISOString() : null,
-        notes: notes || null,
-      };
-
-      let error;
-      if (existingRecord) {
-        const { error: updateError } = await supabase
-          .from('event_attendees')
-          .update(attendanceData)
-          .eq('id', existingRecord.id);
-        error = updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('event_attendees')
-          .insert([attendanceData]);
-        error = insertError;
-      }
-
-      if (error) throw error;
-
-      await fetchEventAttendees(eventId);
-      return true;
-    } catch (error: any) {
-      console.error('Error saving attendance:', error);
-      setError(error.message || 'Failed to save attendance.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
@@ -757,135 +494,6 @@ const Events = () => {
 
   const getSermonForEvent = (eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
-  };
-
-  // FIXED: Now properly stores sync data to the database
-  const syncEventToCloud = async (eventId: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const event = events.find(e => e.id === eventId);
-      if (!event) throw new Error('Event not found');
-
-      const eventAttendees = getEventAttendees(eventId);
-      const stats = getAttendanceStats(eventId);
-
-      // Create comprehensive sync data
-      const syncData = {
-        event_id: event.id,
-        event_name: event.name,
-        event_date: event.event_date,
-        event_time: event.event_time,
-        location: event.location,
-        topic: event.topic,
-        is_completed: event.is_completed,
-        is_whole_church: event.is_whole_church,
-        target_groups: event.target_groups,
-        target_departments: event.target_departments,
-        total_attendees: eventAttendees.length,
-        present_count: stats.present,
-        absent_count: stats.absent,
-        first_timers_count: stats.firstTimers,
-        attendees: eventAttendees.map(attendee => ({
-          member_id: attendee.members_id,
-          member_name: `${attendee.members.name} ${attendee.members.surname}`,
-          status: attendee.attendance_status,
-          first_time: attendee.first_time,
-          invited_by: attendee.invited_by_member ? 
-            `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null,
-          attended_at: attendee.attended_at,
-          notes: attendee.notes
-        })),
-        synced_at: new Date().toISOString(),
-        synced_by: user?.id,
-        synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
-      };
-
-      // FIRST: Store sync data in the event_sync_logs table
-      const { error: syncError } = await supabase
-        .from('event_sync_logs')
-        .insert([{
-          event_id: eventId,
-          sync_data: syncData,
-          synced_by: user?.id,
-          synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
-        }]);
-
-      if (syncError) throw syncError;
-
-      // SECOND: Also update the event's updated_at timestamp
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ 
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', eventId);
-
-      if (updateError) throw updateError;
-
-      // Refresh sync history to show the new sync
-      await fetchSyncHistory(eventId);
-
-      setSuccess(`Event "${event.name}" successfully synced to cloud! All data has been saved.`);
-      setTimeout(() => setSuccess(null), 3000);
-      
-    } catch (error: any) {
-      console.error('Error syncing event to cloud:', error);
-      setError(error.message || 'Failed to sync event to cloud. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const exportEventData = (eventId: string) => {
-    const event = events.find(e => e.id === eventId);
-    if (!event) return;
-
-    const eventAttendees = getEventAttendees(eventId);
-    
-    const csvRows = [];
-    
-    csvRows.push(['Event Information']);
-    csvRows.push(['Name', event.name]);
-    csvRows.push(['Date', event.event_date]);
-    csvRows.push(['Time', event.event_time]);
-    csvRows.push(['Location', event.location || '']);
-    csvRows.push(['Topic', event.topic || '']);
-    csvRows.push(['']);
-    
-    csvRows.push(['Attendees List']);
-    csvRows.push(['Name', 'Surname', 'Residence', 'Phone', 'Status', 'First Time', 'Attended At', 'Invited By', 'Notes']);
-    
-    eventAttendees.forEach(attendee => {
-      csvRows.push([
-        attendee.members.name,
-        attendee.members.surname,
-        attendee.members.residence || '',
-        attendee.members.phone || '',
-        attendee.attendance_status,
-        attendee.first_time ? 'Yes' : 'No',
-        attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
-        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : '',
-        attendee.notes || ''
-      ]);
-    });
-    
-    const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `event_${event.name.replace(/\s+/g, '_')}_${event.event_date}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    
-    setSuccess(`Event data exported successfully!`);
-    setTimeout(() => setSuccess(null), 3000);
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -1324,7 +932,12 @@ const Events = () => {
         if (member.status === 'not_attending') continue;
         if (attendeeIds.has(member.id)) continue;
 
-        const shouldAttend = await isMemberInTargetGroups(member, event);
+        const shouldAttend = event.is_whole_church || 
+          (event.target_groups && event.target_groups.includes(member.cell_group_id || '')) ||
+          (event.target_departments && event.target_departments.some(deptId => 
+            member.department_ids?.includes(deptId) || deptId === member.ministry_group_id
+          ));
+
         if (shouldAttend) {
           absentMemberIds.push(member.id);
         }
@@ -1614,33 +1227,6 @@ const Events = () => {
     setShowAttendeeModal(null);
   };
 
-  const openBulkAttendanceModal = async (eventId: string) => {
-    setShowBulkAttendanceModal(eventId);
-    setLoading(true);
-    
-    try {
-      const initialAttendance = await initializeBulkAttendance(eventId);
-      setBulkAttendance(initialAttendance);
-    } catch (error: any) {
-      console.error('Error initializing bulk attendance:', error);
-      setError('Failed to load attendance data.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const closeBulkAttendanceModal = () => {
-    setShowBulkAttendanceModal(null);
-    setBulkAttendance({});
-    setAttendanceNotes({});
-    attendanceNotesRef.current = {};
-    setSavingProgress({ current: 0, total: 0, isSaving: false });
-  };
-
-  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
-    setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
-  };
-
   const openNewcomerModal = (eventId: string) => {
     setShowNewcomerModal(eventId);
   };
@@ -1854,422 +1440,6 @@ const Events = () => {
         icon: AlertCircle
       };
     }
-  };
-
-  const SyncModal = () => {
-    if (!showSyncModal) return null;
-
-    const event = events.find(e => e.id === showSyncModal);
-    if (!event) return null;
-
-    const stats = getAttendanceStats(event.id);
-    const eventAttendees = getEventAttendees(event.id);
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-            <div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                <Upload className="inline-block h-5 w-5 mr-2 text-blue-500" />
-                Sync to Cloud - {event.name}
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Backup event data to cloud storage
-              </p>
-            </div>
-            <button
-              onClick={() => setShowSyncModal(null)}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
-            >
-              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-            </button>
-          </div>
-
-          <div className="p-6">
-            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
-              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">What will be synced:</h4>
-              <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Event details (name, date, time, location, topic)
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Attendance statistics ({stats.present} present, {stats.absent} absent)
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Attendee list ({eventAttendees.length} members with details)
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Event scope and target groups information
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Sync timestamp and user information
-                </li>
-              </ul>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.present}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Present</div>
-              </div>
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.absent}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Absent</div>
-              </div>
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">{eventAttendees.length}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Total Registered</div>
-              </div>
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
-              </div>
-            </div>
-
-            {/* Sync History */}
-            <div className="mb-6">
-              <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Sync History</h4>
-              {loadingHistory ? (
-                <div className="text-center py-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-                </div>
-              ) : syncHistory.length === 0 ? (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                  No sync history yet. Sync this event to create the first record.
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-60 overflow-y-auto">
-                  {syncHistory.map((sync) => (
-                    <div key={sync.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {new Date(sync.synced_at).toLocaleString()}
-                          </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-400">
-                            By: {sync.synced_by_name}
-                          </div>
-                        </div>
-                        <div className="text-sm text-gray-500 dark:text-gray-500">
-                          {sync.sync_data?.attendees?.length || 0} attendees
-                        </div>
-                      </div>
-                      {sync.sync_data?.present_count && (
-                        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                          {sync.sync_data.present_count} present, {sync.sync_data.absent_count} absent
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => exportEventData(event.id)}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 font-medium"
-                >
-                  <Download className="h-4 w-4" />
-                  Export as CSV
-                </button>
-                <button
-                  onClick={() => syncEventToCloud(event.id)}
-                  disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Upload className="h-4 w-4" />
-                  {loading ? 'Syncing...' : 'Sync to Cloud'}
-                </button>
-              </div>
-              
-              <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
-                Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
-            <button
-              onClick={() => setShowSyncModal(null)}
-              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const BulkAttendanceModal = () => {
-    if (!showBulkAttendanceModal) return null;
-
-    const event = events.find(e => e.id === showBulkAttendanceModal);
-    if (!event) return null;
-
-    const [targetMembers, setTargetMembers] = useState<Member[]>([]);
-    const [loadingTargetMembers, setLoadingTargetMembers] = useState(true);
-    
-    useEffect(() => {
-      const loadTargetMembers = async () => {
-        setLoadingTargetMembers(true);
-        try {
-          const membersList: Member[] = [];
-          for (const member of members) {
-            if (member.status === 'not_attending') continue;
-            const shouldAttend = await isMemberInTargetGroups(member, event);
-            if (shouldAttend) {
-              membersList.push(member);
-            }
-          }
-          setTargetMembers(membersList);
-        } catch (error) {
-          console.error('Error loading target members:', error);
-        } finally {
-          setLoadingTargetMembers(false);
-        }
-      };
-      
-      loadTargetMembers();
-    }, [event, members]);
-
-    const stats = {
-      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
-      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
-      total: targetMembers.length
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-            <div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                Bulk Attendance - {event.name}
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Manage attendance for all target members - {targetMembers.length} members found
-              </p>
-              <div className="mt-2 text-sm text-blue-600 dark:text-blue-400">
-                <span className="font-medium">Note:</span> All members are marked as ABSENT by default. Click "Present" for members who attended.
-              </div>
-            </div>
-            <button
-              onClick={closeBulkAttendanceModal}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
-            >
-              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-            </button>
-          </div>
-          
-          <div className="p-6 max-h-[70vh] overflow-y-auto">
-            {/* Progress Bar */}
-            {savingProgress.isSaving && (
-              <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-blue-700 dark:text-blue-300">
-                    Saving attendance...
-                  </span>
-                  <span className="text-sm text-blue-600 dark:text-blue-400">
-                    {savingProgress.current} of {savingProgress.total}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                    style={{ width: `${(savingProgress.current / savingProgress.total) * 100}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                  Processing in batches of 50 members for optimal performance...
-                </p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
-                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
-              </div>
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
-                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
-              </div>
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
-                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
-              </div>
-            </div>
-
-            <div className="flex gap-2 mb-6 flex-wrap">
-              <button
-                onClick={() => {
-                  const newAttendance = { ...bulkAttendance };
-                  targetMembers.forEach(member => {
-                    newAttendance[member.id] = 'present';
-                  });
-                  setBulkAttendance(newAttendance);
-                }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-              >
-                Mark All Present
-              </button>
-              <button
-                onClick={() => {
-                  const newAttendance = { ...bulkAttendance };
-                  targetMembers.forEach(member => {
-                    newAttendance[member.id] = 'absent';
-                  });
-                  setBulkAttendance(newAttendance);
-                }}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
-              >
-                Mark All Absent
-              </button>
-              <button
-                onClick={() => {
-                  setBulkAttendance({});
-                }}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
-              >
-                Clear All
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {loadingTargetMembers ? (
-                <div className="flex justify-center items-center py-12">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="ml-3 text-gray-600 dark:text-gray-400">Loading target members...</span>
-                </div>
-              ) : targetMembers.length === 0 ? (
-                <div className="text-center py-8">
-                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
-                </div>
-              ) : (
-                targetMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between flex-wrap gap-3">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
-                            {getInitials(member.name, member.surname)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 dark:text-white truncate">
-                              {member.name} {member.surname}
-                            </div>
-                            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              {member.residence && (
-                                <div className="flex items-center gap-1">
-                                  <MapPin className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate">{member.residence}</span>
-                                </div>
-                              )}
-                              {member.phone && (
-                                <div className="flex items-center gap-1">
-                                  <Phone className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate">{member.phone}</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                              bulkAttendance[member.id] === 'present'
-                                ? 'bg-green-600 text-white shadow-lg'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                            <span className="hidden sm:inline">Present</span>
-                          </button>
-                          <button
-                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                              bulkAttendance[member.id] === 'absent'
-                                ? 'bg-red-600 text-white shadow-lg'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <X className="h-4 w-4" />
-                            <span className="hidden sm:inline">Absent</span>
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {bulkAttendance[member.id] === 'absent' && (
-                        <div className="mt-2 pl-0 sm:pl-13">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Reason for absence (optional)
-                          </label>
-                          <textarea
-                            defaultValue={attendanceNotesRef.current[member.id] || ''}
-                            onChange={(e) => {
-                              attendanceNotesRef.current[member.id] = e.target.value;
-                            }}
-                            placeholder="Enter reason for absence..."
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                            rows={2}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                {stats.present} present, {stats.absent} absent of {targetMembers.length} members
-              </div>
-              <div className="flex gap-3 w-full sm:w-auto">
-                <button
-                  onClick={closeBulkAttendanceModal}
-                  disabled={savingProgress.isSaving}
-                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => saveAttendanceWithChunking(showBulkAttendanceModal)}
-                  disabled={savingProgress.isSaving || Object.keys(bulkAttendance).length === 0}
-                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
-                >
-                  {savingProgress.isSaving ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>Saving ({savingProgress.current}/{savingProgress.total})...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="hidden sm:inline">Save Attendance</span>
-                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
   };
 
   const NewcomerModal = () => {
@@ -3438,13 +2608,6 @@ const Events = () => {
                             Add Attendee
                           </button>
                           <button
-                            onClick={() => openBulkAttendanceModal(event.id)}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
-                          >
-                            <UsersIcon className="h-4 w-4" />
-                            Bulk Attendance
-                          </button>
-                          <button
                             onClick={() => openNewcomerModal(event.id)}
                             className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
                           >
@@ -3468,13 +2631,6 @@ const Events = () => {
                       >
                         <BookOpen className="h-4 w-4" />
                         {sermon ? 'Edit Sermon' : 'Add Sermon'}
-                      </button>
-                      <button
-                        onClick={() => setShowSyncModal(event.id)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
-                      >
-                        <Upload className="h-4 w-4" />
-                        Sync to Cloud
                       </button>
                       <button
                         onClick={() => openAttendeeModal('present', event.id)}
@@ -3691,10 +2847,8 @@ const Events = () => {
 
       <SermonModal />
       <PamphletModal />
-      <BulkAttendanceModal />
       <NewcomerModal />
       <AttendeeModal />
-      <SyncModal />
     </div>
   );
 };
