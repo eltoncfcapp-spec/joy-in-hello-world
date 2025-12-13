@@ -5,7 +5,7 @@ import {
   Users, MapPin, Calendar, User, Search, X, 
   Shield, AlertCircle, CheckCircle, Printer,
   Clock, FileText, Save, UserPlus, Mail, Phone,
-  Download, FileDown
+  Download, FileDown, PlusCircle, Group, Settings, BarChart3
 } from 'lucide-react';
 
 // Simple interfaces for departments
@@ -60,6 +60,28 @@ interface DepartmentReport {
   action_items: string | null;
   next_meeting_date: string | null;
   created_at: string | null;
+}
+
+// Group Interfaces
+interface Group {
+  id: string;
+  name: string;
+  description: string | null;
+  department_id: string | null;
+  leader_id: string | null;
+  meeting_day: string | null;
+  meeting_time: string | null;
+  location: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface GroupMember {
+  id: string;
+  group_id: string;
+  member_id: string;
+  role: 'leader' | 'assistant' | 'member';
+  created_at: string;
 }
 
 // Department Meeting Creation Step
@@ -1814,21 +1836,33 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
     { number: 4, title: 'Create Report', description: 'Generate meeting report' }
   ];
 
-  // Mock permission functions since they don't exist in useAuth
+  // Permission functions
   const canCreateDepartmentMeetings = (deptId: string) => {
-    return true; // For now, always return true
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor' || adminRole === 'department_leader';
   };
 
   const canManageDepartmentAttendance = (deptId: string) => {
-    return true; // For now, always return true
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor' || adminRole === 'department_leader';
   };
 
   const canAddDepartmentNewcomers = (deptId: string) => {
-    return true; // For now, always return true
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor' || adminRole === 'department_leader';
   };
 
   const canCreateDepartmentReports = (deptId: string) => {
-    return true; // For now, always return true
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor' || adminRole === 'department_leader';
   };
 
   const canAccessStep = (stepNumber: number) => {
@@ -1956,6 +1990,491 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   );
 };
 
+// Group Creation Modal Component
+const CreateGroupModal: React.FC<{
+  departments: Department[];
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}> = ({ departments, onClose, onSuccess, onError }) => {
+  const { profile } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    department_id: '',
+    meeting_day: '',
+    meeting_time: '',
+    location: ''
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const createGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.name.trim()) {
+      onError('Group name is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const groupPayload = {
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
+        department_id: formData.department_id || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        location: formData.location || null,
+        leader_id: profile?.id || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('groups')
+        .insert([groupPayload])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // If current user is the creator, add them as group leader
+      if (profile?.id) {
+        await supabase
+          .from('group_members')
+          .insert([{
+            group_id: data.id,
+            member_id: profile.id,
+            role: 'leader'
+          }]);
+      }
+
+      onSuccess(`Group "${formData.name}" created successfully!`);
+      onClose();
+    } catch (error: any) {
+      onError('Failed to create group: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canCreateGroup = () => {
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor';
+  };
+
+  if (!canCreateGroup()) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+          <div className="text-center">
+            <Shield className="h-16 w-16 text-red-400 mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Access Denied</h3>
+            <p className="text-gray-600 mb-6">
+              Only administrators and pastors can create groups.
+            </p>
+            <button
+              onClick={onClose}
+              className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-2xl font-bold text-gray-900">Create New Group</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={createGroup} className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Group Name *
+            </label>
+            <div className="relative">
+              <Group className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleInputChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter group name"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              rows={3}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Describe the purpose of this group..."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Associated Department (Optional)
+              </label>
+              <select
+                name="department_id"
+                value={formData.department_id}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select a department...</option>
+                {departments.map(dept => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Day (Optional)
+              </label>
+              <select
+                name="meeting_day"
+                value={formData.meeting_day}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select day...</option>
+                <option value="Sunday">Sunday</option>
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Time (Optional)
+              </label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="time"
+                  name="meeting_time"
+                  value={formData.meeting_time}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Location (Optional)
+              </label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  name="location"
+                  value={formData.location}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Meeting location"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              <PlusCircle className="h-4 w-4" />
+              {loading ? 'Creating Group...' : 'Create Group'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Groups Management Component
+const GroupsManagement: React.FC<{
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}> = ({ onClose, onSuccess, onError }) => {
+  const { profile } = useAuth();
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  useEffect(() => {
+    loadGroups();
+  }, []);
+
+  const loadGroups = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('groups')
+        .select(`
+          *,
+          departments (name),
+          group_members (
+            id,
+            role,
+            members (name, surname)
+          )
+        `)
+        .order('name');
+
+      if (error) throw error;
+      setGroups(data || []);
+    } catch (error: any) {
+      onError('Failed to load groups: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canCreateGroup = () => {
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor';
+  };
+
+  const canManageGroup = (groupId: string) => {
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor';
+  };
+
+  const getUserRoleDisplay = () => {
+    if (!profile) return 'Guest';
+    
+    const adminRole = profile.admin_role || 'member';
+    if (adminRole === 'admin' || adminRole === 'administrator') return 'Administrator';
+    if (adminRole === 'pastor') return 'Pastor';
+    if (adminRole === 'deacon') return 'Deacon';
+    if (adminRole === 'department_leader') return 'Department Leader';
+    if (adminRole === 'group_leader') return 'Group Leader';
+    return 'Member';
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900">Groups Management</h3>
+            <p className="text-gray-600">
+              {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in'}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {canCreateGroup() && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <PlusCircle className="h-4 w-4" />
+                Create Group
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {!profile ? (
+          <div className="text-center py-12">
+            <Shield className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">
+              Please Log In
+            </h3>
+            <p className="text-gray-500">
+              You need to be logged in to view groups
+            </p>
+          </div>
+        ) : loading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading groups...</p>
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="text-center py-12">
+            <Group className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">
+              No Groups Found
+            </h3>
+            <p className="text-gray-500 mb-6">
+              {canCreateGroup() 
+                ? 'Create your first group to get started' 
+                : 'No groups are currently available'}
+            </p>
+            {canCreateGroup() && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors mx-auto"
+              >
+                <PlusCircle className="h-5 w-5" />
+                Create First Group
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {groups.map((group: any) => {
+              const canManage = canManageGroup(group.id);
+              const memberCount = group.group_members?.length || 0;
+              
+              return (
+                <div
+                  key={group.id}
+                  className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all duration-300"
+                >
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-green-500 to-blue-500 flex items-center justify-center">
+                      <Group className="h-6 w-6 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-lg font-bold text-gray-900 mb-1">{group.name}</h4>
+                      {group.departments && (
+                        <span className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                          {group.departments.name}
+                        </span>
+                      )}
+                    </div>
+                    {canManage && (
+                      <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                        Can Manage
+                      </span>
+                    )}
+                  </div>
+
+                  {group.description && (
+                    <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                      {group.description}
+                    </p>
+                  )}
+
+                  <div className="space-y-2 mb-4">
+                    {(group.meeting_day || group.meeting_time) && (
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <Calendar className="h-4 w-4" />
+                        <span>
+                          {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {group.location && (
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <MapPin className="h-4 w-4" />
+                        <span>{group.location}</span>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <Users className="h-4 w-4" />
+                      <span>{memberCount} member{memberCount !== 1 ? 's' : ''}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-4 border-t border-gray-200">
+                    <span className="text-xs text-gray-500">
+                      Created {new Date(group.created_at).toLocaleDateString()}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {/* View group details */}}
+                        className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                      >
+                        View
+                      </button>
+                      {canManage && (
+                        <button
+                          onClick={() => {/* Manage group */}}
+                          className="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs font-medium"
+                        >
+                          Manage
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {showCreateModal && (
+        <CreateGroupModal
+          departments={[]} // You'll need to pass departments data here
+          onClose={() => {
+            setShowCreateModal(false);
+            loadGroups();
+          }}
+          onSuccess={(message) => {
+            onSuccess(message);
+            setShowCreateModal(false);
+          }}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+};
+
 // Main Departments Component
 const Departments = () => {
   const { profile } = useAuth();
@@ -1970,15 +2489,18 @@ const Departments = () => {
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showGroupsModal, setShowGroupsModal] = useState(false);
   
   const [meetings, setMeetings] = useState<DepartmentMeeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
 
   useEffect(() => {
     loadDepartments();
     loadAllMembers();
+    loadGroups();
   }, []);
 
   const loadDepartments = async () => {
@@ -2025,6 +2547,20 @@ const Departments = () => {
       setMembers(data || []);
     } catch (error: any) {
       console.error('Failed to load members:', error);
+    }
+  };
+
+  const loadGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('groups')
+        .select('*')
+        .order('name');
+      
+      if (error) throw error;
+      setGroups(data || []);
+    } catch (error: any) {
+      console.error('Failed to load groups:', error);
     }
   };
 
@@ -2092,6 +2628,7 @@ const Departments = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
+    setShowGroupsModal(false);
     setSelectedDepartment(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
@@ -2114,6 +2651,27 @@ const Departments = () => {
     return 'Member';
   };
 
+  const canCreateGroup = () => {
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor';
+  };
+
+  const canViewDepartment = (deptId: string) => {
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor' || adminRole === 'department_leader';
+  };
+
+  const canManageDepartment = (deptId: string) => {
+    if (!profile) return false;
+    
+    const adminRole = profile.admin_role || 'member';
+    return adminRole === 'admin' || adminRole === 'pastor' || adminRole === 'department_leader';
+  };
+
   const getAttendanceStats = () => {
     const attended = attendanceRecords.filter(r => r.status === 'present').length;
     const absent = attendanceRecords.filter(r => r.status === 'absent').length;
@@ -2121,21 +2679,6 @@ const Departments = () => {
     const total = attendanceRecords.length;
 
     return { attended, absent, absentWithReason, total };
-  };
-
-  // Mock permission functions
-  const canViewDepartment = (deptId: string) => {
-    return true; // For now, everyone can view
-  };
-
-  const canManageDepartment = (deptId: string) => {
-    return true; // For now, everyone can manage
-  };
-
-  const getRoles = () => {
-    if (!profile) return [];
-    const adminRole = profile.admin_role || 'member';
-    return [adminRole];
   };
 
   return (
@@ -2149,6 +2692,22 @@ const Departments = () => {
             <p className="text-gray-600">
               {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
             </p>
+          </div>
+          
+          <div className="flex gap-3">
+            {canCreateGroup() && (
+              <button
+                onClick={() => setShowGroupsModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <Group className="h-4 w-4" />
+                Manage Groups
+              </button>
+            )}
+            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+              <BarChart3 className="h-4 w-4" />
+              Analytics
+            </button>
           </div>
         </div>
 
@@ -2657,6 +3216,20 @@ const Departments = () => {
               />
             </div>
           </div>
+        )}
+
+        {showGroupsModal && (
+          <GroupsManagement
+            onClose={closeAllModals}
+            onSuccess={(message) => {
+              setSuccess(message);
+              setTimeout(() => setSuccess(null), 3000);
+            }}
+            onError={(message) => {
+              setError(message);
+              setTimeout(() => setError(null), 3000);
+            }}
+          />
         )}
       </div>
 
