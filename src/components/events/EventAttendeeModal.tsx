@@ -6,6 +6,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
+  email: string | null;
   phone: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   cell_group_id: string | null;
@@ -45,6 +46,7 @@ const EventAttendeeModal: React.FC<EventAttendeeModalProps> = ({
           id,
           name,
           surname,
+          email,
           phone,
           status,
           cell_group_id,
@@ -116,7 +118,8 @@ const EventAttendeeModal: React.FC<EventAttendeeModalProps> = ({
     return (
       member.name.toLowerCase().includes(search) ||
       member.surname.toLowerCase().includes(search) ||
-      member.phone?.toLowerCase().includes(search)
+      member.phone?.toLowerCase().includes(search) ||
+      member.email?.toLowerCase().includes(search)
     );
   });
 
@@ -196,7 +199,7 @@ const EventAttendeeModal: React.FC<EventAttendeeModalProps> = ({
                             {member.name} {member.surname}
                           </p>
                           <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                            {member.phone || 'No phone'}
+                            {member.phone} {member.email && `• ${member.email}`}
                           </p>
                           {member.cell_groups && (
                             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -220,7 +223,8 @@ const EventAttendeeModal: React.FC<EventAttendeeModalProps> = ({
                       {selectedMember.name} {selectedMember.surname}
                     </p>
                     <p className="text-xs text-gray-600 dark:text-gray-400">
-                      {selectedMember.phone || 'No phone'}
+                      {selectedMember.phone || 'No phone'} 
+                      {selectedMember.email && ` • ${selectedMember.email}`}
                     </p>
                   </div>
                 </div>

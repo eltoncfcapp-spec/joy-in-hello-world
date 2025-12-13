@@ -1,5 +1,6 @@
-import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2 } from 'lucide-react';
+import { Settings, Users, Database, Shield, Bell, Mail, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Calendar, Building, Heart, CreditCard, Trash2, MessageCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import ChurchInfoModalComponent from '../components/admin/ChurchInfoModal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
 
@@ -7,6 +8,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
+  email: string | null;
   phone: string | null;
   admin_role: string;
   pastor_role: boolean | null;
@@ -33,6 +35,35 @@ interface Group {
   type: 'cell_group' | 'department';
 }
 
+interface ChurchInfo {
+  id?: string;
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  denomination: string;
+  doctrinal_statement: string;
+  service_times: ServiceTime[];
+  communication_templates: CommunicationTemplate[];
+}
+
+interface ServiceTime {
+  id?: string;
+  day: string;
+  time: string;
+  type: string;
+  description: string;
+}
+
+interface CommunicationTemplate {
+  id?: string;
+  name: string;
+  subject: string;
+  body: string;
+  type: 'email' | 'sms' | 'notification';
+}
+
 interface SystemConfig {
   id?: string;
   global_settings: {
@@ -43,12 +74,26 @@ interface SystemConfig {
     max_login_attempts: number;
     session_timeout: number;
   };
+  notification_settings: {
+    email_notifications: boolean;
+    sms_notifications: boolean;
+    push_notifications: boolean;
+    event_reminders: boolean;
+    donation_receipts: boolean;
+    birthday_reminders: boolean;
+  };
   backup_settings: {
     auto_backup: boolean;
     backup_frequency: 'daily' | 'weekly' | 'monthly';
     backup_time: string;
     retain_backups: number;
     cloud_storage: boolean;
+  };
+  integration_settings: {
+    email_service: 'smtp' | 'sendgrid' | 'mailgun';
+    sms_service: 'twilio' | 'plivo';
+    calendar_sync: boolean;
+    payment_gateway: 'stripe' | 'paypal' | 'none';
   };
 }
 
@@ -79,6 +124,38 @@ interface SecuritySettings {
   };
 }
 
+interface NotificationSettings {
+  id?: string;
+  email_settings: {
+    smtp_host: string;
+    smtp_port: number;
+    smtp_username: string;
+    smtp_password: string;
+    from_email: string;
+    from_name: string;
+  };
+  sms_settings: {
+    provider: string;
+    account_sid: string;
+    auth_token: string;
+    from_number: string;
+  };
+  push_settings: {
+    enabled: boolean;
+    service_key: string;
+  };
+  notification_templates: NotificationTemplate[];
+}
+
+interface NotificationTemplate {
+  id?: string;
+  name: string;
+  trigger: string;
+  subject: string;
+  message: string;
+  enabled: boolean;
+}
+
 interface AuditLog {
   id: string;
   user_id: string;
@@ -95,10 +172,6 @@ interface StorageInfo {
   used_storage: number;
   available_storage: number;
   usage_percentage: number;
-}
-
-interface ImportFieldMapping {
-  [key: string]: string; // Column name in CSV -> Database field name
 }
 
 // Helper functions
@@ -173,6 +246,7 @@ const setRolesToMember = (roles: string[]): Partial<Member> => {
 
 // Extended Cloud Service Functions
 const cloudService = {
+  // Your existing member/group functions
   async getMembers(): Promise<Member[]> {
     try {
       const { data, error } = await supabase
@@ -266,6 +340,49 @@ const cloudService = {
     }
   },
 
+  // New Administrative Functions with fallbacks for missing tables
+  async getChurchInfo(): Promise<ChurchInfo> {
+    try {
+      // Return default church info since table doesn't exist yet
+      const defaultInfo: ChurchInfo = {
+        name: 'Your Church Name',
+        address: '',
+        phone: '',
+        email: '',
+        website: '',
+        denomination: '',
+        doctrinal_statement: '',
+        service_times: [],
+        communication_templates: []
+      };
+      return defaultInfo;
+    } catch (error) {
+      console.error('Error fetching church info:', error);
+      // Return default if table doesn't exist
+      return {
+        name: 'Your Church Name',
+        address: '',
+        phone: '',
+        email: '',
+        website: '',
+        denomination: '',
+        doctrinal_statement: '',
+        service_times: [],
+        communication_templates: []
+      };
+    }
+  },
+
+  async updateChurchInfo(info: ChurchInfo): Promise<ChurchInfo> {
+    try {
+      // Church info table doesn't exist yet, return the passed info
+      return info;
+    } catch (error) {
+      console.error('Error updating church info:', error);
+      throw error;
+    }
+  },
+
   async getSystemConfig(): Promise<SystemConfig> {
     try {
       const { data, error } = await supabase
@@ -284,12 +401,26 @@ const cloudService = {
             max_login_attempts: 5,
             session_timeout: 60
           },
+          notification_settings: {
+            email_notifications: true,
+            sms_notifications: false,
+            push_notifications: true,
+            event_reminders: true,
+            donation_receipts: true,
+            birthday_reminders: true
+          },
           backup_settings: {
             auto_backup: true,
             backup_frequency: 'weekly',
             backup_time: '02:00',
             retain_backups: 30,
             cloud_storage: true
+          },
+          integration_settings: {
+            email_service: 'smtp',
+            sms_service: 'twilio',
+            calendar_sync: false,
+            payment_gateway: 'none'
           }
         };
         return defaultConfig;
@@ -306,12 +437,26 @@ const cloudService = {
           max_login_attempts: 5,
           session_timeout: 60
         },
+        notification_settings: {
+          email_notifications: true,
+          sms_notifications: false,
+          push_notifications: true,
+          event_reminders: true,
+          donation_receipts: true,
+          birthday_reminders: true
+        },
         backup_settings: {
           auto_backup: true,
           backup_frequency: 'weekly',
           backup_time: '02:00',
           retain_backups: 30,
           cloud_storage: true
+        },
+        integration_settings: {
+          email_service: 'smtp',
+          sms_service: 'twilio',
+          calendar_sync: false,
+          payment_gateway: 'none'
         }
       };
     }
@@ -416,6 +561,38 @@ const cloudService = {
     }
   },
 
+  async getNotificationSettings(): Promise<NotificationSettings> {
+    // Return default notification settings since table doesn't exist
+    const defaultSettings: NotificationSettings = {
+      email_settings: {
+        smtp_host: '',
+        smtp_port: 587,
+        smtp_username: '',
+        smtp_password: '',
+        from_email: '',
+        from_name: ''
+      },
+      sms_settings: {
+        provider: 'twilio',
+        account_sid: '',
+        auth_token: '',
+        from_number: ''
+      },
+      push_settings: {
+        enabled: false,
+        service_key: ''
+      },
+      notification_templates: []
+    };
+    return defaultSettings;
+  },
+
+  async updateNotificationSettings(settings: NotificationSettings): Promise<NotificationSettings> {
+    // Return the settings as-is since table doesn't exist
+    console.warn('Notification settings table not configured');
+    return settings;
+  },
+
   async getAuditLogs(): Promise<AuditLog[]> {
     try {
       const { data, error } = await supabase
@@ -448,163 +625,62 @@ const cloudService = {
     }
   },
 
-  async importData(
-    file: File, 
-    options: { updateExisting: boolean; createMissing: boolean },
-    fieldMapping: ImportFieldMapping,
-    cellGroups: Group[]
-  ): Promise<{ success: number; errors: number; errorMessages: string[] }> {
+  async importData(file: File, options: { updateExisting: boolean; createMissing: boolean }): Promise<{ success: number; errors: number }> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       
       reader.onload = async (e) => {
         try {
           const content = e.target?.result as string;
-          const rows = content.split('\n').filter(row => row.trim() !== '');
+          const rows = content.split('\n').slice(1); // Remove header
           
-          if (rows.length === 0) {
-            throw new Error('File is empty');
-          }
-
-          const headerRow = rows[0];
-          const headers = headerRow.split(',').map(col => col.replace(/^"|"$/g, '').trim());
-          
-          const availableDatabaseFields = [
-            'surname', 'name', 'residence', 'cell_group', 'gender', 'baptism'
-          ];
-          
-          // Validate required fields are mapped
-          const requiredFields = ['surname', 'name'];
-          const missingRequired = requiredFields.filter(field => !Object.values(fieldMapping).includes(field));
-          
-          if (missingRequired.length > 0) {
-            throw new Error(`Missing required field mapping: ${missingRequired.join(', ')}`);
-          }
-
-          const errorMessages: string[] = [];
           let success = 0;
           let errors = 0;
 
-          for (let i = 1; i < rows.length; i++) {
-            const row = rows[i];
+          for (const row of rows) {
             if (!row.trim()) continue;
             
             const columns = row.split(',').map(col => col.replace(/^"|"$/g, '').trim());
             
             try {
-              // Map CSV columns to database fields
-              const memberData: any = {
-                status: 'newcomer',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              };
-              
-              // Process each mapped field
-              for (const csvHeader of headers) {
-                const dbField = fieldMapping[csvHeader];
-                if (dbField && availableDatabaseFields.includes(dbField)) {
-                  const columnIndex = headers.indexOf(csvHeader);
-                  if (columnIndex >= 0 && columnIndex < columns.length) {
-                    const value = columns[columnIndex];
-                    
-                    switch (dbField) {
-                      case 'surname':
-                        memberData.surname = value;
-                        break;
-                      case 'name':
-                        memberData.name = value;
-                        break;
-                      case 'residence':
-                        memberData.residence = value || null;
-                        break;
-                      case 'cell_group':
-                        // Find cell group by name
-                        const cellGroup = cellGroups.find(g => 
-                          g.type === 'cell_group' && 
-                          g.name.toLowerCase() === value.toLowerCase()
-                        );
-                        memberData.cell_group_id = cellGroup?.id || null;
-                        break;
-                      case 'gender':
-                        memberData.gender = value.toLowerCase() === 'male' ? 'male' : 
-                                          value.toLowerCase() === 'female' ? 'female' : null;
-                        break;
-                      case 'baptism':
-                        if (value) {
-                          const baptismDate = new Date(value);
-                          if (!isNaN(baptismDate.getTime())) {
-                            memberData.baptism = baptismDate.toISOString();
-                          }
-                        }
-                        break;
-                    }
-                  }
-                }
-              }
+              // Basic validation - adjust based on your CSV structure
+              if (columns.length >= 2) { // At least name and surname
+                const memberData = {
+                  name: columns[0],
+                  surname: columns[1],
+                  email: columns[2] || null,
+                  phone: columns[3] || null,
+                  status: 'active',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                };
 
-              // Validate required fields
-              if (!memberData.name || !memberData.surname) {
-                errorMessages.push(`Row ${i}: Missing name or surname`);
-                errors++;
-                continue;
-              }
-
-              if (options.updateExisting) {
-                // Try to update existing member by name and surname
-                const { data: existingMembers, error: findError } = await supabase
-                  .from('members')
-                  .select('id')
-                  .eq('name', memberData.name)
-                  .eq('surname', memberData.surname)
-                  .limit(1);
-
-                if (!findError && existingMembers && existingMembers.length > 0) {
+                if (options.updateExisting && columns[4]) { // Assuming email is used for updates
                   const { error: updateError } = await supabase
                     .from('members')
-                    .update(memberData)
-                    .eq('id', existingMembers[0].id);
+                    .update(memberData as any)
+                    .eq('email', columns[2]);
 
-                  if (!updateError) {
-                    success++;
-                  } else {
-                    errorMessages.push(`Row ${i}: Failed to update - ${updateError.message}`);
-                    errors++;
-                  }
-                } else if (options.createMissing) {
+                  if (!updateError) success++;
+                  else errors++;
+                } else {
                   const { error: insertError } = await supabase
                     .from('members')
-                    .insert(memberData);
+                    .insert(memberData as any);
 
-                  if (!insertError) {
-                    success++;
-                  } else {
-                    errorMessages.push(`Row ${i}: Failed to create - ${insertError.message}`);
-                    errors++;
-                  }
-                } else {
-                  errorMessages.push(`Row ${i}: Member not found and createMissing is false`);
-                  errors++;
+                  if (!insertError) success++;
+                  else errors++;
                 }
-              } else if (options.createMissing) {
-                const { error: insertError } = await supabase
-                  .from('members')
-                  .insert(memberData);
-
-                if (!insertError) {
-                  success++;
-                } else {
-                  errorMessages.push(`Row ${i}: Failed to create - ${insertError.message}`);
-                  errors++;
-                }
+              } else {
+                errors++;
               }
             } catch (rowError) {
-              errorMessages.push(`Row ${i}: ${rowError instanceof Error ? rowError.message : 'Unknown error'}`);
               errors++;
               console.error('Error processing row:', rowError);
             }
           }
 
-          resolve({ success, errors, errorMessages });
+          resolve({ success, errors });
         } catch (error) {
           reject(error);
         }
@@ -617,6 +693,7 @@ const cloudService = {
 
   async runBackup(): Promise<void> {
     try {
+      // Create backup record if backups table exists
       const { error } = await supabase
         .from('backups' as any)
         .insert({
@@ -626,6 +703,7 @@ const cloudService = {
           type: 'manual'
         });
 
+      // If backups table doesn't exist, just log the backup action
       if (error && !error.message.includes('does not exist')) {
         throw error;
       }
@@ -650,7 +728,7 @@ const cloudService = {
       return {
         total_members: membersCount.count || 0,
         total_groups: groupsCount.count || 0,
-        total_backups: 0,
+        total_backups: 0, // Default if backups table doesn't exist
         storage_used: storageInfo.used_storage,
         storage_total: storageInfo.total_storage,
         storage_percentage: storageInfo.usage_percentage,
@@ -672,16 +750,18 @@ const cloudService = {
 
   async getStorageInfo(): Promise<StorageInfo> {
     try {
+      // Get database size information
       const { data: dbSize, error: dbError } = await supabase
         .from('members')
         .select('*');
 
       if (dbError) throw dbError;
 
+      // Calculate approximate storage usage
       const memberCount = dbSize?.length || 0;
-      const estimatedSizePerMember = 1024;
+      const estimatedSizePerMember = 1024; // 1KB per member estimate
       const usedStorage = memberCount * estimatedSizePerMember;
-      const totalStorage = 100 * 1024 * 1024;
+      const totalStorage = 100 * 1024 * 1024; // 100MB total storage
       const availableStorage = totalStorage - usedStorage;
       const usagePercentage = (usedStorage / totalStorage) * 100;
 
@@ -704,6 +784,7 @@ const cloudService = {
 
   async cleanupOldData(): Promise<{ deleted: number }> {
     try {
+      // Delete members marked as inactive for more than 1 year
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
@@ -791,20 +872,20 @@ const Admin = () => {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
-  // State for administrative sections
+  // New state for administrative sections
+  const [churchInfo, setChurchInfo] = useState<ChurchInfo | null>(null);
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null);
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
+  const [backupStatus, setBackupStatus] = useState<string>('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importOptions, setImportOptions] = useState({
     updateExisting: true,
     createMissing: true
   });
-  const [importResults, setImportResults] = useState<{ success: number; errors: number; errorMessages: string[] } | null>(null);
-  const [importFieldMapping, setImportFieldMapping] = useState<ImportFieldMapping>({});
-  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
-  const [showImportMapping, setShowImportMapping] = useState(false);
+  const [importResults, setImportResults] = useState<{ success: number; errors: number } | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -828,8 +909,24 @@ const Admin = () => {
     login_pin: ''
   });
 
-  // Modified admin sections - Removed Notifications, Communications, System Configuration
+  // Enhanced admin sections
   const adminSections = [
+    {
+      icon: Building,
+      title: 'Church Information',
+      description: 'Manage church profile, service times, and communication',
+      color: 'from-blue-500 to-blue-600',
+      modal: 'church-info',
+      permission: 'admin_access'
+    },
+    {
+      icon: Settings,
+      title: 'System Configuration',
+      description: 'Global preferences, integrations, and backups',
+      color: 'from-purple-500 to-purple-600',
+      modal: 'system-config',
+      permission: 'admin_access'
+    },
     {
       icon: Users,
       title: 'User Management',
@@ -853,6 +950,22 @@ const Admin = () => {
       color: 'from-red-500 to-red-600',
       modal: 'security',
       permission: 'admin_access'
+    },
+    {
+      icon: Bell,
+      title: 'Notifications',
+      description: 'Email, SMS, and push notifications',
+      color: 'from-yellow-500 to-yellow-600',
+      modal: 'notifications',
+      permission: 'admin_access'
+    },
+    {
+      icon: Mail,
+      title: 'Communication',
+      description: 'Email templates and messaging',
+      color: 'from-pink-500 to-pink-600',
+      modal: 'communication',
+      permission: 'admin_access'
     }
   ];
 
@@ -872,26 +985,23 @@ const Admin = () => {
     { value: 'delete_members', label: 'Delete Members', description: 'Can remove members' },
     { value: 'view_groups', label: 'View Groups', description: 'Can see all groups' },
     { value: 'manage_groups', label: 'Manage Groups', description: 'Can create and edit groups' },
+    { value: 'view_events', label: 'View Events', description: 'Can see event calendar' },
+    { value: 'manage_events', label: 'Manage Events', description: 'Can create and edit events' },
+    { value: 'view_donations', label: 'View Donations', description: 'Can see donation records' },
+    { value: 'manage_donations', label: 'Manage Donations', description: 'Can record and edit donations' },
+    { value: 'view_reports', label: 'View Reports', description: 'Can access analytics and reports' },
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
 
-  // Database fields for import mapping
-  const databaseFields = [
-    { value: 'surname', label: 'Surname', required: true, description: 'Last name of the member' },
-    { value: 'name', label: 'Name', required: true, description: 'First name of the member' },
-    { value: 'residence', label: 'Residence', required: false, description: 'Address or location' },
-    { value: 'cell_group', label: 'Cell Group', required: false, description: 'Cell group name (must match existing group)' },
-    { value: 'gender', label: 'Gender', required: false, description: 'Male or Female' },
-    { value: 'baptism', label: 'Baptism Date', required: false, description: 'Date format: YYYY-MM-DD' }
-  ];
-
+  // Enhanced load data function
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [membersData, groupsData, systemData, securityData, statsData] = await Promise.all([
+      const [membersData, groupsData, churchData, systemData, securityData, statsData] = await Promise.all([
         cloudService.getMembers(),
         cloudService.getGroups(),
+        cloudService.getChurchInfo(),
         cloudService.getSystemConfig(),
         cloudService.getSecuritySettings(),
         cloudService.getSystemStats()
@@ -899,6 +1009,7 @@ const Admin = () => {
       
       setMembers(membersData);
       setGroups(groupsData);
+      setChurchInfo(churchData);
       setSystemConfig(systemData);
       setSecuritySettings(securityData);
       setSystemStats(statsData);
@@ -912,6 +1023,7 @@ const Admin = () => {
     }
   };
 
+  // Enhanced useEffect for permissions and data loading
   useEffect(() => {
     const checkAccessAndLoadData = async () => {
       if (!profile) {
@@ -924,6 +1036,7 @@ const Admin = () => {
         id: profile.id,
         name: profile.name || '',
         surname: profile.surname || '',
+        email: profile.email,
         phone: profile.phone || null,
         admin_role: profile.admin_role || 'member',
         pastor_role: profile.pastor_role || false,
@@ -965,6 +1078,7 @@ const Admin = () => {
     checkAccessAndLoadData();
   }, [profile]);
 
+  // Enhanced modal handler
   const openModal = async (modalType: string, user?: Member) => {
     if (!profile) return;
 
@@ -972,6 +1086,7 @@ const Admin = () => {
       id: profile.id,
       name: profile.name || '',
       surname: profile.surname || '',
+      email: profile.email,
       phone: profile.phone || null,
       admin_role: profile.admin_role || 'member',
       pastor_role: profile.pastor_role || false,
@@ -987,8 +1102,8 @@ const Admin = () => {
       can_edit_members: profile.can_edit_members || false,
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
-      status: null,
-      created_at: null
+      status: (profile as any).status || null,
+      created_at: (profile as any).created_at || null
     };
 
     if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'view_members')) {
@@ -1027,9 +1142,14 @@ const Admin = () => {
       setGeneratedCredentials(null);
     }
 
+    // Load additional data for specific modals
     if (modalType === 'security') {
       const logs = await cloudService.getAuditLogs();
       setAuditLogs(logs);
+    }
+    if (modalType === 'notifications') {
+      const settings = await cloudService.getNotificationSettings();
+      setNotificationSettings(settings);
     }
   };
 
@@ -1052,9 +1172,21 @@ const Admin = () => {
     setError(null);
     setImportFile(null);
     setImportResults(null);
-    setImportFieldMapping({});
-    setCsvHeaders([]);
-    setShowImportMapping(false);
+  };
+
+  // Handler functions for administrative sections
+  const handleUpdateSystemConfig = async () => {
+    if (!systemConfig) return;
+    
+    setLoading(true);
+    try {
+      await cloudService.updateSystemConfig(systemConfig);
+      setError(null);
+    } catch (err) {
+      setError('Failed to update system configuration');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUpdateSecuritySettings = async () => {
@@ -1066,6 +1198,35 @@ const Admin = () => {
       setError(null);
     } catch (err) {
       setError('Failed to update security settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateNotificationSettings = async () => {
+    if (!notificationSettings) return;
+    
+    setLoading(true);
+    try {
+      await cloudService.updateNotificationSettings(notificationSettings);
+      setError(null);
+    } catch (err) {
+      setError('Failed to update notification settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRunBackup = async () => {
+    setLoading(true);
+    setBackupStatus('Starting backup...');
+    try {
+      await cloudService.runBackup();
+      setBackupStatus('Backup completed successfully!');
+      setTimeout(() => setBackupStatus(''), 3000);
+      await loadData(); // Refresh stats
+    } catch (err) {
+      setBackupStatus('Backup failed!');
     } finally {
       setLoading(false);
     }
@@ -1099,9 +1260,9 @@ const Admin = () => {
     setLoading(true);
     setError(null);
     try {
-      const results = await cloudService.importData(importFile, importOptions, importFieldMapping, groups);
+      const results = await cloudService.importData(importFile, importOptions);
       setImportResults(results);
-      await loadData();
+      await loadData(); // Refresh data after import
     } catch (err) {
       setError('Failed to import data');
     } finally {
@@ -1118,7 +1279,7 @@ const Admin = () => {
     try {
       const result = await cloudService.cleanupOldData();
       alert(`Successfully deleted ${result.deleted} inactive members.`);
-      await loadData();
+      await loadData(); // Refresh data after cleanup
     } catch (err) {
       setError('Failed to cleanup data');
     } finally {
@@ -1126,56 +1287,7 @@ const Admin = () => {
     }
   };
 
-  const handleFileUpload = (file: File) => {
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const rows = content.split('\n');
-        
-        if (rows.length === 0) {
-          throw new Error('File is empty');
-        }
-
-        const headers = rows[0].split(',').map(col => col.replace(/^"|"$/g, '').trim());
-        setCsvHeaders(headers);
-        setImportFile(file);
-        setShowImportMapping(true);
-        
-        // Auto-map common headers
-        const autoMapping: ImportFieldMapping = {};
-        headers.forEach(header => {
-          const headerLower = header.toLowerCase();
-          
-          if (headerLower.includes('surname') || headerLower.includes('last')) {
-            autoMapping[header] = 'surname';
-          } else if (headerLower.includes('name') || headerLower.includes('first')) {
-            autoMapping[header] = 'name';
-          } else if (headerLower.includes('residence') || headerLower.includes('address')) {
-            autoMapping[header] = 'residence';
-          } else if (headerLower.includes('cell') || headerLower.includes('group')) {
-            autoMapping[header] = 'cell_group';
-          } else if (headerLower.includes('gender') || headerLower.includes('sex')) {
-            autoMapping[header] = 'gender';
-          } else if (headerLower.includes('baptism') || headerLower.includes('baptised')) {
-            autoMapping[header] = 'baptism';
-          }
-        });
-        
-        setImportFieldMapping(autoMapping);
-      } catch (error) {
-        setError('Failed to parse CSV file');
-      }
-    };
-    
-    reader.onerror = () => {
-      setError('Failed to read file');
-    };
-    
-    reader.readAsText(file);
-  };
-
+  // Keep your existing handler functions
   const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
     
@@ -1183,6 +1295,7 @@ const Admin = () => {
       id: profile!.id,
       name: profile!.name || '',
       surname: profile!.surname || '',
+      email: profile!.email,
       phone: profile!.phone || null,
       admin_role: profile!.admin_role || 'member',
       pastor_role: profile!.pastor_role || false,
@@ -1238,6 +1351,7 @@ const Admin = () => {
       id: profile.id,
       name: profile.name || '',
       surname: profile.surname || '',
+      email: profile.email,
       phone: profile.phone || null,
       admin_role: profile.admin_role || 'member',
       pastor_role: profile.pastor_role || false,
@@ -1295,6 +1409,7 @@ const Admin = () => {
     }
   };
 
+  // Permission and role handlers
   const handlePermissionToggle = (permission: string) => {
     setUserFormData(prev => ({
       ...prev,
@@ -1344,12 +1459,13 @@ const Admin = () => {
     });
   };
 
+  // Enhanced member filtering
   const getFilteredMembers = () => {
     let filtered = members;
     if (searchTerm) {
       filtered = filtered.filter(member =>
         `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (member.phone && member.phone.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
         getRolesFromMember(member).some(role => role.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
@@ -1359,6 +1475,7 @@ const Admin = () => {
       id: profile.id,
       name: profile.name || '',
       surname: profile.surname || '',
+      email: profile.email,
       phone: profile.phone || null,
       admin_role: profile.admin_role || 'member',
       pastor_role: profile.pastor_role || false,
@@ -1427,9 +1544,126 @@ const Admin = () => {
   const cellGroups = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
 
-  // Modal Components
+  // Modal Components for ALL Administrative Sections
+  const SystemConfigModal = () => (
+    <Modal title="System Configuration" onClose={closeModal}>
+      <div className="space-y-6">
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <h3 className="text-lg font-semibold mb-3">Global Settings</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+              <select 
+                value={systemConfig?.global_settings.timezone || 'UTC'}
+                onChange={(e) => setSystemConfig(prev => prev ? {
+                  ...prev,
+                  global_settings: {...prev.global_settings, timezone: e.target.value}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="UTC">UTC</option>
+                <option value="EST">EST</option>
+                <option value="PST">PST</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date Format</label>
+              <select 
+                value={systemConfig?.global_settings.date_format || 'MM/DD/YYYY'}
+                onChange={(e) => setSystemConfig(prev => prev ? {
+                  ...prev,
+                  global_settings: {...prev.global_settings, date_format: e.target.value}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <h3 className="text-lg font-semibold mb-3">Backup Settings</h3>
+          <div className="space-y-3">
+            <label className="flex items-center">
+              <input 
+                type="checkbox" 
+                checked={systemConfig?.backup_settings.auto_backup || false}
+                onChange={(e) => setSystemConfig(prev => prev ? {
+                  ...prev,
+                  backup_settings: {...prev.backup_settings, auto_backup: e.target.checked}
+                } : null)}
+                className="mr-2" 
+              />
+              <span className="text-sm text-gray-700">Automatic Backups</span>
+            </label>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Frequency</label>
+                <select 
+                  value={systemConfig?.backup_settings.backup_frequency || 'weekly'}
+                  onChange={(e) => setSystemConfig(prev => prev ? {
+                    ...prev,
+                    backup_settings: {...prev.backup_settings, backup_frequency: e.target.value as any}
+                  } : null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Retain Backups (days)</label>
+                <input 
+                  type="number" 
+                  value={systemConfig?.backup_settings.retain_backups || 30}
+                  onChange={(e) => setSystemConfig(prev => prev ? {
+                    ...prev,
+                    backup_settings: {...prev.backup_settings, retain_backups: parseInt(e.target.value)}
+                  } : null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" 
+                />
+              </div>
+            </div>
+            {backupStatus && (
+              <div className={`p-3 rounded-lg ${
+                backupStatus.includes('failed') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+              }`}>
+                {backupStatus}
+              </div>
+            )}
+            <button
+              onClick={handleRunBackup}
+              disabled={loading}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              {loading ? 'Running Backup...' : 'Run Backup Now'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button 
+            onClick={handleUpdateSystemConfig}
+            disabled={loading}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Configuration'}
+          </button>
+          <button onClick={closeModal} className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+
   const DataManagementModal = () => (
-    <Modal title="Data Management" onClose={closeModal} size="max-w-6xl">
+    <Modal title="Data Management" onClose={closeModal}>
       <div className="space-y-6">
         {/* Storage Information */}
         <div className="bg-gray-50 p-6 rounded-lg">
@@ -1484,6 +1718,10 @@ const Admin = () => {
                 <span className="text-sm text-gray-700">CSV Format</span>
               </label>
             </div>
+            <label className="flex items-center">
+              <input type="checkbox" className="mr-2" />
+              <span className="text-sm text-gray-700">Include sensitive data</span>
+            </label>
             <button
               onClick={() => handleExportData('csv', false)}
               disabled={loading}
@@ -1495,166 +1733,86 @@ const Admin = () => {
           </div>
         </div>
 
-        {/* Import Data Section */}
+        {/* Import Data */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Import Data</h3>
-          
-          {!showImportMapping ? (
-            <div className="space-y-4">
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                {importFile ? (
-                  <div className="space-y-2">
-                    <FileText className="h-12 w-12 text-green-600 mx-auto" />
-                    <p className="text-sm font-medium text-gray-900">{importFile.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {formatBytes(importFile.size)} • {new Date(importFile.lastModified).toLocaleDateString()}
-                    </p>
-                    <button
-                      onClick={() => setImportFile(null)}
-                      className="text-red-600 text-sm hover:text-red-700"
-                    >
-                      Remove File
-                    </button>
-                  </div>
-                ) : (
-                  <div>
-                    <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-sm text-gray-600 mb-2">Upload CSV file with member data</p>
-                    <p className="text-xs text-gray-500 mb-4">
-                      Supported fields: Surname, Name, Residence, Cell Group, Gender, Baptism Date
-                    </p>
-                    <input 
-                      type="file" 
-                      accept=".csv"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleFileUpload(file);
-                      }}
-                      className="hidden" 
-                      id="file-upload"
-                    />
-                    <label
-                      htmlFor="file-upload"
-                      className="mt-2 inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-medium cursor-pointer hover:bg-blue-700"
-                    >
-                      Choose CSV File
-                    </label>
-                  </div>
-                )}
-              </div>
-              
-              <div className="space-y-3 bg-white p-4 rounded-lg border">
-                <h4 className="font-medium text-gray-900">Import Options</h4>
-                <label className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    checked={importOptions.updateExisting}
-                    onChange={(e) => setImportOptions(prev => ({...prev, updateExisting: e.target.checked}))}
-                    className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-700">Update existing members</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    checked={importOptions.createMissing}
-                    onChange={(e) => setImportOptions(prev => ({...prev, createMissing: e.target.checked}))}
-                    className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-700">Create new members if not found</span>
-                </label>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="bg-white p-4 rounded-lg border">
-                <h4 className="font-medium text-gray-900 mb-4">Map CSV Columns to Database Fields</h4>
-                <p className="text-sm text-gray-600 mb-4">
-                  Please map each CSV column to its corresponding database field.
-                  Required fields are marked with *
-                </p>
-                
-                <div className="space-y-4">
-                  {csvHeaders.map((header, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <span className="font-medium text-gray-900">CSV Column: </span>
-                        <code className="bg-gray-200 px-2 py-1 rounded text-sm">{header}</code>
-                      </div>
-                      <select
-                        value={importFieldMapping[header] || ''}
-                        onChange={(e) => setImportFieldMapping(prev => ({
-                          ...prev,
-                          [header]: e.target.value
-                        }))}
-                        className="px-3 py-2 border border-gray-300 rounded-lg min-w-48"
-                      >
-                        <option value="">Select database field...</option>
-                        {databaseFields.map(field => (
-                          <option key={field.value} value={field.value}>
-                            {field.label} {field.required ? '*' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ))}
+          <div className="space-y-4">
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+              {importFile ? (
+                <div className="space-y-2">
+                  <FileText className="h-8 w-8 text-green-600 mx-auto" />
+                  <p className="text-sm font-medium text-gray-900">{importFile.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {formatBytes(importFile.size)} • {new Date(importFile.lastModified).toLocaleDateString()}
+                  </p>
+                  <button
+                    onClick={() => setImportFile(null)}
+                    className="text-red-600 text-sm hover:text-red-700"
+                  >
+                    Remove File
+                  </button>
                 </div>
-                
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                  <h5 className="font-medium text-blue-900 mb-2">Available Database Fields:</h5>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {databaseFields.map(field => (
-                      <div key={field.value} className="text-sm">
-                        <span className="font-medium text-gray-900">{field.label}</span>
-                        <span className="text-red-500">{field.required ? ' *' : ''}</span>
-                        <p className="text-xs text-gray-500">{field.description}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={handleImportData}
-                  disabled={loading || Object.keys(importFieldMapping).length === 0}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
-                >
-                  <Upload className="h-4 w-4" />
-                  {loading ? 'Importing...' : 'Start Import'}
-                </button>
-                <button
-                  onClick={() => setShowImportMapping(false)}
-                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                >
-                  Back
-                </button>
-              </div>
-            </div>
-          )}
-
-          {importResults && (
-            <div className={`mt-4 p-4 rounded-lg ${
-              importResults.errors > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'
-            }`}>
-              <h4 className={`font-medium mb-2 ${importResults.errors > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
-                Import Results: {importResults.success} successful, {importResults.errors} errors
-              </h4>
-              
-              {importResults.errorMessages.length > 0 && (
-                <div className="mt-3">
-                  <h5 className="text-sm font-medium text-red-700 mb-2">Error Details:</h5>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {importResults.errorMessages.map((msg, idx) => (
-                      <div key={idx} className="text-xs text-red-600 bg-red-50 p-2 rounded">
-                        {msg}
-                      </div>
-                    ))}
-                  </div>
+              ) : (
+                <div>
+                  <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">Drag and drop your CSV file here or click to browse</p>
+                  <input 
+                    type="file" 
+                    accept=".csv"
+                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    className="hidden" 
+                    id="file-upload"
+                  />
+                  <label
+                    htmlFor="file-upload"
+                    className="mt-2 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-700"
+                  >
+                    Browse Files
+                  </label>
                 </div>
               )}
             </div>
-          )}
+            
+            <div className="space-y-2">
+              <label className="flex items-center">
+                <input 
+                  type="checkbox" 
+                  checked={importOptions.updateExisting}
+                  onChange={(e) => setImportOptions(prev => ({...prev, updateExisting: e.target.checked}))}
+                  className="mr-2" 
+                />
+                <span className="text-sm text-gray-700">Update existing records</span>
+              </label>
+              <label className="flex items-center">
+                <input 
+                  type="checkbox" 
+                  checked={importOptions.createMissing}
+                  onChange={(e) => setImportOptions(prev => ({...prev, createMissing: e.target.checked}))}
+                  className="mr-2" 
+                />
+                <span className="text-sm text-gray-700">Create missing records</span>
+              </label>
+            </div>
+
+            {importResults && (
+              <div className={`p-3 rounded-lg ${
+                importResults.errors > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+              }`}>
+                <p className="font-medium">
+                  Import completed: {importResults.success} successful, {importResults.errors} errors
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={handleImportData}
+              disabled={!importFile || loading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4" />
+              {loading ? 'Importing...' : 'Import Data'}
+            </button>
+          </div>
         </div>
 
         {/* Data Cleanup */}
@@ -1758,6 +1916,108 @@ const Admin = () => {
     </Modal>
   );
 
+  const NotificationsModal = () => (
+    <Modal title="Notification Settings" onClose={closeModal}>
+      <div className="space-y-6">
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Email Settings</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
+              <input 
+                type="text" 
+                value={notificationSettings?.email_settings.smtp_host || ''}
+                onChange={(e) => setNotificationSettings(prev => prev ? {
+                  ...prev,
+                  email_settings: {...prev.email_settings, smtp_host: e.target.value}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Port</label>
+              <input 
+                type="number" 
+                value={notificationSettings?.email_settings.smtp_port || 587}
+                onChange={(e) => setNotificationSettings(prev => prev ? {
+                  ...prev,
+                  email_settings: {...prev.email_settings, smtp_port: parseInt(e.target.value)}
+                } : null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Notification Types</h3>
+          <div className="space-y-3">
+            {[
+              { key: 'email_notifications', label: 'Email Notifications', icon: Mail },
+              { key: 'sms_notifications', label: 'SMS Notifications', icon: MessageCircle },
+              { key: 'push_notifications', label: 'Push Notifications', icon: Bell },
+              { key: 'event_reminders', label: 'Event Reminders', icon: Calendar },
+              { key: 'donation_receipts', label: 'Donation Receipts', icon: CreditCard },
+              { key: 'birthday_reminders', label: 'Birthday Reminders', icon: Heart }
+            ].map((type) => (
+              <label key={type.key} className="flex items-center gap-3 p-3 bg-white rounded-lg border cursor-pointer hover:bg-gray-50">
+                <input 
+                  type="checkbox" 
+                  checked={(systemConfig?.notification_settings as any)?.[type.key] || false}
+                  onChange={(e) => setSystemConfig(prev => prev ? {
+                    ...prev,
+                    notification_settings: {...prev.notification_settings, [type.key]: e.target.checked}
+                  } : null)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <type.icon className="h-5 w-5 text-gray-600" />
+                <span className="text-sm font-medium text-gray-700">{type.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button 
+            onClick={handleUpdateNotificationSettings}
+            disabled={loading}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Notification Settings'}
+          </button>
+          <button onClick={closeModal} className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  const CommunicationModal = () => (
+    <Modal title="Communication Templates" onClose={closeModal}>
+      <div className="space-y-6">
+        <div className="bg-gray-50 p-6 rounded-lg">
+          <h3 className="text-lg font-semibold mb-4">Email Templates</h3>
+          <div className="space-y-4">
+            {churchInfo?.communication_templates?.map((template, index) => (
+              <div key={index} className="bg-white p-4 rounded-lg border">
+                <h4 className="font-semibold text-gray-900">{template.name}</h4>
+                <p className="text-sm text-gray-600 mt-1">{template.subject}</p>
+                <button className="mt-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+                  Edit Template
+                </button>
+              </div>
+            ))}
+            <button className="w-full p-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 hover:text-gray-700">
+              + Add New Template
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  // Your existing User Management Modal
   const UsersModal = () => (
     <Modal title="User Management" onClose={closeModal}>
       <div className="space-y-6">
@@ -1793,7 +2053,7 @@ const Admin = () => {
                       {member.name} {member.surname}
                     </h4>
                     <p className="text-sm text-gray-500">
-                      {member.phone || 'No phone'} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                      {member.email} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                     </p>
                   </div>
                 </div>
@@ -1811,6 +2071,7 @@ const Admin = () => {
     </Modal>
   );
 
+  // Your existing User Details Modal
   const UserDetailsModal = () => (
     <Modal title={`Manage User - ${selectedUser?.name} ${selectedUser?.surname}`} onClose={closeModal}>
       <div className="space-y-6">
@@ -1829,7 +2090,7 @@ const Admin = () => {
               <h4 className="text-xl font-bold text-gray-900">
                 {selectedUser?.name} {selectedUser?.surname}
               </h4>
-              <p className="text-gray-600">{selectedUser?.phone || 'No phone'}</p>
+              <p className="text-gray-600">{selectedUser?.email}</p>
               <p className="text-sm text-gray-500">{selectedUser?.phone}</p>
               {selectedUser?.cell_group_id && (
                 <p className="text-sm text-gray-500">Cell Group ID: {selectedUser?.cell_group_id}</p>
@@ -2064,6 +2325,7 @@ const Admin = () => {
     </Modal>
   );
 
+  // Keep your existing render logic for initialLoad and hasAccess
   if (initialLoad) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 flex items-center justify-center">
@@ -2106,6 +2368,7 @@ const Admin = () => {
                   id: profile.id,
                   name: profile.name || '',
                   surname: profile.surname || '',
+                  email: profile.email,
                   phone: profile.phone || null,
                   admin_role: profile.admin_role || 'member',
                   pastor_role: profile.pastor_role || false,
@@ -2155,8 +2418,8 @@ const Admin = () => {
           </div>
         )}
 
-        {/* Modified Admin Sections Grid - Only 3 sections */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* Enhanced Admin Sections Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
             if (!profile) return null;
             
@@ -2164,6 +2427,7 @@ const Admin = () => {
               id: profile.id,
               name: profile.name || '',
               surname: profile.surname || '',
+              email: profile.email,
               phone: profile.phone || null,
               admin_role: profile.admin_role || 'member',
               pastor_role: profile.pastor_role || false,
@@ -2209,12 +2473,13 @@ const Admin = () => {
           })}
         </div>
 
-        {/* User Management Section */}
+        {/* Your existing User Management Section */}
         {profile && (() => {
           const currentUser: Member = {
             id: profile.id,
             name: profile.name || '',
             surname: profile.surname || '',
+            email: profile.email,
             phone: profile.phone || null,
             admin_role: profile.admin_role || 'member',
             pastor_role: profile.pastor_role || false,
@@ -2292,7 +2557,7 @@ const Admin = () => {
                             {member.name} {member.surname}
                           </h4>
                           <p className="text-sm text-gray-500">
-                            {member.phone || 'No phone'} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
+                            {member.email} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                           </p>
                           {member.cell_group_id && (
                             <p className="text-xs text-gray-500">
@@ -2341,6 +2606,7 @@ const Admin = () => {
             id: profile.id,
             name: profile.name || '',
             surname: profile.surname || '',
+            email: profile.email,
             phone: profile.phone || null,
             admin_role: profile.admin_role || 'member',
             pastor_role: profile.pastor_role || false,
@@ -2410,9 +2676,32 @@ const Admin = () => {
           );
         })()}
 
-        {/* Render Modals */}
+        {/* Render ALL Modals */}
+        {activeModal === 'church-info' && (
+          <ChurchInfoModalComponent
+            churchInfo={churchInfo}
+            onClose={closeModal}
+            onSave={async (info) => {
+              setLoading(true);
+              try {
+                await cloudService.updateChurchInfo(info);
+                setChurchInfo(info);
+                setError(null);
+              } catch (err) {
+                setError('Failed to update church information');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            loading={loading}
+            error={error}
+          />
+        )}
+        {activeModal === 'system-config' && <SystemConfigModal />}
         {activeModal === 'data-management' && <DataManagementModal />}
         {activeModal === 'security' && <SecurityModal />}
+        {activeModal === 'notifications' && <NotificationsModal />}
+        {activeModal === 'communication' && <CommunicationModal />}
         {activeModal === 'users' && <UsersModal />}
         {activeModal === 'userDetails' && <UserDetailsModal />}
 

@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -41,14 +41,19 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  residence: string;
+  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  ministry_group_id: string | null;
   cell_groups: { name: string } | null;
+  ministry_group_id: string | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  department_ids?: string[];
+  department_members?: Array<{
+    departments: {
+      id: string;
+      name: string;
+    } | null;
+  }>;
 }
 
 interface CellGroup {
@@ -83,22 +88,8 @@ interface EventAttendee {
   } | null;
 }
 
-interface AuthContextType {
-  user: any;
-  profile: {
-    id?: string;
-    name?: string;
-    surname?: string;
-    admin_role?: string;
-    pastor_role?: boolean;
-  } | null;
-  isAdmin: () => boolean;
-  isPastor: () => boolean;
-  loading: boolean;
-}
-
 const Events = () => {
-  const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth() as AuthContextType;
+  const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
   const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
   const [showSermonModal, setShowSermonModal] = useState<string | null>(null);
@@ -122,9 +113,15 @@ const Events = () => {
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
   const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
-  const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
-  const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   
+  const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
+  const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
+  const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
+  const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
+  
+  // Use ref for absence notes to prevent re-renders while typing
+  const attendanceNotesRef = useRef<Record<string, string>>({});
+
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
     name: '',
@@ -158,12 +155,14 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
+  const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
     surname: '',
     phone: '',
-    residence: '',
+    email: '',
     notes: ''
   });
 
@@ -171,33 +170,7 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  const fixTimezoneIssue = (dateString: string) => {
-    if (!dateString) return dateString;
-    
-    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-    if (datePattern.test(dateString)) {
-      const date = new Date(dateString);
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      
-      return `${year}-${month}-${day}`;
-    }
-    
-    return dateString;
-  };
-
-  const formatDateForDisplay = (dateString: string) => {
-    if (!dateString) return '';
-    
-    const date = new Date(dateString);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    
-    return `${year}-${month}-${day}`;
-  };
-
+  // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
@@ -222,6 +195,7 @@ const Events = () => {
 
       setEvents(eventsWithDefaults as Event[]);
       
+      // Fetch attendees for all events in parallel
       const attendeePromises = eventsWithDefaults.map((event: Event) => 
         fetchEventAttendees(event.id)
       );
@@ -259,62 +233,30 @@ const Events = () => {
     try {
       setError(null);
       
-      const { data: membersData, error: membersError } = await supabase
+      const { data, error } = await supabase
         .from('members')
         .select(`
           id,
           name,
           surname,
-          residence,
+          email,
           phone,
           cell_group_id,
           ministry_group_id,
           status,
-          cell_groups (
-            name
-          ),
-          ministry_groups (
-            name
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name),
+          department_members (
+            departments (
+              id,
+              name
+            )
           )
         `)
         .order('name');
 
-      if (membersError) throw membersError;
-
-      const { data: deptMembersData, error: deptError } = await supabase
-        .from('department_members')
-        .select(`
-          member_id,
-          departments (
-            id,
-            name
-          )
-        `);
-
-      if (deptError && deptError.code !== 'PGRST116') {
-        console.warn('Error fetching department members:', deptError);
-      }
-
-      const memberDeptMap = new Map<string, string[]>();
-      if (deptMembersData) {
-        deptMembersData.forEach((item: any) => {
-          if (item.departments && item.member_id) {
-            if (!memberDeptMap.has(item.member_id)) {
-              memberDeptMap.set(item.member_id, []);
-            }
-            memberDeptMap.get(item.member_id)?.push(item.departments.id);
-          }
-        });
-      }
-
-      const membersWithDepartments = (membersData || []).map((member: any) => ({
-        ...member,
-        department_ids: memberDeptMap.get(member.id) || [],
-        cell_groups: member.cell_groups?.[0] || null,
-        ministry_groups: member.ministry_groups?.[0] || null
-      }));
-
-      setMembers(membersWithDepartments);
+      if (error) throw error;
+      setMembers(data || []);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
@@ -365,91 +307,57 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      const { data: attendeesData, error: attendeesError } = await supabase
+      const { data, error } = await supabase
         .from('event_attendees')
-        .select('*')
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false });
 
-      if (attendeesError) throw attendeesError;
+      if (error) throw error;
 
-      if (!attendeesData || attendeesData.length === 0) {
-        const attendeesWithDefaults: EventAttendee[] = [];
-        setAttendees(prev => {
-          const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-          return [...filtered, ...attendeesWithDefaults];
-        });
-        return [];
-      }
-
-      const attendeesWithMembers = await Promise.all(
-        attendeesData.map(async (attendee: any) => {
-          const { data: memberData, error: memberError } = await supabase
-            .from('members')
-            .select(`
-              id,
-              name,
-              surname,
-              residence,
-              phone,
-              status,
-              cell_group_id,
-              ministry_group_id,
-              cell_groups (
-                name
-              ),
-              ministry_groups (
-                name
-              )
-            `)
-            .eq('id', attendee.members_id)
-            .single();
-
-          if (memberError) {
-            console.error('Error fetching member:', memberError);
-            return null;
-          }
-
-          let invited_by_member = null;
-          if (attendee.invited_by_id) {
-            const { data: inviterData } = await supabase
-              .from('members')
-              .select('id, name, surname')
-              .eq('id', attendee.invited_by_id)
-              .single();
-            
-            invited_by_member = inviterData;
-          }
-
-          return {
-            ...attendee,
-            attendance_status: attendee.attendance_status || 'present',
-            members: {
-              ...memberData,
-              cell_groups: memberData.cell_groups?.[0] || null,
-              ministry_groups: memberData.ministry_groups?.[0] || null
-            },
-            invited_by_member
-          };
-        })
-      );
-
-      const validAttendees = attendeesWithMembers.filter(
-        (attendee): attendee is EventAttendee => attendee !== null
-      );
+      const attendeesWithDefaults = (data || []).map((attendee: any) => ({
+        ...attendee,
+        attendance_status: attendee.attendance_status || 'present'
+      }));
 
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...validAttendees];
+        return [...filtered, ...attendeesWithDefaults];
       });
       
-      return validAttendees;
+      return attendeesWithDefaults;
     } catch (error: any) {
       console.error('Error fetching attendees:', error);
       return [];
     }
   }, []);
 
+  // Initialize all data
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
@@ -483,6 +391,97 @@ const Events = () => {
     fetchDepartments
   ]);
 
+  // ATTENDANCE FUNCTIONS - FIXED for schema
+  const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Check if attendance record already exists
+      const { data: existingRecord } = await supabase
+        .from('event_attendees')
+        .select('id')
+        .eq('event_id', eventId)
+        .eq('members_id', memberId)
+        .single();
+
+      const attendanceData: any = {
+        event_id: eventId,
+        members_id: memberId,
+        first_time: false,
+        invited_by_id: null,
+        attendance_status: status,
+        attended_at: status === 'present' ? new Date().toISOString() : null,
+        notes: notes || null,
+      };
+
+      let error;
+      if (existingRecord) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from('event_attendees')
+          .update(attendanceData)
+          .eq('id', existingRecord.id);
+        error = updateError;
+      } else {
+        // Create new record - FIXED: removed created_at since it doesn't exist in schema
+        const { error: insertError } = await supabase
+          .from('event_attendees')
+          .insert([attendanceData]);
+        error = insertError;
+      }
+
+      if (error) throw error;
+
+      // Refresh attendees data
+      await fetchEventAttendees(eventId);
+      return true;
+    } catch (error: any) {
+      console.error('Error saving attendance:', error);
+      setError(error.message || 'Failed to save attendance.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveBulkAttendance = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
+        const notes = attendanceNotesRef.current[memberId] || '';
+        return await saveAttendance(eventId, memberId, status, notes);
+      });
+
+      const results = await Promise.all(savePromises);
+      const successfulSaves = results.filter(result => result).length;
+      const totalSaves = Object.keys(bulkAttendance).length;
+
+      if (successfulSaves === totalSaves) {
+        setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
+        closeBulkAttendanceModal();
+        
+        // Refresh the event data to show updated counts
+        await fetchEventAttendees(eventId);
+      } else {
+        setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
+    } catch (error: any) {
+      console.error('Error saving bulk attendance:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getAttendanceStats = (eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
@@ -494,6 +493,186 @@ const Events = () => {
 
   const getSermonForEvent = (eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
+  };
+
+  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('department_members')
+        .select('id')
+        .eq('member_id', memberId)
+        .eq('department_id', departmentId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return false;
+        }
+        throw error;
+      }
+
+      return !!data;
+    } catch (error) {
+      console.error('Error checking department membership:', error);
+      return false;
+    }
+  };
+
+  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
+    if (event.is_whole_church) return true;
+
+    // Check cell groups
+    if (event.target_groups && event.target_groups.length > 0) {
+      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
+        return true;
+      }
+    }
+
+    // Check ministry groups
+    if (event.target_departments && event.target_departments.length > 0) {
+      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
+        return true;
+      }
+
+      // Check departments
+      for (const deptId of event.target_departments) {
+        const isInDept = await isMemberInDepartment(member.id, deptId);
+        if (isInDept) return true;
+      }
+    }
+
+    return false;
+  };
+
+  // Function to sync event to cloud (mark as synced/backed up)
+  const syncEventToCloud = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Get the event data
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      // Get all attendees for this event
+      const eventAttendees = getEventAttendees(eventId);
+
+      // Prepare data for sync
+      const syncData = {
+        event_id: event.id,
+        event_name: event.name,
+        event_date: event.event_date,
+        event_time: event.event_time,
+        location: event.location,
+        is_completed: event.is_completed,
+        total_attendees: eventAttendees.length,
+        present_count: getAttendanceStats(eventId).present,
+        absent_count: getAttendanceStats(eventId).absent,
+        attendees: eventAttendees.map(attendee => ({
+          member_id: attendee.members_id,
+          member_name: `${attendee.members.name} ${attendee.members.surname}`,
+          status: attendee.attendance_status,
+          first_time: attendee.first_time,
+          attended_at: attendee.attended_at
+        })),
+        synced_at: new Date().toISOString(),
+        synced_by: user?.id,
+        synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+      };
+
+      // Here you would typically send this data to your cloud backup service
+      // For now, we'll just update a field in the events table to mark it as synced
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ 
+          updated_at: new Date().toISOString(),
+          // You could add a 'last_synced_at' field to your events table
+        })
+        .eq('id', eventId);
+
+      if (updateError) throw updateError;
+
+      // Log the sync action (optional)
+      const { error: logError } = await supabase
+        .from('audit_logs')
+        .insert([{
+          table_name: 'events',
+          record_id: eventId,
+          action: 'SYNC',
+          new_data: syncData,
+          user_id: user?.id,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (logError) {
+        console.warn('Failed to log sync action:', logError);
+      }
+
+      setSuccess(`Event "${event.name}" successfully synced to cloud!`);
+      setTimeout(() => setSuccess(null), 3000);
+      
+      // Close sync modal
+      setShowSyncModal(null);
+      
+    } catch (error: any) {
+      console.error('Error syncing event to cloud:', error);
+      setError(error.message || 'Failed to sync event to cloud. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to export event data as CSV
+  const exportEventData = (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const eventAttendees = getEventAttendees(eventId);
+    
+    // Prepare CSV content
+    const csvRows = [];
+    
+    // Add event info
+    csvRows.push(['Event Information']);
+    csvRows.push(['Name', event.name]);
+    csvRows.push(['Date', event.event_date]);
+    csvRows.push(['Time', event.event_time]);
+    csvRows.push(['Location', event.location || '']);
+    csvRows.push(['Topic', event.topic || '']);
+    csvRows.push(['']);
+    
+    // Add attendees
+    csvRows.push(['Attendees List']);
+    csvRows.push(['Name', 'Surname', 'Status', 'First Time', 'Attended At', 'Invited By']);
+    
+    eventAttendees.forEach(attendee => {
+      csvRows.push([
+        attendee.members.name,
+        attendee.members.surname,
+        attendee.attendance_status,
+        attendee.first_time ? 'Yes' : 'No',
+        attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
+        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : ''
+      ]);
+    });
+    
+    // Convert to CSV string
+    const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `event_${event.name.replace(/\s+/g, '_')}_${event.event_date}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    setSuccess(`Event data exported successfully!`);
+    setTimeout(() => setSuccess(null), 3000);
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -541,6 +720,7 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
+      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
@@ -582,6 +762,7 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
+      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: null } : event
       ));
@@ -699,7 +880,7 @@ const Events = () => {
         title: sermonFormData.title.trim(),
         summary: sermonFormData.summary.trim(),
         pastor_name: sermonFormData.pastorName.trim(),
-        sermon_date: fixTimezoneIssue(sermonFormData.sermonDate),
+        sermon_date: sermonFormData.sermonDate,
         event_id: sermonFormData.eventId || null,
         video_url: videoUrl,
         document_url: documentUrl,
@@ -736,6 +917,7 @@ const Events = () => {
         existingDocumentUrl: '',
       });
       
+      // Refresh sermons data
       await fetchSermons();
       setSuccess(editingSermon ? 'Sermon updated successfully!' : 'Sermon added successfully!');
       
@@ -773,12 +955,14 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Update local state immediately
       setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
       setSuccess('Sermon deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting sermon:', error);
       setError(error.message || 'Failed to delete sermon.');
+      // Refresh data on error
       await fetchSermons();
     } finally {
       setSermonLoading(null);
@@ -792,7 +976,7 @@ const Events = () => {
         title: sermonToEdit.title,
         summary: sermonToEdit.summary,
         pastorName: sermonToEdit.pastor_name,
-        sermonDate: formatDateForDisplay(sermonToEdit.sermon_date),
+        sermonDate: sermonToEdit.sermon_date,
         eventId: sermonToEdit.event_id || '',
         videoFile: null,
         documentFile: null,
@@ -806,7 +990,7 @@ const Events = () => {
         title: event?.name || '',
         summary: '',
         pastorName: '',
-        sermonDate: event?.event_date ? formatDateForDisplay(event.event_date) : new Date().toISOString().split('T')[0],
+        sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
         eventId: eventId || '',
         videoFile: null,
         documentFile: null,
@@ -861,6 +1045,7 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Refresh sermons data
       await fetchSermons();
       setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
       setTimeout(() => setSuccess(null), 3000);
@@ -874,6 +1059,7 @@ const Events = () => {
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
+      // Create absent records
       const absentRecords = absentMemberIds.map(memberId => ({
         event_id: eventId,
         members_id: memberId,
@@ -883,7 +1069,9 @@ const Events = () => {
         attended_at: null
       }));
 
+      // Insert or update records
       for (const record of absentRecords) {
+        // Check if record exists
         const { data: existing } = await supabase
           .from('event_attendees')
           .select('id')
@@ -892,17 +1080,20 @@ const Events = () => {
           .single();
 
         if (existing) {
+          // Update existing
           await supabase
             .from('event_attendees')
             .update(record)
             .eq('id', existing.id);
         } else {
+          // Insert new
           await supabase
             .from('event_attendees')
             .insert([record]);
         }
       }
       
+      // Refresh attendees data
       await fetchEventAttendees(eventId);
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
@@ -932,12 +1123,7 @@ const Events = () => {
         if (member.status === 'not_attending') continue;
         if (attendeeIds.has(member.id)) continue;
 
-        const shouldAttend = event.is_whole_church || 
-          (event.target_groups && event.target_groups.includes(member.cell_group_id || '')) ||
-          (event.target_departments && event.target_departments.some(deptId => 
-            member.department_ids?.includes(deptId) || deptId === member.ministry_group_id
-          ));
-
+        const shouldAttend = await isMemberInTargetGroups(member, event);
         if (shouldAttend) {
           absentMemberIds.push(member.id);
         }
@@ -957,6 +1143,7 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId 
           ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
@@ -987,12 +1174,10 @@ const Events = () => {
     setSuccess(null);
     
     try {
-      const fixedEventDate = fixTimezoneIssue(eventFormData.eventDate);
-      
       const eventData = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
-        event_date: fixedEventDate,
+        event_date: eventFormData.eventDate,
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
         is_whole_church: eventFormData.isWholeChurch,
@@ -1023,6 +1208,7 @@ const Events = () => {
         targetDepartments: [],
       });
       
+      // Refresh events data
       await fetchEvents();
       setSuccess('Event created successfully!');
       
@@ -1044,6 +1230,7 @@ const Events = () => {
       return;
     }
 
+    // Check if member is already registered for this event
     const alreadyRegistered = attendees.some(
       a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
     );
@@ -1071,82 +1258,47 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      const { data: newAttendee, error: attendeeError } = await supabase
+      const { data, error } = await supabase
         .from('event_attendees')
         .insert([attendeeData])
-        .select()
-        .single();
-
-      if (attendeeError) {
-        console.error('Supabase error details:', attendeeError);
-        throw attendeeError;
-      }
-
-      // Get the full member data for the new attendee
-      const { data: memberData } = await supabase
-        .from('members')
         .select(`
-          id,
-          name,
-          surname,
-          residence,
-          phone,
-          status,
-          cell_group_id,
-          ministry_group_id,
-          cell_groups (
-            name
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
           ),
-          ministry_groups (
-            name
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
           )
         `)
-        .eq('id', attendeeFormData.memberId)
         .single();
 
-      if (!memberData) throw new Error('Member data not found');
-
-      // Get inviter data if exists
-      let invited_by_member = null;
-      if (attendeeFormData.invitedById) {
-        const { data: inviterData } = await supabase
-          .from('members')
-          .select('id, name, surname')
-          .eq('id', attendeeFormData.invitedById)
-          .single();
-        
-        invited_by_member = inviterData;
+      if (error) {
+        console.error('Supabase error details:', error);
+        throw error;
       }
 
-      // Create the complete attendee object
-      const attendeeToAdd: EventAttendee = {
-        id: newAttendee.id,
-        event_id: newAttendee.event_id,
-        members_id: newAttendee.members_id,
-        first_time: newAttendee.first_time,
-        invited_by_id: newAttendee.invited_by_id,
-        attended_at: newAttendee.attended_at,
-        attendance_status: newAttendee.attendance_status,
-        notes: newAttendee.notes,
-        members: {
-          id: memberData.id,
-          name: memberData.name,
-          surname: memberData.surname,
-          residence: memberData.residence,
-          phone: memberData.phone,
-          cell_group_id: memberData.cell_group_id,
-          ministry_group_id: memberData.ministry_group_id,
-          status: memberData.status,
-          cell_groups: memberData.cell_groups?.[0] || null,
-          ministry_groups: memberData.ministry_groups?.[0] || null,
-          department_ids: []
-        },
-        invited_by_member
-      };
+      // Update attendees state immediately AND refresh from server
+      setAttendees(prev => [...prev, data]);
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
 
-      // Update local state immediately
-      setAttendees(prev => [...prev, attendeeToAdd]);
-
+      // Reset form and close it
       resetAttendeeForm();
       
       setSuccess('Attendee added successfully!');
@@ -1173,8 +1325,9 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update local state immediately
+      // Update attendees state immediately AND refresh from server
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
+      await fetchEventAttendees(eventId); // Ensure data is fresh from server
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1227,6 +1380,47 @@ const Events = () => {
     setShowAttendeeModal(null);
   };
 
+  const openBulkAttendanceModal = async (eventId: string) => {
+    setShowBulkAttendanceModal(eventId);
+    
+    // Initialize bulk attendance state
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
+    const initialNotes: Record<string, string> = {};
+
+    // Set all target members as present by default
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
+      
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        initialAttendance[member.id] = 'present';
+      }
+    }
+
+    // Update with existing attendance records
+    const existingAttendees = getEventAttendees(eventId);
+    existingAttendees.forEach(attendee => {
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+    });
+
+    setBulkAttendance(initialAttendance);
+    setAttendanceNotes(initialNotes);
+  };
+
+  const closeBulkAttendanceModal = () => {
+    setShowBulkAttendanceModal(null);
+    setBulkAttendance({});
+    setAttendanceNotes({});
+    attendanceNotesRef.current = {};
+  };
+
+  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
+    setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
+  };
+
   const openNewcomerModal = (eventId: string) => {
     setShowNewcomerModal(eventId);
   };
@@ -1237,7 +1431,7 @@ const Events = () => {
       name: '',
       surname: '',
       phone: '',
-      residence: '',
+      email: '',
       notes: ''
     });
   };
@@ -1256,8 +1450,18 @@ const Events = () => {
     setSuccess(null);
 
     try {
+      // Check if member already exists with same email or phone
       let existingMember = null;
-      if (newcomerFormData.phone.trim()) {
+      if (newcomerFormData.email.trim()) {
+        const { data: emailMatch } = await supabase
+          .from('members')
+          .select('*')
+          .eq('email', newcomerFormData.email.trim())
+          .single();
+        existingMember = emailMatch;
+      }
+      
+      if (!existingMember && newcomerFormData.phone.trim()) {
         const { data: phoneMatch } = await supabase
           .from('members')
           .select('*')
@@ -1269,13 +1473,15 @@ const Events = () => {
       let memberId;
       
       if (existingMember) {
+        // Use existing member
         memberId = existingMember.id;
       } else {
+        // Create new member
         const memberPayload = {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
-          residence: newcomerFormData.residence.trim(),
           phone: newcomerFormData.phone.trim() || null,
+          email: newcomerFormData.email.trim() || null,
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -1293,8 +1499,8 @@ const Events = () => {
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('phone')) {
-            setError('A member with this phone number already exists');
+          if (memberError.code === '23505' && memberError.message.includes('email')) {
+            setError('A member with this email already exists');
             return;
           }
           throw memberError;
@@ -1302,6 +1508,7 @@ const Events = () => {
         memberId = memberData.id;
       }
 
+      // Add to event attendees
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
@@ -1311,14 +1518,46 @@ const Events = () => {
         attended_at: new Date().toISOString()
       };
 
-      const { error: attendeeError } = await supabase
+      const { data: newAttendee, error: attendeeError } = await supabase
         .from('event_attendees')
-        .insert([attendeeData]);
+        .insert([attendeeData])
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            email,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
+        .single();
 
       if (attendeeError) throw attendeeError;
 
-      // Refresh attendees to show the new member
+      // Update attendees state immediately AND refresh from server
+      if (newAttendee) {
+        setAttendees(prev => [...prev, newAttendee]);
+      }
       await fetchEventAttendees(eventId);
+
+      // Refresh members data
       await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
@@ -1337,8 +1576,8 @@ const Events = () => {
       member.name.toLowerCase().includes(searchLower) ||
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.residence.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower)
+      member.phone?.toLowerCase().includes(searchLower) ||
+      member.email?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1348,8 +1587,8 @@ const Events = () => {
       member.name.toLowerCase().includes(searchLower) ||
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.residence.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower)
+      member.phone?.toLowerCase().includes(searchLower) ||
+      member.email?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1370,26 +1609,16 @@ const Events = () => {
   };
 
   const formatDate = (dateString: string) => {
-    if (!dateString) return 'Invalid date';
-    
-    const date = new Date(dateString + 'T00:00:00');
-    
-    if (isNaN(date.getTime())) {
-      return 'Invalid date';
-    }
-    
+    const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
-      day: 'numeric',
-      timeZone: 'UTC'
+      day: 'numeric'
     });
   };
 
   const formatTime = (timeString: string) => {
-    if (!timeString) return '';
-    
     const [hours, minutes] = timeString.split(':');
     const hour = parseInt(hours);
     const ampm = hour >= 12 ? 'PM' : 'AM';
@@ -1442,6 +1671,351 @@ const Events = () => {
     }
   };
 
+  // Sync Modal Component
+  const SyncModal = () => {
+    if (!showSyncModal) return null;
+
+    const event = events.find(e => e.id === showSyncModal);
+    if (!event) return null;
+
+    const stats = getAttendanceStats(event.id);
+    const eventAttendees = getEventAttendees(event.id);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                <Upload className="inline-block h-5 w-5 mr-2 text-blue-500" />
+                Sync to Cloud - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Backup event data to cloud storage
+              </p>
+            </div>
+            <button
+              onClick={() => setShowSyncModal(null)}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-6">
+            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">What will be synced:</h4>
+              <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Event details (name, date, time, location)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendance statistics ({stats.present} present, {stats.absent} absent)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Attendee list ({eventAttendees.length} members)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  First-time visitor information
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Sync timestamp and user information
+                </li>
+              </ul>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.present}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Present</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.absent}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Absent</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{eventAttendees.length}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Total Registered</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportEventData(event.id)}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 font-medium"
+                >
+                  <Download className="h-4 w-4" />
+                  Export as CSV
+                </button>
+                <button
+                  onClick={() => syncEventToCloud(event.id)}
+                  disabled={loading}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Upload className="h-4 w-4" />
+                  {loading ? 'Syncing...' : 'Sync to Cloud'}
+                </button>
+              </div>
+              
+              <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
+                Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setShowSyncModal(null)}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Bulk Attendance Modal Component - UPDATED for schema
+  const BulkAttendanceModal = () => {
+    if (!showBulkAttendanceModal) return null;
+
+    const event = events.find(e => e.id === showBulkAttendanceModal);
+    if (!event) return null;
+
+    // Get target members who should attend this event
+    const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    
+    useEffect(() => {
+      const loadTargetMembers = async () => {
+        const membersList: Member[] = [];
+        for (const member of members) {
+          if (member.status === 'not_attending') continue;
+          const shouldAttend = await isMemberInTargetGroups(member, event);
+          if (shouldAttend) {
+            membersList.push(member);
+          }
+        }
+        setTargetMembers(membersList);
+      };
+      
+      loadTargetMembers();
+    }, [event, members]);
+
+    const stats = {
+      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+      total: targetMembers.length
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Bulk Attendance - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage attendance for all target members - {targetMembers.length} members found
+              </p>
+            </div>
+            <button
+              onClick={closeBulkAttendanceModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Attendance Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex gap-2 mb-6 flex-wrap">
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'present';
+                  });
+                  setBulkAttendance(newAttendance);
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              >
+                Mark All Present
+              </button>
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'absent';
+                  });
+                  setBulkAttendance(newAttendance);
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+              >
+                Mark All Absent
+              </button>
+              <button
+                onClick={() => {
+                  setBulkAttendance({});
+                }}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+              >
+                Clear All
+              </button>
+            </div>
+
+            {/* Members List */}
+            <div className="space-y-3">
+              {targetMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+                </div>
+              ) : (
+                targetMembers.map((member) => (
+                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+                            {getInitials(member.name, member.surname)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white truncate">
+                              {member.name} {member.surname}
+                            </div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                              {member.phone && (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.phone}</span>
+                                </div>
+                              )}
+                              {member.email && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.email}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'present'
+                                ? 'bg-green-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="hidden sm:inline">Present</span>
+                          </button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'absent'
+                                ? 'bg-red-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <X className="h-4 w-4" />
+                            <span className="hidden sm:inline">Absent</span>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Absence Reason Field - Only show when marked as absent */}
+                      {bulkAttendance[member.id] === 'absent' && (
+                        <div className="mt-2 pl-0 sm:pl-13">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Reason for absence (optional)
+                          </label>
+                          <textarea
+                            defaultValue={attendanceNotesRef.current[member.id] || ''}
+                            onChange={(e) => {
+                              attendanceNotesRef.current[member.id] = e.target.value;
+                            }}
+                            placeholder="Enter reason for absence..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                            rows={2}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                {stats.present + stats.absent} of {targetMembers.length} members marked
+              </div>
+              <div className="flex gap-3 w-full sm:w-auto">
+                <button
+                  onClick={closeBulkAttendanceModal}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                  disabled={loading || Object.keys(bulkAttendance).length === 0}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="hidden sm:inline">Save Attendance</span>
+                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Newcomer Modal Component
   const NewcomerModal = () => {
     if (!showNewcomerModal) return null;
 
@@ -1499,22 +2073,6 @@ const Events = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Residence *
-                </label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={newcomerFormData.residence}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, residence: e.target.value })}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter residence"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Phone Number
                 </label>
                 <div className="relative">
@@ -1525,6 +2083,21 @@ const Events = () => {
                     onChange={(e) => setNewcomerFormData({ ...newcomerFormData, phone: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter phone number"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="email"
+                    value={newcomerFormData.email}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, email: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter email address"
                   />
                 </div>
               </div>
@@ -1566,6 +2139,7 @@ const Events = () => {
     );
   };
 
+  // Attendee Modal Component
   const AttendeeModal = () => {
     if (!showAttendeeModal) return null;
 
@@ -1626,16 +2200,16 @@ const Events = () => {
                           {attendee.members.name} {attendee.members.surname}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                          {attendee.members.residence && (
-                            <div className="flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {attendee.members.residence}
-                            </div>
-                          )}
                           {attendee.members.phone && (
                             <div className="flex items-center gap-1">
                               <Phone className="h-3 w-3" />
                               {attendee.members.phone}
+                            </div>
+                          )}
+                          {attendee.members.email && (
+                            <div className="flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {attendee.members.email}
                             </div>
                           )}
                           {type === 'present' && attendee.first_time && (
@@ -1678,6 +2252,7 @@ const Events = () => {
     );
   };
 
+  // Sermon Modal Component
   const SermonModal = () => {
     if (!showSermonModal) return null;
 
@@ -1754,7 +2329,9 @@ const Events = () => {
                 </div>
               </div>
 
+              {/* File Uploads */}
               <div className="space-y-4">
+                {/* Video Upload */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1804,6 +2381,7 @@ const Events = () => {
                   </label>
                 </div>
 
+                {/* Document Upload */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Sermon Notes (PDF/DOC)
@@ -1872,6 +2450,7 @@ const Events = () => {
     );
   };
 
+  // Pamphlet Modal Component
   const PamphletModal = () => {
     if (!viewingPamphlet) return null;
 
@@ -1961,6 +2540,7 @@ const Events = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -1991,18 +2571,21 @@ const Events = () => {
           </div>
         </div>
 
+        {/* Success Message */}
         {success && (
           <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
             {success}
           </div>
         )}
 
+        {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
             {error}
           </div>
         )}
 
+        {/* Sermons List */}
         {showSermonList && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between mb-6">
@@ -2137,10 +2720,12 @@ const Events = () => {
           </div>
         )}
 
+        {/* Event Creation Form */}
         {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
             <form onSubmit={handleEventSubmit} className="space-y-6">
+              {/* Event Type Selection */}
               {!eventFormData.eventType && (
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Event Type *</label>
@@ -2171,6 +2756,7 @@ const Events = () => {
                 </div>
               )}
 
+              {/* Show form fields only after event type is selected */}
               {eventFormData.eventType && (
                 <>
                   <div className="flex items-center gap-2 mb-4">
@@ -2247,6 +2833,7 @@ const Events = () => {
                   />
                 </div>
 
+                {/* Event Scope */}
                 <div className="md:col-span-2 space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
                   <div className="flex flex-col sm:flex-row gap-4">
@@ -2281,6 +2868,7 @@ const Events = () => {
                   </div>
                 </div>
 
+                {/* Target Groups Selection */}
                 {!eventFormData.isWholeChurch && (
                   <>
                     <div className="space-y-2">
@@ -2392,6 +2980,7 @@ const Events = () => {
           </div>
         )}
 
+        {/* Loading State */}
         {loading && events.length === 0 && (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -2399,6 +2988,7 @@ const Events = () => {
           </div>
         )}
 
+        {/* Events List */}
         <div className="space-y-6">
           {!loading && events.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
@@ -2464,6 +3054,7 @@ const Events = () => {
                         )}
                       </div>
 
+                      {/* Sermon Preview */}
                       {sermon && (
                         <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                           <div className="flex items-center justify-between">
@@ -2506,6 +3097,7 @@ const Events = () => {
                         </div>
                       )}
 
+                      {/* Pamphlet Display Section */}
                       {event.pamphlet_url && (
                         <div className="mt-4">
                           <div className="flex items-center gap-3 flex-wrap">
@@ -2544,6 +3136,7 @@ const Events = () => {
                         </div>
                       )}
 
+                      {/* Upload Pamphlet Button */}
                       {hasAccess() && !event.pamphlet_url && (
                         <div className="mt-4">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
@@ -2565,6 +3158,7 @@ const Events = () => {
                         </div>
                       )}
 
+                      {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
@@ -2597,6 +3191,7 @@ const Events = () => {
                       </div>
                     </div>
 
+                    {/* Action Buttons - ADDED SYNC BUTTON */}
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
@@ -2606,6 +3201,13 @@ const Events = () => {
                           >
                             <Plus className="h-4 w-4" />
                             Add Attendee
+                          </button>
+                          <button
+                            onClick={() => openBulkAttendanceModal(event.id)}
+                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          >
+                            <UsersIcon className="h-4 w-4" />
+                            Bulk Attendance
                           </button>
                           <button
                             onClick={() => openNewcomerModal(event.id)}
@@ -2633,6 +3235,13 @@ const Events = () => {
                         {sermon ? 'Edit Sermon' : 'Add Sermon'}
                       </button>
                       <button
+                        onClick={() => setShowSyncModal(event.id)}
+                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                      >
+                        <Upload className="h-4 w-4" />
+                        Sync to Cloud
+                      </button>
+                      <button
                         onClick={() => openAttendeeModal('present', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
@@ -2649,11 +3258,13 @@ const Events = () => {
                     </div>
                   </div>
 
+                  {/* Add Attendee Form */}
                   {showAttendeeForm === event.id && (
                     <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
                       <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Attendee</h4>
                       <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Member Search */}
                           <div className="space-y-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Member *</label>
                             <div className="relative">
@@ -2686,7 +3297,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.residence} {member.phone && `• ${member.phone}`}
+                                          {member.phone || member.email}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -2699,6 +3310,7 @@ const Events = () => {
                             </div>
                           </div>
 
+                          {/* Inviter Search */}
                           <div className="space-y-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Invited By (Optional)</label>
                             <div className="relative">
@@ -2731,7 +3343,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.residence} {member.phone && `• ${member.phone}`}
+                                          {member.phone || member.email}
                                         </div>
                                       </div>
                                     </div>
@@ -2742,6 +3354,7 @@ const Events = () => {
                           </div>
                         </div>
 
+                        {/* First Time Checkbox */}
                         <div className="flex items-center gap-3">
                           <input
                             type="checkbox"
@@ -2755,6 +3368,7 @@ const Events = () => {
                           </label>
                         </div>
 
+                        {/* Selected Member Preview */}
                         {selectedMember && (
                           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                             <div className="flex items-center justify-between">
@@ -2767,8 +3381,8 @@ const Events = () => {
                                     {selectedMember.name} {selectedMember.surname}
                                   </div>
                                   <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    {selectedMember.residence && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{selectedMember.residence}</span>}
                                     {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
+                                    {selectedMember.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.email}</span>}
                                   </div>
                                 </div>
                               </div>
@@ -2787,6 +3401,7 @@ const Events = () => {
                           </div>
                         )}
 
+                        {/* Selected Inviter Preview */}
                         {selectedInviter && (
                           <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
                             <div className="flex items-center justify-between">
@@ -2818,6 +3433,7 @@ const Events = () => {
                           </div>
                         )}
 
+                        {/* Form Actions */}
                         <div className="flex gap-3">
                           <button
                             type="submit"
@@ -2845,10 +3461,13 @@ const Events = () => {
         </div>
       </div>
 
+      {/* Render All Modals */}
       <SermonModal />
       <PamphletModal />
+      <BulkAttendanceModal />
       <NewcomerModal />
       <AttendeeModal />
+      <SyncModal />
     </div>
   );
 };

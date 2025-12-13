@@ -7,6 +7,8 @@ import {
   ArrowUp, 
   ArrowDown, 
   X,
+  Plus,
+  UserPlus,
   MapPin,
   ChevronDown,
   ChevronUp,
@@ -20,10 +22,7 @@ import {
   Upload,
   ExternalLink,
   BookOpen,
-  PlayCircle,
-  Phone,
-  UserX,
-  Clock
+  PlayCircle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,6 +32,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
+  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
@@ -109,10 +109,6 @@ interface AbsentMember {
   surname: string;
   phone: string | null;
   consecutiveAbsences: number;
-  lastAttendedDate?: string | null;
-  cellGroupId?: string | null;
-  status?: string | null;
-  cellGroupName?: string | null;
 }
 
 // Permission checking utilities
@@ -127,24 +123,22 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [_selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [_selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
     activity: true,
-    sermons: true,
-    absentMembers: true
+    sermons: true
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [sermonSearchTerm, setSermonSearchTerm] = useState('');
-  const [absentSearchTerm, setAbsentSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
-  const [selectedAbsentMember, setSelectedAbsentMember] = useState<AbsentMember | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string>('');
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -168,13 +162,7 @@ const Dashboard = () => {
   };
 
   const getFilteredAbsentMembers = () => {
-    if (!absentSearchTerm) return absentMembers;
-    
-    return absentMembers.filter(member => 
-      member.name.toLowerCase().includes(absentSearchTerm.toLowerCase()) ||
-      member.surname.toLowerCase().includes(absentSearchTerm.toLowerCase()) ||
-      (member.phone && member.phone.includes(absentSearchTerm))
-    );
+    return absentMembers;
   };
 
   const getFilteredSermons = () => {
@@ -190,17 +178,13 @@ const Dashboard = () => {
 
   // Format date for display
   const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    } catch (error) {
-      return 'Invalid date';
-    }
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
 
   // Load dashboard data from Supabase
@@ -208,7 +192,6 @@ const Dashboard = () => {
     try {
       setLoading(true);
       setError(null);
-      setDebugInfo('Loading dashboard data...');
       
       // Load members with additional fields for permissions
       const { data: membersData, error: membersError } = await supabase
@@ -218,7 +201,6 @@ const Dashboard = () => {
 
       if (membersError) throw membersError;
       setMembers(membersData || []);
-      setDebugInfo(prev => prev + ` Loaded ${membersData?.length || 0} members. `);
 
       // Load cell groups
       const { data: cellGroupsData, error: cellGroupsError } = await supabase
@@ -228,7 +210,6 @@ const Dashboard = () => {
 
       if (cellGroupsError) throw cellGroupsError;
       setCellGroups(cellGroupsData || []);
-      setDebugInfo(prev => prev + ` Loaded ${cellGroupsData?.length || 0} cell groups. `);
 
       // Load events with pamphlet URLs
       const { data: eventsData, error: eventsError } = await supabase
@@ -239,7 +220,6 @@ const Dashboard = () => {
 
       if (eventsError) throw eventsError;
       setUpcomingEvents(eventsData || []);
-      setDebugInfo(prev => prev + ` Loaded ${eventsData?.length || 0} events. `);
 
       // Load sermons
       const { data: sermonsData, error: sermonsError } = await supabase
@@ -255,7 +235,6 @@ const Dashboard = () => {
 
       if (sermonsError) throw sermonsError;
       setSermons(sermonsData || []);
-      setDebugInfo(prev => prev + ` Loaded ${sermonsData?.length || 0} sermons. `);
 
       // Calculate stats with all data (everyone can see)
       calculateStats(membersData || [], eventsData || [], sermonsData || []);
@@ -264,143 +243,80 @@ const Dashboard = () => {
       generateRecentActivities(membersData || [], eventsData || [], sermonsData || []);
 
       // Load absent members
-      await loadAbsentMembers(membersData || [], cellGroupsData || []);
+      await loadAbsentMembers();
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
       setError('Failed to load dashboard data');
-      setDebugInfo(prev => prev + ' Error: ' + (error as Error).message);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadAbsentMembers = async (allMembers: Member[], cellGroupsData: CellGroup[]) => {
+  const loadAbsentMembers = async () => {
     try {
-      setDebugInfo(prev => prev + ' Starting to load absent members... ');
-      
       // Get all Sunday Service events in descending order
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
-        .or('name.ilike.%sunday%,name.ilike.%service%')
+        .ilike('name', '%sunday%service%')
         .order('event_date', { ascending: false })
-        .limit(20);
+        .limit(10);
 
-      if (eventsError) {
-        console.error('Error loading Sunday events:', eventsError);
-        setDebugInfo(prev => prev + ' Error loading events: ' + eventsError.message);
+      if (eventsError) throw eventsError;
+      if (!sundayEvents || sundayEvents.length < 2) {
         setAbsentMembers([]);
         return;
       }
 
-      setDebugInfo(prev => prev + ` Found ${sundayEvents?.length || 0} potential Sunday events. `);
+      // Get the last 2 Sunday services
+      const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      if (!sundayEvents || sundayEvents.length === 0) {
-        setDebugInfo(prev => prev + ' No Sunday events found. ');
+      // Get all members
+      const { data: allMembers, error: membersError } = await supabase
+        .from('members')
+        .select('id, name, surname, phone, assigned_groups, assigned_departments');
+
+      if (membersError) throw membersError;
+      if (!allMembers) {
         setAbsentMembers([]);
         return;
       }
 
-      // Get unique dates and pick one event per date (to handle duplicates)
-      const uniqueDatesMap = new Map<string, string>();
-      sundayEvents.forEach(e => {
-        if (!uniqueDatesMap.has(e.event_date)) {
-          uniqueDatesMap.set(e.event_date, e.id);
-        }
-      });
-      
-      const uniqueDates = Array.from(uniqueDatesMap.keys()).sort((a, b) => 
-        new Date(b).getTime() - new Date(a).getTime()
-      );
-      
-      if (uniqueDates.length < 2) {
-        setDebugInfo(prev => prev + ` Not enough unique Sunday dates (found ${uniqueDates.length}, need 2). `);
-        setAbsentMembers([]);
-        return;
-      }
-
-      // Get the last 2 unique Sunday dates
-      const lastTwoSundayDates = uniqueDates.slice(0, 2);
-      setDebugInfo(prev => prev + ` Using last 2 Sunday dates: ${lastTwoSundayDates.join(', ')} `);
-
-      // Get all event IDs for these dates (in case of duplicates)
-      const eventIdsForLastTwoSundays = sundayEvents
-        .filter(e => lastTwoSundayDates.includes(e.event_date))
-        .map(e => e.id);
-
-      // Get attendance records for these events - check for 'absent' status
+      // Get attendance for the last 2 Sunday services
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
-        .select('members_id, event_id, attendance_status')
-        .in('event_id', eventIdsForLastTwoSundays);
+        .select('members_id, event_id')
+        .in('event_id', lastTwoSundays.map(e => e.id));
 
-      if (attendanceError) {
-        console.error('Error loading attendances:', attendanceError);
-        setDebugInfo(prev => prev + ' Error loading attendances: ' + attendanceError.message);
-        setAbsentMembers([]);
-        return;
-      }
+      if (attendanceError) throw attendanceError;
 
-      setDebugInfo(prev => prev + ` Found ${attendances?.length || 0} attendance records for last 2 Sundays. `);
-
-      // Find members who were absent for both Sundays
+      // Find members who were absent for both services
       const absent: AbsentMember[] = [];
       
       allMembers.forEach(member => {
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
-        // Count absences across the last 2 Sunday dates
-        let absentCount = 0;
-        
-        lastTwoSundayDates.forEach(sundayDate => {
-          // Get all event IDs for this Sunday date
-          const eventsOnThisDate = sundayEvents
-            .filter(e => e.event_date === sundayDate)
-            .map(e => e.id);
-          
-          // Check if member has any attendance record for this date
-          const attendanceForDate = memberAttendances.filter(a => 
-            eventsOnThisDate.includes(a.event_id)
-          );
-          
-          if (attendanceForDate.length === 0) {
-            // No record at all means absent
-            absentCount++;
-          } else {
-            // Check if all records show 'absent' status
-            const allAbsent = attendanceForDate.every(a => 
-              a.attendance_status === 'absent'
-            );
-            if (allAbsent) {
-              absentCount++;
-            }
-          }
-        });
+        // Check if member was absent for both Sundays (no attendance record = absent)
+        const absentCount = lastTwoSundays.filter(sunday => {
+          const hasAttendance = memberAttendances.some(a => a.event_id === sunday.id);
+          return !hasAttendance; // No attendance record means absent
+        }).length;
 
-        if (absentCount >= 2) {
-          // Get cell group name
-          const cellGroup = cellGroupsData.find(g => g.id === member.cell_group_id);
-          
+        if (absentCount === 2) {
           absent.push({
             id: member.id,
             name: member.name,
             surname: member.surname,
             phone: member.phone,
-            consecutiveAbsences: absentCount,
-            lastAttendedDate: null,
-            cellGroupId: member.cell_group_id,
-            cellGroupName: cellGroup?.name || null,
-            status: member.status
+            consecutiveAbsences: 2
           });
         }
       });
 
-      setDebugInfo(prev => prev + ` Found ${absent.length} members absent for 2 consecutive Sundays. `);
       setAbsentMembers(absent);
     } catch (error) {
       console.error('Error loading absent members:', error);
-      setDebugInfo(prev => prev + ' Error in loadAbsentMembers: ' + (error as Error).message);
       setAbsentMembers([]);
     }
   };
@@ -446,7 +362,7 @@ const Dashboard = () => {
         action: 'viewSermons'
       },
       { 
-        icon: Users, 
+        icon: UserPlus, 
         label: 'Newcomers', 
         value: newcomers.toString(), 
         change: `${newcomers} new visitors`, 
@@ -525,19 +441,6 @@ const Dashboard = () => {
       });
     });
 
-    // Add absent member alert if any
-    if (absentMembers.length > 0) {
-      activities.unshift({
-        id: activities.length + 1,
-        type: 'absent',
-        message: `${absentMembers.length} members absent for 2 consecutive Sundays`,
-        time: 'Today',
-        color: 'bg-red-500',
-        icon: AlertTriangle,
-        action: () => openModal('viewAbsentMembers')
-      });
-    }
-
     setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 6));
   };
 
@@ -610,12 +513,6 @@ const Dashboard = () => {
     setQuickViewEvent(null);
   };
 
-  // Open absent member detail modal
-  const openAbsentMemberDetail = (member: AbsentMember) => {
-    setSelectedAbsentMember(member);
-    setActiveModal('absentMemberDetail');
-  };
-
   // Open sermon detail modal
   const openSermonDetail = (sermon: Sermon) => {
     setSelectedSermon(sermon);
@@ -639,16 +536,19 @@ const Dashboard = () => {
 
   const closeModal = () => {
     setActiveModal(null);
+    setSelectedMember(null);
+    setSelectedEvent(null);
     setSelectedSermon(null);
-    setSelectedAbsentMember(null);
     setError(null);
   };
 
-  const openMemberDetail = (_member: Member) => {
+  const openMemberDetail = (member: Member) => {
+    setSelectedMember(member);
     setActiveModal('memberDetail');
   };
 
-  const openEventDetail = (_event: Event) => {
+  const openEventDetail = (event: Event) => {
+    setSelectedEvent(event);
     setActiveModal('eventDetail');
   };
 
@@ -690,7 +590,6 @@ const Dashboard = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading dashboard...</p>
-          {debugInfo && <p className="mt-2 text-xs text-gray-500">{debugInfo}</p>}
         </div>
       </div>
     );
@@ -698,8 +597,8 @@ const Dashboard = () => {
 
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
+  getFilteredAbsentMembers(); // Called for side effects
   const filteredSermons = getFilteredSermons();
-  const filteredAbsentMembers = getFilteredAbsentMembers();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
@@ -758,14 +657,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Debug info - remove in production */}
-      {debugInfo && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-          <p className="text-yellow-700 text-sm font-medium">Debug Info:</p>
-          <p className="text-yellow-600 text-xs">{debugInfo}</p>
-        </div>
-      )}
-
       {/* Stats Grid - All users can see */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6 mb-8">
         {stats.map((stat) => (
@@ -807,7 +698,7 @@ const Dashboard = () => {
       </div>
 
       {/* Content Grid - All users can see */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Activity */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
@@ -1046,117 +937,82 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Absent Members Section - Always show if there are absent members */}
-      {absentMembers.length > 0 && (
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300 mb-6">
-          <button 
-            onClick={() => toggleSection('absentMembers')}
-            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-xl">
-                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+      {/* Quick Actions - Only show if user has edit permissions */}
+      {currentUserCanEdit && (
+        <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
+          <div className="flex flex-wrap gap-3">
+            <button 
+              onClick={() => openModal('addMember')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+            >
+              <UserPlus className="h-4 w-4" />
+              Add New Member
+            </button>
+            <button 
+              onClick={() => openModal('createEvent')}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+            >
+              <Plus className="h-4 w-4" />
+              Create Event
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick View Pamphlet Modal */}
+      {quickViewEvent && quickViewEvent.pamphlet_url && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">{quickViewEvent.name}</h3>
+                <p className="text-sm text-gray-600">Event Pamphlet</p>
               </div>
-              <div className="text-left">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Members Absent for 2 Consecutive Sundays</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {absentMembers.length} member{absentMembers.length !== 1 ? 's' : ''} need follow-up
-                </p>
-              </div>
-            </div>
-            {expandedSections.absentMembers ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-          </button>
-          
-          {expandedSections.absentMembers && (
-            <div className="p-6 pt-0">
-              <div className="mb-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search absent members by name or phone..."
-                    value={absentSearchTerm}
-                    onChange={(e) => setAbsentSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {filteredAbsentMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10 rounded-xl p-4 hover:bg-red-100/50 dark:hover:bg-red-900/20 transition-colors duration-200 cursor-pointer"
-                    onClick={() => openAbsentMemberDetail(member)}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <p className="font-medium text-lg text-gray-900 dark:text-white">
-                          {member.name} {member.surname}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1">
-                          {member.phone && (
-                            <span className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
-                              <Phone className="h-3 w-3" />
-                              {member.phone}
-                            </span>
-                          )}
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium rounded-full">
-                            <UserX className="h-3 w-3" />
-                            {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openAbsentMemberDetail(member);
-                        }}
-                        className="p-2 hover:bg-red-200 dark:hover:bg-red-800 rounded-lg transition-colors"
-                      >
-                        <Eye className="h-4 w-4 text-red-600 dark:text-red-400" />
-                      </button>
-                    </div>
-                    
-                    <div className="mt-3 pt-3 border-t border-red-200 dark:border-red-800/50">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-gray-500 dark:text-gray-400">Last Attended</p>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {member.lastAttendedDate ? formatDate(member.lastAttendedDate) : 'Never'}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500 dark:text-gray-400">Status</p>
-                          <p className="font-medium text-gray-900 dark:text-white capitalize">
-                            {member.status?.replace('_', ' ') || 'Unknown'}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500 dark:text-gray-400">Cell Group</p>
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {member.cellGroupName || 'Not assigned'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              <div className="mt-4 flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-700">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Showing {filteredAbsentMembers.length} of {absentMembers.length} absent members
-                </p>
-                <button
-                  onClick={() => openModal('viewAbsentMembers')}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors duration-200"
+              <div className="flex items-center gap-2">
+                <a
+                  href={quickViewEvent.pamphlet_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
+                  title="Open in new tab"
                 >
-                  View All Absent Members
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+                <button
+                  onClick={closeQuickView}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                >
+                  <X className="h-5 w-5 text-gray-500" />
                 </button>
               </div>
             </div>
-          )}
+            <div className="p-4 h-96">
+              <iframe
+                src={quickViewEvent.pamphlet_url}
+                className="w-full h-full rounded-lg border border-gray-200"
+                title="Event Pamphlet"
+              />
+            </div>
+            <div className="p-4 border-t border-gray-200 bg-gray-50">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  <p><strong>Date:</strong> {quickViewEvent.event_date}</p>
+                  <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
+                  {quickViewEvent.location && <p><strong>Location:</strong> {quickViewEvent.location}</p>}
+                </div>
+                <a
+                  href={quickViewEvent.pamphlet_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1319,172 +1175,6 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Absent Members Modal */}
-      {activeModal === 'viewAbsentMembers' && (
-        <Modal title="Members Absent for 2 Consecutive Sundays" size="max-w-4xl">
-          <div className="space-y-4">
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="h-6 w-6 text-red-600" />
-                <div>
-                  <h4 className="font-semibold text-red-700">Follow-up Required</h4>
-                  <p className="text-red-600 text-sm">
-                    These members have missed 2 consecutive Sunday services and may need pastoral care.
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search absent members by name, phone, or status..."
-                value={absentSearchTerm}
-                onChange={(e) => setAbsentSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-            </div>
-
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {filteredAbsentMembers.map((member) => (
-                <div 
-                  key={member.id}
-                  className="border border-red-200 rounded-xl p-4 hover:bg-red-50 transition-colors duration-200 cursor-pointer"
-                  onClick={() => openAbsentMemberDetail(member)}
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h4 className="font-bold text-lg text-gray-900">{member.name} {member.surname}</h4>
-                      <div className="flex items-center gap-3 mt-1">
-                        {member.phone && (
-                          <span className="text-sm text-gray-600 flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            {member.phone}
-                          </span>
-                        )}
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                          <UserX className="h-3 w-3" />
-                          {member.consecutiveAbsences} Sunday{member.consecutiveAbsences !== 1 ? 's' : ''} absent
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openAbsentMemberDetail(member);
-                      }}
-                      className="p-2 hover:bg-red-100 rounded-lg transition-colors"
-                    >
-                      <Eye className="h-4 w-4 text-red-600" />
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-red-200">
-                    <div>
-                      <p className="text-gray-500 text-sm">Status</p>
-                      <p className="font-medium text-gray-900 capitalize">
-                        {member.status?.replace('_', ' ') || 'Unknown'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-sm">Last Attended</p>
-                      <p className="font-medium text-gray-900">
-                        {member.lastAttendedDate ? formatDate(member.lastAttendedDate) : 'Never'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-sm">Cell Group</p>
-                      <p className="font-medium text-gray-900">
-                        {member.cellGroupName || 'Not assigned'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {filteredAbsentMembers.length === 0 && (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
-                  {absentSearchTerm ? 'No absent members found matching your search' : 'No members absent for 2 Sundays'}
-                </p>
-              )}
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Absent Member Detail Modal */}
-      {activeModal === 'absentMemberDetail' && selectedAbsentMember && (
-        <Modal title="Absent Member Details" size="max-w-md">
-          <div className="space-y-6">
-            <div className="text-center">
-              <h3 className="text-2xl font-bold text-gray-900 mb-1">
-                {selectedAbsentMember.name} {selectedAbsentMember.surname}
-              </h3>
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-100 text-red-700 rounded-full font-medium">
-                <AlertTriangle className="h-4 w-4" />
-                {selectedAbsentMember.consecutiveAbsences} Sunday{selectedAbsentMember.consecutiveAbsences !== 1 ? 's' : ''} Absent
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-semibold text-gray-900 mb-2">Contact Information</h4>
-                {selectedAbsentMember.phone ? (
-                  <div className="flex items-center gap-2 text-gray-600">
-                    <Phone className="h-4 w-4" />
-                    <span>{selectedAbsentMember.phone}</span>
-                  </div>
-                ) : (
-                  <p className="text-gray-500">No contact information available</p>
-                )}
-              </div>
-
-              <div>
-                <h4 className="font-semibold text-gray-900 mb-2">Attendance Information</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Status:</span>
-                    <span className="font-medium capitalize">
-                      {selectedAbsentMember.status?.replace('_', ' ') || 'Unknown'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Last Attended:</span>
-                    <span className="font-medium">
-                      {selectedAbsentMember.lastAttendedDate ? formatDate(selectedAbsentMember.lastAttendedDate) : 'Never'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Cell Group:</span>
-                    <span className="font-medium">
-                      {selectedAbsentMember.cellGroupName || 'Not assigned'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-gray-200">
-              <h4 className="font-semibold text-gray-900 mb-3">Suggested Actions</h4>
-              <div className="space-y-2">
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors duration-200">
-                  <Phone className="h-4 w-4" />
-                  Call Member for Follow-up
-                </button>
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition-colors duration-200">
-                  <Users className="h-4 w-4" />
-                  Assign to Pastoral Care
-                </button>
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors duration-200">
-                  <Clock className="h-4 w-4" />
-                  Mark as Followed-up
-                </button>
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
-
       {/* Members Modal */}
       {activeModal === 'viewMembers' && (
         <Modal title="Members" size="max-w-4xl">
@@ -1508,19 +1198,25 @@ const Dashboard = () => {
               {filteredMembers
                 .filter(member => 
                   `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
                   (member.phone && member.phone.includes(searchTerm))
                 )
                 .map(member => (
                 <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-                  <div>
-                    <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                    <p className="text-sm text-gray-500">{member.phone || 'No contact'}</p>
-                    {member.login_username && (
-                      <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-                        <Key className="h-3 w-3" />
-                        Login: {member.login_username}
-                      </p>
-                    )}
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                      <p className="text-sm text-gray-500">{member.email || member.phone || 'No contact'}</p>
+                      {member.login_username && (
+                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                          <Key className="h-3 w-3" />
+                          Login: {member.login_username}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button 
@@ -1543,61 +1239,7 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Quick View Pamphlet Modal */}
-      {quickViewEvent && quickViewEvent.pamphlet_url && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-gray-200">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{quickViewEvent.name}</h3>
-                <p className="text-sm text-gray-600">Event Pamphlet</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={quickViewEvent.pamphlet_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
-                  title="Open in new tab"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </a>
-                <button
-                  onClick={closeQuickView}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-                >
-                  <X className="h-5 w-5 text-gray-500" />
-                </button>
-              </div>
-            </div>
-            <div className="p-4 h-96">
-              <iframe
-                src={quickViewEvent.pamphlet_url}
-                className="w-full h-full rounded-lg border border-gray-200"
-                title="Event Pamphlet"
-              />
-            </div>
-            <div className="p-4 border-t border-gray-200 bg-gray-50">
-              <div className="flex justify-between items-center">
-                <div className="text-sm text-gray-600">
-                  <p><strong>Date:</strong> {quickViewEvent.event_date}</p>
-                  <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
-                  {quickViewEvent.location && <p><strong>Location:</strong> {quickViewEvent.location}</p>}
-                </div>
-                <a
-                  href={quickViewEvent.pamphlet_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
-                >
-                  <Download className="h-4 w-4" />
-                  Download
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ... (other modals remain the same) ... */}
 
       {/* Pamphlet Viewer Modal */}
       {viewingPamphlet && (
@@ -1642,4 +1284,5 @@ const Dashboard = () => {
     </div>
   );
 };
+
 export default Dashboard;
