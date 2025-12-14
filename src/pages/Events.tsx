@@ -233,7 +233,8 @@ const Events = () => {
     try {
       setError(null);
       
-      const { data, error } = await supabase
+      // First, fetch members
+      const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
           id,
@@ -245,18 +246,36 @@ const Events = () => {
           ministry_group_id,
           status,
           cell_groups!fk_cell_group(name),
-          ministry_groups(name),
-          department_members (
-            departments (
-              id,
-              name
-            )
-          )
+          ministry_groups(name)
         `)
         .order('name');
 
-      if (error) throw error;
-      setMembers(data || []);
+      if (membersError) throw membersError;
+
+      // Then, fetch department members separately
+      const { data: departmentMembersData, error: deptError } = await supabase
+        .from('department_members')
+        .select(`
+          member_id,
+          departments (
+            id,
+            name
+          )
+        `);
+
+      if (deptError) throw deptError;
+
+      // Combine the data
+      const membersWithDepartments = (membersData || []).map(member => ({
+        ...member,
+        department_members: (departmentMembersData || [])
+          .filter(dept => dept.member_id === member.id)
+          .map(dept => ({
+            departments: dept.departments
+          }))
+      }));
+
+      setMembers(membersWithDepartments as Member[]);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
@@ -321,13 +340,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -391,7 +404,7 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS - FIXED for schema
+  // ATTENDANCE FUNCTIONS
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
@@ -424,7 +437,7 @@ const Events = () => {
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
-        // Create new record - FIXED: removed created_at since it doesn't exist in schema
+        // Create new record
         const { error: insertError } = await supabase
           .from('event_attendees')
           .insert([attendanceData]);
@@ -587,7 +600,6 @@ const Events = () => {
         .from('events')
         .update({ 
           updated_at: new Date().toISOString(),
-          // You could add a 'last_synced_at' field to your events table
         })
         .eq('id', eventId);
 
@@ -1273,13 +1285,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1533,13 +1539,7 @@ const Events = () => {
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
-            )
+            ministry_groups(name)
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1786,7 +1786,7 @@ const Events = () => {
     );
   };
 
-  // Bulk Attendance Modal Component - UPDATED for schema
+  // Bulk Attendance Modal Component
   const BulkAttendanceModal = () => {
     if (!showBulkAttendanceModal) return null;
 
@@ -3191,7 +3191,7 @@ const Events = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons - ADDED SYNC BUTTON */}
+                    {/* Action Buttons */}
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
