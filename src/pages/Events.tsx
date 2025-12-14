@@ -41,7 +41,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  login_username: string | null;
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
@@ -162,7 +162,7 @@ const Events = () => {
     name: '',
     surname: '',
     phone: '',
-    email: '',
+    login_username: '', // Changed from email to login_username
     notes: ''
   });
 
@@ -240,7 +240,7 @@ const Events = () => {
           id,
           name,
           surname,
-          email,
+          login_username,
           phone,
           cell_group_id,
           ministry_group_id,
@@ -334,7 +334,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            login_username,
             phone,
             status,
             cell_group_id,
@@ -1279,7 +1279,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            login_username,
             phone,
             status,
             cell_group_id,
@@ -1437,7 +1437,7 @@ const Events = () => {
       name: '',
       surname: '',
       phone: '',
-      email: '',
+      login_username: '',
       notes: ''
     });
   };
@@ -1456,15 +1456,15 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      // Check if member already exists with same email or phone
+      // Check if member already exists with same login_username or phone
       let existingMember = null;
-      if (newcomerFormData.email.trim()) {
-        const { data: emailMatch } = await supabase
+      if (newcomerFormData.login_username.trim()) {
+        const { data: usernameMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('email', newcomerFormData.email.trim())
+          .eq('login_username', newcomerFormData.login_username.trim())
           .single();
-        existingMember = emailMatch;
+        existingMember = usernameMatch;
       }
       
       if (!existingMember && newcomerFormData.phone.trim()) {
@@ -1487,7 +1487,7 @@ const Events = () => {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
           phone: newcomerFormData.phone.trim() || null,
-          email: newcomerFormData.email.trim() || null,
+          login_username: newcomerFormData.login_username.trim() || null,
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -1505,8 +1505,8 @@ const Events = () => {
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            setError('A member with this email already exists');
+          if (memberError.code === '23505' && memberError.message.includes('login_username')) {
+            setError('A member with this username already exists');
             return;
           }
           throw memberError;
@@ -1533,7 +1533,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            login_username,
             phone,
             status,
             cell_group_id,
@@ -1577,7 +1577,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.login_username?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1588,7 +1588,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.login_username?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1918,10 +1918,10 @@ const Events = () => {
                                   <span className="truncate">{member.phone}</span>
                                 </div>
                               )}
-                              {member.email && (
+                              {member.login_username && (
                                 <div className="flex items-center gap-1">
                                   <Mail className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate">{member.email}</span>
+                                  <span className="truncate">{member.login_username}</span>
                                 </div>
                               )}
                             </div>
@@ -2088,16 +2088,16 @@ const Events = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Email Address
+                  Username
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="email"
-                    value={newcomerFormData.email}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, email: e.target.value })}
+                    type="text"
+                    value={newcomerFormData.login_username}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, login_username: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
+                    placeholder="Enter username"
                   />
                 </div>
               </div>
@@ -2206,10 +2206,10 @@ const Events = () => {
                               {attendee.members.phone}
                             </div>
                           )}
-                          {attendee.members.email && (
+                          {attendee.members.login_username && (
                             <div className="flex items-center gap-1">
                               <Mail className="h-3 w-3" />
-                              {attendee.members.email}
+                              {attendee.members.login_username}
                             </div>
                           )}
                           {type === 'present' && attendee.first_time && (
@@ -3297,7 +3297,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.phone || member.login_username}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -3343,7 +3343,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.phone || member.login_username}
                                         </div>
                                       </div>
                                     </div>
@@ -3382,7 +3382,7 @@ const Events = () => {
                                   </div>
                                   <div className="text-sm text-gray-600 dark:text-gray-400">
                                     {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
-                                    {selectedMember.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.email}</span>}
+                                    {selectedMember.login_username && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.login_username}</span>}
                                   </div>
                                 </div>
                               </div>
