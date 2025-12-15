@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, login_username, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,7 +40,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  elogin_username: string | null;
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
@@ -157,7 +157,7 @@ const Events = () => {
     name: '',
     surname: '',
     phone: '',
-    email: '',
+    elogin_username: '',
     notes: ''
   });
 
@@ -234,7 +234,7 @@ const Events = () => {
           id,
           name,
           surname,
-          email,
+          elogin_username,
           phone,
           cell_group_id,
           ministry_group_id,
@@ -310,7 +310,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            elogin_username,
             phone,
             status,
             cell_group_id,
@@ -1266,7 +1266,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            elogin_username,
             phone,
             status,
             cell_group_id,
@@ -1429,7 +1429,7 @@ const Events = () => {
       name: '',
       surname: '',
       phone: '',
-      email: '',
+      elogin_username: '',
       notes: ''
     });
   };
@@ -1448,15 +1448,15 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      // Check if member already exists with same email or phone
+      // Check if member already exists with same elogin_username or phone
       let existingMember = null;
-      if (newcomerFormData.email.trim()) {
-        const { data: emailMatch } = await supabase
+      if (newcomerFormData.elogin_username.trim()) {
+        const { data: elogin_usernameMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('email', newcomerFormData.email.trim())
+          .eq('elogin_username', newcomerFormData.elogin_username.trim())
           .single();
-        existingMember = emailMatch;
+        existingMember = elogin_usernameMatch;
       }
       
       if (!existingMember && newcomerFormData.phone.trim()) {
@@ -1479,7 +1479,7 @@ const Events = () => {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
           phone: newcomerFormData.phone.trim() || null,
-          email: newcomerFormData.email.trim() || null,
+          elogin_username: newcomerFormData.elogin_username.trim() || null,
           status: 'newcomer',
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -1497,8 +1497,8 @@ const Events = () => {
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            setError('A member with this email already exists');
+          if (memberError.code === '23505' && memberError.message.includes('elogin_username')) {
+            setError('A member with this elogin_username already exists');
             return;
           }
           throw memberError;
@@ -1525,7 +1525,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            elogin_username,
             phone,
             status,
             cell_group_id,
@@ -1575,7 +1575,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.elogin_username?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1586,7 +1586,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.elogin_username?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1915,10 +1915,10 @@ const Events = () => {
                                 {member.phone}
                               </div>
                             )}
-                            {member.email && (
+                            {member.elogin_username && (
                               <div className="flex items-center gap-1">
-                                <Mail className="h-3 w-3" />
-                                {member.email}
+                                <login_username className="h-3 w-3" />
+                                {member.elogin_username}
                               </div>
                             )}
                           </div>
@@ -2060,16 +2060,16 @@ const Events = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Email Address
+                  Elogin_username Address
                 </label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <login_username className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="email"
-                    value={newcomerFormData.email}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, email: e.target.value })}
+                    type="elogin_username"
+                    value={newcomerFormData.elogin_username}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, elogin_username: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
+                    placeholder="Enter elogin_username address"
                   />
                 </div>
               </div>
@@ -2178,10 +2178,10 @@ const Events = () => {
                               {attendee.members.phone}
                             </div>
                           )}
-                          {attendee.members.email && (
+                          {attendee.members.elogin_username && (
                             <div className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              {attendee.members.email}
+                              <login_username className="h-3 w-3" />
+                              {attendee.members.elogin_username}
                             </div>
                           )}
                           {type === 'present' && attendee.first_time && (
@@ -3214,7 +3214,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.phone || member.elogin_username}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -3260,7 +3260,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.phone || member.elogin_username}
                                         </div>
                                       </div>
                                     </div>
@@ -3299,7 +3299,7 @@ const Events = () => {
                                   </div>
                                   <div className="text-sm text-gray-600 dark:text-gray-400">
                                     {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
-                                    {selectedMember.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.email}</span>}
+                                    {selectedMember.elogin_username && <span className="flex items-center gap-1"><login_username className="h-3 w-3" />{selectedMember.elogin_username}</span>}
                                   </div>
                                 </div>
                               </div>
