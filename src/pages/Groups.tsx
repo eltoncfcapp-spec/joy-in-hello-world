@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Mail, Phone, Download, FileDown } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, login_username, Phone, Download, FileDown } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -32,7 +32,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  login_username: string | null;
   phone: string | null;
   cell_group_id?: string | null;
   status?: string | null;
@@ -441,7 +441,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
     !groupMembers.some(gm => gm.id === member.id) && (
       member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
+      member.login_username?.toLowerCase().includes(searchMemberTerm.toLowerCase())
     )
   );
 
@@ -542,7 +542,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
-                          {member.email} • {member.phone}
+                          {member.login_username} • {member.phone}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -647,7 +647,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium text-gray-900">{member.name} {member.surname}</div>
-                        <div className="text-sm text-gray-600">{member.email} • {member.phone}</div>
+                        <div className="text-sm text-gray-600">{member.login_username} • {member.phone}</div>
                       </div>
                       <button
                         onClick={() => addMemberToGroup(member)}
@@ -683,7 +683,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     name: '',
     surname: '',
     phone: '',
-    email: '',
+    login_username: '',
     notes: ''
   });
 
@@ -703,15 +703,15 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     try {
       setLoading(true);
       
-      // Check if member already exists with same email or phone
+      // Check if member already exists with same login_username or phone
       let existingMember = null;
-      if (formData.email.trim()) {
-        const { data: emailMatch } = await supabase
+      if (formData.login_username.trim()) {
+        const { data: login_usernameMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('email', formData.email.trim())
+          .eq('login_username', formData.login_username.trim())
           .single();
-        existingMember = emailMatch;
+        existingMember = login_usernameMatch;
       }
       
       if (!existingMember && formData.phone.trim()) {
@@ -745,7 +745,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
-          email: formData.email.trim() || null,
+          login_username: formData.login_username.trim() || null,
           status: 'newcomer' as const,
           cell_group_id: group.id,
           first_time_visit_date: new Date().toISOString(),
@@ -765,8 +765,8 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            onError('A member with this email already exists');
+          if (memberError.code === '23505' && memberError.message.includes('login_username')) {
+            onError('A member with this login_username already exists');
             return;
           }
           throw memberError;
@@ -787,7 +787,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
 
-      setFormData({ name: '', surname: '', phone: '', email: '', notes: '' });
+      setFormData({ name: '', surname: '', phone: '', login_username: '', notes: '' });
       setShowForm(false);
       onNewcomerAdded();
     } catch (error: any) {
@@ -888,16 +888,16 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">login_username Address</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <login_username className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
+                    type="login_username"
+                    name="login_username"
+                    value={formData.login_username}
                     onChange={handleInputChange}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter email address"
+                    placeholder="Enter login_username address"
                   />
                 </div>
               </div>
@@ -928,7 +928,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 type="button"
                 onClick={() => {
                   setShowForm(false);
-                  setFormData({ name: '', surname: '', phone: '', email: '', notes: '' });
+                  setFormData({ name: '', surname: '', phone: '', login_username: '', notes: '' });
                 }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
@@ -987,7 +987,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .select(`
           *,
           members:member_id (
-            id, name, surname, email, phone
+            id, name, surname, login_username, phone
           )
         `)
         .eq('meeting_id', selectedMeeting.id);
@@ -1822,7 +1822,7 @@ const Groups = () => {
         .select(`
           *,
           members:member_id (
-            id, name, surname, email, phone
+            id, name, surname, login_username, phone
           )
         `)
         .eq('meeting_id', meetingId);
