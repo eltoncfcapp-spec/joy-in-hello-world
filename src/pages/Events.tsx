@@ -277,7 +277,7 @@ const Events = () => {
           cell_group_id,
           ministry_group_id,
           status,
-          cell_groups!fk_cell_group(name),
+          cell_groups(name),
           ministry_groups(name),
           department_members (
             departments (
@@ -353,7 +353,7 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
+            cell_groups(name),
             ministry_groups(name),
             department_members (
               departments (
@@ -1410,7 +1410,7 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
+            cell_groups(name),
             ministry_groups(name),
             department_members (
               departments (
@@ -1670,7 +1670,7 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
+            cell_groups(name),
             ministry_groups(name),
             department_members (
               departments (
