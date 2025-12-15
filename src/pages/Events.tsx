@@ -18,6 +18,9 @@ interface Event {
   is_completed: boolean;
   completed_at: string | null;
   pamphlet_url: string | null;
+  last_synced_at: string | null; // Added from schema
+  backup_file_url: string | null; // Added from schema
+  backup_created_at: string | null; // Added from schema
 }
 
 interface Sermon {
@@ -88,6 +91,15 @@ interface EventAttendee {
   } | null;
 }
 
+interface EventSyncLog {
+  id: string;
+  event_id: string;
+  sync_data: any;
+  synced_at: string;
+  synced_by: string | null;
+  synced_by_name: string | null;
+}
+
 const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
@@ -101,6 +113,7 @@ const Events = () => {
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [attendees, setAttendees] = useState<EventAttendee[]>([]);
+  const [syncLogs, setSyncLogs] = useState<EventSyncLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [sermonLoading, setSermonLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +131,7 @@ const Events = () => {
   const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
+  const [showSyncHistoryModal, setShowSyncHistoryModal] = useState<string | null>(null);
   
   // Use ref for absence notes to prevent re-renders while typing
   const attendanceNotesRef = useRef<Record<string, string>>({});
@@ -170,6 +184,22 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
+  // Fetch sync logs for an event
+  const fetchSyncLogs = useCallback(async (eventId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('event_sync_logs')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('synced_at', { ascending: false });
+
+      if (error) throw error;
+      setSyncLogs(data || []);
+    } catch (error: any) {
+      console.error('Error fetching sync logs:', error);
+    }
+  }, []);
+
   // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
     try {
@@ -190,7 +220,10 @@ const Events = () => {
         target_departments: event.target_departments ?? [],
         is_completed: event.is_completed ?? false,
         completed_at: event.completed_at ?? null,
-        pamphlet_url: event.pamphlet_url ?? null
+        pamphlet_url: event.pamphlet_url ?? null,
+        last_synced_at: event.last_synced_at ?? null,
+        backup_file_url: event.backup_file_url ?? null,
+        backup_created_at: event.backup_created_at ?? null
       }));
 
       setEvents(eventsWithDefaults as Event[]);
@@ -544,7 +577,7 @@ const Events = () => {
     return false;
   };
 
-  // Function to sync event to cloud (mark as synced/backed up)
+  // Function to sync event to cloud (mark as synced/backed up) - FIXED
   const syncEventToCloud = async (eventId: string) => {
     setLoading(true);
     setError(null);
@@ -557,6 +590,7 @@ const Events = () => {
 
       // Get all attendees for this event
       const eventAttendees = getEventAttendees(eventId);
+      const stats = getAttendanceStats(eventId);
 
       // Prepare data for sync
       const syncData = {
@@ -565,35 +599,87 @@ const Events = () => {
         event_date: event.event_date,
         event_time: event.event_time,
         location: event.location,
+        topic: event.topic,
         is_completed: event.is_completed,
+        completed_at: event.completed_at,
+        is_whole_church: event.is_whole_church,
+        target_groups: event.target_groups,
+        target_departments: event.target_departments,
+        pamphlet_url: event.pamphlet_url,
         total_attendees: eventAttendees.length,
-        present_count: getAttendanceStats(eventId).present,
-        absent_count: getAttendanceStats(eventId).absent,
+        present_count: stats.present,
+        absent_count: stats.absent,
+        first_timers_count: stats.firstTimers,
         attendees: eventAttendees.map(attendee => ({
           member_id: attendee.members_id,
           member_name: `${attendee.members.name} ${attendee.members.surname}`,
-          status: attendee.attendance_status,
+          phone: attendee.members.phone,
+          login_username: attendee.members.login_username,
+          status: attendee.members.status,
+          attendance_status: attendee.attendance_status,
           first_time: attendee.first_time,
-          attended_at: attendee.attended_at
+          invited_by: attendee.invited_by_member ? 
+            `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null,
+          attended_at: attendee.attended_at,
+          notes: attendee.notes
         })),
         synced_at: new Date().toISOString(),
         synced_by: user?.id,
         synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
       };
 
-      // Here you would typically send this data to your cloud backup service
-      // For now, we'll just update a field in the events table to mark it as synced
+      // Generate a CSV file for backup
+      const csvContent = generateCSVForEvent(event, eventAttendees, stats);
+      const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+      const csvFileName = `event_backup_${event.name.replace(/\s+/g, '_')}_${event.event_date}_${Date.now()}.csv`;
+      const csvFilePath = `event-backups/${csvFileName}`;
+
+      // Upload CSV to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('event-backups')
+        .upload(csvFilePath, csvBlob, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: 'text/csv'
+        });
+
+      if (uploadError) {
+        console.warn('Failed to upload backup file:', uploadError);
+        // Continue without file upload
+      }
+
+      // Get public URL for the backup file
+      const { data: { publicUrl } } = supabase.storage
+        .from('event-backups')
+        .getPublicUrl(csvFilePath);
+
+      // Update event with sync info
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
           updated_at: new Date().toISOString(),
-          // You could add a 'last_synced_at' field to your events table
+          last_synced_at: new Date().toISOString(),
+          backup_file_url: publicUrl,
+          backup_created_at: new Date().toISOString()
         })
         .eq('id', eventId);
 
       if (updateError) throw updateError;
 
-      // Log the sync action (optional)
+      // Insert sync log into event_sync_logs table
+      const { error: syncLogError } = await supabase
+        .from('event_sync_logs')
+        .insert([{
+          event_id: eventId,
+          sync_data: syncData,
+          synced_at: new Date().toISOString(),
+          synced_by: user?.id,
+          synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
+        }]);
+
+      if (syncLogError) throw syncLogError;
+
+      // Log the sync action in audit_logs
       const { error: logError } = await supabase
         .from('audit_logs')
         .insert([{
@@ -607,9 +693,26 @@ const Events = () => {
 
       if (logError) {
         console.warn('Failed to log sync action:', logError);
+        // Continue anyway
       }
 
-      setSuccess(`Event "${event.name}" successfully synced to cloud!`);
+      // Update local state
+      setEvents(prev => prev.map(e => 
+        e.id === eventId 
+          ? { 
+              ...e, 
+              last_synced_at: new Date().toISOString(),
+              backup_file_url: publicUrl,
+              backup_created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            } 
+          : e
+      ));
+
+      // Refresh sync logs
+      await fetchSyncLogs(eventId);
+
+      setSuccess(`Event "${event.name}" successfully synced to cloud! Backup file created.`);
       setTimeout(() => setSuccess(null), 3000);
       
       // Close sync modal
@@ -623,42 +726,68 @@ const Events = () => {
     }
   };
 
+  // Helper function to generate CSV content
+  const generateCSVForEvent = (event: Event, attendees: EventAttendee[], stats: any) => {
+    const csvRows = [];
+    
+    // Event information
+    csvRows.push(['EVENT INFORMATION']);
+    csvRows.push(['Name', event.name]);
+    csvRows.push(['Date', event.event_date]);
+    csvRows.push(['Time', event.event_time]);
+    csvRows.push(['Location', event.location || '']);
+    csvRows.push(['Topic', event.topic || '']);
+    csvRows.push(['Scope', event.is_whole_church ? 'Whole Church' : 'Target Groups']);
+    csvRows.push(['Status', event.is_completed ? 'Completed' : 'Active']);
+    csvRows.push(['Completed At', event.completed_at || '']);
+    csvRows.push(['Pamphlet URL', event.pamphlet_url || '']);
+    csvRows.push(['']);
+    
+    // Attendance statistics
+    csvRows.push(['ATTENDANCE STATISTICS']);
+    csvRows.push(['Present', stats.present]);
+    csvRows.push(['Absent', stats.absent]);
+    csvRows.push(['First Timers', stats.firstTimers]);
+    csvRows.push(['Total Registered', stats.total]);
+    csvRows.push(['']);
+    
+    // Attendees list
+    csvRows.push(['ATTENDEES LIST']);
+    csvRows.push(['Name', 'Surname', 'Phone', 'Email', 'Status', 'Attendance', 'First Time', 'Invited By', 'Attended At', 'Notes']);
+    
+    attendees.forEach(attendee => {
+      csvRows.push([
+        attendee.members.name,
+        attendee.members.surname,
+        attendee.members.phone || '',
+        attendee.members.login_username || '',
+        attendee.members.status || '',
+        attendee.attendance_status,
+        attendee.first_time ? 'Yes' : 'No',
+        attendee.invited_by_member ? 
+          `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : '',
+        attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
+        attendee.notes || ''
+      ]);
+    });
+    
+    // Convert to CSV string
+    return csvRows.map(row => 
+      row.map(cell => 
+        `"${(cell || '').toString().replace(/"/g, '""')}"`
+      ).join(',')
+    ).join('\n');
+  };
+
   // Function to export event data as CSV
   const exportEventData = (eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
     const eventAttendees = getEventAttendees(eventId);
+    const stats = getAttendanceStats(eventId);
     
-    // Prepare CSV content
-    const csvRows = [];
-    
-    // Add event info
-    csvRows.push(['Event Information']);
-    csvRows.push(['Name', event.name]);
-    csvRows.push(['Date', event.event_date]);
-    csvRows.push(['Time', event.event_time]);
-    csvRows.push(['Location', event.location || '']);
-    csvRows.push(['Topic', event.topic || '']);
-    csvRows.push(['']);
-    
-    // Add attendees
-    csvRows.push(['Attendees List']);
-    csvRows.push(['Name', 'Surname', 'Status', 'First Time', 'Attended At', 'Invited By']);
-    
-    eventAttendees.forEach(attendee => {
-      csvRows.push([
-        attendee.members.name,
-        attendee.members.surname,
-        attendee.attendance_status,
-        attendee.first_time ? 'Yes' : 'No',
-        attendee.attended_at ? new Date(attendee.attended_at).toLocaleString() : '',
-        attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : ''
-      ]);
-    });
-    
-    // Convert to CSV string
-    const csvContent = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    const csvContent = generateCSVForEvent(event, eventAttendees, stats);
     
     // Create download link
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -673,6 +802,12 @@ const Events = () => {
     
     setSuccess(`Event data exported successfully!`);
     setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Function to view sync history
+  const viewSyncHistory = async (eventId: string) => {
+    setShowSyncHistoryModal(eventId);
+    await fetchSyncLogs(eventId);
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -1184,6 +1319,9 @@ const Events = () => {
         is_completed: false,
         completed_at: null,
         pamphlet_url: null,
+        last_synced_at: null,
+        backup_file_url: null,
+        backup_created_at: null,
         target_groups: !eventFormData.isWholeChurch && eventFormData.targetCellGroups.length > 0 ? eventFormData.targetCellGroups : null,
         target_departments: !eventFormData.isWholeChurch && [...eventFormData.targetMinistryGroups, ...eventFormData.targetDepartments].length > 0 
           ? [...eventFormData.targetMinistryGroups, ...eventFormData.targetDepartments] 
@@ -1671,7 +1809,136 @@ const Events = () => {
     }
   };
 
-  // Sync Modal Component
+  // Sync History Modal Component
+  const SyncHistoryModal = () => {
+    if (!showSyncHistoryModal) return null;
+
+    const event = events.find(e => e.id === showSyncHistoryModal);
+    if (!event) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                <Upload className="inline-block h-5 w-5 mr-2 text-blue-500" />
+                Sync History - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                View all cloud sync records for this event
+              </p>
+            </div>
+            <button
+              onClick={() => setShowSyncHistoryModal(null)}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {syncLogs.length === 0 ? (
+              <div className="text-center py-12">
+                <Upload className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">No Sync Records</h4>
+                <p className="text-gray-500 dark:text-gray-500">
+                  This event has not been synced to the cloud yet.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {syncLogs.map((log) => (
+                  <div key={log.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700/50">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                          <Upload className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {new Date(log.synced_at).toLocaleString()}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            Synced by: {log.synced_by_name || 'Unknown'}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const dataStr = JSON.stringify(log.sync_data, null, 2);
+                          const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                          const link = document.createElement('a');
+                          link.href = dataUri;
+                          link.download = `sync_log_${event.name}_${log.synced_at}.json`;
+                          link.click();
+                        }}
+                        className="px-3 py-1 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-colors"
+                      >
+                        Export JSON
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Event:</span>
+                        <span className="ml-2 text-gray-900 dark:text-white">{log.sync_data.event_name}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Date:</span>
+                        <span className="ml-2 text-gray-900 dark:text-white">{log.sync_data.event_date}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Present:</span>
+                        <span className="ml-2 text-green-600 dark:text-green-400">{log.sync_data.present_count}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Absent:</span>
+                        <span className="ml-2 text-red-600 dark:text-red-400">{log.sync_data.absent_count}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">First Timers:</span>
+                        <span className="ml-2 text-blue-600 dark:text-blue-400">{log.sync_data.first_timers_count}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">Total Attendees:</span>
+                        <span className="ml-2 text-gray-900 dark:text-white">{log.sync_data.total_attendees}</span>
+                      </div>
+                    </div>
+                    
+                    {log.sync_data.backup_file_url && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                        <a
+                          href={log.sync_data.backup_file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 text-sm text-green-600 dark:text-green-400 hover:underline"
+                        >
+                          <Download className="h-3 w-3" />
+                          Download Backup CSV
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setShowSyncHistoryModal(null)}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Sync Modal Component - UPDATED
   const SyncModal = () => {
     if (!showSyncModal) return null;
 
@@ -1693,6 +1960,11 @@ const Events = () => {
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Backup event data to cloud storage
               </p>
+              {event.last_synced_at && (
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Last synced: {new Date(event.last_synced_at).toLocaleString()}
+                </p>
+              )}
             </div>
             <button
               onClick={() => setShowSyncModal(null)}
@@ -1721,6 +1993,10 @@ const Events = () => {
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
                   First-time visitor information
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Backup CSV file generation
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
@@ -1758,14 +2034,22 @@ const Events = () => {
                   Export as CSV
                 </button>
                 <button
-                  onClick={() => syncEventToCloud(event.id)}
-                  disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => viewSyncHistory(event.id)}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200 font-medium"
                 >
-                  <Upload className="h-4 w-4" />
-                  {loading ? 'Syncing...' : 'Sync to Cloud'}
+                  <Eye className="h-4 w-4" />
+                  View History
                 </button>
               </div>
+              
+              <button
+                onClick={() => syncEventToCloud(event.id)}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Upload className="h-4 w-4" />
+                {loading ? 'Syncing to Cloud...' : 'Sync to Cloud'}
+              </button>
               
               <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
                 Last updated: {event.updated_at ? new Date(event.updated_at).toLocaleString() : 'Never'}
@@ -3030,6 +3314,12 @@ const Events = () => {
                                 Has Sermon
                               </span>
                             )}
+                            {event.last_synced_at && (
+                              <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
+                                <Upload className="h-3 w-3" />
+                                Synced
+                              </span>
+                            )}
                           </div>
                           {event.topic && (
                             <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
@@ -3050,6 +3340,12 @@ const Events = () => {
                           <div className="flex items-center gap-3">
                             <MapPin className="h-4 w-4" />
                             <span className="font-medium">{event.location}</span>
+                          </div>
+                        )}
+                        {event.last_synced_at && (
+                          <div className="flex items-center gap-3 text-sm">
+                            <Upload className="h-4 w-4" />
+                            <span className="font-medium">Last synced: {new Date(event.last_synced_at).toLocaleString()}</span>
                           </div>
                         )}
                       </div>
@@ -3255,6 +3551,15 @@ const Events = () => {
                         <span>View Absent ({stats.absent})</span>
                         <Eye className="h-4 w-4" />
                       </button>
+                      {event.last_synced_at && (
+                        <button
+                          onClick={() => viewSyncHistory(event.id)}
+                          className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
+                        >
+                          <span>View Sync History</span>
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -3468,6 +3773,7 @@ const Events = () => {
       <NewcomerModal />
       <AttendeeModal />
       <SyncModal />
+      <SyncHistoryModal />
     </div>
   );
 };
