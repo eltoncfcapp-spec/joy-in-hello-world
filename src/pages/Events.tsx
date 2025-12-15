@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, login_username, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,7 +40,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  login_username: string | null;
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
@@ -209,7 +209,7 @@ const Events = () => {
           id,
           name,
           surname,
-          email,
+          login_username,
           phone,
           cell_group_id,
           ministry_group_id,
@@ -267,7 +267,7 @@ const Events = () => {
             id,
             name,
             surname,
-            email,
+            login_username,
             phone,
             status,
             cell_group_id,
@@ -858,7 +858,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.login_username?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -869,7 +869,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.email?.toLowerCase().includes(searchLower)
+      member.login_username?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1587,7 +1587,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.phone || member.login_username}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -1633,7 +1633,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.email}
+                                          {member.phone || member.login_username}
                                         </div>
                                       </div>
                                     </div>
@@ -1672,7 +1672,7 @@ const Events = () => {
                                   </div>
                                   <div className="text-sm text-gray-600 dark:text-gray-400">
                                     {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
-                                    {selectedMember.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.email}</span>}
+                                    {selectedMember.login_username && <span className="flex items-center gap-1"><login_username className="h-3 w-3" />{selectedMember.login_username}</span>}
                                   </div>
                                 </div>
                               </div>
