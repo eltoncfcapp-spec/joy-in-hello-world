@@ -41,7 +41,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  login_username: string | null;
+  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
   cell_groups: { name: string } | null;
@@ -115,11 +115,12 @@ const Events = () => {
   const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
   
   const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
+  const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   
-  // Remove bulk attendance state variables
-  const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+  // Use ref for absence notes to prevent re-renders while typing
+  const attendanceNotesRef = useRef<Record<string, string>>({});
 
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
@@ -154,20 +155,16 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
-  
-  // Updated newcomer form data to include invited_by_id
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
+  const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
     surname: '',
     phone: '',
-    login_username: '',
-    invited_by_id: '', // Add invited_by_id field
+    email: '',
     notes: ''
   });
-
-  const [newcomerInviterSearchTerm, setNewcomerInviterSearchTerm] = useState('');
-  const [isNewcomerInviterDropdownOpen, setIsNewcomerInviterDropdownOpen] = useState(false);
-  const [selectedNewcomerInviter, setSelectedNewcomerInviter] = useState<Member | null>(null);
 
   const hasAccess = useCallback(() => {
     return isAdmin?.() || isPastor?.();
@@ -236,49 +233,30 @@ const Events = () => {
     try {
       setError(null);
       
-      // First, fetch members
-      const { data: membersData, error: membersError } = await supabase
+      const { data, error } = await supabase
         .from('members')
         .select(`
           id,
           name,
           surname,
-          login_username,
+          email,
           phone,
           cell_group_id,
           ministry_group_id,
           status,
           cell_groups!fk_cell_group(name),
-          ministry_groups(name)
+          ministry_groups(name),
+          department_members (
+            departments (
+              id,
+              name
+            )
+          )
         `)
         .order('name');
 
-      if (membersError) throw membersError;
-
-      // Then, fetch department members separately
-      const { data: departmentMembersData, error: deptError } = await supabase
-        .from('department_members')
-        .select(`
-          member_id,
-          departments (
-            id,
-            name
-          )
-        `);
-
-      if (deptError) throw deptError;
-
-      // Combine the data
-      const membersWithDepartments = (membersData || []).map(member => ({
-        ...member,
-        department_members: (departmentMembersData || [])
-          .filter(dept => dept.member_id === member.id)
-          .map(dept => ({
-            departments: dept.departments
-          }))
-      }));
-
-      setMembers(membersWithDepartments as Member[]);
+      if (error) throw error;
+      setMembers(data || []);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
@@ -337,13 +315,19 @@ const Events = () => {
             id,
             name,
             surname,
-            login_username,
+            email,
             phone,
             status,
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name)
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -407,7 +391,7 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS - Updated to remove bulk attendance
+  // ATTENDANCE FUNCTIONS - FIXED for schema
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
@@ -440,7 +424,7 @@ const Events = () => {
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
-        // Create new record
+        // Create new record - FIXED: removed created_at since it doesn't exist in schema
         const { error: insertError } = await supabase
           .from('event_attendees')
           .insert([attendanceData]);
@@ -456,6 +440,43 @@ const Events = () => {
       console.error('Error saving attendance:', error);
       setError(error.message || 'Failed to save attendance.');
       return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveBulkAttendance = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
+        const notes = attendanceNotesRef.current[memberId] || '';
+        return await saveAttendance(eventId, memberId, status, notes);
+      });
+
+      const results = await Promise.all(savePromises);
+      const successfulSaves = results.filter(result => result).length;
+      const totalSaves = Object.keys(bulkAttendance).length;
+
+      if (successfulSaves === totalSaves) {
+        setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
+        closeBulkAttendanceModal();
+        
+        // Refresh the event data to show updated counts
+        await fetchEventAttendees(eventId);
+      } else {
+        setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
+    } catch (error: any) {
+      console.error('Error saving bulk attendance:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
     } finally {
       setLoading(false);
     }
@@ -566,6 +587,7 @@ const Events = () => {
         .from('events')
         .update({ 
           updated_at: new Date().toISOString(),
+          // You could add a 'last_synced_at' field to your events table
         })
         .eq('id', eventId);
 
@@ -1245,13 +1267,19 @@ const Events = () => {
             id,
             name,
             surname,
-            login_username,
+            email,
             phone,
             status,
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name)
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1344,23 +1372,53 @@ const Events = () => {
     setIsInviterDropdownOpen(false);
   };
 
-  // Function to handle newcomer inviter selection
-  const handleNewcomerInviterSelect = (member: Member) => {
-    setNewcomerFormData({
-      ...newcomerFormData,
-      invited_by_id: member.id,
-    });
-    setSelectedNewcomerInviter(member);
-    setNewcomerInviterSearchTerm(`${member.name} ${member.surname}`);
-    setIsNewcomerInviterDropdownOpen(false);
-  };
-
   const openAttendeeModal = (type: 'present' | 'absent', eventId: string) => {
     setShowAttendeeModal({ type, eventId });
   };
 
   const closeAttendeeModal = () => {
     setShowAttendeeModal(null);
+  };
+
+  const openBulkAttendanceModal = async (eventId: string) => {
+    setShowBulkAttendanceModal(eventId);
+    
+    // Initialize bulk attendance state
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
+    const initialNotes: Record<string, string> = {};
+
+    // Set all target members as present by default
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
+      
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        initialAttendance[member.id] = 'present';
+      }
+    }
+
+    // Update with existing attendance records
+    const existingAttendees = getEventAttendees(eventId);
+    existingAttendees.forEach(attendee => {
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+    });
+
+    setBulkAttendance(initialAttendance);
+    setAttendanceNotes(initialNotes);
+  };
+
+  const closeBulkAttendanceModal = () => {
+    setShowBulkAttendanceModal(null);
+    setBulkAttendance({});
+    setAttendanceNotes({});
+    attendanceNotesRef.current = {};
+  };
+
+  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
+    setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
   };
 
   const openNewcomerModal = (eventId: string) => {
@@ -1373,12 +1431,9 @@ const Events = () => {
       name: '',
       surname: '',
       phone: '',
-      login_username: '',
-      invited_by_id: '',
+      email: '',
       notes: ''
     });
-    setSelectedNewcomerInviter(null);
-    setNewcomerInviterSearchTerm('');
   };
 
   const handleNewcomerSubmit = async (e: React.FormEvent, eventId: string) => {
@@ -1395,15 +1450,15 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      // Check if member already exists with same login_username or phone
+      // Check if member already exists with same email or phone
       let existingMember = null;
-      if (newcomerFormData.login_username.trim()) {
-        const { data: usernameMatch } = await supabase
+      if (newcomerFormData.email.trim()) {
+        const { data: emailMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('login_username', newcomerFormData.login_username.trim())
+          .eq('email', newcomerFormData.email.trim())
           .single();
-        existingMember = usernameMatch;
+        existingMember = emailMatch;
       }
       
       if (!existingMember && newcomerFormData.phone.trim()) {
@@ -1426,7 +1481,7 @@ const Events = () => {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
           phone: newcomerFormData.phone.trim() || null,
-          login_username: newcomerFormData.login_username.trim() || null,
+          email: newcomerFormData.email.trim() || null,
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -1444,8 +1499,8 @@ const Events = () => {
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('login_username')) {
-            setError('A member with this username already exists');
+          if (memberError.code === '23505' && memberError.message.includes('email')) {
+            setError('A member with this email already exists');
             return;
           }
           throw memberError;
@@ -1453,12 +1508,12 @@ const Events = () => {
         memberId = memberData.id;
       }
 
-      // Add to event attendees with invited_by_id if selected
+      // Add to event attendees
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
         first_time: true,
-        invited_by_id: newcomerFormData.invited_by_id || null,
+        invited_by_id: null,
         attendance_status: 'present' as const,
         attended_at: new Date().toISOString()
       };
@@ -1472,13 +1527,19 @@ const Events = () => {
             id,
             name,
             surname,
-            login_username,
+            email,
             phone,
             status,
             cell_group_id,
             ministry_group_id,
             cell_groups!fk_cell_group(name),
-            ministry_groups(name)
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -1516,7 +1577,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
+      member.email?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1527,18 +1588,7 @@ const Events = () => {
       member.surname.toLowerCase().includes(searchLower) ||
       `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
       member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const filteredNewcomerInviters = members.filter(member => {
-    const searchLower = newcomerInviterSearchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
+      member.email?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -1736,7 +1786,236 @@ const Events = () => {
     );
   };
 
-  // Newcomer Modal Component - Updated with inviter search
+  // Bulk Attendance Modal Component - UPDATED for schema
+  const BulkAttendanceModal = () => {
+    if (!showBulkAttendanceModal) return null;
+
+    const event = events.find(e => e.id === showBulkAttendanceModal);
+    if (!event) return null;
+
+    // Get target members who should attend this event
+    const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    
+    useEffect(() => {
+      const loadTargetMembers = async () => {
+        const membersList: Member[] = [];
+        for (const member of members) {
+          if (member.status === 'not_attending') continue;
+          const shouldAttend = await isMemberInTargetGroups(member, event);
+          if (shouldAttend) {
+            membersList.push(member);
+          }
+        }
+        setTargetMembers(membersList);
+      };
+      
+      loadTargetMembers();
+    }, [event, members]);
+
+    const stats = {
+      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+      total: targetMembers.length
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Bulk Attendance - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage attendance for all target members - {targetMembers.length} members found
+              </p>
+            </div>
+            <button
+              onClick={closeBulkAttendanceModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Attendance Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex gap-2 mb-6 flex-wrap">
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'present';
+                  });
+                  setBulkAttendance(newAttendance);
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              >
+                Mark All Present
+              </button>
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'absent';
+                  });
+                  setBulkAttendance(newAttendance);
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+              >
+                Mark All Absent
+              </button>
+              <button
+                onClick={() => {
+                  setBulkAttendance({});
+                }}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+              >
+                Clear All
+              </button>
+            </div>
+
+            {/* Members List */}
+            <div className="space-y-3">
+              {targetMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+                </div>
+              ) : (
+                targetMembers.map((member) => (
+                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+                            {getInitials(member.name, member.surname)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white truncate">
+                              {member.name} {member.surname}
+                            </div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                              {member.phone && (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.phone}</span>
+                                </div>
+                              )}
+                              {member.email && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.email}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'present'
+                                ? 'bg-green-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="hidden sm:inline">Present</span>
+                          </button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'absent'
+                                ? 'bg-red-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <X className="h-4 w-4" />
+                            <span className="hidden sm:inline">Absent</span>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Absence Reason Field - Only show when marked as absent */}
+                      {bulkAttendance[member.id] === 'absent' && (
+                        <div className="mt-2 pl-0 sm:pl-13">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Reason for absence (optional)
+                          </label>
+                          <textarea
+                            defaultValue={attendanceNotesRef.current[member.id] || ''}
+                            onChange={(e) => {
+                              attendanceNotesRef.current[member.id] = e.target.value;
+                            }}
+                            placeholder="Enter reason for absence..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                            rows={2}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                {stats.present + stats.absent} of {targetMembers.length} members marked
+              </div>
+              <div className="flex gap-3 w-full sm:w-auto">
+                <button
+                  onClick={closeBulkAttendanceModal}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                  disabled={loading || Object.keys(bulkAttendance).length === 0}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="hidden sm:inline">Save Attendance</span>
+                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Newcomer Modal Component
   const NewcomerModal = () => {
     if (!showNewcomerModal) return null;
 
@@ -1809,96 +2088,19 @@ const Events = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Username
+                  Email Address
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="text"
-                    value={newcomerFormData.login_username}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, login_username: e.target.value })}
+                    type="email"
+                    value={newcomerFormData.email}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, email: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter username"
+                    placeholder="Enter email address"
                   />
                 </div>
               </div>
-            </div>
-
-            {/* Invited By Search - NEW */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Invited By (Optional)
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={newcomerInviterSearchTerm}
-                  onChange={(e) => {
-                    setNewcomerInviterSearchTerm(e.target.value);
-                    setIsNewcomerInviterDropdownOpen(true);
-                  }}
-                  onFocus={() => setIsNewcomerInviterDropdownOpen(true)}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  placeholder="Search member who invited..."
-                />
-                <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
-                
-                {isNewcomerInviterDropdownOpen && filteredNewcomerInviters.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                    {filteredNewcomerInviters.map((member) => (
-                      <div
-                        key={member.id}
-                        onClick={() => handleNewcomerInviterSelect(member)}
-                        className="flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer transition-colors duration-150"
-                      >
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
-                          {getInitials(member.name, member.surname)}
-                        </div>
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {member.name} {member.surname}
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {member.phone || member.login_username}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              
-              {/* Selected Inviter Preview */}
-              {selectedNewcomerInviter && (
-                <div className="mt-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-sm font-medium">
-                        {getInitials(selectedNewcomerInviter.name, selectedNewcomerInviter.surname)}
-                      </div>
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">
-                          {selectedNewcomerInviter.name} {selectedNewcomerInviter.surname}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          Selected as inviter
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedNewcomerInviter(null);
-                        setNewcomerFormData({ ...newcomerFormData, invited_by_id: '' });
-                        setNewcomerInviterSearchTerm('');
-                      }}
-                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                    >
-                      <X className="h-4 w-4 text-red-500" />
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
             <div>
@@ -2004,10 +2206,10 @@ const Events = () => {
                               {attendee.members.phone}
                             </div>
                           )}
-                          {attendee.members.login_username && (
+                          {attendee.members.email && (
                             <div className="flex items-center gap-1">
                               <Mail className="h-3 w-3" />
-                              {attendee.members.login_username}
+                              {attendee.members.email}
                             </div>
                           )}
                           {type === 'present' && attendee.first_time && (
@@ -2989,7 +3191,7 @@ const Events = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons - REMOVED BULK ATTENDANCE BUTTON */}
+                    {/* Action Buttons - ADDED SYNC BUTTON */}
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
@@ -3000,7 +3202,13 @@ const Events = () => {
                             <Plus className="h-4 w-4" />
                             Add Attendee
                           </button>
-                          {/* Removed Bulk Attendance Button */}
+                          <button
+                            onClick={() => openBulkAttendanceModal(event.id)}
+                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          >
+                            <UsersIcon className="h-4 w-4" />
+                            Bulk Attendance
+                          </button>
                           <button
                             onClick={() => openNewcomerModal(event.id)}
                             className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
@@ -3089,7 +3297,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.login_username}
+                                          {member.phone || member.email}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -3135,7 +3343,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.login_username}
+                                          {member.phone || member.email}
                                         </div>
                                       </div>
                                     </div>
@@ -3174,7 +3382,7 @@ const Events = () => {
                                   </div>
                                   <div className="text-sm text-gray-600 dark:text-gray-400">
                                     {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
-                                    {selectedMember.login_username && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.login_username}</span>}
+                                    {selectedMember.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.email}</span>}
                                   </div>
                                 </div>
                               </div>
@@ -3256,6 +3464,7 @@ const Events = () => {
       {/* Render All Modals */}
       <SermonModal />
       <PamphletModal />
+      <BulkAttendanceModal />
       <NewcomerModal />
       <AttendeeModal />
       <SyncModal />
