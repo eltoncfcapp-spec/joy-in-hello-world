@@ -42,13 +42,12 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  login_username: string | null;
+  residence: string;
   phone: string | null;
   cell_group_id: string | null;
   ministry_group_id: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
-  cell_groups?: { name: string } | null;
-  ministry_groups?: { name: string } | null;
+  login_username?: string | null;
 }
 
 interface EventAttendee {
@@ -161,32 +160,7 @@ const Events = () => {
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
-      // Get current attendees for this event
-      const eventAttendees = getEventAttendees(eventId);
-      
-      // Create optimized sync data (only what's needed for backup)
-      const syncData = {
-        event_id: event.id,
-        event_name: event.name,
-        event_date: event.event_date,
-        event_time: event.event_time,
-        location: event.location,
-        topic: event.topic,
-        is_completed: event.is_completed,
-        completed_at: event.completed_at,
-        pamphlet_url: event.pamphlet_url,
-        total_attendees: eventAttendees.length,
-        present_count: eventAttendees.filter(a => a.attendance_status === 'present').length,
-        absent_count: eventAttendees.filter(a => a.attendance_status === 'absent').length,
-        first_timers_count: eventAttendees.filter(a => a.first_time && a.attendance_status === 'present').length,
-        attendees_count: eventAttendees.length,
-        synced_at: new Date().toISOString(),
-        synced_by: user?.id,
-        synced_by_name: profile?.name ? `${profile.name} ${profile.surname || ''}` : 'Unknown'
-      };
-
       // SIMPLE UPDATE: Just update the event with sync timestamp
-      // This is FAST and reliable
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
@@ -196,21 +170,6 @@ const Events = () => {
         .eq('id', eventId);
 
       if (updateError) throw updateError;
-
-      // Log the sync (optional, can be commented out if too slow)
-      try {
-        await supabase
-          .from('event_sync_logs')
-          .insert([{
-            event_id: eventId,
-            sync_data: syncData,
-            synced_at: new Date().toISOString(),
-            synced_by: user?.id,
-            synced_by_name: profile?.name ? `${profile.name} ${profile.surname || ''}` : 'Unknown'
-          }]);
-      } catch (logError) {
-        console.warn('Sync log failed, but event was synced:', logError);
-      }
 
       // Update local state
       setEvents(prev => prev.map(e => 
@@ -242,18 +201,17 @@ const Events = () => {
       setLoading(true);
       setError(null);
       
-      // Only fetch essential fields for performance
       const { data, error } = await supabase
         .from('events')
         .select('id, name, topic, event_date, event_time, location, is_completed, completed_at, pamphlet_url, last_synced_at, updated_at')
         .order('event_date', { ascending: false })
-        .limit(30); // Limit to 30 most recent events
+        .limit(30);
 
       if (error) throw error;
 
       const eventsWithDefaults = (data || []).map((event: any) => ({
         ...event,
-        is_whole_church: true, // Default value
+        is_whole_church: true,
         target_groups: [],
         target_departments: [],
         is_completed: event.is_completed ?? false,
@@ -295,27 +253,36 @@ const Events = () => {
     }
   }, []);
 
+  // FIXED: Fetch members with residence field included
   const fetchMembers = useCallback(async () => {
     try {
+      console.log('Fetching members...');
       const { data, error } = await supabase
         .from('members')
         .select(`
           id,
           name,
           surname,
-          login_username,
+          residence,
           phone,
           cell_group_id,
           ministry_group_id,
-          status
+          status,
+          login_username
         `)
         .order('name')
-        .limit(200); // Limit to 200 members for performance
+        .limit(200);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+      
+      console.log('Members fetched:', data?.length || 0);
       setMembers(data || []);
     } catch (error: any) {
       console.error('Error fetching members:', error);
+      setError(error.message || 'Failed to load members.');
     }
   }, []);
 
@@ -325,15 +292,16 @@ const Events = () => {
         .from('event_attendees')
         .select(`
           *,
-          members:members!event_attendees_members_id_fkey (
+          members!event_attendees_members_id_fkey (
             id,
             name,
             surname,
-            login_username,
+            residence,
             phone,
             status,
             cell_group_id,
-            ministry_group_id
+            ministry_group_id,
+            login_username
           ),
           invited_by_member:members!event_attendees_invited_by_id_fkey (
             id,
@@ -343,7 +311,7 @@ const Events = () => {
         `)
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false })
-        .limit(100); // Limit to 100 attendees per event
+        .limit(100);
 
       if (error) throw error;
 
@@ -403,7 +371,10 @@ const Events = () => {
   };
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return '';
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid date';
+    
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -712,6 +683,45 @@ const Events = () => {
     setIsInviterDropdownOpen(false);
   };
 
+  // FIXED: Filter functions for member search
+  const filteredMembers = members.filter(member => {
+    if (!searchTerm.trim()) return true; // Show all when search is empty
+    
+    const searchLower = searchTerm.toLowerCase();
+    const fullName = `${member.name} ${member.surname}`.toLowerCase();
+    const residence = member.residence?.toLowerCase() || '';
+    const phone = member.phone?.toLowerCase() || '';
+    const email = member.login_username?.toLowerCase() || '';
+    
+    return (
+      member.name.toLowerCase().includes(searchLower) ||
+      member.surname.toLowerCase().includes(searchLower) ||
+      fullName.includes(searchLower) ||
+      residence.includes(searchLower) ||
+      phone.includes(searchLower) ||
+      email.includes(searchLower)
+    );
+  });
+
+  const filteredInviters = members.filter(member => {
+    if (!inviterSearchTerm.trim()) return true; // Show all when search is empty
+    
+    const searchLower = inviterSearchTerm.toLowerCase();
+    const fullName = `${member.name} ${member.surname}`.toLowerCase();
+    const residence = member.residence?.toLowerCase() || '';
+    const phone = member.phone?.toLowerCase() || '';
+    const email = member.login_username?.toLowerCase() || '';
+    
+    return (
+      member.name.toLowerCase().includes(searchLower) ||
+      member.surname.toLowerCase().includes(searchLower) ||
+      fullName.includes(searchLower) ||
+      residence.includes(searchLower) ||
+      phone.includes(searchLower) ||
+      email.includes(searchLower)
+    );
+  });
+
   // ==================== NEWCOMER MANAGEMENT ====================
   const handleNewcomerSubmit = async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
@@ -746,6 +756,7 @@ const Events = () => {
         const memberPayload = {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
+          residence: '', // Required field
           phone: newcomerFormData.phone.trim() || null,
           login_username: newcomerFormData.login_username.trim() || null,
           status: 'newcomer',
@@ -780,7 +791,15 @@ const Events = () => {
       await fetchEventAttendees(eventId);
       await fetchMembers();
       
-      closeNewcomerModal();
+      setShowNewcomerModal(null);
+      setNewcomerFormData({
+        name: '',
+        surname: '',
+        phone: '',
+        login_username: '',
+        notes: ''
+      });
+      
       setSuccess('✅ Newcomer added successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -790,33 +809,6 @@ const Events = () => {
       setLoading(false);
     }
   };
-
-  // ==================== FILTER FUNCTIONS ====================
-  const filteredMembers = members.filter(member => {
-    if (!searchTerm.trim()) return false;
-    
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const filteredInviters = members.filter(member => {
-    if (!inviterSearchTerm.trim()) return false;
-    
-    const searchLower = inviterSearchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
-    );
-  });
 
   // ==================== MODAL COMPONENTS ====================
   const SyncModal = () => {
@@ -1020,17 +1012,6 @@ const Events = () => {
     setShowNewcomerModal(eventId);
   };
 
-  const closeNewcomerModal = () => {
-    setShowNewcomerModal(null);
-    setNewcomerFormData({
-      name: '',
-      surname: '',
-      phone: '',
-      login_username: '',
-      notes: ''
-    });
-  };
-
   const openAttendeeModal = (type: 'present' | 'absent', eventId: string) => {
     setShowAttendeeModal({ type, eventId });
   };
@@ -1086,8 +1067,14 @@ const Events = () => {
                           {attendee.members.name} {attendee.members.surname}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {attendee.members.phone && (
+                          {attendee.members.residence && (
                             <div className="flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {attendee.members.residence}
+                            </div>
+                          )}
+                          {attendee.members.phone && (
+                            <div className="flex items-center gap-1 mt-1">
                               <Phone className="h-3 w-3" />
                               {attendee.members.phone}
                             </div>
@@ -1433,7 +1420,7 @@ const Events = () => {
                                 }}
                                 onFocus={() => setIsMemberDropdownOpen(true)}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                                placeholder="Search members..."
+                                placeholder="Search members by name, phone, residence, or email..."
                               />
                               <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
                               
@@ -1452,8 +1439,25 @@ const Events = () => {
                                         <div className="font-medium text-gray-900 dark:text-white">
                                           {member.name} {member.surname}
                                         </div>
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.login_username}
+                                        <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                                          {member.residence && (
+                                            <div className="flex items-center gap-1">
+                                              <MapPin className="h-3 w-3 flex-shrink-0" />
+                                              <span className="truncate">{member.residence}</span>
+                                            </div>
+                                          )}
+                                          {member.phone && (
+                                            <div className="flex items-center gap-1">
+                                              <Phone className="h-3 w-3 flex-shrink-0" />
+                                              <span className="truncate">{member.phone}</span>
+                                            </div>
+                                          )}
+                                          {member.login_username && (
+                                            <div className="flex items-center gap-1">
+                                              <Mail className="h-3 w-3 flex-shrink-0" />
+                                              <span className="truncate">{member.login_username}</span>
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
                                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
@@ -1498,7 +1502,7 @@ const Events = () => {
                                           {member.name} {member.surname}
                                         </div>
                                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.login_username}
+                                          {member.residence} {member.phone && `• ${member.phone}`}
                                         </div>
                                       </div>
                                     </div>
@@ -1533,8 +1537,19 @@ const Events = () => {
                                   <div className="font-medium text-gray-900 dark:text-white">
                                     {selectedMember.name} {selectedMember.surname}
                                   </div>
-                                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    {selectedMember.phone || selectedMember.login_username}
+                                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                                    {selectedMember.residence && (
+                                      <div className="flex items-center gap-1">
+                                        <MapPin className="h-3 w-3" />
+                                        {selectedMember.residence}
+                                      </div>
+                                    )}
+                                    {selectedMember.phone && (
+                                      <div className="flex items-center gap-1">
+                                        <Phone className="h-3 w-3" />
+                                        {selectedMember.phone}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
