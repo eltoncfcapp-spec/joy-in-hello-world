@@ -1713,7 +1713,111 @@ const Events = () => {
                     </div>
                   )}
 
-                  {/* Present and Absent lists would go here... */}
+                  {/* Present List */}
+                  {showPresentList[event.id] && presentAttendees.length > 0 && (
+                    <div className="mt-6 p-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
+                      <h4 className="text-lg font-semibold text-green-700 dark:text-green-300 mb-4 flex items-center gap-2">
+                        <CheckCircle className="h-5 w-5" />
+                        Present Attendees ({presentAttendees.length})
+                      </h4>
+                      <div className="space-y-3">
+                        {presentAttendees.map((attendee) => (
+                          <div key={attendee.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-green-100 dark:border-green-800">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-xs font-medium">
+                                {getInitials(attendee.members.name, attendee.members.surname)}
+                              </div>
+                              <div>
+                                <div className="font-medium text-gray-900 dark:text-white">
+                                  {attendee.members.name} {attendee.members.surname}
+                                </div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {attendee.members.phone && (
+                                    <span className="flex items-center gap-1">
+                                      <Phone className="h-3 w-3" />
+                                      {attendee.members.phone}
+                                    </span>
+                                  )}
+                                  {attendee.first_time && (
+                                    <span className="inline-block px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full mt-1">
+                                      First Time
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {attendee.invited_by_member && (
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
+                                </div>
+                              )}
+                              {hasAccess() && (
+                                <button
+                                  onClick={() => handleRemoveAttendee(attendee.id, event.id)}
+                                  className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                                >
+                                  <X className="h-4 w-4 text-red-500" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Absent List */}
+                  {showAbsentList[event.id] && absentAttendees.length > 0 && (
+                    <div className="mt-6 p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl">
+                      <h4 className="text-lg font-semibold text-red-700 dark:text-red-300 mb-4 flex items-center gap-2">
+                        <AlertCircle className="h-5 w-5" />
+                        Absent Attendees ({absentAttendees.length})
+                      </h4>
+                      <div className="space-y-3">
+                        {absentAttendees.map((attendee) => (
+                          <div key={attendee.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-red-100 dark:border-red-800">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center text-white text-xs font-medium">
+                                {getInitials(attendee.members.name, attendee.members.surname)}
+                              </div>
+                              <div>
+                                <div className="font-medium text-gray-900 dark:text-white">
+                                  {attendee.members.name} {attendee.members.surname}
+                                </div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {attendee.members.phone && (
+                                    <span className="flex items-center gap-1">
+                                      <Phone className="h-3 w-3" />
+                                      {attendee.members.phone}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">
+                              Auto-marked as absent
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty States */}
+                  {showPresentList[event.id] && presentAttendees.length === 0 && (
+                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl text-center">
+                      <CheckCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 dark:text-gray-400">No attendees marked as present yet.</p>
+                    </div>
+                  )}
+
+                  {showAbsentList[event.id] && absentAttendees.length === 0 && (
+                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl text-center">
+                      <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 dark:text-gray-400">No attendees marked as absent.</p>
+                    </div>
+                  )}
                 </div>
               );
             })
