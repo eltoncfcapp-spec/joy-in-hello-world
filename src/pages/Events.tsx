@@ -18,9 +18,9 @@ interface Event {
   is_completed: boolean;
   completed_at: string | null;
   pamphlet_url: string | null;
-  last_synced_at: string | null; // Added from schema
-  backup_file_url: string | null; // Added from schema
-  backup_created_at: string | null; // Added from schema
+  last_synced_at: string | null;
+  backup_file_url: string | null;
+  backup_created_at: string | null;
 }
 
 interface Sermon {
@@ -78,11 +78,16 @@ interface EventAttendee {
   id: string;
   event_id: string;
   members_id: string;
+  name: string | null;
+  surname: string | null;
+  phone: string | null;
   first_time: boolean | null;
-  invited_by_id: string | null;
+  invited_by: string | null;
+  cell_group_id: string | null;
   attended_at: string | null;
+  invited_by_id: string | null;
   attendance_status: 'present' | 'absent' | string | null;
-  notes?: string | null;
+  notes: string | null;
   members: Member;
   invited_by_member?: {
     id: string;
@@ -133,7 +138,6 @@ const Events = () => {
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   const [showSyncHistoryModal, setShowSyncHistoryModal] = useState<string | null>(null);
   
-  // Use ref for absence notes to prevent re-renders while typing
   const attendanceNotesRef = useRef<Record<string, string>>({});
 
   const [eventFormData, setEventFormData] = useState({
@@ -180,7 +184,6 @@ const Events = () => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Fetch sync logs for an event
   const fetchSyncLogs = useCallback(async (eventId: string) => {
     try {
       const { data, error } = await supabase
@@ -196,7 +199,6 @@ const Events = () => {
     }
   }, []);
 
-  // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
@@ -224,7 +226,6 @@ const Events = () => {
 
       setEvents(eventsWithDefaults as Event[]);
       
-      // Fetch attendees for all events in parallel
       const attendeePromises = eventsWithDefaults.map((event: Event) => 
         fetchEventAttendees(event.id)
       );
@@ -386,7 +387,6 @@ const Events = () => {
     }
   }, []);
 
-  // Initialize all data
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
@@ -420,13 +420,16 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS - FIXED for schema
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
       setError(null);
 
-      // Check if attendance record already exists
+      const member = members.find(m => m.id === memberId);
+      if (!member) {
+        throw new Error('Member not found');
+      }
+
       const { data: existingRecord } = await supabase
         .from('event_attendees')
         .select('id')
@@ -434,11 +437,22 @@ const Events = () => {
         .eq('members_id', memberId)
         .single();
 
+      const attendeeForm = attendees.find(a => a.event_id === eventId && a.members_id === memberId);
+      const invitedById = attendeeForm?.invited_by_id || null;
+      const invitedByName = invitedById 
+        ? members.find(m => m.id === invitedById)?.name + ' ' + members.find(m => m.id === invitedById)?.surname
+        : null;
+
       const attendanceData: any = {
         event_id: eventId,
         members_id: memberId,
+        name: member.name,
+        surname: member.surname,
+        phone: member.phone,
+        cell_group_id: member.cell_group_id,
         first_time: false,
-        invited_by_id: null,
+        invited_by_id: invitedById,
+        invited_by: invitedByName,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
         notes: notes || null,
@@ -446,14 +460,12 @@ const Events = () => {
 
       let error;
       if (existingRecord) {
-        // Update existing record
         const { error: updateError } = await supabase
           .from('event_attendees')
           .update(attendanceData)
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
-        // Create new record - FIXED: removed created_at since it doesn't exist in schema
         const { error: insertError } = await supabase
           .from('event_attendees')
           .insert([attendanceData]);
@@ -462,7 +474,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Refresh attendees data
       await fetchEventAttendees(eventId);
       return true;
     } catch (error: any) {
@@ -493,7 +504,6 @@ const Events = () => {
         setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
         closeBulkAttendanceModal();
         
-        // Refresh the event data to show updated counts
         await fetchEventAttendees(eventId);
       } else {
         setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
@@ -548,25 +558,21 @@ const Events = () => {
   };
 
   const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
-    return true; // All members can attend all events now
+    return true;
   };
 
-  // Function to sync event to cloud (mark as synced/backed up) - FIXED
   const syncEventToCloud = async (eventId: string) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
 
     try {
-      // Get the event data
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
-      // Get all attendees for this event
       const eventAttendees = getEventAttendees(eventId);
       const stats = getAttendanceStats(eventId);
 
-      // Prepare data for sync
       const syncData = {
         event_id: event.id,
         event_name: event.name,
@@ -602,13 +608,11 @@ const Events = () => {
         synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
       };
 
-      // Generate a CSV file for backup
       const csvContent = generateCSVForEvent(event, eventAttendees, stats);
       const csvBlob = new Blob([csvContent], { type: 'text/csv' });
       const csvFileName = `event_backup_${event.name.replace(/\s+/g, '_')}_${event.event_date}_${Date.now()}.csv`;
       const csvFilePath = `event-backups/${csvFileName}`;
 
-      // Upload CSV to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('event-backups')
         .upload(csvFilePath, csvBlob, {
@@ -619,15 +623,12 @@ const Events = () => {
 
       if (uploadError) {
         console.warn('Failed to upload backup file:', uploadError);
-        // Continue without file upload
       }
 
-      // Get public URL for the backup file
       const { data: { publicUrl } } = supabase.storage
         .from('event-backups')
         .getPublicUrl(csvFilePath);
 
-      // Update event with sync info
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
@@ -640,7 +641,6 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
-      // Insert sync log into event_sync_logs table
       const { error: syncLogError } = await supabase
         .from('event_sync_logs')
         .insert([{
@@ -653,7 +653,6 @@ const Events = () => {
 
       if (syncLogError) throw syncLogError;
 
-      // Log the sync action in audit_logs
       const { error: logError } = await supabase
         .from('audit_logs')
         .insert([{
@@ -667,10 +666,8 @@ const Events = () => {
 
       if (logError) {
         console.warn('Failed to log sync action:', logError);
-        // Continue anyway
       }
 
-      // Update local state
       setEvents(prev => prev.map(e => 
         e.id === eventId 
           ? { 
@@ -683,13 +680,11 @@ const Events = () => {
           : e
       ));
 
-      // Refresh sync logs
       await fetchSyncLogs(eventId);
 
       setSuccess(`Event "${event.name}" successfully synced to cloud! Backup file created.`);
       setTimeout(() => setSuccess(null), 3000);
       
-      // Close sync modal
       setShowSyncModal(null);
       
     } catch (error: any) {
@@ -700,11 +695,9 @@ const Events = () => {
     }
   };
 
-  // Helper function to generate CSV content
   const generateCSVForEvent = (event: Event, attendees: EventAttendee[], stats: any) => {
     const csvRows = [];
     
-    // Event information
     csvRows.push(['EVENT INFORMATION']);
     csvRows.push(['Name', event.name]);
     csvRows.push(['Date', event.event_date]);
@@ -717,7 +710,6 @@ const Events = () => {
     csvRows.push(['Pamphlet URL', event.pamphlet_url || '']);
     csvRows.push(['']);
     
-    // Attendance statistics
     csvRows.push(['ATTENDANCE STATISTICS']);
     csvRows.push(['Present', stats.present]);
     csvRows.push(['Absent', stats.absent]);
@@ -725,7 +717,6 @@ const Events = () => {
     csvRows.push(['Total Registered', stats.total]);
     csvRows.push(['']);
     
-    // Attendees list
     csvRows.push(['ATTENDEES LIST']);
     csvRows.push(['Name', 'Surname', 'Phone', 'Email', 'Status', 'Attendance', 'First Time', 'Invited By', 'Attended At', 'Notes']);
     
@@ -745,7 +736,6 @@ const Events = () => {
       ]);
     });
     
-    // Convert to CSV string
     return csvRows.map(row => 
       row.map(cell => 
         `"${(cell || '').toString().replace(/"/g, '""')}"`
@@ -753,7 +743,6 @@ const Events = () => {
     ).join('\n');
   };
 
-  // Function to export event data as CSV
   const exportEventData = (eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
@@ -763,7 +752,6 @@ const Events = () => {
     
     const csvContent = generateCSVForEvent(event, eventAttendees, stats);
     
-    // Create download link
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -778,7 +766,6 @@ const Events = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Function to view sync history
   const viewSyncHistory = async (eventId: string) => {
     setShowSyncHistoryModal(eventId);
     await fetchSyncLogs(eventId);
@@ -829,7 +816,6 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
-      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
@@ -871,7 +857,6 @@ const Events = () => {
 
       if (updateError) throw updateError;
 
-      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: null } : event
       ));
@@ -1026,7 +1011,6 @@ const Events = () => {
         existingDocumentUrl: '',
       });
       
-      // Refresh sermons data
       await fetchSermons();
       setSuccess(editingSermon ? 'Sermon updated successfully!' : 'Sermon added successfully!');
       
@@ -1064,14 +1048,12 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update local state immediately
       setSermons(prev => prev.filter(sermon => sermon.id !== sermonId));
       setSuccess('Sermon deleted successfully!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting sermon:', error);
       setError(error.message || 'Failed to delete sermon.');
-      // Refresh data on error
       await fetchSermons();
     } finally {
       setSermonLoading(null);
@@ -1154,7 +1136,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Refresh sermons data
       await fetchSermons();
       setSuccess(`${fileType === 'video' ? 'Video' : 'Document'} removed successfully!`);
       setTimeout(() => setSuccess(null), 3000);
@@ -1168,19 +1149,28 @@ const Events = () => {
 
   const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
     try {
-      // Create absent records
-      const absentRecords = absentMemberIds.map(memberId => ({
-        event_id: eventId,
-        members_id: memberId,
-        first_time: false,
-        invited_by_id: null,
-        attendance_status: 'absent' as const,
-        attended_at: null
-      }));
+      const absentRecords = absentMemberIds.map(memberId => {
+        const member = members.find(m => m.id === memberId);
+        if (!member) return null;
+        
+        return {
+          event_id: eventId,
+          members_id: memberId,
+          name: member.name,
+          surname: member.surname,
+          phone: member.phone,
+          cell_group_id: member.cell_group_id,
+          first_time: false,
+          invited_by_id: null,
+          invited_by: null,
+          attendance_status: 'absent' as const,
+          attended_at: null
+        };
+      }).filter(Boolean);
 
-      // Insert or update records
       for (const record of absentRecords) {
-        // Check if record exists
+        if (!record) continue;
+        
         const { data: existing } = await supabase
           .from('event_attendees')
           .select('id')
@@ -1189,20 +1179,17 @@ const Events = () => {
           .single();
 
         if (existing) {
-          // Update existing
           await supabase
             .from('event_attendees')
             .update(record)
             .eq('id', existing.id);
         } else {
-          // Insert new
           await supabase
             .from('event_attendees')
             .insert([record]);
         }
       }
       
-      // Refresh attendees data
       await fetchEventAttendees(eventId);
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
@@ -1252,7 +1239,6 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update local state immediately
       setEvents(prev => prev.map(event => 
         event.id === eventId 
           ? { ...event, is_completed: true, completed_at: new Date().toISOString() }
@@ -1314,7 +1300,6 @@ const Events = () => {
         location: '',
       });
       
-      // Refresh events data
       await fetchEvents();
       setSuccess('Event created successfully!');
       
@@ -1336,7 +1321,6 @@ const Events = () => {
       return;
     }
 
-    // Check if member is already registered for this event
     const alreadyRegistered = attendees.some(
       a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
     );
@@ -1355,11 +1339,21 @@ const Events = () => {
       const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
       if (!selectedMember) throw new Error('Selected member not found');
 
+      const inviterName = attendeeFormData.invitedById
+        ? members.find(m => m.id === attendeeFormData.invitedById)?.name + ' ' + 
+          members.find(m => m.id === attendeeFormData.invitedById)?.surname
+        : null;
+
       const attendeeData = {
         event_id: eventId,
         members_id: attendeeFormData.memberId,
+        name: selectedMember.name,
+        surname: selectedMember.surname,
+        phone: selectedMember.phone,
+        cell_group_id: selectedMember.cell_group_id,
         first_time: attendeeFormData.firstTime,
         invited_by_id: attendeeFormData.invitedById || null,
+        invited_by: inviterName,
         attendance_status: 'present' as const,
         attended_at: new Date().toISOString()
       };
@@ -1400,11 +1394,9 @@ const Events = () => {
         throw error;
       }
 
-      // Update attendees state immediately AND refresh from server
       setAttendees(prev => [...prev, data]);
-      await fetchEventAttendees(eventId); // Ensure data is fresh from server
+      await fetchEventAttendees(eventId);
 
-      // Reset form and close it
       resetAttendeeForm();
       
       setSuccess('Attendee added successfully!');
@@ -1431,9 +1423,8 @@ const Events = () => {
 
       if (error) throw error;
 
-      // Update attendees state immediately AND refresh from server
       setAttendees(prev => prev.filter(attendee => attendee.id !== attendeeId));
-      await fetchEventAttendees(eventId); // Ensure data is fresh from server
+      await fetchEventAttendees(eventId);
       
       setSuccess('Attendee removed successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -1489,14 +1480,12 @@ const Events = () => {
   const openBulkAttendanceModal = async (eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     
-    // Initialize bulk attendance state
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
     const initialAttendance: Record<string, 'present' | 'absent'> = {};
     const initialNotes: Record<string, string> = {};
 
-    // Set all target members as present by default
     for (const member of members) {
       if (member.status === 'not_attending') continue;
       
@@ -1506,7 +1495,6 @@ const Events = () => {
       }
     }
 
-    // Update with existing attendance records
     const existingAttendees = getEventAttendees(eventId);
     existingAttendees.forEach(attendee => {
       initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
@@ -1556,7 +1544,6 @@ const Events = () => {
     setSuccess(null);
 
     try {
-      // Check if member already exists with same login_username or phone
       let existingMember = null;
       if (newcomerFormData.login_username.trim()) {
         const { data: login_usernameMatch } = await supabase
@@ -1577,12 +1564,12 @@ const Events = () => {
       }
 
       let memberId;
+      let memberData;
       
       if (existingMember) {
-        // Use existing member
         memberId = existingMember.id;
+        memberData = existingMember;
       } else {
-        // Create new member
         const memberPayload = {
           name: newcomerFormData.name.trim(),
           surname: newcomerFormData.surname.trim(),
@@ -1598,7 +1585,7 @@ const Events = () => {
           status_date: new Date().toISOString()
         };
 
-        const { data: memberData, error: memberError } = await supabase
+        const { data: newMemberData, error: memberError } = await supabase
           .from('members')
           .insert([memberPayload])
           .select()
@@ -1611,15 +1598,20 @@ const Events = () => {
           }
           throw memberError;
         }
-        memberId = memberData.id;
+        memberId = newMemberData.id;
+        memberData = newMemberData;
       }
 
-      // Add to event attendees
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
+        name: memberData.name,
+        surname: memberData.surname,
+        phone: memberData.phone,
+        cell_group_id: memberData.cell_group_id,
         first_time: true,
         invited_by_id: null,
+        invited_by: null,
         attendance_status: 'present' as const,
         attended_at: new Date().toISOString()
       };
@@ -1657,13 +1649,11 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Update attendees state immediately AND refresh from server
       if (newAttendee) {
         setAttendees(prev => [...prev, newAttendee]);
       }
       await fetchEventAttendees(eventId);
 
-      // Refresh members data
       await fetchMembers();
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
@@ -1777,7 +1767,6 @@ const Events = () => {
     }
   };
 
-  // Sync History Modal Component
   const SyncHistoryModal = () => {
     if (!showSyncHistoryModal) return null;
 
@@ -1906,7 +1895,6 @@ const Events = () => {
     );
   };
 
-  // Sync Modal Component - UPDATED
   const SyncModal = () => {
     if (!showSyncModal) return null;
 
@@ -2038,14 +2026,12 @@ const Events = () => {
     );
   };
 
-  // Bulk Attendance Modal Component - UPDATED for schema
   const BulkAttendanceModal = () => {
     if (!showBulkAttendanceModal) return null;
 
     const event = events.find(e => e.id === showBulkAttendanceModal);
     if (!event) return null;
 
-    // Get target members who should attend this event
     const [targetMembers, setTargetMembers] = useState<Member[]>([]);
     
     useEffect(() => {
@@ -2091,7 +2077,6 @@ const Events = () => {
           </div>
           
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            {/* Attendance Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
@@ -2107,7 +2092,6 @@ const Events = () => {
               </div>
             </div>
 
-            {/* Quick Actions */}
             <div className="flex gap-2 mb-6 flex-wrap">
               <button
                 onClick={() => {
@@ -2143,7 +2127,6 @@ const Events = () => {
               </button>
             </div>
 
-            {/* Members List */}
             <div className="space-y-3">
               {targetMembers.length === 0 ? (
                 <div className="text-center py-8">
@@ -2205,7 +2188,6 @@ const Events = () => {
                         </div>
                       </div>
                       
-                      {/* Absence Reason Field - Only show when marked as absent */}
                       {bulkAttendance[member.id] === 'absent' && (
                         <div className="mt-2 pl-0 sm:pl-13">
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -2267,7 +2249,6 @@ const Events = () => {
     );
   };
 
-  // Newcomer Modal Component
   const NewcomerModal = () => {
     if (!showNewcomerModal) return null;
 
@@ -2391,7 +2372,6 @@ const Events = () => {
     );
   };
 
-  // Attendee Modal Component
   const AttendeeModal = () => {
     if (!showAttendeeModal) return null;
 
@@ -2504,7 +2484,6 @@ const Events = () => {
     );
   };
 
-  // Sermon Modal Component
   const SermonModal = () => {
     if (!showSermonModal) return null;
 
@@ -2581,9 +2560,7 @@ const Events = () => {
                 </div>
               </div>
 
-              {/* File Uploads */}
               <div className="space-y-4">
-                {/* Video Upload */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2633,7 +2610,6 @@ const Events = () => {
                   </label>
                 </div>
 
-                {/* Document Upload */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Sermon Notes (PDF/DOC)
@@ -2702,7 +2678,6 @@ const Events = () => {
     );
   };
 
-  // Pamphlet Modal Component
   const PamphletModal = () => {
     if (!viewingPamphlet) return null;
 
@@ -2792,7 +2767,6 @@ const Events = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -2823,21 +2797,18 @@ const Events = () => {
           </div>
         </div>
 
-        {/* Success Message */}
         {success && (
           <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
             {success}
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
             {error}
           </div>
         )}
 
-        {/* Sermons List */}
         {showSermonList && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <div className="flex items-center justify-between mb-6">
@@ -2972,12 +2943,10 @@ const Events = () => {
           </div>
         )}
 
-        {/* Event Creation Form */}
         {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
             <form onSubmit={handleEventSubmit} className="space-y-6">
-              {/* Event Type Selection */}
               {!eventFormData.eventType && (
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Event Type *</label>
@@ -3008,7 +2977,6 @@ const Events = () => {
                 </div>
               )}
 
-              {/* Show form fields only after event type is selected */}
               {eventFormData.eventType && (
                 <>
                   <div className="flex items-center gap-2 mb-4">
@@ -3107,7 +3075,6 @@ const Events = () => {
           </div>
         )}
 
-        {/* Loading State */}
         {loading && events.length === 0 && (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -3115,7 +3082,6 @@ const Events = () => {
           </div>
         )}
 
-        {/* Events List */}
         <div className="space-y-6">
           {!loading && events.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
@@ -3193,7 +3159,6 @@ const Events = () => {
                         )}
                       </div>
 
-                      {/* Sermon Preview */}
                       {sermon && (
                         <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                           <div className="flex items-center justify-between">
@@ -3236,7 +3201,6 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Pamphlet Display Section */}
                       {event.pamphlet_url && (
                         <div className="mt-4">
                           <div className="flex items-center gap-3 flex-wrap">
@@ -3275,7 +3239,6 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Upload Pamphlet Button */}
                       {hasAccess() && !event.pamphlet_url && (
                         <div className="mt-4">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
@@ -3297,7 +3260,6 @@ const Events = () => {
                         </div>
                       )}
 
-                      {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
@@ -3330,7 +3292,6 @@ const Events = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons - ADDED SYNC BUTTON */}
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
@@ -3406,13 +3367,11 @@ const Events = () => {
                     </div>
                   </div>
 
-                  {/* Add Attendee Form */}
                   {showAttendeeForm === event.id && (
                     <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
                       <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Attendee</h4>
                       <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Member Search */}
                           <div className="space-y-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Member *</label>
                             <div className="relative">
@@ -3458,7 +3417,6 @@ const Events = () => {
                             </div>
                           </div>
 
-                          {/* Inviter Search */}
                           <div className="space-y-2">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Invited By (Optional)</label>
                             <div className="relative">
@@ -3502,7 +3460,6 @@ const Events = () => {
                           </div>
                         </div>
 
-                        {/* First Time Checkbox */}
                         <div className="flex items-center gap-3">
                           <input
                             type="checkbox"
@@ -3516,7 +3473,6 @@ const Events = () => {
                           </label>
                         </div>
 
-                        {/* Selected Member Preview */}
                         {selectedMember && (
                           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
                             <div className="flex items-center justify-between">
@@ -3549,7 +3505,6 @@ const Events = () => {
                           </div>
                         )}
 
-                        {/* Selected Inviter Preview */}
                         {selectedInviter && (
                           <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
                             <div className="flex items-center justify-between">
@@ -3581,7 +3536,6 @@ const Events = () => {
                           </div>
                         )}
 
-                        {/* Form Actions */}
                         <div className="flex gap-3">
                           <button
                             type="submit"
@@ -3609,7 +3563,6 @@ const Events = () => {
         </div>
       </div>
 
-      {/* Render All Modals */}
       <SermonModal />
       <PamphletModal />
       <BulkAttendanceModal />
