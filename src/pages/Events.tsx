@@ -143,10 +143,6 @@ const Events = () => {
     eventDate: '',
     eventTime: '',
     location: '',
-    isWholeChurch: true,
-    targetCellGroups: [] as string[],
-    targetMinistryGroups: [] as string[],
-    targetDepartments: [] as string[],
   });
 
   const [attendeeFormData, setAttendeeFormData] = useState({
@@ -552,29 +548,7 @@ const Events = () => {
   };
 
   const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
-    if (event.is_whole_church) return true;
-
-    // Check cell groups
-    if (event.target_groups && event.target_groups.length > 0) {
-      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
-        return true;
-      }
-    }
-
-    // Check ministry groups
-    if (event.target_departments && event.target_departments.length > 0) {
-      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
-        return true;
-      }
-
-      // Check departments
-      for (const deptId of event.target_departments) {
-        const isInDept = await isMemberInDepartment(member.id, deptId);
-        if (isInDept) return true;
-      }
-    }
-
-    return false;
+    return true; // All members can attend all events now
   };
 
   // Function to sync event to cloud (mark as synced/backed up) - FIXED
@@ -1315,17 +1289,15 @@ const Events = () => {
         event_date: eventFormData.eventDate,
         event_time: eventFormData.eventTime,
         location: eventFormData.location.trim() || null,
-        is_whole_church: eventFormData.isWholeChurch,
+        is_whole_church: true,
         is_completed: false,
         completed_at: null,
         pamphlet_url: null,
         last_synced_at: null,
         backup_file_url: null,
         backup_created_at: null,
-        target_groups: !eventFormData.isWholeChurch && eventFormData.targetCellGroups.length > 0 ? eventFormData.targetCellGroups : null,
-        target_departments: !eventFormData.isWholeChurch && [...eventFormData.targetMinistryGroups, ...eventFormData.targetDepartments].length > 0 
-          ? [...eventFormData.targetMinistryGroups, ...eventFormData.targetDepartments] 
-          : null,
+        target_groups: null,
+        target_departments: null,
       };
 
       const { error } = await supabase.from('events').insert([eventData]);
@@ -1340,10 +1312,6 @@ const Events = () => {
         eventDate: '', 
         eventTime: '', 
         location: '',
-        isWholeChurch: true,
-        targetCellGroups: [],
-        targetMinistryGroups: [],
-        targetDepartments: [],
       });
       
       // Refresh events data
@@ -3116,131 +3084,6 @@ const Events = () => {
                     placeholder="Event location"
                   />
                 </div>
-
-                {/* Event Scope */}
-                <div className="md:col-span-2 space-y-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
-                      <input
-                        type="radio"
-                        name="eventScope"
-                        checked={eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
-                      />
-                      <Building className="h-5 w-5 text-purple-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
-                      <input
-                        type="radio"
-                        name="eventScope"
-                        checked={!eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
-                      />
-                      <UsersIcon className="h-5 w-5 text-orange-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Target Groups Selection */}
-                {!eventFormData.isWholeChurch && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {cellGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetCellGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {ministryGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {departments.map((dept) => (
-                          <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetDepartments.includes(dept.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetDepartments: [...eventFormData.targetDepartments, dept.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
               <div className="flex gap-3">
                 <button
