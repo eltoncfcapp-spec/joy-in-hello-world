@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, Mail, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Save, Trash2, Filter } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -114,21 +114,16 @@ const Events = () => {
   const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
   const [editingSermon, setEditingSermon] = useState<Sermon | null>(null);
   
-  const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
-  const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
-  const [showAbsentManagement, setShowAbsentManagement] = useState<{[key: string]: boolean}>({});
-  const [absentSearchTerm, setAbsentSearchTerm] = useState<{[key: string]: string}>({});
-  const [editingNotes, setEditingNotes] = useState<{[key: string]: boolean}>({});
-  const [notesText, setNotesText] = useState<{[key: string]: string}>({});
-  const [selectedAbsentMembers, setSelectedAbsentMembers] = useState<{[key: string]: string[]}>({});
-  
-  const [showSundayPreset, setShowSundayPreset] = useState(false);
+  const [showAttendeeModal, setShowAttendeeModal] = useState<{type: 'present' | 'absent', eventId: string} | null>(null);
+  const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
+  const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
   
-  // Use ref for attendance notes
+  // Use ref for absence notes to prevent re-renders while typing
   const attendanceNotesRef = useRef<Record<string, string>>({});
 
   const [eventFormData, setEventFormData] = useState({
+    eventType: '' as 'sunday' | 'other' | '',
     name: '',
     topic: '',
     eventDate: '',
@@ -138,7 +133,6 @@ const Events = () => {
     targetCellGroups: [] as string[],
     targetMinistryGroups: [] as string[],
     targetDepartments: [] as string[],
-    autoMarkAbsent: true,
   });
 
   const [attendeeFormData, setAttendeeFormData] = useState({
@@ -161,47 +155,20 @@ const Events = () => {
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
+  const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
+  const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+
+  const [newcomerFormData, setNewcomerFormData] = useState({
+    name: '',
+    surname: '',
+    phone: '',
+    login_username: '',
+    notes: ''
+  });
 
   const hasAccess = useCallback(() => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
-
-  // Function to get next Sunday date
-  const getNextSunday = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    const daysUntilNextSunday = dayOfWeek === 0 ? 7 : 7 - dayOfWeek;
-    const nextSunday = new Date(today);
-    nextSunday.setDate(today.getDate() + daysUntilNextSunday);
-    return nextSunday.toISOString().split('T')[0];
-  };
-
-  // Function to set Sunday preset
-  const setSundayPreset = () => {
-    const nextSunday = getNextSunday();
-    setEventFormData({
-      name: 'Sunday Service',
-      topic: 'Weekly Sunday Worship Service',
-      eventDate: nextSunday,
-      eventTime: '09:00',
-      location: 'Main Sanctuary',
-      isWholeChurch: true,
-      targetCellGroups: [],
-      targetMinistryGroups: [],
-      targetDepartments: [],
-      autoMarkAbsent: true
-    });
-    setShowSundayPreset(true);
-  };
-
-  // Function to close Sunday preset and use custom name
-  const useCustomName = () => {
-    setShowSundayPreset(false);
-    setEventFormData({
-      ...eventFormData,
-      name: ''
-    });
-  };
 
   // Memoized data fetching functions
   const fetchEvents = useCallback(async () => {
@@ -424,7 +391,7 @@ const Events = () => {
     fetchDepartments
   ]);
 
-  // ATTENDANCE FUNCTIONS
+  // ATTENDANCE FUNCTIONS - FIXED for schema
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
@@ -457,7 +424,7 @@ const Events = () => {
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
-        // Create new record
+        // Create new record - FIXED: removed created_at since it doesn't exist in schema
         const { error: insertError } = await supabase
           .from('event_attendees')
           .insert([attendanceData]);
@@ -478,17 +445,40 @@ const Events = () => {
     }
   };
 
-  const markMembersAsAbsent = async (eventId: string, absentMembers: {memberId: string, notes?: string}[]) => {
+  const saveBulkAttendance = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
     try {
-      const savePromises = absentMembers.map(async ({memberId, notes}) => {
-        return await saveAttendance(eventId, memberId, 'absent', notes);
+      const savePromises = Object.entries(bulkAttendance).map(async ([memberId, status]) => {
+        const notes = attendanceNotesRef.current[memberId] || '';
+        return await saveAttendance(eventId, memberId, status, notes);
       });
 
       const results = await Promise.all(savePromises);
-      return results.every(result => result);
+      const successfulSaves = results.filter(result => result).length;
+      const totalSaves = Object.keys(bulkAttendance).length;
+
+      if (successfulSaves === totalSaves) {
+        setSuccess(`Successfully saved attendance for ${successfulSaves} members!`);
+        closeBulkAttendanceModal();
+        
+        // Refresh the event data to show updated counts
+        await fetchEventAttendees(eventId);
+      } else {
+        setError(`Failed to save attendance for ${totalSaves - successfulSaves} members.`);
+      }
+
+      setTimeout(() => {
+        setSuccess(null);
+        setError(null);
+      }, 5000);
     } catch (error: any) {
-      console.error('Error marking members as absent:', error);
-      throw error;
+      console.error('Error saving bulk attendance:', error);
+      setError(error.message || 'Failed to save bulk attendance.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -505,6 +495,55 @@ const Events = () => {
     return sermons.find(sermon => sermon.event_id === eventId);
   };
 
+  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('department_members')
+        .select('id')
+        .eq('member_id', memberId)
+        .eq('department_id', departmentId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return false;
+        }
+        throw error;
+      }
+
+      return !!data;
+    } catch (error) {
+      console.error('Error checking department membership:', error);
+      return false;
+    }
+  };
+
+  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
+    if (event.is_whole_church) return true;
+
+    // Check cell groups
+    if (event.target_groups && event.target_groups.length > 0) {
+      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
+        return true;
+      }
+    }
+
+    // Check ministry groups
+    if (event.target_departments && event.target_departments.length > 0) {
+      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
+        return true;
+      }
+
+      // Check departments
+      for (const deptId of event.target_departments) {
+        const isInDept = await isMemberInDepartment(member.id, deptId);
+        if (isInDept) return true;
+      }
+    }
+
+    return false;
+  };
+
   // Function to sync event to cloud (mark as synced/backed up)
   const syncEventToCloud = async (eventId: string) => {
     setLoading(true);
@@ -518,7 +557,6 @@ const Events = () => {
 
       // Get all attendees for this event
       const eventAttendees = getEventAttendees(eventId);
-      const stats = getAttendanceStats(eventId);
 
       // Prepare data for sync
       const syncData = {
@@ -529,8 +567,8 @@ const Events = () => {
         location: event.location,
         is_completed: event.is_completed,
         total_attendees: eventAttendees.length,
-        present_count: stats.present,
-        absent_count: stats.absent,
+        present_count: getAttendanceStats(eventId).present,
+        absent_count: getAttendanceStats(eventId).absent,
         attendees: eventAttendees.map(attendee => ({
           member_id: attendee.members_id,
           member_name: `${attendee.members.name} ${attendee.members.surname}`,
@@ -543,11 +581,13 @@ const Events = () => {
         synced_by_name: profile?.name ? `${profile.name} ${profile.surname}` : 'Unknown'
       };
 
-      // Update the events table to mark it as synced
+      // Here you would typically send this data to your cloud backup service
+      // For now, we'll just update a field in the events table to mark it as synced
       const { error: updateError } = await supabase
         .from('events')
         .update({ 
           updated_at: new Date().toISOString(),
+          // You could add a 'last_synced_at' field to your events table
         })
         .eq('id', eventId);
 
@@ -633,50 +673,6 @@ const Events = () => {
     
     setSuccess(`Event data exported successfully!`);
     setTimeout(() => setSuccess(null), 3000);
-  };
-
-  // Get expected members for an event
-  const getExpectedMembers = (event: Event) => {
-    if (event.is_whole_church) {
-      return members.filter(member => 
-        member.status !== 'not_attending'
-      );
-    } else {
-      return members.filter(member => {
-        const inTargetCellGroup = event.target_groups?.some(groupId => 
-          member.cell_group_id === groupId
-        );
-        const inTargetMinistryGroup = event.target_departments?.some(deptId => 
-          member.ministry_group_id === deptId
-        );
-        return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
-      });
-    }
-  };
-
-  // Automatically mark all expected members as absent when event is created
-  const autoMarkAllAbsent = async (eventId: string, eventData: any) => {
-    try {
-      const event = events.find(e => e.id === eventId) || eventData;
-      if (!event) return 0;
-
-      const expectedMembers = getExpectedMembers(event);
-      const eventAttendees = getEventAttendees(eventId);
-      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
-
-      const absentMembers = expectedMembers
-        .filter(member => !attendeeIds.has(member.id))
-        .map(member => ({ memberId: member.id, notes: 'Automatically marked as absent on event creation' }));
-
-      if (absentMembers.length > 0) {
-        const success = await markMembersAsAbsent(eventId, absentMembers);
-        return success ? absentMembers.length : 0;
-      }
-      return 0;
-    } catch (error: any) {
-      console.error('Error auto-marking absent:', error);
-      throw error;
-    }
   };
 
   const uploadPamphlet = async (eventId: string, file: File) => {
@@ -1061,6 +1057,50 @@ const Events = () => {
     }
   };
 
+  const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
+    try {
+      // Create absent records
+      const absentRecords = absentMemberIds.map(memberId => ({
+        event_id: eventId,
+        members_id: memberId,
+        first_time: false,
+        invited_by_id: null,
+        attendance_status: 'absent' as const,
+        attended_at: null
+      }));
+
+      // Insert or update records
+      for (const record of absentRecords) {
+        // Check if record exists
+        const { data: existing } = await supabase
+          .from('event_attendees')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('members_id', record.members_id)
+          .single();
+
+        if (existing) {
+          // Update existing
+          await supabase
+            .from('event_attendees')
+            .update(record)
+            .eq('id', existing.id);
+        } else {
+          // Insert new
+          await supabase
+            .from('event_attendees')
+            .insert([record]);
+        }
+      }
+      
+      // Refresh attendees data
+      await fetchEventAttendees(eventId);
+    } catch (error: any) {
+      console.error('Error marking members as absent:', error);
+      throw error;
+    }
+  };
+
   const handleCompleteEvent = async (eventId: string) => {
     if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
       return;
@@ -1077,17 +1117,20 @@ const Events = () => {
       const eventAttendees = getEventAttendees(eventId);
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
-      const expectedMembers = getExpectedMembers(event);
+      const absentMemberIds: string[] = [];
 
-      const absentMembers = expectedMembers
-        .filter(member => !attendeeIds.has(member.id))
-        .map(member => ({ 
-          memberId: member.id, 
-          notes: 'Auto-marked as absent on event completion' 
-        }));
+      for (const member of members) {
+        if (member.status === 'not_attending') continue;
+        if (attendeeIds.has(member.id)) continue;
 
-      if (absentMembers.length > 0) {
-        await markMembersAsAbsent(eventId, absentMembers);
+        const shouldAttend = await isMemberInTargetGroups(member, event);
+        if (shouldAttend) {
+          absentMemberIds.push(member.id);
+        }
+      }
+
+      if (absentMemberIds.length > 0) {
+        await markMembersAsAbsent(eventId, absentMemberIds);
       }
 
       const { error } = await supabase
@@ -1107,65 +1150,11 @@ const Events = () => {
           : event
       ));
 
-      setSuccess(`Event marked as completed! ${absentMembers.length} members marked as absent.`);
+      setSuccess(`Event marked as completed! ${absentMemberIds.length} members marked as absent.`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error completing event:', error);
       setError(error.message || 'Failed to complete event. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Delete event with all related data
-  const handleDeleteEvent = async (eventId: string) => {
-    if (!confirm('Are you sure you want to delete this event? This will also delete all attendees, sermons, and files associated with this event.')) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      // First, delete event attendees
-      const { error: attendeesError } = await supabase
-        .from('event_attendees')
-        .delete()
-        .eq('event_id', eventId);
-
-      if (attendeesError) throw attendeesError;
-
-      // Delete sermons associated with this event
-      const { error: sermonsError } = await supabase
-        .from('sermons')
-        .delete()
-        .eq('event_id', eventId);
-
-      if (sermonsError) throw sermonsError;
-
-      // Delete the event
-      const { error: eventError } = await supabase
-        .from('events')
-        .delete()
-        .eq('id', eventId);
-
-      if (eventError) throw eventError;
-
-      // Remove event from local state
-      setEvents(prev => prev.filter(event => event.id !== eventId));
-      
-      // Remove related attendees from local state
-      setAttendees(prev => prev.filter(attendee => attendee.event_id !== eventId));
-      
-      // Remove related sermons from local state
-      setSermons(prev => prev.filter(sermon => sermon.event_id !== eventId));
-
-      setSuccess('Event deleted successfully with all related data!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error deleting event:', error);
-      setError(error.message || 'Failed to delete event. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -1180,33 +1169,11 @@ const Events = () => {
       return;
     }
 
-    // Check if required fields are filled
-    if (!eventFormData.name.trim()) {
-      setError('Event name is required');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-
-    if (!eventFormData.eventDate) {
-      setError('Event date is required');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-
-    if (!eventFormData.eventTime) {
-      setError('Event time is required');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setSuccess(null);
     
     try {
-      console.log('Submitting event form data:', eventFormData);
-      
-      // Prepare event data according to your database schema
       const eventData = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
@@ -1223,38 +1190,13 @@ const Events = () => {
           : null,
       };
 
-      console.log('Prepared event data for database:', eventData);
+      const { error } = await supabase.from('events').insert([eventData]);
 
-      const { data, error } = await supabase
-        .from('events')
-        .insert([eventData])
-        .select();
+      if (error) throw error;
 
-      if (error) {
-        console.error('Database error:', error);
-        throw error;
-      }
-
-      console.log('Event created successfully:', data);
-
-      const newEvent = data[0];
-      
-      // Auto-mark all expected members as absent if checkbox is checked
-      if (eventFormData.autoMarkAbsent) {
-        try {
-          const absentCount = await autoMarkAllAbsent(newEvent.id, newEvent);
-          setSuccess(`Event created successfully! ${absentCount} members automatically marked as absent.`);
-        } catch (absentError) {
-          console.error('Error auto-marking absent:', absentError);
-          setSuccess('Event created successfully! (Note: Auto-marking absent failed)');
-        }
-      } else {
-        setSuccess('Event created successfully!');
-      }
-
-      // Reset form and close
       setShowEventForm(false);
       setEventFormData({ 
+        eventType: '',
         name: '', 
         topic: '', 
         eventDate: '', 
@@ -1264,12 +1206,11 @@ const Events = () => {
         targetCellGroups: [],
         targetMinistryGroups: [],
         targetDepartments: [],
-        autoMarkAbsent: true,
       });
-      setShowSundayPreset(false);
       
-      // Refresh events list
+      // Refresh events data
       await fetchEvents();
+      setSuccess('Event created successfully!');
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -1431,179 +1372,202 @@ const Events = () => {
     setIsInviterDropdownOpen(false);
   };
 
-  // NEW: Function to toggle absent management panel
-  const toggleAbsentManagement = (eventId: string) => {
-    setShowAbsentManagement(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowPresentList(prev => ({ ...prev, [eventId]: false }));
-    setShowAbsentList(prev => ({ ...prev, [eventId]: false }));
+  const openAttendeeModal = (type: 'present' | 'absent', eventId: string) => {
+    setShowAttendeeModal({ type, eventId });
   };
 
-  // NEW: Function to handle absent search
-  const handleAbsentSearch = (eventId: string, value: string) => {
-    setAbsentSearchTerm(prev => ({
-      ...prev,
-      [eventId]: value
-    }));
+  const closeAttendeeModal = () => {
+    setShowAttendeeModal(null);
   };
 
-  // NEW: Get filtered members for absent search
-  const getFilteredAbsentMembers = (eventId: string) => {
+  const openBulkAttendanceModal = async (eventId: string) => {
+    setShowBulkAttendanceModal(eventId);
+    
+    // Initialize bulk attendance state
     const event = events.find(e => e.id === eventId);
-    if (!event) return [];
+    if (!event) return;
 
-    const searchTerm = absentSearchTerm[eventId] || '';
-    const searchLower = searchTerm.toLowerCase();
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
+    const initialNotes: Record<string, string> = {};
 
-    // Get expected members for this event
-    let expectedMembers = getExpectedMembers(event);
-    
-    // Filter out already registered attendees
-    const eventAttendees = getEventAttendees(eventId);
-    const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
-    
-    // Filter members that are expected but not yet registered
-    const unregisteredMembers = expectedMembers.filter(member => 
-      !attendeeIds.has(member.id)
-    );
-
-    // Apply search filter
-    return unregisteredMembers.filter(member => {
-      return (
-        member.name.toLowerCase().includes(searchLower) ||
-        member.surname.toLowerCase().includes(searchLower) ||
-        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-        member.phone?.toLowerCase().includes(searchLower) ||
-        member.login_username?.toLowerCase().includes(searchLower)
-      );
-    });
-  };
-
-  // NEW: Toggle selection of absent member
-  const toggleAbsentMemberSelection = (eventId: string, memberId: string) => {
-    setSelectedAbsentMembers(prev => {
-      const currentSelected = prev[eventId] || [];
-      if (currentSelected.includes(memberId)) {
-        return {
-          ...prev,
-          [eventId]: currentSelected.filter(id => id !== memberId)
-        };
-      } else {
-        return {
-          ...prev,
-          [eventId]: [...currentSelected, memberId]
-        };
+    // Set all target members as present by default
+    for (const member of members) {
+      if (member.status === 'not_attending') continue;
+      
+      const shouldAttend = await isMemberInTargetGroups(member, event);
+      if (shouldAttend) {
+        initialAttendance[member.id] = 'present';
       }
+    }
+
+    // Update with existing attendance records
+    const existingAttendees = getEventAttendees(eventId);
+    existingAttendees.forEach(attendee => {
+      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
+    });
+
+    setBulkAttendance(initialAttendance);
+    setAttendanceNotes(initialNotes);
+  };
+
+  const closeBulkAttendanceModal = () => {
+    setShowBulkAttendanceModal(null);
+    setBulkAttendance({});
+    setAttendanceNotes({});
+    attendanceNotesRef.current = {};
+  };
+
+  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
+    setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
+  };
+
+  const openNewcomerModal = (eventId: string) => {
+    setShowNewcomerModal(eventId);
+  };
+
+  const closeNewcomerModal = () => {
+    setShowNewcomerModal(null);
+    setNewcomerFormData({
+      name: '',
+      surname: '',
+      phone: '',
+      login_username: '',
+      notes: ''
     });
   };
 
-  // NEW: Mark selected members as absent with custom notes
-  const markSelectedAsAbsent = async (eventId: string) => {
-    const selected = selectedAbsentMembers[eventId] || [];
-    if (selected.length === 0) {
-      setError('Please select at least one member');
+  const handleNewcomerSubmit = async (e: React.FormEvent, eventId: string) => {
+    e.preventDefault();
+
+    if (!newcomerFormData.name.trim() || !newcomerFormData.surname.trim()) {
+      setError('Name and surname are required');
       setTimeout(() => setError(null), 3000);
       return;
     }
 
     setLoading(true);
     setError(null);
-    
-    try {
-      const absentMembers = selected.map(memberId => ({
-        memberId,
-        notes: notesText[`${eventId}-${memberId}`] || 'Manually marked as absent'
-      }));
+    setSuccess(null);
 
-      await markMembersAsAbsent(eventId, absentMembers);
+    try {
+      // Check if member already exists with same login_username or phone
+      let existingMember = null;
+      if (newcomerFormData.login_username.trim()) {
+        const { data: login_usernameMatch } = await supabase
+          .from('members')
+          .select('*')
+          .eq('login_username', newcomerFormData.login_username.trim())
+          .single();
+        existingMember = login_usernameMatch;
+      }
       
-      // Clear selections and notes
-      setSelectedAbsentMembers(prev => ({ ...prev, [eventId]: [] }));
-      Object.keys(notesText).forEach(key => {
-        if (key.startsWith(`${eventId}-`)) {
-          delete notesText[key];
+      if (!existingMember && newcomerFormData.phone.trim()) {
+        const { data: phoneMatch } = await supabase
+          .from('members')
+          .select('*')
+          .eq('phone', newcomerFormData.phone.trim())
+          .single();
+        existingMember = phoneMatch;
+      }
+
+      let memberId;
+      
+      if (existingMember) {
+        // Use existing member
+        memberId = existingMember.id;
+      } else {
+        // Create new member
+        const memberPayload = {
+          name: newcomerFormData.name.trim(),
+          surname: newcomerFormData.surname.trim(),
+          phone: newcomerFormData.phone.trim() || null,
+          login_username: newcomerFormData.login_username.trim() || null,
+          status: 'newcomer' as const,
+          first_time_visit_date: new Date().toISOString(),
+          is_permanent_member: false,
+          is_leader: false,
+          admin_role: 'member',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status_date: new Date().toISOString()
+        };
+
+        const { data: memberData, error: memberError } = await supabase
+          .from('members')
+          .insert([memberPayload])
+          .select()
+          .single();
+
+        if (memberError) {
+          if (memberError.code === '23505' && memberError.message.includes('login_username')) {
+            setError('A member with this login_username already exists');
+            return;
+          }
+          throw memberError;
         }
-      });
-      setNotesText({...notesText});
-      
-      setSuccess(`${absentMembers.length} members marked as absent successfully!`);
-      setTimeout(() => setSuccess(null), 3000);
-      
-      // Refresh attendees
+        memberId = memberData.id;
+      }
+
+      // Add to event attendees
+      const attendeeData = {
+        event_id: eventId,
+        members_id: memberId,
+        first_time: true,
+        invited_by_id: null,
+        attendance_status: 'present' as const,
+        attended_at: new Date().toISOString()
+      };
+
+      const { data: newAttendee, error: attendeeError } = await supabase
+        .from('event_attendees')
+        .insert([attendeeData])
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            login_username,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
+            )
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
+          )
+        `)
+        .single();
+
+      if (attendeeError) throw attendeeError;
+
+      // Update attendees state immediately AND refresh from server
+      if (newAttendee) {
+        setAttendees(prev => [...prev, newAttendee]);
+      }
       await fetchEventAttendees(eventId);
+
+      // Refresh members data
+      await fetchMembers();
+      closeNewcomerModal();
+      setSuccess('Newcomer added successfully!');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
-      console.error('Error marking selected as absent:', error);
-      setError(error.message || 'Failed to mark members as absent.');
+      console.error('Error adding newcomer:', error);
+      setError(error.message || 'Failed to add newcomer.');
     } finally {
       setLoading(false);
     }
-  };
-
-  // NEW: Update absent notes
-  const updateAbsentNotes = async (attendeeId: string, eventId: string, notes: string) => {
-    try {
-      const { error } = await supabase
-        .from('event_attendees')
-        .update({ notes })
-        .eq('id', attendeeId);
-
-      if (error) throw error;
-
-      // Update local state
-      setAttendees(prev => prev.map(attendee => 
-        attendee.id === attendeeId ? { ...attendee, notes } : attendee
-      ));
-
-      setSuccess('Notes updated successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error updating notes:', error);
-      setError(error.message || 'Failed to update notes.');
-    }
-  };
-
-  // NEW: Function to edit notes
-  const startEditNotes = (attendeeId: string, currentNotes: string) => {
-    setEditingNotes(prev => ({ ...prev, [attendeeId]: true }));
-    setNotesText(prev => ({ ...prev, [attendeeId]: currentNotes || '' }));
-  };
-
-  // NEW: Function to save edited notes
-  const saveEditNotes = async (attendeeId: string, eventId: string) => {
-    const notes = notesText[attendeeId] || '';
-    await updateAbsentNotes(attendeeId, eventId, notes);
-    setEditingNotes(prev => ({ ...prev, [attendeeId]: false }));
-  };
-
-  // NEW: Function to cancel editing notes
-  const cancelEditNotes = (attendeeId: string) => {
-    setEditingNotes(prev => ({ ...prev, [attendeeId]: false }));
-  };
-
-  const togglePresentList = (eventId: string) => {
-    setShowPresentList(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowAbsentList(prev => ({
-      ...prev,
-      [eventId]: false
-    }));
-    setShowAbsentManagement(prev => ({ ...prev, [eventId]: false }));
-  };
-
-  const toggleAbsentList = (eventId: string) => {
-    setShowAbsentList(prev => ({
-      ...prev,
-      [eventId]: !prev[eventId]
-    }));
-    setShowPresentList(prev => ({
-      ...prev,
-      [eventId]: false
-    }));
-    setShowAbsentManagement(prev => ({ ...prev, [eventId]: false }));
   };
 
   const filteredMembers = members.filter(member => {
@@ -1686,7 +1650,7 @@ const Events = () => {
       return {
         color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
         text: 'Target Groups',
-        icon: GroupsIcon
+        icon: UsersIcon
       };
     }
   };
@@ -1812,6 +1776,472 @@ const Events = () => {
           <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={() => setShowSyncModal(null)}
+              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Bulk Attendance Modal Component - UPDATED for schema
+  const BulkAttendanceModal = () => {
+    if (!showBulkAttendanceModal) return null;
+
+    const event = events.find(e => e.id === showBulkAttendanceModal);
+    if (!event) return null;
+
+    // Get target members who should attend this event
+    const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    
+    useEffect(() => {
+      const loadTargetMembers = async () => {
+        const membersList: Member[] = [];
+        for (const member of members) {
+          if (member.status === 'not_attending') continue;
+          const shouldAttend = await isMemberInTargetGroups(member, event);
+          if (shouldAttend) {
+            membersList.push(member);
+          }
+        }
+        setTargetMembers(membersList);
+      };
+      
+      loadTargetMembers();
+    }, [event, members]);
+
+    const stats = {
+      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+      total: targetMembers.length
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                Bulk Attendance - {event.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage attendance for all target members - {targetMembers.length} members found
+              </p>
+            </div>
+            <button
+              onClick={closeBulkAttendanceModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {/* Attendance Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex gap-2 mb-6 flex-wrap">
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'present';
+                  });
+                  setBulkAttendance(newAttendance);
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+              >
+                Mark All Present
+              </button>
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'absent';
+                  });
+                  setBulkAttendance(newAttendance);
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+              >
+                Mark All Absent
+              </button>
+              <button
+                onClick={() => {
+                  setBulkAttendance({});
+                }}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+              >
+                Clear All
+              </button>
+            </div>
+
+            {/* Members List */}
+            <div className="space-y-3">
+              {targetMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+                </div>
+              ) : (
+                targetMembers.map((member) => (
+                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
+                            {getInitials(member.name, member.surname)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white truncate">
+                              {member.name} {member.surname}
+                            </div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                              {member.phone && (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.phone}</span>
+                                </div>
+                              )}
+                              {member.login_username && (
+                                <div className="flex items-center gap-1">
+                                  <Mail className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{member.login_username}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'present'
+                                ? 'bg-green-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="hidden sm:inline">Present</span>
+                          </button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
+                              bulkAttendance[member.id] === 'absent'
+                                ? 'bg-red-600 text-white shadow-lg'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            <X className="h-4 w-4" />
+                            <span className="hidden sm:inline">Absent</span>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Absence Reason Field - Only show when marked as absent */}
+                      {bulkAttendance[member.id] === 'absent' && (
+                        <div className="mt-2 pl-0 sm:pl-13">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Reason for absence (optional)
+                          </label>
+                          <textarea
+                            defaultValue={attendanceNotesRef.current[member.id] || ''}
+                            onChange={(e) => {
+                              attendanceNotesRef.current[member.id] = e.target.value;
+                            }}
+                            placeholder="Enter reason for absence..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                            rows={2}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                {stats.present + stats.absent} of {targetMembers.length} members marked
+              </div>
+              <div className="flex gap-3 w-full sm:w-auto">
+                <button
+                  onClick={closeBulkAttendanceModal}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                  disabled={loading || Object.keys(bulkAttendance).length === 0}
+                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="hidden sm:inline">Save Attendance</span>
+                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Newcomer Modal Component
+  const NewcomerModal = () => {
+    if (!showNewcomerModal) return null;
+
+    const event = events.find(e => e.id === showNewcomerModal);
+    if (!event) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+              Add Newcomer - {event.name}
+            </h3>
+            <button
+              onClick={closeNewcomerModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <form onSubmit={(e) => handleNewcomerSubmit(e, showNewcomerModal)} className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  First Name *
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={newcomerFormData.name}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, name: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter first name"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Last Name *
+                </label>
+                <input
+                  type="text"
+                  value={newcomerFormData.surname}
+                  onChange={(e) => setNewcomerFormData({ ...newcomerFormData, surname: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter last name"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="tel"
+                    value={newcomerFormData.phone}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, phone: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  login_username Address
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="login_username"
+                    value={newcomerFormData.login_username}
+                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, login_username: e.target.value })}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter login_username address"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Additional Notes
+              </label>
+              <textarea
+                value={newcomerFormData.notes}
+                onChange={(e) => setNewcomerFormData({ ...newcomerFormData, notes: e.target.value })}
+                rows={3}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                placeholder="Any additional notes about the newcomer..."
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors disabled:opacity-50 font-medium"
+              >
+                <User className="h-4 w-4" />
+                {loading ? 'Adding Newcomer...' : 'Add Newcomer'}
+              </button>
+              <button
+                type="button"
+                onClick={closeNewcomerModal}
+                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  // Attendee Modal Component
+  const AttendeeModal = () => {
+    if (!showAttendeeModal) return null;
+
+    const { type, eventId } = showAttendeeModal;
+    const attendees = type === 'present' ? getPresentAttendees(eventId) : getAbsentAttendees(eventId);
+    const event = events.find(e => e.id === eventId);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                {type === 'present' ? 'Present' : 'Absent'} Attendees - {event?.name}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Total: {attendees.length} {type === 'present' ? 'present' : 'absent'}
+              </p>
+            </div>
+            <button
+              onClick={closeAttendeeModal}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {attendees.length === 0 ? (
+              <div className="text-center py-12">
+                <UsersIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                  No {type === 'present' ? 'Present' : 'Absent'} Attendees
+                </h4>
+                <p className="text-gray-500 dark:text-gray-500">
+                  {type === 'present' 
+                    ? 'No members have been marked as present for this event.' 
+                    : 'No members have been marked as absent for this event.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {attendees.map((attendee) => (
+                  <div key={attendee.id} className={`flex items-center justify-between p-4 ${
+                    type === 'present' 
+                      ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700' 
+                      : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700'
+                  } rounded-xl`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-medium ${
+                        type === 'present'
+                          ? 'bg-gradient-to-br from-green-500 to-emerald-500'
+                          : 'bg-gradient-to-br from-red-500 to-orange-500'
+                      }`}>
+                        {getInitials(attendee.members.name, attendee.members.surname)}
+                      </div>
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">
+                          {attendee.members.name} {attendee.members.surname}
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                          {attendee.members.phone && (
+                            <div className="flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {attendee.members.phone}
+                            </div>
+                          )}
+                          {attendee.members.login_username && (
+                            <div className="flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {attendee.members.login_username}
+                            </div>
+                          )}
+                          {type === 'present' && attendee.first_time && (
+                            <span className="inline-block px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-xs">
+                              First Time
+                            </span>
+                          )}
+                          {type === 'present' && attendee.invited_by_member && (
+                            <div className="text-xs text-gray-500">
+                              Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {type === 'present' && hasAccess() && (
+                      <button
+                        onClick={() => handleRemoveAttendee(attendee.id, eventId)}
+                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                        title="Remove Attendee"
+                      >
+                        <X className="h-4 w-4 text-red-500" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={closeAttendeeModal}
               className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
             >
               Close
@@ -2132,24 +2562,7 @@ const Events = () => {
               {showSermonList ? 'Hide Sermons' : 'View Sermons'}
             </button>
             <button 
-              onClick={() => {
-                setShowEventForm(!showEventForm);
-                if (!showEventForm) {
-                  setEventFormData({
-                    name: '',
-                    topic: '',
-                    eventDate: '',
-                    eventTime: '',
-                    location: '',
-                    isWholeChurch: true,
-                    targetCellGroups: [],
-                    targetMinistryGroups: [],
-                    targetDepartments: [],
-                    autoMarkAbsent: true,
-                  });
-                  setShowSundayPreset(false);
-                }
-              }}
+              onClick={() => setShowEventForm(!showEventForm)}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
             >
               <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
@@ -2307,79 +2720,78 @@ const Events = () => {
           </div>
         )}
 
-        {/* Sunday Preset Banner */}
-        {showEventForm && showSundayPreset && (
-          <div className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-700 rounded-2xl p-6 shadow-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
-                  <CalendarIcon className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">Sunday Service Preset</h3>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Using preset for Sunday Service on {formatDate(eventFormData.eventDate)} at {formatTime(eventFormData.eventTime)}
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    // Keep the preset but change name
-                    setEventFormData({
-                      ...eventFormData,
-                      name: eventFormData.name || 'Sunday Service'
-                    });
-                  }}
-                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
-                >
-                  Continue with Sunday
-                </button>
-                <button
-                  onClick={useCustomName}
-                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Use Custom Name
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Event Creation Form */}
         {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create New Event</h2>
-              {!showSundayPreset && (
-                <button
-                  type="button"
-                  onClick={setSundayPreset}
-                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
-                >
-                  <CalendarIcon className="h-4 w-4" />
-                  Use Sunday Service Preset
-                </button>
-              )}
-            </div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
             <form onSubmit={handleEventSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
-                  <input
-                    type="text"
-                    value={eventFormData.name}
-                    onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter event name"
-                    required
-                  />
-                  {!showSundayPreset && (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Click "Use Sunday Service Preset" to auto-fill Sunday details
-                    </p>
-                  )}
+              {/* Event Type Selection */}
+              {!eventFormData.eventType && (
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Event Type *</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'sunday', name: 'Sunday' })}
+                      className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200"
+                    >
+                      <CalendarIcon className="h-8 w-8 text-blue-600" />
+                      <div className="text-left">
+                        <div className="font-semibold text-gray-900 dark:text-white text-lg">Sunday Service</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Regular Sunday worship service</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'other', name: '' })}
+                      className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200"
+                    >
+                      <Plus className="h-8 w-8 text-purple-600" />
+                      <div className="text-left">
+                        <div className="font-semibold text-gray-900 dark:text-white text-lg">Other Event</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">Custom event with your own name</div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
+              )}
+
+              {/* Show form fields only after event type is selected */}
+              {eventFormData.eventType && (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium">
+                      {eventFormData.eventType === 'sunday' ? 'Sunday Service' : 'Other Event'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: '', name: '' })}
+                      className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm underline"
+                    >
+                      Change type
+                    </button>
+                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {eventFormData.eventType === 'sunday' ? (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
+                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
+                      Sunday
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                    <input
+                      type="text"
+                      value={eventFormData.name}
+                      onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      placeholder="Enter event name"
+                      required
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
                   <input
@@ -2421,27 +2833,6 @@ const Events = () => {
                   />
                 </div>
 
-                {/* Auto Mark Absent Checkbox */}
-                <div className="md:col-span-2 space-y-2">
-                  <div className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl">
-                    <input
-                      type="checkbox"
-                      id="autoMarkAbsent"
-                      checked={eventFormData.autoMarkAbsent}
-                      onChange={(e) => setEventFormData({ ...eventFormData, autoMarkAbsent: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                    />
-                    <div>
-                      <label htmlFor="autoMarkAbsent" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Automatically mark all expected members as absent
-                      </label>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        When checked, all expected members (based on event scope) will be automatically marked as absent upon event creation.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Event Scope */}
                 <div className="md:col-span-2 space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
@@ -2468,7 +2859,7 @@ const Events = () => {
                         onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
                         className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
                       />
-                      <GroupsIcon className="h-5 w-5 text-orange-600" />
+                      <UsersIcon className="h-5 w-5 text-orange-600" />
                       <div>
                         <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
@@ -2577,15 +2968,14 @@ const Events = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowEventForm(false);
-                    setShowSundayPreset(false);
-                  }}
+                  onClick={() => setShowEventForm(false)}
                   className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
                 >
                   Cancel
                 </button>
               </div>
+                </>
+              )}
             </form>
           </div>
         )}
@@ -2608,15 +2998,12 @@ const Events = () => {
             </div>
           ) : (
             events.map((event) => {
-              const presentAttendees = getPresentAttendees(event.id);
-              const absentAttendees = getAbsentAttendees(event.id);
               const scopeBadge = getEventScopeBadge(event);
               const statusBadge = getEventStatusBadge(event);
               const ScopeIcon = scopeBadge.icon;
               const StatusIcon = statusBadge.icon;
               const sermon = getSermonForEvent(event.id);
-              const filteredAbsentMembers = getFilteredAbsentMembers(event.id);
-              const selectedForEvent = selectedAbsentMembers[event.id] || [];
+              const stats = getAttendanceStats(event.id);
               
               return (
                 <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
@@ -2648,15 +3035,6 @@ const Events = () => {
                             <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
                           )}
                         </div>
-                        {hasAccess() && (
-                          <button
-                            onClick={() => handleDeleteEvent(event.id)}
-                            className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                            title="Delete Event"
-                          >
-                            <Trash2 className="h-5 w-5 text-red-500" />
-                          </button>
-                        )}
                       </div>
                       
                       <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
@@ -2782,23 +3160,31 @@ const Events = () => {
 
                       {/* Attendance Summary */}
                       <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
-                          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{presentAttendees.length}</div>
+                        <button
+                          onClick={() => openAttendeeModal('present', event.id)}
+                          className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
+                        >
+                          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
                           <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
-                        </div>
-                        <div className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
-                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{absentAttendees.length}</div>
+                          <div className="text-xs text-green-600 dark:text-green-400 mt-1">Click to view</div>
+                        </button>
+                        <button
+                          onClick={() => openAttendeeModal('absent', event.id)}
+                          className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
+                        >
+                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
                           <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
-                        </div>
+                          <div className="text-xs text-red-600 dark:text-red-400 mt-1">Click to view</div>
+                        </button>
                         <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
                           <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                            {presentAttendees.filter(a => a.first_time).length}
+                            {stats.firstTimers}
                           </div>
                           <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">First Timers</div>
                         </div>
                         <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4 text-center">
                           <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-                            {presentAttendees.length + absentAttendees.length}
+                            {stats.total}
                           </div>
                           <div className="text-sm text-purple-700 dark:text-purple-300 font-medium">Total Registered</div>
                         </div>
@@ -2815,6 +3201,20 @@ const Events = () => {
                           >
                             <Plus className="h-4 w-4" />
                             Add Attendee
+                          </button>
+                          <button
+                            onClick={() => openBulkAttendanceModal(event.id)}
+                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          >
+                            <UsersIcon className="h-4 w-4" />
+                            Bulk Attendance
+                          </button>
+                          <button
+                            onClick={() => openNewcomerModal(event.id)}
+                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          >
+                            <User className="h-4 w-4" />
+                            Add Newcomer
                           </button>
                           {hasAccess() && (
                             <button
@@ -2842,29 +3242,19 @@ const Events = () => {
                         Sync to Cloud
                       </button>
                       <button
-                        onClick={() => togglePresentList(event.id)}
+                        onClick={() => openAttendeeModal('present', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
-                        <span>{showPresentList[event.id] ? 'Hide' : 'View'} Present ({presentAttendees.length})</span>
-                        <ChevronDown className={`h-4 w-4 transition-transform ${showPresentList[event.id] ? 'rotate-180' : ''}`} />
+                        <span>View Present ({stats.present})</span>
+                        <Eye className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => toggleAbsentList(event.id)}
+                        onClick={() => openAttendeeModal('absent', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                       >
-                        <span>{showAbsentList[event.id] ? 'Hide' : 'View'} Absent ({absentAttendees.length})</span>
-                        <ChevronDown className={`h-4 w-4 transition-transform ${showAbsentList[event.id] ? 'rotate-180' : ''}`} />
+                        <span>View Absent ({stats.absent})</span>
+                        <Eye className="h-4 w-4" />
                       </button>
-                      {/* NEW: Manage Absent Button */}
-                      {!event.is_completed && hasAccess() && (
-                        <button
-                          onClick={() => toggleAbsentManagement(event.id)}
-                          className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
-                        >
-                          <span>{showAbsentManagement[event.id] ? 'Close' : 'Manage'} Absent</span>
-                          <Filter className={`h-4 w-4 transition-transform ${showAbsentManagement[event.id] ? 'rotate-180' : ''}`} />
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -3064,267 +3454,6 @@ const Events = () => {
                       </form>
                     </div>
                   )}
-
-                  {/* NEW: Manage Absent Section */}
-                  {showAbsentManagement[event.id] && (
-                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
-                      <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                        <Filter className="h-5 w-5" />
-                        Manage Absent Members
-                        <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                          ({filteredAbsentMembers.length} unregistered members)
-                        </span>
-                      </h4>
-                      
-                      {/* Search Bar */}
-                      <div className="mb-4">
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={absentSearchTerm[event.id] || ''}
-                            onChange={(e) => handleAbsentSearch(event.id, e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                            placeholder="Search members to mark as absent..."
-                          />
-                          <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
-                        </div>
-                      </div>
-
-                      {/* Members List */}
-                      {filteredAbsentMembers.length > 0 ? (
-                        <div className="space-y-3 max-h-80 overflow-y-auto mb-4">
-                          {filteredAbsentMembers.map((member) => (
-                            <div key={member.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedForEvent.includes(member.id)}
-                                  onChange={() => toggleAbsentMemberSelection(event.id, member.id)}
-                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                                />
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
-                                  {getInitials(member.name, member.surname)}
-                                </div>
-                                <div>
-                                  <div className="font-medium text-gray-900 dark:text-white">
-                                    {member.name} {member.surname}
-                                  </div>
-                                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    {member.phone && (
-                                      <span className="flex items-center gap-1">
-                                        <Phone className="h-3 w-3" />
-                                        {member.phone}
-                                      </span>
-                                    )}
-                                    {member.cell_groups?.name && (
-                                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded-full">
-                                        {member.cell_groups.name}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="w-48">
-                                <input
-                                  type="text"
-                                  value={notesText[`${event.id}-${member.id}`] || ''}
-                                  onChange={(e) => setNotesText(prev => ({ 
-                                    ...prev, 
-                                    [`${event.id}-${member.id}`]: e.target.value 
-                                  }))}
-                                  className="w-full px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                  placeholder="Absent reason (optional)"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8">
-                          <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                          <p className="text-gray-600 dark:text-gray-400">
-                            {absentSearchTerm[event.id] 
-                              ? 'No members found matching your search'
-                              : 'All expected members are already registered or marked as absent'}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Action Buttons */}
-                      <div className="flex justify-between items-center">
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {selectedForEvent.length} member{selectedForEvent.length !== 1 ? 's' : ''} selected
-                        </div>
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => {
-                              setSelectedAbsentMembers(prev => ({ ...prev, [event.id]: [] }));
-                              setAbsentSearchTerm(prev => ({ ...prev, [event.id]: '' }));
-                            }}
-                            className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
-                          >
-                            Clear All
-                          </button>
-                          <button
-                            onClick={() => markSelectedAsAbsent(event.id)}
-                            disabled={loading || selectedForEvent.length === 0}
-                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <AlertCircle className="h-4 w-4" />
-                            {loading ? 'Marking...' : `Mark ${selectedForEvent.length} as Absent`}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Present List */}
-                  {showPresentList[event.id] && presentAttendees.length > 0 && (
-                    <div className="mt-6 p-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
-                      <h4 className="text-lg font-semibold text-green-700 dark:text-green-300 mb-4 flex items-center gap-2">
-                        <CheckCircle className="h-5 w-5" />
-                        Present Attendees ({presentAttendees.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {presentAttendees.map((attendee) => (
-                          <div key={attendee.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-green-100 dark:border-green-800">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-xs font-medium">
-                                {getInitials(attendee.members.name, attendee.members.surname)}
-                              </div>
-                              <div>
-                                <div className="font-medium text-gray-900 dark:text-white">
-                                  {attendee.members.name} {attendee.members.surname}
-                                </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                  {attendee.members.phone && (
-                                    <span className="flex items-center gap-1">
-                                      <Phone className="h-3 w-3" />
-                                      {attendee.members.phone}
-                                    </span>
-                                  )}
-                                  {attendee.first_time && (
-                                    <span className="inline-block px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full mt-1">
-                                      First Time
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {attendee.invited_by_member && (
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                  Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
-                                </div>
-                              )}
-                              {hasAccess() && (
-                                <button
-                                  onClick={() => handleRemoveAttendee(attendee.id, event.id)}
-                                  className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                                >
-                                  <X className="h-4 w-4 text-red-500" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Absent List with Notes Editing */}
-                  {showAbsentList[event.id] && absentAttendees.length > 0 && (
-                    <div className="mt-6 p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl">
-                      <h4 className="text-lg font-semibold text-red-700 dark:text-red-300 mb-4 flex items-center gap-2">
-                        <AlertCircle className="h-5 w-5" />
-                        Absent Attendees ({absentAttendees.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {absentAttendees.map((attendee) => (
-                          <div key={attendee.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-red-100 dark:border-red-800">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center text-white text-xs font-medium">
-                                {getInitials(attendee.members.name, attendee.members.surname)}
-                              </div>
-                              <div>
-                                <div className="font-medium text-gray-900 dark:text-white">
-                                  {attendee.members.name} {attendee.members.surname}
-                                </div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                  {attendee.members.phone && (
-                                    <span className="flex items-center gap-1">
-                                      <Phone className="h-3 w-3" />
-                                      {attendee.members.phone}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {editingNotes[attendee.id] ? (
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    value={notesText[attendee.id] || ''}
-                                    onChange={(e) => setNotesText(prev => ({ ...prev, [attendee.id]: e.target.value }))}
-                                    className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                    placeholder="Absent reason"
-                                  />
-                                  <button
-                                    onClick={() => saveEditNotes(attendee.id, event.id)}
-                                    className="p-1 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-lg transition-colors duration-150"
-                                  >
-                                    <Save className="h-4 w-4 text-green-500" />
-                                  </button>
-                                  <button
-                                    onClick={() => cancelEditNotes(attendee.id)}
-                                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-150"
-                                  >
-                                    <X className="h-4 w-4 text-gray-500" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
-                                    {attendee.notes || 'No reason provided'}
-                                  </span>
-                                  <button
-                                    onClick={() => startEditNotes(attendee.id, attendee.notes || '')}
-                                    className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
-                                  >
-                                    <Edit className="h-4 w-4 text-blue-500" />
-                                  </button>
-                                </div>
-                              )}
-                              {hasAccess() && (
-                                <button
-                                  onClick={() => handleRemoveAttendee(attendee.id, event.id)}
-                                  className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                                >
-                                  <Trash2 className="h-4 w-4 text-red-500" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Empty States */}
-                  {showPresentList[event.id] && presentAttendees.length === 0 && (
-                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl text-center">
-                      <CheckCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                      <p className="text-gray-600 dark:text-gray-400">No attendees marked as present yet.</p>
-                    </div>
-                  )}
-
-                  {showAbsentList[event.id] && absentAttendees.length === 0 && (
-                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl text-center">
-                      <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                      <p className="text-gray-600 dark:text-gray-400">No attendees marked as absent.</p>
-                    </div>
-                  )}
                 </div>
               );
             })
@@ -3335,6 +3464,9 @@ const Events = () => {
       {/* Render All Modals */}
       <SermonModal />
       <PamphletModal />
+      <BulkAttendanceModal />
+      <NewcomerModal />
+      <AttendeeModal />
       <SyncModal />
     </div>
   );
