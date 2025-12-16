@@ -121,7 +121,7 @@ const Events = () => {
     isWholeChurch: true,
     targetCellGroups: [] as string[],
     targetMinistryGroups: [] as string[],
-    autoMarkAbsent: true,
+    autoMarkAbsent: false,
   });
 
   const [attendeeFormData, setAttendeeFormData] = useState({
