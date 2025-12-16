@@ -17,6 +17,7 @@ interface CellGroup {
   updated_at?: string;
   created_by?: string | null;
   leader_name?: string | null;
+  is_current_user_leader?: boolean;
 }
 
 interface GroupMeeting {
@@ -374,9 +375,10 @@ interface EditGroupModalProps {
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
+  canEdit: boolean;
 }
 
-const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError }) => {
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -432,6 +434,11 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
     if (!formData.name.trim()) {
       onError('Group name is required');
+      return;
+    }
+
+    if (!canEdit) {
+      onError('You do not have permission to edit this group');
       return;
     }
 
@@ -631,7 +638,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
           <div className="flex gap-3 pt-4">
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !canEdit}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
             >
               <Save className="h-4 w-4" />
@@ -658,9 +665,10 @@ interface DeleteGroupModalProps {
   onClose: () => void;
   onConfirm: () => void;
   onError: (message: string) => void;
+  canDelete: boolean;
 }
 
-const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError }) => {
+const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
 
@@ -686,6 +694,11 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
   const handleDelete = async () => {
     if (!group?.id) {
       onError('Group not found');
+      return;
+    }
+
+    if (!canDelete) {
+      onError('You do not have permission to delete this group');
       return;
     }
 
@@ -784,7 +797,7 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
         <div className="flex gap-3">
           <button
             onClick={handleDelete}
-            disabled={loading || memberCount > 0}
+            disabled={loading || memberCount > 0 || !canDelete}
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
           >
             <Trash2 className="h-4 w-4" />
@@ -803,7 +816,7 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
   );
 };
 
-// Group Meeting Creation Step (existing code, keeping the same)
+// Group Meeting Creation Step
 const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -1008,7 +1021,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
   );
 };
 
-// Group Attendance Step Component (existing code, keeping the same)
+// Group Attendance Step Component
 interface GroupAttendanceStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -1414,7 +1427,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   );
 };
 
-// Group Newcomer Step Component (existing code, keeping the same)
+// Group Newcomer Step Component
 interface GroupNewcomerStepProps {
   group: CellGroup;
   selectedMeeting: GroupMeeting | null;
@@ -1695,7 +1708,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   );
 };
 
-// Group Report Step Component (existing code, keeping the same)
+// Group Report Step Component
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2328,7 +2341,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
   );
 };
 
-// Group Management Workflow Component (existing code, keeping the same)
+// Group Management Workflow Component
 interface GroupWorkflowProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2476,7 +2489,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
 
 // Main Groups Component
 const Groups = () => {
-  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor } = useAuth();
+  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor, isGroupLeader, isMember } = useAuth();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -2498,9 +2511,11 @@ const Groups = () => {
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
 
   useEffect(() => {
-    loadGroups();
-    loadAllMembers();
-  }, []);
+    if (profile) {
+      loadGroups();
+      loadAllMembers();
+    }
+  }, [profile]);
 
   const loadGroups = async () => {
     try {
@@ -2530,19 +2545,67 @@ const Groups = () => {
           const leaderName = group.leaders ? 
             `${group.leaders.name} ${group.leaders.surname}` : null;
           
+          // Check if current user is the leader of this group
+          const isCurrentUserLeader = group.leader_id === profile?.id;
+          
           return {
             ...group,
             leader_name: leaderName,
-            memberCount: count || 0
+            memberCount: count || 0,
+            is_current_user_leader: isCurrentUserLeader
           };
         })
       );
 
-      setGroups(groupsWithMemberCounts);
+      // Filter groups based on user role
+      let filteredGroups = groupsWithMemberCounts;
+      
+      if (!isAdministrator && !isPastor) {
+        if (isGroupLeader) {
+          // Group Leaders can see only their own group
+          filteredGroups = groupsWithMemberCounts.filter(group => 
+            group.leader_id === profile?.id
+          );
+        } else if (isMember) {
+          // Members can see only their own group
+          const userGroup = await getUserGroup();
+          filteredGroups = groupsWithMemberCounts.filter(group => 
+            group.id === userGroup?.id
+          );
+        }
+      }
+      // Administrators and Pastors can see all groups (no filtering)
+
+      setGroups(filteredGroups);
     } catch (error: any) {
       setError('Failed to load groups: ' + error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getUserGroup = async (): Promise<CellGroup | null> => {
+    try {
+      if (!profile?.id) return null;
+      
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('cell_group_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (!memberData?.cell_group_id) return null;
+      
+      const { data: groupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', memberData.cell_group_id)
+        .single();
+      
+      return groupData;
+    } catch (error) {
+      console.error('Failed to get user group:', error);
+      return null;
     }
   };
 
@@ -2627,8 +2690,8 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
-    if (!isAdministrator && !isPastor) {
-      setError('Only administrators and pastors can edit groups');
+    if (!canEditGroup(group)) {
+      setError('You do not have permission to edit this group');
       return;
     }
     setSelectedGroup(group);
@@ -2636,7 +2699,7 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
-    if (!isAdministrator && !isPastor) {
+    if (!canDeleteGroup(group)) {
       setError('Only administrators and pastors can delete groups');
       return;
     }
@@ -2674,13 +2737,39 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  const filteredGroups = groups.filter(group => 
-    canViewGroup(group.id) && (
-      group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  );
+  // Permission functions
+  const canCreateGroups = () => {
+    return isAdministrator || isPastor;
+  };
+
+  const canEditGroup = (group: CellGroup) => {
+    if (isAdministrator || isPastor) {
+      return true; // Admins & Pastors can edit all groups
+    }
+    if (isGroupLeader) {
+      return group.leader_id === profile?.id; // Leaders can edit only their own group
+    }
+    return false; // Members cannot edit any groups
+  };
+
+  const canDeleteGroup = (group: CellGroup) => {
+    return isAdministrator || isPastor; // Only admins & pastors can delete
+  };
+
+  const canViewGroupDetails = (group: CellGroup) => {
+    if (isAdministrator || isPastor) {
+      return true; // Admins & Pastors can view all groups
+    }
+    if (isGroupLeader) {
+      return group.leader_id === profile?.id; // Leaders can view only their own group
+    }
+    if (isMember) {
+      // Members can view only their own group
+      // This assumes members have a cell_group_id in their profile
+      return true; // We'll filter this in loadGroups
+    }
+    return false;
+  };
 
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
@@ -2690,11 +2779,8 @@ const Groups = () => {
     if (roles.includes('pastor')) return 'Pastor';
     if (roles.includes('deacon')) return 'Deacon';
     if (roles.includes('group_leader')) return 'Group Leader';
-    return 'Member';
-  };
-
-  const canCreateGroups = () => {
-    return isAdministrator || isPastor;
+    if (roles.includes('member')) return 'Member';
+    return 'Guest';
   };
 
   const getAttendanceStats = () => {
@@ -2779,12 +2865,12 @@ const Groups = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {loading && filteredGroups.length === 0 ? (
+            {loading && groups.length === 0 ? (
               <div className="col-span-full text-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                 <p className="mt-4 text-gray-600">Loading groups...</p>
               </div>
-            ) : filteredGroups.length === 0 ? (
+            ) : groups.length === 0 ? (
               <div className="col-span-full text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-600 mb-2">
@@ -2804,10 +2890,15 @@ const Groups = () => {
                 )}
               </div>
             ) : (
-              filteredGroups.map((group) => {
+              groups.filter(group => 
+                group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
+              ).map((group) => {
                 const canManage = canManageGroup(group.id);
                 const canView = canViewGroup(group.id);
-                const canEdit = isAdministrator || isPastor;
+                const canEdit = canEditGroup(group);
+                const canDelete = canDeleteGroup(group);
                 
                 return (
                   <div
@@ -2821,36 +2912,48 @@ const Groups = () => {
                         </div>
                         <div className="flex-1">
                           <h3 className="text-xl font-bold text-gray-900 mb-2">{group.name}</h3>
-                          {canManage ? (
-                            <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium mb-2">
-                              <Shield className="h-3 w-3 mr-1" />
-                              Can Manage
-                            </span>
-                          ) : canView ? (
-                            <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium mb-2">
-                              <Shield className="h-3 w-3 mr-1" />
-                              View Only
-                            </span>
-                          ) : null}
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {group.is_current_user_leader && (
+                              <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Your Leadership
+                              </span>
+                            )}
+                            {canManage ? (
+                              <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Can Manage
+                              </span>
+                            ) : canView ? (
+                              <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                View Only
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                       
-                      {canEdit && (
+                      {(canEdit || canDelete) && (
                         <div className="flex gap-1">
-                          <button
-                            onClick={() => openEditGroupModal(group)}
-                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Edit Group"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => openDeleteGroupModal(group)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete Group"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              onClick={() => openEditGroupModal(group)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit Group"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => openDeleteGroupModal(group)}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Group"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2930,6 +3033,7 @@ const Groups = () => {
             setError(message);
             setTimeout(() => setError(null), 3000);
           }}
+          canEdit={selectedGroup ? canEditGroup(selectedGroup) : false}
         />
 
         <DeleteGroupModal
@@ -2941,6 +3045,7 @@ const Groups = () => {
             setError(message);
             setTimeout(() => setError(null), 3000);
           }}
+          canDelete={selectedGroup ? canDeleteGroup(selectedGroup) : false}
         />
 
         {showMeetingsModal && selectedGroup && (
