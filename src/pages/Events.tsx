@@ -112,21 +112,10 @@ const Events = () => {
   // New state for Sunday preset
   const [showSundayPreset, setShowSundayPreset] = useState(false);
 
-  // Fix date for South Africa timezone
-  const getSouthAfricaDate = (dateString?: string) => {
-    const date = dateString ? new Date(dateString) : new Date();
-    // Convert to South Africa time (UTC+2)
-    const saOffset = 2 * 60; // South Africa is UTC+2
-    const localOffset = date.getTimezoneOffset();
-    const diff = saOffset + localOffset;
-    const saDate = new Date(date.getTime() + diff * 60000);
-    return saDate.toISOString().split('T')[0];
-  };
-
   const [eventFormData, setEventFormData] = useState({
     name: '',
     topic: '',
-    eventDate: getSouthAfricaDate(), // Initialize with South Africa date
+    eventDate: '',
     eventTime: '',
     location: '',
     isWholeChurch: true,
@@ -174,33 +163,7 @@ const Events = () => {
     const daysUntilNextSunday = dayOfWeek === 0 ? 7 : 7 - dayOfWeek;
     const nextSunday = new Date(today);
     nextSunday.setDate(today.getDate() + daysUntilNextSunday);
-    return getSouthAfricaDate(nextSunday.toISOString());
-  };
-
-  // Function to get next specific day of the week
-  const getNextDayOfWeek = (dayName: string) => {
-    const days: { [key: string]: number } = {
-      sunday: 0,
-      monday: 1,
-      tuesday: 2,
-      wednesday: 3,
-      thursday: 4,
-      friday: 5,
-      saturday: 6
-    };
-    
-    const today = new Date();
-    const targetDay = days[dayName.toLowerCase()];
-    const currentDay = today.getDay();
-    
-    let daysToAdd = targetDay - currentDay;
-    if (daysToAdd <= 0) {
-      daysToAdd += 7;
-    }
-    
-    const nextDay = new Date(today);
-    nextDay.setDate(today.getDate() + daysToAdd);
-    return getSouthAfricaDate(nextDay.toISOString());
+    return nextSunday.toISOString().split('T')[0];
   };
 
   // Function to set Sunday preset
@@ -527,7 +490,7 @@ const Events = () => {
       title: event?.name || '',
       summary: '',
       pastorName: '',
-      sermonDate: event?.event_date || getSouthAfricaDate(),
+      sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
       eventId: eventId || '',
       videoFile: null,
       documentFile: null,
@@ -717,6 +680,60 @@ const Events = () => {
     }
   };
 
+  // Delete event with all related data
+  const handleDeleteEvent = async (eventId: string) => {
+    if (!confirm('Are you sure you want to delete this event? This will also delete all attendees, sermons, and files associated with this event.')) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // First, delete event attendees
+      const { error: attendeesError } = await supabase
+        .from('event_attendees')
+        .delete()
+        .eq('event_id', eventId);
+
+      if (attendeesError) throw attendeesError;
+
+      // Delete sermons associated with this event
+      const { error: sermonsError } = await supabase
+        .from('sermons')
+        .delete()
+        .eq('event_id', eventId);
+
+      if (sermonsError) throw sermonsError;
+
+      // Delete the event
+      const { error: eventError } = await supabase
+        .from('events')
+        .delete()
+        .eq('id', eventId);
+
+      if (eventError) throw eventError;
+
+      // Remove event from local state
+      setEvents(prev => prev.filter(event => event.id !== eventId));
+      
+      // Remove related attendees from local state
+      setAttendees(prev => prev.filter(attendee => attendee.event_id !== eventId));
+      
+      // Remove related sermons from local state
+      setSermons(prev => prev.filter(sermon => sermon.event_id !== eventId));
+
+      setSuccess('Event deleted successfully with all related data!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting event:', error);
+      setError(error.message || 'Failed to delete event. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCompleteEvent = async (eventId: string) => {
     if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
       return;
@@ -822,7 +839,7 @@ const Events = () => {
       setEventFormData({ 
         name: '', 
         topic: '', 
-        eventDate: getSouthAfricaDate(), 
+        eventDate: '', 
         eventTime: '', 
         location: '',
         isWholeChurch: true,
@@ -1312,7 +1329,7 @@ const Events = () => {
                   setEventFormData({
                     name: '',
                     topic: '',
-                    eventDate: getSouthAfricaDate(),
+                    eventDate: '',
                     eventTime: '',
                     location: '',
                     isWholeChurch: true,
@@ -1520,17 +1537,10 @@ const Events = () => {
                   <input
                     type="date"
                     value={eventFormData.eventDate}
-                    onChange={(e) => {
-                      // Ensure date is captured correctly for South Africa timezone
-                      const dateValue = e.target.value;
-                      setEventFormData({ ...eventFormData, eventDate: dateValue });
-                    }}
+                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     required
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Date displayed in South Africa timezone (UTC+2)
-                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
@@ -1752,6 +1762,15 @@ const Events = () => {
                             <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
                           )}
                         </div>
+                        {hasAccess() && (
+                          <button
+                            onClick={() => handleDeleteEvent(event.id)}
+                            className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                            title="Delete Event"
+                          >
+                            <Trash2 className="h-5 w-5 text-red-500" />
+                          </button>
+                        )}
                       </div>
                       
                       <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
