@@ -109,16 +109,30 @@ const Events = () => {
   const [notesText, setNotesText] = useState<{[key: string]: string}>({});
   const [selectedAbsentMembers, setSelectedAbsentMembers] = useState<{[key: string]: string[]}>({});
 
+  // New state for Sunday preset
+  const [showSundayPreset, setShowSundayPreset] = useState(false);
+
+  // Fix date for South Africa timezone
+  const getSouthAfricaDate = (dateString?: string) => {
+    const date = dateString ? new Date(dateString) : new Date();
+    // Convert to South Africa time (UTC+2)
+    const saOffset = 2 * 60; // South Africa is UTC+2
+    const localOffset = date.getTimezoneOffset();
+    const diff = saOffset + localOffset;
+    const saDate = new Date(date.getTime() + diff * 60000);
+    return saDate.toISOString().split('T')[0];
+  };
+
   const [eventFormData, setEventFormData] = useState({
     name: '',
     topic: '',
-    eventDate: '',
+    eventDate: getSouthAfricaDate(), // Initialize with South Africa date
     eventTime: '',
     location: '',
     isWholeChurch: true,
     targetCellGroups: [] as string[],
     targetMinistryGroups: [] as string[],
-    autoMarkAbsent: true, // New: Auto mark absent checkbox
+    autoMarkAbsent: true,
   });
 
   const [attendeeFormData, setAttendeeFormData] = useState({
@@ -152,6 +166,58 @@ const Events = () => {
       fetchMinistryGroups();
     }
   }, [user, authLoading]);
+
+  // Function to get next Sunday date
+  const getNextSunday = () => {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const daysUntilNextSunday = dayOfWeek === 0 ? 7 : 7 - dayOfWeek;
+    const nextSunday = new Date(today);
+    nextSunday.setDate(today.getDate() + daysUntilNextSunday);
+    return getSouthAfricaDate(nextSunday.toISOString());
+  };
+
+  // Function to get next specific day of the week
+  const getNextDayOfWeek = (dayName: string) => {
+    const days: { [key: string]: number } = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
+    };
+    
+    const today = new Date();
+    const targetDay = days[dayName.toLowerCase()];
+    const currentDay = today.getDay();
+    
+    let daysToAdd = targetDay - currentDay;
+    if (daysToAdd <= 0) {
+      daysToAdd += 7;
+    }
+    
+    const nextDay = new Date(today);
+    nextDay.setDate(today.getDate() + daysToAdd);
+    return getSouthAfricaDate(nextDay.toISOString());
+  };
+
+  // Function to set Sunday preset
+  const setSundayPreset = () => {
+    const nextSunday = getNextSunday();
+    setEventFormData({
+      ...eventFormData,
+      name: 'Sunday Service',
+      eventDate: nextSunday,
+      eventTime: '09:00',
+      location: 'Main Sanctuary',
+      isWholeChurch: true,
+      topic: 'Weekly Sunday Worship Service',
+      autoMarkAbsent: true
+    });
+    setShowSundayPreset(true);
+  };
 
   const fetchEvents = async () => {
     try {
@@ -461,7 +527,7 @@ const Events = () => {
       title: event?.name || '',
       summary: '',
       pastorName: '',
-      sermonDate: event?.event_date || new Date().toISOString().split('T')[0],
+      sermonDate: event?.event_date || getSouthAfricaDate(),
       eventId: eventId || '',
       videoFile: null,
       documentFile: null,
@@ -756,7 +822,7 @@ const Events = () => {
       setEventFormData({ 
         name: '', 
         topic: '', 
-        eventDate: '', 
+        eventDate: getSouthAfricaDate(), 
         eventTime: '', 
         location: '',
         isWholeChurch: true,
@@ -764,6 +830,7 @@ const Events = () => {
         targetMinistryGroups: [],
         autoMarkAbsent: true,
       });
+      setShowSundayPreset(false);
       
       await fetchEvents();
       
@@ -1163,6 +1230,15 @@ const Events = () => {
     }
   };
 
+  // Function to close Sunday preset and use custom name
+  const useCustomName = () => {
+    setShowSundayPreset(false);
+    setEventFormData({
+      ...eventFormData,
+      name: ''
+    });
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -1230,7 +1306,23 @@ const Events = () => {
               {showSermonList ? 'Hide Sermons' : 'View Sermons'}
             </button>
             <button 
-              onClick={() => setShowEventForm(!showEventForm)}
+              onClick={() => {
+                setShowEventForm(!showEventForm);
+                if (!showEventForm) {
+                  setEventFormData({
+                    name: '',
+                    topic: '',
+                    eventDate: getSouthAfricaDate(),
+                    eventTime: '',
+                    location: '',
+                    isWholeChurch: true,
+                    targetCellGroups: [],
+                    targetMinistryGroups: [],
+                    autoMarkAbsent: true,
+                  });
+                  setShowSundayPreset(false);
+                }
+              }}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
             >
               <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
@@ -1340,10 +1432,61 @@ const Events = () => {
           </div>
         )}
 
+        {/* Sunday Preset Banner */}
+        {showEventForm && showSundayPreset && (
+          <div className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-700 rounded-2xl p-6 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+                  <CalendarIcon className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">Sunday Service Preset</h3>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Using preset for Sunday Service on {formatDate(eventFormData.eventDate)} at {formatTime(eventFormData.eventTime)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    // Keep the preset but change name
+                    setEventFormData({
+                      ...eventFormData,
+                      name: eventFormData.name || 'Sunday Service'
+                    });
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+                >
+                  Continue with Sunday
+                </button>
+                <button
+                  onClick={useCustomName}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                >
+                  Use Custom Name
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Event Creation Form */}
         {showEventForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create New Event</h2>
+              {!showSundayPreset && (
+                <button
+                  type="button"
+                  onClick={setSundayPreset}
+                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+                >
+                  <CalendarIcon className="h-4 w-4" />
+                  Use Sunday Service Preset
+                </button>
+              )}
+            </div>
             <form onSubmit={handleEventSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
@@ -1356,6 +1499,11 @@ const Events = () => {
                     placeholder="Enter event name"
                     required
                   />
+                  {!showSundayPreset && (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Click "Use Sunday Service Preset" to auto-fill Sunday details
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
@@ -1372,10 +1520,17 @@ const Events = () => {
                   <input
                     type="date"
                     value={eventFormData.eventDate}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
+                    onChange={(e) => {
+                      // Ensure date is captured correctly for South Africa timezone
+                      const dateValue = e.target.value;
+                      setEventFormData({ ...eventFormData, eventDate: dateValue });
+                    }}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     required
                   />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Date displayed in South Africa timezone (UTC+2)
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
@@ -1526,7 +1681,10 @@ const Events = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowEventForm(false)}
+                  onClick={() => {
+                    setShowEventForm(false);
+                    setShowSundayPreset(false);
+                  }}
                   className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
                 >
                   Cancel
