@@ -170,13 +170,14 @@ const Events = () => {
   const setSundayPreset = () => {
     const nextSunday = getNextSunday();
     setEventFormData({
-      ...eventFormData,
       name: 'Sunday Service',
+      topic: 'Weekly Sunday Worship Service',
       eventDate: nextSunday,
       eventTime: '09:00',
       location: 'Main Sanctuary',
       isWholeChurch: true,
-      topic: 'Weekly Sunday Worship Service',
+      targetCellGroups: [],
+      targetMinistryGroups: [],
       autoMarkAbsent: true
     });
     setShowSundayPreset(true);
@@ -799,11 +800,33 @@ const Events = () => {
       return;
     }
 
+    // Check if required fields are filled
+    if (!eventFormData.name.trim()) {
+      setError('Event name is required');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (!eventFormData.eventDate) {
+      setError('Event date is required');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (!eventFormData.eventTime) {
+      setError('Event time is required');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
     
     try {
+      console.log('Submitting event form data:', eventFormData);
+      
+      // Prepare event data according to your database schema
       const eventData = {
         name: eventFormData.name.trim(),
         topic: eventFormData.topic.trim() || null,
@@ -818,23 +841,36 @@ const Events = () => {
         target_departments: !eventFormData.isWholeChurch && eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null,
       };
 
+      console.log('Prepared event data for database:', eventData);
+
       const { data, error } = await supabase
         .from('events')
         .insert([eventData])
         .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+
+      console.log('Event created successfully:', data);
 
       const newEvent = data[0];
       
       // Auto-mark all expected members as absent if checkbox is checked
       if (eventFormData.autoMarkAbsent) {
-        const absentCount = await autoMarkAllAbsent(newEvent.id, newEvent);
-        setSuccess(`Event created successfully! ${absentCount} members automatically marked as absent.`);
+        try {
+          const absentCount = await autoMarkAllAbsent(newEvent.id, newEvent);
+          setSuccess(`Event created successfully! ${absentCount} members automatically marked as absent.`);
+        } catch (absentError) {
+          console.error('Error auto-marking absent:', absentError);
+          setSuccess('Event created successfully! (Note: Auto-marking absent failed)');
+        }
       } else {
         setSuccess('Event created successfully!');
       }
 
+      // Reset form and close
       setShowEventForm(false);
       setEventFormData({ 
         name: '', 
@@ -849,6 +885,7 @@ const Events = () => {
       });
       setShowSundayPreset(false);
       
+      // Refresh events list
       await fetchEvents();
       
       setTimeout(() => setSuccess(null), 3000);
