@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, login_username, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, Plus, ChevronDown, Phone, X, User, Search, login_username, Building, Users as GroupsIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Save, Trash2, Filter } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -67,6 +67,7 @@ interface EventAttendee {
   invited_by_id: string | null;
   attended_at: string | null;
   attendance_status: 'present' | 'absent';
+  notes: string | null;
   members: Member;
   invited_by_member?: {
     id: string;
@@ -100,6 +101,13 @@ const Events = () => {
   
   const [showPresentList, setShowPresentList] = useState<{[key: string]: boolean}>({});
   const [showAbsentList, setShowAbsentList] = useState<{[key: string]: boolean}>({});
+  
+  // New states for managing absent members
+  const [showAbsentManagement, setShowAbsentManagement] = useState<{[key: string]: boolean}>({});
+  const [absentSearchTerm, setAbsentSearchTerm] = useState<{[key: string]: string}>({});
+  const [editingNotes, setEditingNotes] = useState<{[key: string]: boolean}>({});
+  const [notesText, setNotesText] = useState<{[key: string]: string}>({});
+  const [selectedAbsentMembers, setSelectedAbsentMembers] = useState<{[key: string]: string[]}>({});
 
   const [eventFormData, setEventFormData] = useState({
     name: '',
@@ -110,6 +118,7 @@ const Events = () => {
     isWholeChurch: true,
     targetCellGroups: [] as string[],
     targetMinistryGroups: [] as string[],
+    autoMarkAbsent: true, // New: Auto mark absent checkbox
   });
 
   const [attendeeFormData, setAttendeeFormData] = useState({
@@ -288,7 +297,8 @@ const Events = () => {
 
       const attendeesWithDefaults = (data || []).map((attendee: any) => ({
         ...attendee,
-        attendance_status: attendee.attendance_status || 'present'
+        attendance_status: attendee.attendance_status || 'present',
+        notes: attendee.notes || null
       }));
 
       setAttendees(prev => {
@@ -567,10 +577,10 @@ const Events = () => {
     setViewingPamphlet(null);
   };
 
-  // Rest of your existing functions...
-  const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
+  // Mark members as absent with optional notes
+  const markMembersAsAbsent = async (eventId: string, absentMembers: {memberId: string, notes?: string}[]) => {
     try {
-      const absentRecords = absentMemberIds.map(memberId => {
+      const absentRecords = absentMembers.map(({memberId, notes}) => {
         const member = members.find(m => m.id === memberId);
         return {
           event_id: eventId,
@@ -579,7 +589,8 @@ const Events = () => {
           surname: member?.surname || 'Member',
           first_time: false,
           attendance_status: 'absent',
-          attended_at: null
+          attended_at: null,
+          notes: notes || null
         };
       });
 
@@ -589,8 +600,53 @@ const Events = () => {
 
       if (error) throw error;
       await fetchEventAttendees(eventId);
+      return true;
     } catch (error: any) {
       console.error('Error marking members as absent:', error);
+      throw error;
+    }
+  };
+
+  // Get expected members for an event
+  const getExpectedMembers = (event: Event) => {
+    if (event.is_whole_church) {
+      return members.filter(member => 
+        member.status !== 'not_attending'
+      );
+    } else {
+      return members.filter(member => {
+        const inTargetCellGroup = event.target_groups?.some(groupId => 
+          member.cell_group_id === groupId
+        );
+        const inTargetMinistryGroup = event.target_departments?.some(deptId => 
+          member.ministry_group_id === deptId
+        );
+        return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
+      });
+    }
+  };
+
+  // Automatically mark all expected members as absent when event is created
+  const autoMarkAllAbsent = async (eventId: string, eventData: any) => {
+    try {
+      const event = events.find(e => e.id === eventId) || eventData;
+      if (!event) return;
+
+      const expectedMembers = getExpectedMembers(event);
+      const eventAttendees = getEventAttendees(eventId);
+      const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
+
+      const absentMembers = expectedMembers
+        .filter(member => !attendeeIds.has(member.id))
+        .map(member => ({ memberId: member.id, notes: 'Automatically marked as absent on event creation' }));
+
+      if (absentMembers.length > 0) {
+        await markMembersAsAbsent(eventId, absentMembers);
+        return absentMembers.length;
+      }
+      return 0;
+    } catch (error: any) {
+      console.error('Error auto-marking absent:', error);
       throw error;
     }
   };
@@ -611,30 +667,18 @@ const Events = () => {
       const eventAttendees = getEventAttendees(eventId);
       const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
 
-      let expectedMembers: Member[] = [];
-
-      if (event.is_whole_church) {
-        expectedMembers = members.filter(member => 
-          member.status !== 'not_attending'
-        );
-      } else {
-        expectedMembers = members.filter(member => {
-          const inTargetCellGroup = event.target_groups?.some(groupId => 
-            member.cell_group_id === groupId
-          );
-          const inTargetMinistryGroup = event.target_departments?.some(deptId => 
-            member.ministry_group_id === deptId
-          );
-          return (inTargetCellGroup || inTargetMinistryGroup) && member.status !== 'not_attending';
-        });
-      }
+      const expectedMembers = getExpectedMembers(event);
 
       const absentMemberIds = expectedMembers
         .filter(member => !attendeeIds.has(member.id))
         .map(member => member.id);
 
       if (absentMemberIds.length > 0) {
-        await markMembersAsAbsent(eventId, absentMemberIds);
+        const absentMembers = absentMemberIds.map(memberId => ({ 
+          memberId, 
+          notes: 'Auto-marked as absent on event completion' 
+        }));
+        await markMembersAsAbsent(eventId, absentMembers);
       }
 
       const { error } = await supabase
@@ -691,9 +735,22 @@ const Events = () => {
         target_departments: !eventFormData.isWholeChurch && eventFormData.targetMinistryGroups.length > 0 ? eventFormData.targetMinistryGroups : null,
       };
 
-      const { error } = await supabase.from('events').insert([eventData]);
+      const { data, error } = await supabase
+        .from('events')
+        .insert([eventData])
+        .select();
 
       if (error) throw error;
+
+      const newEvent = data[0];
+      
+      // Auto-mark all expected members as absent if checkbox is checked
+      if (eventFormData.autoMarkAbsent) {
+        const absentCount = await autoMarkAllAbsent(newEvent.id, newEvent);
+        setSuccess(`Event created successfully! ${absentCount} members automatically marked as absent.`);
+      } else {
+        setSuccess('Event created successfully!');
+      }
 
       setShowEventForm(false);
       setEventFormData({ 
@@ -705,8 +762,9 @@ const Events = () => {
         isWholeChurch: true,
         targetCellGroups: [],
         targetMinistryGroups: [],
+        autoMarkAbsent: true,
       });
-      setSuccess('Event created successfully!');
+      
       await fetchEvents();
       
       setTimeout(() => setSuccess(null), 3000);
@@ -716,6 +774,157 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // NEW: Function to toggle absent management panel
+  const toggleAbsentManagement = (eventId: string) => {
+    setShowAbsentManagement(prev => ({
+      ...prev,
+      [eventId]: !prev[eventId]
+    }));
+    setShowPresentList(prev => ({ ...prev, [eventId]: false }));
+    setShowAbsentList(prev => ({ ...prev, [eventId]: false }));
+  };
+
+  // NEW: Function to handle absent search
+  const handleAbsentSearch = (eventId: string, value: string) => {
+    setAbsentSearchTerm(prev => ({
+      ...prev,
+      [eventId]: value
+    }));
+  };
+
+  // NEW: Get filtered members for absent search
+  const getFilteredAbsentMembers = (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return [];
+
+    const searchTerm = absentSearchTerm[eventId] || '';
+    const searchLower = searchTerm.toLowerCase();
+
+    // Get expected members for this event
+    let expectedMembers = getExpectedMembers(event);
+    
+    // Filter out already registered attendees
+    const eventAttendees = getEventAttendees(eventId);
+    const attendeeIds = new Set(eventAttendees.map(a => a.members_id));
+    
+    // Filter members that are expected but not yet registered
+    const unregisteredMembers = expectedMembers.filter(member => 
+      !attendeeIds.has(member.id)
+    );
+
+    // Apply search filter
+    return unregisteredMembers.filter(member => {
+      return (
+        member.name.toLowerCase().includes(searchLower) ||
+        member.surname.toLowerCase().includes(searchLower) ||
+        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+        member.phone?.toLowerCase().includes(searchLower) ||
+        member.login_username?.toLowerCase().includes(searchLower)
+      );
+    });
+  };
+
+  // NEW: Toggle selection of absent member
+  const toggleAbsentMemberSelection = (eventId: string, memberId: string) => {
+    setSelectedAbsentMembers(prev => {
+      const currentSelected = prev[eventId] || [];
+      if (currentSelected.includes(memberId)) {
+        return {
+          ...prev,
+          [eventId]: currentSelected.filter(id => id !== memberId)
+        };
+      } else {
+        return {
+          ...prev,
+          [eventId]: [...currentSelected, memberId]
+        };
+      }
+    });
+  };
+
+  // NEW: Mark selected members as absent with custom notes
+  const markSelectedAsAbsent = async (eventId: string) => {
+    const selected = selectedAbsentMembers[eventId] || [];
+    if (selected.length === 0) {
+      setError('Please select at least one member');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const absentMembers = selected.map(memberId => ({
+        memberId,
+        notes: notesText[`${eventId}-${memberId}`] || 'Manually marked as absent'
+      }));
+
+      await markMembersAsAbsent(eventId, absentMembers);
+      
+      // Clear selections and notes
+      setSelectedAbsentMembers(prev => ({ ...prev, [eventId]: [] }));
+      Object.keys(notesText).forEach(key => {
+        if (key.startsWith(`${eventId}-`)) {
+          delete notesText[key];
+        }
+      });
+      setNotesText({...notesText});
+      
+      setSuccess(`${absentMembers.length} members marked as absent successfully!`);
+      setTimeout(() => setSuccess(null), 3000);
+      
+      // Refresh attendees
+      await fetchEventAttendees(eventId);
+    } catch (error: any) {
+      console.error('Error marking selected as absent:', error);
+      setError(error.message || 'Failed to mark members as absent.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // NEW: Update absent notes
+  const updateAbsentNotes = async (attendeeId: string, eventId: string, notes: string) => {
+    try {
+      const { error } = await supabase
+        .from('event_attendees')
+        .update({ notes })
+        .eq('id', attendeeId);
+
+      if (error) throw error;
+
+      // Update local state
+      setAttendees(prev => prev.map(attendee => 
+        attendee.id === attendeeId ? { ...attendee, notes } : attendee
+      ));
+
+      setSuccess('Notes updated successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error updating notes:', error);
+      setError(error.message || 'Failed to update notes.');
+    }
+  };
+
+  // NEW: Function to edit notes
+  const startEditNotes = (attendeeId: string, currentNotes: string) => {
+    setEditingNotes(prev => ({ ...prev, [attendeeId]: true }));
+    setNotesText(prev => ({ ...prev, [attendeeId]: currentNotes || '' }));
+  };
+
+  // NEW: Function to save edited notes
+  const saveEditNotes = async (attendeeId: string, eventId: string) => {
+    const notes = notesText[attendeeId] || '';
+    await updateAbsentNotes(attendeeId, eventId, notes);
+    setEditingNotes(prev => ({ ...prev, [attendeeId]: false }));
+  };
+
+  // NEW: Function to cancel editing notes
+  const cancelEditNotes = (attendeeId: string) => {
+    setEditingNotes(prev => ({ ...prev, [attendeeId]: false }));
   };
 
   const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
@@ -838,6 +1047,7 @@ const Events = () => {
       ...prev,
       [eventId]: false
     }));
+    setShowAbsentManagement(prev => ({ ...prev, [eventId]: false }));
   };
 
   const toggleAbsentList = (eventId: string) => {
@@ -849,6 +1059,7 @@ const Events = () => {
       ...prev,
       [eventId]: false
     }));
+    setShowAbsentManagement(prev => ({ ...prev, [eventId]: false }));
   };
 
   const filteredMembers = members.filter(member => {
@@ -1187,6 +1398,27 @@ const Events = () => {
                   />
                 </div>
 
+                {/* Auto Mark Absent Checkbox */}
+                <div className="md:col-span-2 space-y-2">
+                  <div className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl">
+                    <input
+                      type="checkbox"
+                      id="autoMarkAbsent"
+                      checked={eventFormData.autoMarkAbsent}
+                      onChange={(e) => setEventFormData({ ...eventFormData, autoMarkAbsent: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                    />
+                    <div>
+                      <label htmlFor="autoMarkAbsent" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Automatically mark all expected members as absent
+                      </label>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        When checked, all expected members (based on event scope) will be automatically marked as absent upon event creation.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Event Scope */}
                 <div className="md:col-span-2 space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
@@ -1329,6 +1561,8 @@ const Events = () => {
               const ScopeIcon = scopeBadge.icon;
               const StatusIcon = statusBadge.icon;
               const sermon = getSermonForEvent(event.id);
+              const filteredAbsentMembers = getFilteredAbsentMembers(event.id);
+              const selectedForEvent = selectedAbsentMembers[event.id] || [];
               
               return (
                 <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 hover:scale-[1.02]">
@@ -1545,6 +1779,16 @@ const Events = () => {
                         <span>{showAbsentList[event.id] ? 'Hide' : 'View'} Absent ({absentAttendees.length})</span>
                         <ChevronDown className={`h-4 w-4 transition-transform ${showAbsentList[event.id] ? 'rotate-180' : ''}`} />
                       </button>
+                      {/* NEW: Manage Absent Button */}
+                      {!event.is_completed && hasAccess() && (
+                        <button
+                          onClick={() => toggleAbsentManagement(event.id)}
+                          className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
+                        >
+                          <span>{showAbsentManagement[event.id] ? 'Close' : 'Manage'} Absent</span>
+                          <Filter className={`h-4 w-4 transition-transform ${showAbsentManagement[event.id] ? 'rotate-180' : ''}`} />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1713,6 +1957,119 @@ const Events = () => {
                     </div>
                   )}
 
+                  {/* NEW: Manage Absent Section */}
+                  {showAbsentManagement[event.id] && (
+                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
+                      <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                        <Filter className="h-5 w-5" />
+                        Manage Absent Members
+                        <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+                          ({filteredAbsentMembers.length} unregistered members)
+                        </span>
+                      </h4>
+                      
+                      {/* Search Bar */}
+                      <div className="mb-4">
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={absentSearchTerm[event.id] || ''}
+                            onChange={(e) => handleAbsentSearch(event.id, e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                            placeholder="Search members to mark as absent..."
+                          />
+                          <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
+                        </div>
+                      </div>
+
+                      {/* Members List */}
+                      {filteredAbsentMembers.length > 0 ? (
+                        <div className="space-y-3 max-h-80 overflow-y-auto mb-4">
+                          {filteredAbsentMembers.map((member) => (
+                            <div key={member.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedForEvent.includes(member.id)}
+                                  onChange={() => toggleAbsentMemberSelection(event.id, member.id)}
+                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
+                                  {getInitials(member.name, member.surname)}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-gray-900 dark:text-white">
+                                    {member.name} {member.surname}
+                                  </div>
+                                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                                    {member.phone && (
+                                      <span className="flex items-center gap-1">
+                                        <Phone className="h-3 w-3" />
+                                        {member.phone}
+                                      </span>
+                                    )}
+                                    {member.cell_groups?.name && (
+                                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded-full">
+                                        {member.cell_groups.name}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="w-48">
+                                <input
+                                  type="text"
+                                  value={notesText[`${event.id}-${member.id}`] || ''}
+                                  onChange={(e) => setNotesText(prev => ({ 
+                                    ...prev, 
+                                    [`${event.id}-${member.id}`]: e.target.value 
+                                  }))}
+                                  className="w-full px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                  placeholder="Absent reason (optional)"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8">
+                          <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                          <p className="text-gray-600 dark:text-gray-400">
+                            {absentSearchTerm[event.id] 
+                              ? 'No members found matching your search'
+                              : 'All expected members are already registered or marked as absent'}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="flex justify-between items-center">
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {selectedForEvent.length} member{selectedForEvent.length !== 1 ? 's' : ''} selected
+                        </div>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => {
+                              setSelectedAbsentMembers(prev => ({ ...prev, [event.id]: [] }));
+                              setAbsentSearchTerm(prev => ({ ...prev, [event.id]: '' }));
+                            }}
+                            className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
+                          >
+                            Clear All
+                          </button>
+                          <button
+                            onClick={() => markSelectedAsAbsent(event.id)}
+                            disabled={loading || selectedForEvent.length === 0}
+                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <AlertCircle className="h-4 w-4" />
+                            {loading ? 'Marking...' : `Mark ${selectedForEvent.length} as Absent`}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Present List */}
                   {showPresentList[event.id] && presentAttendees.length > 0 && (
                     <div className="mt-6 p-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
@@ -1767,7 +2124,7 @@ const Events = () => {
                     </div>
                   )}
 
-                  {/* Absent List */}
+                  {/* Absent List with Notes Editing */}
                   {showAbsentList[event.id] && absentAttendees.length > 0 && (
                     <div className="mt-6 p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl">
                       <h4 className="text-lg font-semibold text-red-700 dark:text-red-300 mb-4 flex items-center gap-2">
@@ -1795,8 +2152,50 @@ const Events = () => {
                                 </div>
                               </div>
                             </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
-                              Auto-marked as absent
+                            <div className="flex items-center gap-2">
+                              {editingNotes[attendee.id] ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={notesText[attendee.id] || ''}
+                                    onChange={(e) => setNotesText(prev => ({ ...prev, [attendee.id]: e.target.value }))}
+                                    className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    placeholder="Absent reason"
+                                  />
+                                  <button
+                                    onClick={() => saveEditNotes(attendee.id, event.id)}
+                                    className="p-1 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-lg transition-colors duration-150"
+                                  >
+                                    <Save className="h-4 w-4 text-green-500" />
+                                  </button>
+                                  <button
+                                    onClick={() => cancelEditNotes(attendee.id)}
+                                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-150"
+                                  >
+                                    <X className="h-4 w-4 text-gray-500" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
+                                    {attendee.notes || 'No reason provided'}
+                                  </span>
+                                  <button
+                                    onClick={() => startEditNotes(attendee.id, attendee.notes || '')}
+                                    className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
+                                  >
+                                    <Edit className="h-4 w-4 text-blue-500" />
+                                  </button>
+                                </div>
+                              )}
+                              {hasAccess() && (
+                                <button
+                                  onClick={() => handleRemoveAttendee(attendee.id, event.id)}
+                                  className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
