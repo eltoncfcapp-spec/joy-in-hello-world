@@ -17,6 +17,8 @@ interface CellGroup {
   updated_at?: string;
   created_by?: string | null;
   leader_name?: string | null;
+  leader_email?: string | null;
+  leader_phone?: string | null;
   is_current_user_leader?: boolean;
 }
 
@@ -93,10 +95,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
   const loadAvailableLeaders = async () => {
     try {
+      // Get all members who are leaders or have leadership potential
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .in('admin_role', ['group_leader', 'deacon', 'pastor', 'administrator', 'admin'])
+        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
@@ -409,7 +412,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .in('admin_role', ['group_leader', 'deacon', 'pastor', 'administrator', 'admin'])
+        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
@@ -2521,36 +2524,43 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // Load groups with leader information
+      // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
-        .select(`
-          *,
-          leaders:leader_id (
-            name,
-            surname
-          )
-        `)
+        .select('*')
         .order('name');
 
       if (groupsError) throw groupsError;
 
-      const groupsWithMemberCounts = await Promise.all(
+      // Get leader information for each group
+      const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
+          // Get member count
           const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
-          const leaderName = group.leaders ? 
-            `${group.leaders.name} ${group.leaders.surname}` : null;
+          // Get leader information if leader_id exists
+          let leaderInfo = null;
+          if (group.leader_id) {
+            const { data: leaderData } = await supabase
+              .from('members')
+              .select('name, surname, email, phone')
+              .eq('id', group.leader_id)
+              .single();
+            
+            leaderInfo = leaderData;
+          }
           
           // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
             ...group,
-            leader_name: leaderName,
+            leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
+            leader_email: leaderInfo?.email || null,
+            leader_phone: leaderInfo?.phone || null,
             memberCount: count || 0,
             is_current_user_leader: isCurrentUserLeader
           };
@@ -2558,18 +2568,18 @@ const Groups = () => {
       );
 
       // Filter groups based on user role
-      let filteredGroups = groupsWithMemberCounts;
+      let filteredGroups = groupsWithDetails;
       
       if (!isAdministrator && !isPastor) {
         if (isGroupLeader) {
           // Group Leaders can see only their own group
-          filteredGroups = groupsWithMemberCounts.filter(group => 
+          filteredGroups = groupsWithDetails.filter(group => 
             group.leader_id === profile?.id
           );
         } else if (isMember) {
           // Members can see only their own group
           const userGroup = await getUserGroup();
-          filteredGroups = groupsWithMemberCounts.filter(group => 
+          filteredGroups = groupsWithDetails.filter(group => 
             group.id === userGroup?.id
           );
         }
@@ -2578,6 +2588,7 @@ const Groups = () => {
 
       setGroups(filteredGroups);
     } catch (error: any) {
+      console.error('Error loading groups:', error);
       setError('Failed to load groups: ' + error.message);
     } finally {
       setLoading(false);
