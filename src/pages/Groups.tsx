@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, login_username, Phone, Download, FileDown } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Mail, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -13,6 +13,10 @@ interface CellGroup {
   leader_id: string | null;
   description?: string | null;
   memberCount?: number;
+  created_at?: string;
+  updated_at?: string;
+  created_by?: string | null;
+  leader_name?: string | null;
 }
 
 interface GroupMeeting {
@@ -32,10 +36,11 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  login_username: string | null;
+  email: string | null;
   phone: string | null;
   cell_group_id?: string | null;
   status?: string | null;
+  admin_role?: string | null;
 }
 
 interface GroupAttendanceRecord {
@@ -57,7 +62,748 @@ interface GroupReport {
   created_at: string | null;
 }
 
-// Group Meeting Creation Step
+// New Group Creation Component
+interface CreateGroupModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+  userId: string | null;
+}
+
+const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    description: '',
+    leader_id: '',
+  });
+  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
+  const [searchLeaderTerm, setSearchLeaderTerm] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      loadAvailableLeaders();
+    }
+  }, [isOpen]);
+
+  const loadAvailableLeaders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .in('admin_role', ['group_leader', 'deacon', 'pastor', 'administrator', 'admin'])
+        .order('name');
+
+      if (error) throw error;
+      setAvailableLeaders(data || []);
+    } catch (error: any) {
+      console.error('Failed to load leaders:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const createGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!formData.name.trim()) {
+      onError('Group name is required');
+      return;
+    }
+
+    if (!userId) {
+      onError('You must be logged in to create a group');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Check if group with same name already exists
+      const { data: existingGroup } = await supabase
+        .from('cell_groups')
+        .select('id')
+        .ilike('name', formData.name.trim())
+        .single();
+
+      if (existingGroup) {
+        onError('A group with this name already exists');
+        return;
+      }
+
+      const newGroup = {
+        name: formData.name.trim(),
+        location: formData.location.trim() || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        description: formData.description.trim() || null,
+        leader_id: formData.leader_id || null,
+        created_by: userId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .insert([newGroup])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // If a leader was selected, update their group assignment
+      if (formData.leader_id) {
+        await supabase
+          .from('members')
+          .update({ 
+            cell_group_id: data.id,
+            admin_role: 'group_leader',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', formData.leader_id);
+      }
+
+      setFormData({
+        name: '',
+        location: '',
+        meeting_day: '',
+        meeting_time: '',
+        description: '',
+        leader_id: '',
+      });
+      
+      onSuccess('Group created successfully!');
+      onClose();
+    } catch (error: any) {
+      console.error('Error creating group:', error);
+      onError('Failed to create group: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredLeaders = availableLeaders.filter(leader =>
+    leader.name.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
+    leader.surname.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
+    leader.email?.toLowerCase().includes(searchLeaderTerm.toLowerCase())
+  );
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Create New Group</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={createGroup} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Group Name *
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter group name"
+              required
+              minLength={2}
+              maxLength={100}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Location
+            </label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                name="location"
+                value={formData.location}
+                onChange={handleInputChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter meeting location"
+                maxLength={200}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Day
+              </label>
+              <select
+                name="meeting_day"
+                value={formData.meeting_day}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select day</option>
+                <option value="Sunday">Sunday</option>
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Time
+              </label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="time"
+                  name="meeting_time"
+                  value={formData.meeting_time}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              rows={3}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter group description (optional)"
+              maxLength={500}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Group Leader (Optional)
+            </label>
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <input
+                  type="text"
+                  placeholder="Search for leaders..."
+                  value={searchLeaderTerm}
+                  onChange={(e) => setSearchLeaderTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              
+              <select
+                name="leader_id"
+                value={formData.leader_id}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">No leader assigned</option>
+                {filteredLeaders.map((leader) => (
+                  <option key={leader.id} value={leader.id}>
+                    {leader.name} {leader.surname} ({leader.admin_role})
+                  </option>
+                ))}
+              </select>
+              
+              {filteredLeaders.length === 0 && searchLeaderTerm && (
+                <p className="text-sm text-gray-500 text-center py-2">
+                  No leaders found matching your search
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              <Save className="h-4 w-4" />
+              {loading ? 'Creating Group...' : 'Create Group'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-6 pt-4 border-t border-gray-200">
+          <p className="text-sm text-gray-500">
+            Only administrators and pastors can create new groups. 
+            The group creator will have full management permissions.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Edit Group Modal Component
+interface EditGroupModalProps {
+  isOpen: boolean;
+  group: CellGroup | null;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}
+
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    description: '',
+    leader_id: '',
+  });
+  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
+
+  useEffect(() => {
+    if (isOpen && group) {
+      setFormData({
+        name: group.name || '',
+        location: group.location || '',
+        meeting_day: group.meeting_day || '',
+        meeting_time: group.meeting_time || '',
+        description: group.description || '',
+        leader_id: group.leader_id || '',
+      });
+      loadAvailableLeaders();
+    }
+  }, [isOpen, group]);
+
+  const loadAvailableLeaders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .in('admin_role', ['group_leader', 'deacon', 'pastor', 'administrator', 'admin'])
+        .order('name');
+
+      if (error) throw error;
+      setAvailableLeaders(data || []);
+    } catch (error: any) {
+      console.error('Failed to load leaders:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const updateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!group?.id) {
+      onError('Group not found');
+      return;
+    }
+
+    if (!formData.name.trim()) {
+      onError('Group name is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Check if group with same name already exists (excluding current group)
+      const { data: existingGroup } = await supabase
+        .from('cell_groups')
+        .select('id')
+        .ilike('name', formData.name.trim())
+        .neq('id', group.id)
+        .single();
+
+      if (existingGroup) {
+        onError('Another group with this name already exists');
+        return;
+      }
+
+      const updatedGroup = {
+        name: formData.name.trim(),
+        location: formData.location.trim() || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        description: formData.description.trim() || null,
+        leader_id: formData.leader_id || null,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('cell_groups')
+        .update(updatedGroup)
+        .eq('id', group.id);
+
+      if (error) throw error;
+
+      // Handle leader assignment changes
+      const previousLeaderId = group.leader_id;
+      if (previousLeaderId !== formData.leader_id) {
+        // Remove previous leader's group assignment
+        if (previousLeaderId) {
+          await supabase
+            .from('members')
+            .update({ 
+              cell_group_id: null,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', previousLeaderId);
+        }
+
+        // Assign new leader
+        if (formData.leader_id) {
+          await supabase
+            .from('members')
+            .update({ 
+              cell_group_id: group.id,
+              admin_role: 'group_leader',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', formData.leader_id);
+        }
+      }
+
+      onSuccess('Group updated successfully!');
+      onClose();
+    } catch (error: any) {
+      console.error('Error updating group:', error);
+      onError('Failed to update group: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen || !group) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Edit Group</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={updateGroup} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Group Name *
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter group name"
+              required
+              minLength={2}
+              maxLength={100}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Location
+            </label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                name="location"
+                value={formData.location}
+                onChange={handleInputChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter meeting location"
+                maxLength={200}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Day
+              </label>
+              <select
+                name="meeting_day"
+                value={formData.meeting_day}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select day</option>
+                <option value="Sunday">Sunday</option>
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Time
+              </label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="time"
+                  name="meeting_time"
+                  value={formData.meeting_time}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              rows={3}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter group description (optional)"
+              maxLength={500}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Group Leader
+            </label>
+            <select
+              name="leader_id"
+              value={formData.leader_id}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">No leader assigned</option>
+              {availableLeaders.map((leader) => (
+                <option key={leader.id} value={leader.id}>
+                  {leader.name} {leader.surname} ({leader.admin_role})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              <Save className="h-4 w-4" />
+              {loading ? 'Updating Group...' : 'Update Group'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Delete Group Confirmation Modal
+interface DeleteGroupModalProps {
+  isOpen: boolean;
+  group: CellGroup | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  onError: (message: string) => void;
+}
+
+const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError }) => {
+  const [loading, setLoading] = useState(false);
+  const [memberCount, setMemberCount] = useState(0);
+
+  useEffect(() => {
+    if (isOpen && group) {
+      checkMemberCount();
+    }
+  }, [isOpen, group]);
+
+  const checkMemberCount = async () => {
+    try {
+      const { count } = await supabase
+        .from('members')
+        .select('*', { count: 'exact', head: true })
+        .eq('cell_group_id', group?.id);
+
+      setMemberCount(count || 0);
+    } catch (error) {
+      console.error('Failed to check member count:', error);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!group?.id) {
+      onError('Group not found');
+      return;
+    }
+
+    if (memberCount > 0) {
+      onError(`Cannot delete group with ${memberCount} member(s). Please reassign or remove members first.`);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Remove leader assignment if exists
+      if (group.leader_id) {
+        await supabase
+          .from('members')
+          .update({ 
+            cell_group_id: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', group.leader_id);
+      }
+
+      // Delete the group
+      const { error } = await supabase
+        .from('cell_groups')
+        .delete()
+        .eq('id', group.id);
+
+      if (error) throw error;
+
+      onConfirm();
+    } catch (error: any) {
+      console.error('Error deleting group:', error);
+      onError('Failed to delete group: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+      onClose();
+    }
+  };
+
+  if (!isOpen || !group) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Delete Group</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mb-6">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+              <div>
+                <h4 className="text-red-800 font-medium mb-1">Warning</h4>
+                <p className="text-red-700 text-sm">
+                  You are about to delete the group "{group.name}". This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <span className="text-gray-700">Group Name</span>
+              <span className="font-medium text-gray-900">{group.name}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <span className="text-gray-700">Location</span>
+              <span className="font-medium text-gray-900">{group.location || 'Not specified'}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <span className="text-gray-700">Current Members</span>
+              <span className="font-medium text-gray-900">{memberCount}</span>
+            </div>
+          </div>
+
+          {memberCount > 0 && (
+            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <p className="text-sm text-yellow-800">
+                  This group has {memberCount} member(s). You must remove all members before deleting the group.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleDelete}
+            disabled={loading || memberCount > 0}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+          >
+            <Trash2 className="h-4 w-4" />
+            {loading ? 'Deleting...' : 'Delete Group'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Group Meeting Creation Step (existing code, keeping the same)
 const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -262,7 +1008,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
   );
 };
 
-// Group Attendance Step Component
+// Group Attendance Step Component (existing code, keeping the same)
 interface GroupAttendanceStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -441,7 +1187,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
     !groupMembers.some(gm => gm.id === member.id) && (
       member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.login_username?.toLowerCase().includes(searchMemberTerm.toLowerCase())
+      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
     )
   );
 
@@ -542,7 +1288,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
-                          {member.login_username} • {member.phone}
+                          {member.email} • {member.phone}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -647,7 +1393,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium text-gray-900">{member.name} {member.surname}</div>
-                        <div className="text-sm text-gray-600">{member.login_username} • {member.phone}</div>
+                        <div className="text-sm text-gray-600">{member.email} • {member.phone}</div>
                       </div>
                       <button
                         onClick={() => addMemberToGroup(member)}
@@ -668,7 +1414,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   );
 };
 
-// Group Newcomer Step Component
+// Group Newcomer Step Component (existing code, keeping the same)
 interface GroupNewcomerStepProps {
   group: CellGroup;
   selectedMeeting: GroupMeeting | null;
@@ -683,7 +1429,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     name: '',
     surname: '',
     phone: '',
-    login_username: '',
+    email: '',
     notes: ''
   });
 
@@ -703,15 +1449,15 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     try {
       setLoading(true);
       
-      // Check if member already exists with same login_username or phone
+      // Check if member already exists with same email or phone
       let existingMember = null;
-      if (formData.login_username.trim()) {
-        const { data: login_usernameMatch } = await supabase
+      if (formData.email.trim()) {
+        const { data: emailMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('login_username', formData.login_username.trim())
+          .eq('email', formData.email.trim())
           .single();
-        existingMember = login_usernameMatch;
+        existingMember = emailMatch;
       }
       
       if (!existingMember && formData.phone.trim()) {
@@ -745,7 +1491,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
-          login_username: formData.login_username.trim() || null,
+          email: formData.email.trim() || null,
           status: 'newcomer' as const,
           cell_group_id: group.id,
           first_time_visit_date: new Date().toISOString(),
@@ -765,8 +1511,8 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('login_username')) {
-            onError('A member with this login_username already exists');
+          if (memberError.code === '23505' && memberError.message.includes('email')) {
+            onError('A member with this email already exists');
             return;
           }
           throw memberError;
@@ -787,7 +1533,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
 
-      setFormData({ name: '', surname: '', phone: '', login_username: '', notes: '' });
+      setFormData({ name: '', surname: '', phone: '', email: '', notes: '' });
       setShowForm(false);
       onNewcomerAdded();
     } catch (error: any) {
@@ -888,16 +1634,16 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">login_username Address</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
                 <div className="relative">
-                  <login_username className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="login_username"
-                    name="login_username"
-                    value={formData.login_username}
+                    type="email"
+                    name="email"
+                    value={formData.email}
                     onChange={handleInputChange}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter login_username address"
+                    placeholder="Enter email address"
                   />
                 </div>
               </div>
@@ -928,7 +1674,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 type="button"
                 onClick={() => {
                   setShowForm(false);
-                  setFormData({ name: '', surname: '', phone: '', login_username: '', notes: '' });
+                  setFormData({ name: '', surname: '', phone: '', email: '', notes: '' });
                 }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
@@ -949,7 +1695,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   );
 };
 
-// Group Report Step Component
+// Group Report Step Component (existing code, keeping the same)
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -987,7 +1733,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .select(`
           *,
           members:member_id (
-            id, name, surname, login_username, phone
+            id, name, surname, email, phone
           )
         `)
         .eq('meeting_id', selectedMeeting.id);
@@ -1582,7 +2328,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
   );
 };
 
-// Group Management Workflow Component
+// Group Management Workflow Component (existing code, keeping the same)
 interface GroupWorkflowProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -1730,7 +2476,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
 
 // Main Groups Component
 const Groups = () => {
-  const { profile, canViewGroup, canManageGroup, getRoles } = useAuth();
+  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor } = useAuth();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -1739,6 +2485,9 @@ const Groups = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false);
+  const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -1757,9 +2506,16 @@ const Groups = () => {
     try {
       setLoading(true);
       
+      // Load groups with leader information
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
-        .select('*')
+        .select(`
+          *,
+          leaders:leader_id (
+            name,
+            surname
+          )
+        `)
         .order('name');
 
       if (groupsError) throw groupsError;
@@ -1771,8 +2527,12 @@ const Groups = () => {
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
+          const leaderName = group.leaders ? 
+            `${group.leaders.name} ${group.leaders.surname}` : null;
+          
           return {
             ...group,
+            leader_name: leaderName,
             memberCount: count || 0
           };
         })
@@ -1822,7 +2582,7 @@ const Groups = () => {
         .select(`
           *,
           members:member_id (
-            id, name, surname, login_username, phone
+            id, name, surname, email, phone
           )
         `)
         .eq('meeting_id', meetingId);
@@ -1866,7 +2626,28 @@ const Groups = () => {
     await loadMeetings(group.id);
   };
 
+  const openEditGroupModal = (group: CellGroup) => {
+    if (!isAdministrator && !isPastor) {
+      setError('Only administrators and pastors can edit groups');
+      return;
+    }
+    setSelectedGroup(group);
+    setShowEditGroupModal(true);
+  };
+
+  const openDeleteGroupModal = (group: CellGroup) => {
+    if (!isAdministrator && !isPastor) {
+      setError('Only administrators and pastors can delete groups');
+      return;
+    }
+    setSelectedGroup(group);
+    setShowDeleteGroupModal(true);
+  };
+
   const closeAllModals = () => {
+    setShowCreateGroupModal(false);
+    setShowEditGroupModal(false);
+    setShowDeleteGroupModal(false);
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
@@ -1875,10 +2656,29 @@ const Groups = () => {
     setAttendanceRecords([]);
   };
 
+  const handleGroupCreated = () => {
+    loadGroups();
+    setSuccess('Group created successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleGroupUpdated = () => {
+    loadGroups();
+    setSuccess('Group updated successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleGroupDeleted = () => {
+    loadGroups();
+    setSuccess('Group deleted successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
   const filteredGroups = groups.filter(group => 
     canViewGroup(group.id) && (
       group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      group.location?.toLowerCase().includes(searchTerm.toLowerCase())
+      group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
 
@@ -1891,6 +2691,10 @@ const Groups = () => {
     if (roles.includes('deacon')) return 'Deacon';
     if (roles.includes('group_leader')) return 'Group Leader';
     return 'Member';
+  };
+
+  const canCreateGroups = () => {
+    return isAdministrator || isPastor;
   };
 
   const getAttendanceStats = () => {
@@ -1913,9 +2717,9 @@ const Groups = () => {
           </p>
         </div>
 
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="relative max-w-md mx-auto">
+        {/* Search and Create Group Bar */}
+        <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
+          <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
               type="text"
@@ -1925,6 +2729,16 @@ const Groups = () => {
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
+          
+          {canCreateGroups() && (
+            <button
+              onClick={() => setShowCreateGroupModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-green-600 text-white rounded-xl hover:from-blue-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
+            >
+              <Plus className="h-5 w-5" />
+              Create New Group
+            </button>
+          )}
         </div>
 
         {/* Error/Success Messages */}
@@ -1973,46 +2787,81 @@ const Groups = () => {
             ) : filteredGroups.length === 0 ? (
               <div className="col-span-full text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-600 mb-2">No Accessible Groups</h3>
+                <h3 className="text-xl font-semibold text-gray-600 mb-2">
+                  {searchTerm ? 'No groups match your search' : 'No Accessible Groups'}
+                </h3>
                 <p className="text-gray-500 mb-6">
-                  {searchTerm ? 'No groups match your search' : 'You do not have access to any groups'}
+                  {searchTerm ? 'Try a different search term' : 'You do not have access to any groups'}
                 </p>
+                {canCreateGroups() && (
+                  <button
+                    onClick={() => setShowCreateGroupModal(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mx-auto"
+                  >
+                    <Plus className="h-5 w-5" />
+                    Create Your First Group
+                  </button>
+                )}
               </div>
             ) : (
               filteredGroups.map((group) => {
                 const canManage = canManageGroup(group.id);
                 const canView = canViewGroup(group.id);
+                const canEdit = isAdministrator || isPastor;
                 
                 return (
                   <div
                     key={group.id}
                     className="bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
                   >
-                    <div className="flex items-start gap-4 mb-4">
-                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center shadow-lg">
-                        <Users className="h-7 w-7 text-white" />
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-start gap-4">
+                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center shadow-lg">
+                          <Users className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">{group.name}</h3>
+                          {canManage ? (
+                            <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium mb-2">
+                              <Shield className="h-3 w-3 mr-1" />
+                              Can Manage
+                            </span>
+                          ) : canView ? (
+                            <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium mb-2">
+                              <Shield className="h-3 w-3 mr-1" />
+                              View Only
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">{group.name}</h3>
-                        {canManage ? (
-                          <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium mb-2">
-                            <Shield className="h-3 w-3 mr-1" />
-                            Can Manage
-                          </span>
-                        ) : canView ? (
-                          <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium mb-2">
-                            <Shield className="h-3 w-3 mr-1" />
-                            View Only
-                          </span>
-                        ) : null}
-                      </div>
+                      
+                      {canEdit && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => openEditGroupModal(group)}
+                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Edit Group"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => openDeleteGroupModal(group)}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Delete Group"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-3 mb-4">
-                      <div className="flex items-center gap-3 text-gray-600">
-                        <User className="h-4 w-4" />
-                        <span className="text-sm">Leader: {group.leader_id ? 'Assigned' : 'Not assigned'}</span>
-                      </div>
+                      {group.leader_name && (
+                        <div className="flex items-center gap-3 text-gray-600">
+                          <User className="h-4 w-4" />
+                          <span className="text-sm">Leader: {group.leader_name}</span>
+                        </div>
+                      )}
                       {group.location && (
                         <div className="flex items-center gap-3 text-gray-600">
                           <MapPin className="h-4 w-4" />
@@ -2061,6 +2910,39 @@ const Groups = () => {
         )}
 
         {/* Modals */}
+        <CreateGroupModal
+          isOpen={showCreateGroupModal}
+          onClose={() => setShowCreateGroupModal(false)}
+          onSuccess={handleGroupCreated}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          userId={profile?.id || null}
+        />
+
+        <EditGroupModal
+          isOpen={showEditGroupModal}
+          group={selectedGroup}
+          onClose={() => setShowEditGroupModal(false)}
+          onSuccess={handleGroupUpdated}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+        />
+
+        <DeleteGroupModal
+          isOpen={showDeleteGroupModal}
+          group={selectedGroup}
+          onClose={() => setShowDeleteGroupModal(false)}
+          onConfirm={handleGroupDeleted}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+        />
+
         {showMeetingsModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
             <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
