@@ -1116,7 +1116,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       
       const { data, error } = await supabase
         .from('meeting_attendance')
-        .select('*, members!inner(*)')
+        .select('*')
         .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
@@ -1212,6 +1212,8 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (insertError) throw insertError;
       
+      // Reload attendance data after saving
+      await loadExistingAttendance();
       onAttendanceSaved();
       onError('Attendance saved successfully!');
     } catch (error: any) {
@@ -1861,6 +1863,12 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
     next_meeting_date: '',
     additional_notes: ''
   });
+  const [attendanceStats, setAttendanceStats] = useState({
+    present: 0,
+    absent: 0,
+    absentWithReason: 0,
+    total: 0
+  });
 
   useEffect(() => {
     if (selectedMeeting) {
@@ -1868,6 +1876,21 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       loadExistingReport();
     }
   }, [selectedMeeting]);
+
+  useEffect(() => {
+    // Update stats whenever attendance changes
+    const presentCount = attendance.filter(a => a.status === 'present').length;
+    const absentCount = attendance.filter(a => a.status === 'absent').length;
+    const absentWithReasonCount = attendance.filter(a => a.status === 'absent_with_reason').length;
+    const totalCount = attendance.length;
+
+    setAttendanceStats({
+      present: presentCount,
+      absent: absentCount,
+      absentWithReason: absentWithReasonCount,
+      total: totalCount
+    });
+  }, [attendance]);
 
   const loadAttendanceData = async () => {
     try {
@@ -1883,7 +1906,13 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         `)
         .eq('meeting_id', selectedMeeting.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading attendance:', error);
+        onError('Failed to load attendance data: ' + error.message);
+        return;
+      }
+      
+      console.log('Loaded attendance data:', data); // Debug log
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -1977,7 +2006,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   };
 
   const handlePrint = () => {
-    const stats = getAttendanceStats();
+    const stats = attendanceStats;
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
@@ -2105,7 +2134,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   };
 
   const downloadReport = () => {
-    const stats = getAttendanceStats();
+    const stats = attendanceStats;
     const reportContent = `
 GROUP MEETING REPORT
 
@@ -2163,17 +2192,6 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
-  const getAttendanceStats = () => {
-    const present = attendance.filter(a => a.status === 'present').length;
-    const absent = attendance.filter(a => a.status === 'absent').length;
-    const absentWithReason = attendance.filter(a => a.status === 'absent_with_reason').length;
-    const total = attendance.length;
-
-    return { present, absent, absentWithReason, total };
-  };
-
-  const stats = getAttendanceStats();
 
   return (
     <div className="space-y-6">
@@ -2290,36 +2308,36 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                       <CheckCircle className="h-5 w-5 text-green-600" />
                       <span className="text-green-800">Present</span>
                     </div>
-                    <span className="text-lg font-bold text-green-800">{stats.present}</span>
+                    <span className="text-lg font-bold text-green-800">{attendanceStats.present}</span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <X className="h-5 w-5 text-red-600" />
                       <span className="text-red-800">Absent</span>
                     </div>
-                    <span className="text-lg font-bold text-red-800">{stats.absent}</span>
+                    <span className="text-lg font-bold text-red-800">{attendanceStats.absent}</span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="h-5 w-5 text-yellow-600" />
                       <span className="text-yellow-800">Absent with Notes</span>
                     </div>
-                    <span className="text-lg font-bold text-yellow-800">{stats.absentWithReason}</span>
+                    <span className="text-lg font-bold text-yellow-800">{attendanceStats.absentWithReason}</span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <Users className="h-5 w-5 text-blue-600" />
                       <span className="text-blue-800">Total</span>
                     </div>
-                    <span className="text-lg font-bold text-blue-800">{stats.total}</span>
+                    <span className="text-lg font-bold text-blue-800">{attendanceStats.total}</span>
                   </div>
                 </div>
 
-                {stats.total > 0 && (
+                {attendanceStats.total > 0 && (
                   <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-gray-900">
-                        {Math.round((stats.present / stats.total) * 100)}%
+                        {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
                       </div>
                       <div className="text-sm text-gray-600">Attendance Rate</div>
                     </div>
@@ -2793,9 +2811,16 @@ const Groups = () => {
         `)
         .eq('meeting_id', meetingId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading attendance:', error);
+        setError('Failed to load attendance: ' + error.message);
+        return;
+      }
+      
+      console.log('Loaded attendance records:', data); // Debug log
       setAttendanceRecords(data || []);
     } catch (error: any) {
+      console.error('Failed to load attendance:', error);
       setError('Failed to load attendance: ' + error.message);
     }
   };
