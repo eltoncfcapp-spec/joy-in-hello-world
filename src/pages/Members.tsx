@@ -6,7 +6,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
   ministry_group_id: string | null;
@@ -45,7 +45,7 @@ const Members = () => {
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
-    email: '',
+    residence: '',
     phone: '',
     invited_by: '',
     cell_group_id: '',
@@ -55,7 +55,7 @@ const Members = () => {
   const [editFormData, setEditFormData] = useState({
     name: '',
     surname: '',
-    email: '',
+    residence: '',
     phone: '',
     invited_by: '',
     cell_group_id: '',
@@ -147,7 +147,7 @@ const Members = () => {
         .insert([{
           name: formData.name.trim(),
           surname: formData.surname.trim(),
-          email: formData.email.trim() || null,
+          residence: formData.residence.trim() || null,
           phone: formData.phone.trim() || null,
           cell_group_id: formData.cell_group_id || null,
           ministry_group_id: formData.ministry_group_id || null,
@@ -166,7 +166,7 @@ const Members = () => {
       setFormData({ 
         name: '', 
         surname: '', 
-        email: '', 
+        residence: '', 
         phone: '', 
         invited_by: '', 
         cell_group_id: '',
@@ -190,7 +190,7 @@ const Members = () => {
     setEditFormData({
       name: member.name,
       surname: member.surname,
-      email: member.email || '',
+      residence: member.residence || '',
       phone: member.phone || '',
       invited_by: member.invited_by || '',
       cell_group_id: member.cell_group_id || '',
@@ -218,7 +218,7 @@ const Members = () => {
       const updateData: any = {
         name: editFormData.name.trim(),
         surname: editFormData.surname.trim(),
-        email: editFormData.email.trim() || null,
+        residence: editFormData.residence.trim() || null,
         phone: editFormData.phone.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
         ministry_group_id: editFormData.ministry_group_id || null,
@@ -261,7 +261,7 @@ const Members = () => {
     setEditFormData({
       name: '',
       surname: '',
-      email: '',
+      residence: '',
       phone: '',
       invited_by: '',
       cell_group_id: '',
@@ -332,7 +332,7 @@ const Members = () => {
     (member) =>
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -345,7 +345,7 @@ const Members = () => {
     setFormData({ 
       name: '', 
       surname: '', 
-      email: '', 
+      residence: '', 
       phone: '', 
       invited_by: '', 
       cell_group_id: '',
@@ -454,14 +454,14 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Email
+                    residence
                   </label>
                   <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    type="residence"
+                    value={formData.residence}
+                    onChange={(e) => setFormData({ ...formData, residence: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
+                    placeholder="Enter residence address"
                   />
                 </div>
                 <div className="space-y-2">
@@ -565,7 +565,7 @@ const Members = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search members by name, email, phone, or cell group..."
+              placeholder="Search members by name, residence, phone, or cell group..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -650,11 +650,11 @@ const Members = () => {
                       <div className="flex items-center gap-3">
                         <Mail className="h-4 w-4 text-gray-400" />
                         <input
-                          type="email"
-                          value={editFormData.email}
-                          onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                          type="residence"
+                          value={editFormData.residence}
+                          onChange={(e) => setEditFormData({ ...editFormData, residence: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                          placeholder="Email address"
+                          placeholder="residence address"
                         />
                       </div>
                       
@@ -789,10 +789,10 @@ const Members = () => {
                           </div>
                           
                           <div className="space-y-3 text-gray-600 dark:text-gray-400">
-                            {member.email && (
+                            {member.residence && (
                               <div className="flex items-center gap-3">
                                 <Mail className="h-4 w-4" />
-                                <span className="font-medium">{member.email}</span>
+                                <span className="font-medium">{member.residence}</span>
                               </div>
                             )}
                             {member.phone && (
