@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Mail, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -16,7 +16,7 @@ interface CellGroup {
   created_at?: string;
   updated_at?: string;
   leader_name?: string | null;
-  leader_email?: string | null;
+  leader_residence?: string | null;
   leader_phone?: string | null;
   is_current_user_leader?: boolean;
 }
@@ -38,11 +38,12 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id?: string | null;
   status?: string | null;
   admin_role?: string | null;
+  invited_by?: string | null;
 }
 
 interface GroupAttendanceRecord {
@@ -194,7 +195,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   const filteredLeaders = availableLeaders.filter(leader =>
     leader.name.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
     leader.surname.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
-    leader.email?.toLowerCase().includes(searchLeaderTerm.toLowerCase())
+    leader.residence?.toLowerCase().includes(searchLeaderTerm.toLowerCase())
   );
 
   if (!isOpen) return null;
@@ -1040,6 +1041,12 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
   const [searchMemberTerm, setSearchMemberTerm] = useState('');
+  const [attendanceStats, setAttendanceStats] = useState({
+    present: 0,
+    absent: 0,
+    absentWithReason: 0,
+    total: 0
+  });
 
   useEffect(() => {
     loadGroupMembers();
@@ -1052,6 +1059,21 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
     }
   }, [selectedMeeting]);
 
+  useEffect(() => {
+    // Update stats whenever attendance changes
+    const presentCount = Object.values(attendance).filter(status => status === 'present').length;
+    const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
+    const absentWithReasonCount = Object.values(attendance).filter(status => status === 'absent_with_reason').length;
+    const totalCount = groupMembers.length;
+
+    setAttendanceStats({
+      present: presentCount,
+      absent: absentCount,
+      absentWithReason: absentWithReasonCount,
+      total: totalCount
+    });
+  }, [attendance, groupMembers]);
+
   const loadGroupMembers = async () => {
     try {
       const { data, error } = await supabase
@@ -1063,6 +1085,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       if (error) throw error;
       
       setGroupMembers(data || []);
+      // Initialize all members as present by default
       const initialAttendance: Record<string, 'present'> = {};
       data?.forEach(member => {
         initialAttendance[member.id] = 'present';
@@ -1093,7 +1116,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       
       const { data, error } = await supabase
         .from('meeting_attendance')
-        .select('*')
+        .select('*, members!inner(*)')
         .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
@@ -1190,6 +1213,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       if (insertError) throw insertError;
       
       onAttendanceSaved();
+      onError('Attendance saved successfully!');
     } catch (error: any) {
       onError('Failed to save group attendance: ' + error.message);
     } finally {
@@ -1201,7 +1225,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
     !groupMembers.some(gm => gm.id === member.id) && (
       member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
+      member.residence?.toLowerCase().includes(searchMemberTerm.toLowerCase())
     )
   );
 
@@ -1256,7 +1280,58 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       </div>
 
       {selectedMeeting && (
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* Attendance Summary */}
+          <div className="bg-white border border-gray-200 rounded-2xl p-6">
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-green-700 font-medium">Present</p>
+                    <p className="text-2xl font-bold text-green-800">{attendanceStats.present}</p>
+                  </div>
+                  <CheckCircle className="h-8 w-8 text-green-500" />
+                </div>
+              </div>
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-red-700 font-medium">Absent</p>
+                    <p className="text-2xl font-bold text-red-800">{attendanceStats.absent}</p>
+                  </div>
+                  <X className="h-8 w-8 text-red-500" />
+                </div>
+              </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-yellow-700 font-medium">Absent with Notes</p>
+                    <p className="text-2xl font-bold text-yellow-800">{attendanceStats.absentWithReason}</p>
+                  </div>
+                  <FileText className="h-8 w-8 text-yellow-500" />
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-blue-700 font-medium">Total Members</p>
+                    <p className="text-2xl font-bold text-blue-800">{attendanceStats.total}</p>
+                  </div>
+                  <Users className="h-8 w-8 text-blue-500" />
+                </div>
+                {attendanceStats.total > 0 && (
+                  <div className="mt-2 text-center">
+                    <div className="text-lg font-bold text-blue-900">
+                      {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
+                    </div>
+                    <div className="text-xs text-blue-700">Attendance Rate</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <h4 className="text-lg font-semibold text-gray-900">
               Group Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
@@ -1302,7 +1377,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
-                          {member.email} • {member.phone}
+                          {member.residence} • {member.phone}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1407,7 +1482,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium text-gray-900">{member.name} {member.surname}</div>
-                        <div className="text-sm text-gray-600">{member.email} • {member.phone}</div>
+                        <div className="text-sm text-gray-600">{member.residence} • {member.phone}</div>
                       </div>
                       <button
                         onClick={() => addMemberToGroup(member)}
@@ -1443,38 +1518,56 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     name: '',
     surname: '',
     phone: '',
-    email: '',
-    notes: ''
+    residence: '',
+    notes: '',
+    invited_by: ''
   });
+  const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
+  const [searchInviterTerm, setSearchInviterTerm] = useState('');
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  useEffect(() => {
+    loadAllChurchMembers();
+  }, []);
+
+  const loadAllChurchMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setAllChurchMembers(data || []);
+    } catch (error: any) {
+      console.error('Failed to load all church members:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const filteredInviters = allChurchMembers.filter(member =>
+    member.name.toLowerCase().includes(searchInviterTerm.toLowerCase()) ||
+    member.surname.toLowerCase().includes(searchInviterTerm.toLowerCase()) ||
+    member.residence?.toLowerCase().includes(searchInviterTerm.toLowerCase())
+  );
+
   const addNewcomer = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name.trim() || !formData.surname.trim()) {
-      onError('Name and surname are required');
+    if (!formData.name.trim() || !formData.surname.trim() || !formData.residence.trim()) {
+      onError('Name, surname, and residence are required');
       return;
     }
 
     try {
       setLoading(true);
       
-      // Check if member already exists with same email or phone
+      // Check if member already exists with same phone
       let existingMember = null;
-      if (formData.email.trim()) {
-        const { data: emailMatch } = await supabase
-          .from('members')
-          .select('*')
-          .eq('email', formData.email.trim())
-          .single();
-        existingMember = emailMatch;
-      }
-      
-      if (!existingMember && formData.phone.trim()) {
+      if (formData.phone.trim()) {
         const { data: phoneMatch } = await supabase
           .from('members')
           .select('*')
@@ -1494,7 +1587,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .update({ 
             status: 'newcomer',
             cell_group_id: group.id,
-            invited_by: group.name,
+            invited_by: formData.invited_by || null,
             first_time_visit_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
@@ -1505,11 +1598,11 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
-          email: formData.email.trim() || null,
+          residence: formData.residence.trim(),
           status: 'newcomer' as const,
           cell_group_id: group.id,
           first_time_visit_date: new Date().toISOString(),
-          invited_by: group.name,
+          invited_by: formData.invited_by || null,
           is_permanent_member: false,
           is_leader: false,
           admin_role: 'member',
@@ -1525,8 +1618,8 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .single();
 
         if (memberError) {
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            onError('A member with this email already exists');
+          if (memberError.code === '23505' && memberError.message.includes('phone')) {
+            onError('A member with this phone number already exists');
             return;
           }
           throw memberError;
@@ -1547,9 +1640,10 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
 
-      setFormData({ name: '', surname: '', phone: '', email: '', notes: '' });
+      setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
       setShowForm(false);
       onNewcomerAdded();
+      onError('Newcomer added successfully!');
     } catch (error: any) {
       console.error('Error adding newcomer:', error);
       onError('Failed to add newcomer: ' + (error.message || 'Unknown error'));
@@ -1648,18 +1742,55 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Residence *</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Home className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
+                    type="text"
+                    name="residence"
+                    value={formData.residence}
                     onChange={handleInputChange}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter email address"
+                    placeholder="Enter residence"
+                    required
                   />
                 </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Invited By</label>
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <input
+                    type="text"
+                    placeholder="Search for church member..."
+                    value={searchInviterTerm}
+                    onChange={(e) => setSearchInviterTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                
+                <select
+                  name="invited_by"
+                  value={formData.invited_by}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">Not specified</option>
+                  {filteredInviters.map((member) => (
+                    <option key={member.id} value={`${member.name} ${member.surname}`}>
+                      {member.name} {member.surname} ({member.residence})
+                    </option>
+                  ))}
+                </select>
+                
+                {filteredInviters.length === 0 && searchInviterTerm && (
+                  <p className="text-sm text-gray-500 text-center py-2">
+                    No church members found matching your search
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1688,7 +1819,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 type="button"
                 onClick={() => {
                   setShowForm(false);
-                  setFormData({ name: '', surname: '', phone: '', email: '', notes: '' });
+                  setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
                 }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
@@ -1747,7 +1878,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .select(`
           *,
           members:member_id (
-            id, name, surname, email, phone
+            id, name, surname, residence, phone
           )
         `)
         .eq('meeting_id', selectedMeeting.id);
@@ -1942,6 +2073,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Residence</th>
                 <th>Status</th>
                 <th>Notes</th>
               </tr>
@@ -1950,6 +2082,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
               ${attendance.map(record => `
                 <tr>
                   <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+                  <td>${record.members?.residence || ''}</td>
                   <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
                     ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
                   </td>
@@ -2009,7 +2142,7 @@ ${reportData.additional_notes || 'No additional notes'}
 
 DETAILED ATTENDANCE
 ${attendance.map(record => 
-  `${record.members?.name} ${record.members?.surname} - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}`
+  `${record.members?.name} ${record.members?.surname} (${record.members?.residence || 'No residence'}) - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}`
 ).join('\n')}
 
 ${selectedMeeting?.notes ? `
@@ -2221,6 +2354,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                           <div className="font-medium text-gray-900">
                             {record.members?.name} {record.members?.surname}
                           </div>
+                          <div className="text-sm text-gray-600">{record.members?.residence}</div>
                           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
                             record.status === 'present' ? 'bg-green-100 text-green-800' :
                             record.status === 'absent' ? 'bg-red-100 text-red-800' :
@@ -2544,7 +2678,7 @@ const Groups = () => {
           if (group.leader_id) {
             const { data: leaderData } = await supabase
               .from('members')
-              .select('name, surname, email, phone')
+              .select('name, surname, residence, phone')
               .eq('id', group.leader_id)
               .single();
             
@@ -2557,7 +2691,7 @@ const Groups = () => {
           return {
             ...group,
             leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
-            leader_email: leaderInfo?.email || null,
+            leader_residence: leaderInfo?.residence || null,
             leader_phone: leaderInfo?.phone || null,
             memberCount: count || 0,
             is_current_user_leader: isCurrentUserLeader
@@ -2654,7 +2788,7 @@ const Groups = () => {
         .select(`
           *,
           members:member_id (
-            id, name, surname, email, phone
+            id, name, surname, residence, phone
           )
         `)
         .eq('meeting_id', meetingId);
