@@ -15,7 +15,6 @@ interface CellGroup {
   memberCount?: number;
   created_at?: string;
   updated_at?: string;
-  created_by?: string | null;
   leader_name?: string | null;
   leader_email?: string | null;
   leader_phone?: string | null;
@@ -149,7 +148,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
         meeting_time: formData.meeting_time || null,
         description: formData.description.trim() || null,
         leader_id: formData.leader_id || null,
-        created_by: userId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
