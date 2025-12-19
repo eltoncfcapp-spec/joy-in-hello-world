@@ -1,14 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  Users, MapPin, Calendar, User, Search, X, 
-  Shield, AlertCircle, CheckCircle, Printer,
-  Clock, FileText, Save, UserPlus, Mail, Phone,
-  Download, FileDown
-} from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
 
-// Simple interfaces for departments
+// Interfaces
 interface Department {
   id: string;
   name: string;
@@ -18,6 +13,12 @@ interface Department {
   leader_id: string | null;
   description?: string | null;
   memberCount?: number;
+  created_at?: string;
+  updated_at?: string;
+  leader_name?: string | null;
+  leader_residence?: string | null;
+  leader_phone?: string | null;
+  is_current_user_leader?: boolean;
 }
 
 interface DepartmentMeeting {
@@ -37,11 +38,13 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   department_id?: string | null;
-  department_role?: string;
-  department_member_id?: string;
+  department_role?: string | null;
+  status?: string | null;
+  admin_role?: string | null;
+  invited_by?: string | null;
 }
 
 interface DepartmentAttendanceRecord {
@@ -63,11 +66,779 @@ interface DepartmentReport {
   created_at: string | null;
 }
 
+// Create Department Modal Component
+interface CreateDepartmentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+  userId: string | null;
+}
+
+const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    description: '',
+    leader_id: '',
+  });
+  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
+  const [searchLeaderTerm, setSearchLeaderTerm] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      loadAvailableLeaders();
+    }
+  }, [isOpen]);
+
+  const loadAvailableLeaders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .or('admin_role.eq.department_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
+        .order('name');
+
+      if (error) throw error;
+      setAvailableLeaders(data || []);
+    } catch (error: any) {
+      console.error('Failed to load leaders:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const createDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!formData.name.trim()) {
+      onError('Department name is required');
+      return;
+    }
+
+    if (!userId) {
+      onError('You must be logged in to create a department');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Check if department with same name already exists
+      const { data: existingDepartment } = await supabase
+        .from('departments')
+        .select('id')
+        .ilike('name', formData.name.trim())
+        .single();
+
+      if (existingDepartment) {
+        onError('A department with this name already exists');
+        return;
+      }
+
+      const newDepartment = {
+        name: formData.name.trim(),
+        location: formData.location.trim() || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        description: formData.description.trim() || null,
+        leader_id: formData.leader_id || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('departments')
+        .insert([newDepartment])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // If a leader was selected, update their role
+      if (formData.leader_id) {
+        await supabase
+          .from('members')
+          .update({ 
+            admin_role: 'department_leader',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', formData.leader_id);
+      }
+
+      setFormData({
+        name: '',
+        location: '',
+        meeting_day: '',
+        meeting_time: '',
+        description: '',
+        leader_id: '',
+      });
+      
+      onSuccess('Department created successfully!');
+      onClose();
+    } catch (error: any) {
+      console.error('Error creating department:', error);
+      onError('Failed to create department: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredLeaders = availableLeaders.filter(leader =>
+    leader.name.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
+    leader.surname.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
+    leader.residence?.toLowerCase().includes(searchLeaderTerm.toLowerCase())
+  );
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Create New Department</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={createDepartment} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Department Name *
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter department name"
+              required
+              minLength={2}
+              maxLength={100}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Location
+            </label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                name="location"
+                value={formData.location}
+                onChange={handleInputChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter meeting location"
+                maxLength={200}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Day
+              </label>
+              <select
+                name="meeting_day"
+                value={formData.meeting_day}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select day</option>
+                <option value="Sunday">Sunday</option>
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Time
+              </label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="time"
+                  name="meeting_time"
+                  value={formData.meeting_time}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              rows={3}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter department description (optional)"
+              maxLength={500}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Department Leader (Optional)
+            </label>
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <input
+                  type="text"
+                  placeholder="Search for leaders..."
+                  value={searchLeaderTerm}
+                  onChange={(e) => setSearchLeaderTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              
+              <select
+                name="leader_id"
+                value={formData.leader_id}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">No leader assigned</option>
+                {filteredLeaders.map((leader) => (
+                  <option key={leader.id} value={leader.id}>
+                    {leader.name} {leader.surname} ({leader.admin_role})
+                  </option>
+                ))}
+              </select>
+              
+              {filteredLeaders.length === 0 && searchLeaderTerm && (
+                <p className="text-sm text-gray-500 text-center py-2">
+                  No leaders found matching your search
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              <Save className="h-4 w-4" />
+              {loading ? 'Creating Department...' : 'Create Department'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-6 pt-4 border-t border-gray-200">
+          <p className="text-sm text-gray-500">
+            Only administrators and pastors can create new departments. 
+            The department creator will have full management permissions.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Edit Department Modal Component
+interface EditDepartmentModalProps {
+  isOpen: boolean;
+  department: Department | null;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+  canEdit: boolean;
+}
+
+const EditDepartmentModal: React.FC<EditDepartmentModalProps> = ({ isOpen, department, onClose, onSuccess, onError, canEdit }) => {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    location: '',
+    meeting_day: '',
+    meeting_time: '',
+    description: '',
+    leader_id: '',
+  });
+  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
+
+  useEffect(() => {
+    if (isOpen && department) {
+      setFormData({
+        name: department.name || '',
+        location: department.location || '',
+        meeting_day: department.meeting_day || '',
+        meeting_time: department.meeting_time || '',
+        description: department.description || '',
+        leader_id: department.leader_id || '',
+      });
+      loadAvailableLeaders();
+    }
+  }, [isOpen, department]);
+
+  const loadAvailableLeaders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .or('admin_role.eq.department_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
+        .order('name');
+
+      if (error) throw error;
+      setAvailableLeaders(data || []);
+    } catch (error: any) {
+      console.error('Failed to load leaders:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const updateDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!department?.id) {
+      onError('Department not found');
+      return;
+    }
+
+    if (!formData.name.trim()) {
+      onError('Department name is required');
+      return;
+    }
+
+    if (!canEdit) {
+      onError('You do not have permission to edit this department');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Check if department with same name already exists (excluding current department)
+      const { data: existingDepartment } = await supabase
+        .from('departments')
+        .select('id')
+        .ilike('name', formData.name.trim())
+        .neq('id', department.id)
+        .single();
+
+      if (existingDepartment) {
+        onError('Another department with this name already exists');
+        return;
+      }
+
+      const updatedDepartment = {
+        name: formData.name.trim(),
+        location: formData.location.trim() || null,
+        meeting_day: formData.meeting_day || null,
+        meeting_time: formData.meeting_time || null,
+        description: formData.description.trim() || null,
+        leader_id: formData.leader_id || null,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('departments')
+        .update(updatedDepartment)
+        .eq('id', department.id);
+
+      if (error) throw error;
+
+      // Handle leader assignment changes
+      const previousLeaderId = department.leader_id;
+      if (previousLeaderId !== formData.leader_id) {
+        // Remove previous leader's role if they're no longer a leader elsewhere
+        if (previousLeaderId) {
+          // Check if this person is a leader of any other department
+          const { count } = await supabase
+            .from('departments')
+            .select('*', { count: 'exact', head: true })
+            .eq('leader_id', previousLeaderId)
+            .neq('id', department.id);
+
+          if (count === 0) {
+            await supabase
+              .from('members')
+              .update({ 
+                admin_role: 'member',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', previousLeaderId);
+          }
+        }
+
+        // Assign new leader
+        if (formData.leader_id) {
+          await supabase
+            .from('members')
+            .update({ 
+              admin_role: 'department_leader',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', formData.leader_id);
+        }
+      }
+
+      onSuccess('Department updated successfully!');
+      onClose();
+    } catch (error: any) {
+      console.error('Error updating department:', error);
+      onError('Failed to update department: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen || !department) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Edit Department</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={updateDepartment} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Department Name *
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter department name"
+              required
+              minLength={2}
+              maxLength={100}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Location
+            </label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                name="location"
+                value={formData.location}
+                onChange={handleInputChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter meeting location"
+                maxLength={200}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Day
+              </label>
+              <select
+                name="meeting_day"
+                value={formData.meeting_day}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select day</option>
+                <option value="Sunday">Sunday</option>
+                <option value="Monday">Monday</option>
+                <option value="Tuesday">Tuesday</option>
+                <option value="Wednesday">Wednesday</option>
+                <option value="Thursday">Thursday</option>
+                <option value="Friday">Friday</option>
+                <option value="Saturday">Saturday</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meeting Time
+              </label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="time"
+                  name="meeting_time"
+                  value={formData.meeting_time}
+                  onChange={handleInputChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleInputChange}
+              rows={3}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter department description (optional)"
+              maxLength={500}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Department Leader
+            </label>
+            <select
+              name="leader_id"
+              value={formData.leader_id}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">No leader assigned</option>
+              {availableLeaders.map((leader) => (
+                <option key={leader.id} value={leader.id}>
+                  {leader.name} {leader.surname} ({leader.admin_role})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading || !canEdit}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              <Save className="h-4 w-4" />
+              {loading ? 'Updating Department...' : 'Update Department'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Delete Department Confirmation Modal
+interface DeleteDepartmentModalProps {
+  isOpen: boolean;
+  department: Department | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  onError: (message: string) => void;
+  canDelete: boolean;
+}
+
+const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, department, onClose, onConfirm, onError, canDelete }) => {
+  const [loading, setLoading] = useState(false);
+  const [memberCount, setMemberCount] = useState(0);
+
+  useEffect(() => {
+    if (isOpen && department) {
+      checkMemberCount();
+    }
+  }, [isOpen, department]);
+
+  const checkMemberCount = async () => {
+    try {
+      const { count } = await supabase
+        .from('department_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('department_id', department?.id);
+
+      setMemberCount(count || 0);
+    } catch (error) {
+      console.error('Failed to check member count:', error);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!department?.id) {
+      onError('Department not found');
+      return;
+    }
+
+    if (!canDelete) {
+      onError('You do not have permission to delete this department');
+      return;
+    }
+
+    if (memberCount > 0) {
+      onError(`Cannot delete department with ${memberCount} member(s). Please reassign or remove members first.`);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Remove leader assignment if exists
+      if (department.leader_id) {
+        // Check if this person is a leader of any other department
+        const { count } = await supabase
+          .from('departments')
+          .select('*', { count: 'exact', head: true })
+          .eq('leader_id', department.leader_id)
+          .neq('id', department.id);
+
+        if (count === 0) {
+          await supabase
+            .from('members')
+            .update({ 
+              admin_role: 'member',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', department.leader_id);
+        }
+      }
+
+      // Delete the department
+      const { error } = await supabase
+        .from('departments')
+        .delete()
+        .eq('id', department.id);
+
+      if (error) throw error;
+
+      onConfirm();
+    } catch (error: any) {
+      console.error('Error deleting department:', error);
+      onError('Failed to delete department: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+      onClose();
+    }
+  };
+
+  if (!isOpen || !department) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-gray-900">Delete Department</h3>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mb-6">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+              <div>
+                <h4 className="text-red-800 font-medium mb-1">Warning</h4>
+                <p className="text-red-700 text-sm">
+                  You are about to delete the department "{department.name}". This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <span className="text-gray-700">Department Name</span>
+              <span className="font-medium text-gray-900">{department.name}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <span className="text-gray-700">Location</span>
+              <span className="font-medium text-gray-900">{department.location || 'Not specified'}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <span className="text-gray-700">Current Members</span>
+              <span className="font-medium text-gray-900">{memberCount}</span>
+            </div>
+          </div>
+
+          {memberCount > 0 && (
+            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <p className="text-sm text-yellow-800">
+                  This department has {memberCount} member(s). You must remove all members before deleting the department.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleDelete}
+            disabled={loading || memberCount > 0 || !canDelete}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+          >
+            <Trash2 className="h-4 w-4" />
+            {loading ? 'Deleting...' : 'Delete Department'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Department Meeting Creation Step
 const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }: { 
   department: Department; 
   onMeetingCreated: () => void; 
-  onError: (message: string) => void;
+  onError: (message: string) => void; 
 }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -106,8 +877,8 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
 
   const createMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.meeting_date || !formData.meeting_time || !formData.location) {
+
+    if (!formData.meeting_date || !formData.location) {
       onError('Please fill in all required fields');
       return;
     }
@@ -139,7 +910,6 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         topic: '',
         notes: ''
       });
-
       await loadRecentMeetings();
       onMeetingCreated();
     } catch (error: any) {
@@ -150,12 +920,9 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Calendar className="h-8 w-8 text-blue-600" />
-        </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Schedule Department Meeting</h3>
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Schedule Department Meeting</h3>
         <p className="text-gray-600">Create a new meeting schedule for {department.name}</p>
       </div>
 
@@ -163,9 +930,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         <form onSubmit={createMeeting} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Date *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Date *</label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
@@ -179,11 +944,8 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
                 />
               </div>
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Time *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Time</label>
               <div className="relative">
                 <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
@@ -192,16 +954,13 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
                   value={formData.meeting_time}
                   onChange={handleInputChange}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
                 />
               </div>
             </div>
           </div>
-
+          
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Location *
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Location *</label>
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -215,11 +974,9 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
               />
             </div>
           </div>
-
+          
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Meeting Topic/Agenda
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Topic/Agenda</label>
             <input
               type="text"
               name="topic"
@@ -229,11 +986,9 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
               placeholder="What will be discussed in this meeting?"
             />
           </div>
-
+          
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Additional Notes
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
             <div className="relative">
               <FileText className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <textarea
@@ -246,7 +1001,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
               />
             </div>
           </div>
-
+          
           <button
             type="submit"
             disabled={loading}
@@ -273,11 +1028,9 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
                   </div>
                 </div>
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  meeting.status === 'completed' 
-                    ? 'bg-green-100 text-green-800'
-                    : meeting.status === 'cancelled'
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-blue-100 text-blue-800'
+                  meeting.status === 'completed' ? 'bg-green-100 text-green-800' :
+                  meeting.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                  'bg-blue-100 text-blue-800'
                 }`}>
                   {meeting.status}
                 </span>
@@ -300,13 +1053,13 @@ interface DepartmentAttendanceStepProps {
   onError: (message: string) => void;
 }
 
-const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
-  department,
-  meetings,
-  selectedMeeting,
-  onMeetingSelect,
-  onAttendanceSaved,
-  onError
+const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({ 
+  department, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onAttendanceSaved, 
+  onError 
 }) => {
   const [loading, setLoading] = useState(false);
   const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
@@ -315,6 +1068,12 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [showAddAttendeeModal, setShowAddAttendeeModal] = useState(false);
   const [searchMemberTerm, setSearchMemberTerm] = useState('');
+  const [attendanceStats, setAttendanceStats] = useState({
+    present: 0,
+    absent: 0,
+    absentWithReason: 0,
+    total: 0
+  });
 
   useEffect(() => {
     loadDepartmentMembers();
@@ -327,28 +1086,41 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     }
   }, [selectedMeeting]);
 
+  useEffect(() => {
+    // Update stats whenever attendance changes
+    const presentCount = Object.values(attendance).filter(status => status === 'present').length;
+    const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
+    const absentWithReasonCount = Object.values(attendance).filter(status => status === 'absent_with_reason').length;
+    const totalCount = departmentMembers.length;
+
+    setAttendanceStats({
+      present: presentCount,
+      absent: absentCount,
+      absentWithReason: absentWithReasonCount,
+      total: totalCount
+    });
+  }, [attendance, departmentMembers]);
+
   const loadDepartmentMembers = async () => {
     try {
-      const { data: departmentMembers, error: deptError } = await supabase
+      const { data: departmentMembers, error } = await supabase
         .from('department_members')
         .select(`
-          id,
-          role,
-          member:members (*)
+          *,
+          members:member_id (*)
         `)
-        .eq('department_id', department.id)
-        .order('role', { ascending: false });
+        .eq('department_id', department.id);
 
-      if (deptError) throw deptError;
-
+      if (error) throw error;
+      
       const memberData = departmentMembers?.map(dm => ({
-        ...dm.member,
-        department_role: dm.role,
-        department_member_id: dm.id
-      })).filter(m => m.id) || [];
+        ...dm.members,
+        department_role: dm.role
+      })) || [];
       
       setDepartmentMembers(memberData as Member[]);
       
+      // Initialize all members as present by default
       const initialAttendance: Record<string, 'present'> = {};
       memberData?.forEach(member => {
         if (member.id) initialAttendance[member.id] = 'present';
@@ -365,7 +1137,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         .from('members')
         .select('*')
         .order('name');
-      
+
       if (error) throw error;
       setAllChurchMembers(data || []);
     } catch (error: any) {
@@ -383,10 +1155,10 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         .eq('meeting_id', selectedMeeting.id);
 
       if (error) throw error;
-
+      
       const existingAttendance: Record<string, 'present' | 'absent' | 'absent_with_reason'> = {};
       const existingNotes: Record<string, string> = {};
-
+      
       data?.forEach(record => {
         if (record.member_id && record.status) {
           existingAttendance[record.member_id] = record.status as 'present' | 'absent' | 'absent_with_reason';
@@ -395,7 +1167,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
           }
         }
       });
-
+      
       setAttendance(existingAttendance);
       setNotes(existingNotes);
     } catch (error: any) {
@@ -405,6 +1177,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const handleAttendanceChange = (memberId: string, status: 'present' | 'absent' | 'absent_with_reason') => {
     setAttendance(prev => ({ ...prev, [memberId]: status }));
+    
     if (status !== 'absent_with_reason') {
       setNotes(prev => {
         const newNotes = { ...prev };
@@ -429,10 +1202,15 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       const { error } = await supabase
         .from('department_members')
-        .insert([{ department_id: department.id, member_id: member.id, role: 'member' }]);
+        .insert([{ 
+          department_id: department.id, 
+          member_id: member.id, 
+          role: 'member',
+          assigned_at: new Date().toISOString()
+        }]);
 
       if (error) throw error;
-
+      
       await loadDepartmentMembers();
       setShowAddAttendeeModal(false);
       setSearchMemberTerm('');
@@ -472,7 +1250,11 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         .insert(attendanceRecords);
 
       if (insertError) throw insertError;
+      
+      // Reload attendance data after saving
+      await loadExistingAttendance();
       onAttendanceSaved();
+      onError('Attendance saved successfully!');
     } catch (error: any) {
       onError('Failed to save department attendance: ' + error.message);
     } finally {
@@ -480,29 +1262,18 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     }
   };
 
-  const getRoleBadgeColor = (role: string) => {
-    switch (role) {
-      case 'leader': return 'bg-yellow-100 text-yellow-800';
-      case 'assistant': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const filteredChurchMembers = allChurchMembers.filter(member =>
+  const filteredChurchMembers = allChurchMembers.filter(member => 
     !departmentMembers.some(dm => dm.id === member.id) && (
       member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
+      member.residence?.toLowerCase().includes(searchMemberTerm.toLowerCase())
     )
   );
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Users className="h-8 w-8 text-green-600" />
-        </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Record Department Attendance</h3>
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Record Department Attendance</h3>
         <p className="text-gray-600">Mark department members as present, absent, or absent with notes</p>
       </div>
 
@@ -514,8 +1285,8 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               key={meeting.id}
               onClick={() => onMeetingSelect(meeting)}
               className={`p-4 border rounded-xl text-left transition-all duration-200 ${
-                selectedMeeting?.id === meeting.id
-                  ? 'border-blue-500 bg-blue-50'
+                selectedMeeting?.id === meeting.id 
+                  ? 'border-blue-500 bg-blue-50' 
                   : 'border-gray-300 hover:border-gray-400'
               }`}
             >
@@ -534,7 +1305,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               )}
               <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
                 meeting.status === 'completed' 
-                  ? 'bg-green-100 text-green-800'
+                  ? 'bg-green-100 text-green-800' 
                   : 'bg-blue-100 text-blue-800'
               }`}>
                 {meeting.status}
@@ -550,7 +1321,58 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       </div>
 
       {selectedMeeting && (
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* Attendance Summary */}
+          <div className="bg-white border border-gray-200 rounded-2xl p-6">
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-green-700 font-medium">Present</p>
+                    <p className="text-2xl font-bold text-green-800">{attendanceStats.present}</p>
+                  </div>
+                  <CheckCircle className="h-8 w-8 text-green-500" />
+                </div>
+              </div>
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-red-700 font-medium">Absent</p>
+                    <p className="text-2xl font-bold text-red-800">{attendanceStats.absent}</p>
+                  </div>
+                  <X className="h-8 w-8 text-red-500" />
+                </div>
+              </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-yellow-700 font-medium">Absent with Notes</p>
+                    <p className="text-2xl font-bold text-yellow-800">{attendanceStats.absentWithReason}</p>
+                  </div>
+                  <FileText className="h-8 w-8 text-yellow-500" />
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-blue-700 font-medium">Total Members</p>
+                    <p className="text-2xl font-bold text-blue-800">{attendanceStats.total}</p>
+                  </div>
+                  <Users className="h-8 w-8 text-blue-500" />
+                </div>
+                {attendanceStats.total > 0 && (
+                  <div className="mt-2 text-center">
+                    <div className="text-lg font-bold text-blue-900">
+                      {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
+                    </div>
+                    <div className="text-xs text-blue-700">Attendance Rate</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <h4 className="text-lg font-semibold text-gray-900">
               Department Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
@@ -589,15 +1411,18 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           <div className="font-medium text-gray-900">
                             {member.name} {member.surname}
                           </div>
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${getRoleBadgeColor(member.department_role || 'member')}`}>
-                            {member.department_role}
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
+                            member.department_role === 'leader' ? 'bg-yellow-100 text-yellow-800' : 
+                            member.department_role === 'assistant' ? 'bg-blue-100 text-blue-800' : 
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {member.department_role || 'member'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
-                          {member.email} • {member.phone}
+                          {member.residence} • {member.phone}
                         </div>
                       </div>
-                      
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'present')}
@@ -610,7 +1435,6 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           <CheckCircle className="h-4 w-4" />
                           Present
                         </button>
-
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'absent')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
@@ -622,7 +1446,6 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           <X className="h-4 w-4" />
                           Absent
                         </button>
-
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
@@ -636,7 +1459,6 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                         </button>
                       </div>
                     </div>
-
                     {attendance[member.id] === 'absent_with_reason' && (
                       <div className="mt-3">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Notes for Absence</label>
@@ -652,7 +1474,6 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                   </div>
                 ))}
               </div>
-
               <div className="flex justify-center pt-6">
                 <button
                   onClick={saveAttendance}
@@ -672,11 +1493,14 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
           <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold text-gray-900">Add Attendee to {department.name}</h3>
-              <button onClick={() => setShowAddAttendeeModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+              <button
+                onClick={() => setShowAddAttendeeModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
-
+            
             <div className="mb-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
@@ -689,7 +1513,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                 />
               </div>
             </div>
-
+            
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {filteredChurchMembers.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
@@ -701,7 +1525,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium text-gray-900">{member.name} {member.surname}</div>
-                        <div className="text-sm text-gray-600">{member.email} • {member.phone}</div>
+                        <div className="text-sm text-gray-600">{member.residence} • {member.phone}</div>
                       </div>
                       <button
                         onClick={() => addMemberToDepartment(member)}
@@ -730,11 +1554,11 @@ interface DepartmentNewcomerStepProps {
   onError: (message: string) => void;
 }
 
-const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
-  department,
-  selectedMeeting,
-  onNewcomerAdded,
-  onError
+const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({ 
+  department, 
+  selectedMeeting, 
+  onNewcomerAdded, 
+  onError 
 }) => {
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -742,86 +1566,92 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
     name: '',
     surname: '',
     phone: '',
-    email: '',
-    address: '',
-    notes: ''
+    residence: '',
+    notes: '',
+    invited_by: ''
   });
+  const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
+  const [searchInviterTerm, setSearchInviterTerm] = useState('');
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+  useEffect(() => {
+    loadAllChurchMembers();
+  }, []);
+
+  const loadAllChurchMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setAllChurchMembers(data || []);
+    } catch (error: any) {
+      console.error('Failed to load all church members:', error);
+    }
   };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const filteredInviters = allChurchMembers.filter(member =>
+    member.name.toLowerCase().includes(searchInviterTerm.toLowerCase()) ||
+    member.surname.toLowerCase().includes(searchInviterTerm.toLowerCase()) ||
+    member.residence?.toLowerCase().includes(searchInviterTerm.toLowerCase())
+  );
 
   const addNewcomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.name.trim() || !formData.surname.trim()) {
-      onError('Name and surname are required');
+
+    if (!formData.name.trim() || !formData.surname.trim() || !formData.residence.trim()) {
+      onError('Name, surname, and residence are required');
       return;
     }
 
     try {
       setLoading(true);
-
-      // First, check if member already exists with same email or phone
-      let existingMember = null;
       
-      if (formData.email.trim()) {
-        const { data: emailMatch } = await supabase
-          .from('members')
-          .select('*')
-          .eq('email', formData.email.trim())
-          .single();
-        
-        existingMember = emailMatch;
-      }
-
-      if (!existingMember && formData.phone.trim()) {
+      // Check if member already exists with same phone
+      let existingMember = null;
+      if (formData.phone.trim()) {
         const { data: phoneMatch } = await supabase
           .from('members')
           .select('*')
           .eq('phone', formData.phone.trim())
           .single();
-        
         existingMember = phoneMatch;
       }
 
       let memberId;
-
+      
       if (existingMember) {
         // Use existing member
         memberId = existingMember.id;
-        
-        // Update member status if needed
-        if (existingMember.status !== 'newcomer') {
-          await supabase
-            .from('members')
-            .update({ 
-              status: 'newcomer',
-              invited_by: department.name,
-              first_time_visit_date: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', existingMember.id);
-        }
+        // Update member status
+        await supabase
+          .from('members')
+          .update({ 
+            status: 'newcomer',
+            first_time_visit_date: new Date().toISOString(),
+            invited_by: formData.invited_by || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingMember.id);
       } else {
-        // Create new member with proper schema compliance
+        // Create new member
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
-          email: formData.email.trim() || null,
+          residence: formData.residence.trim(),
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
-          invited_by: department.name,
-          // Set default values for required schema fields
+          invited_by: formData.invited_by || null,
           is_permanent_member: false,
           is_leader: false,
           admin_role: 'member',
-          // Set timestamps
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           status_date: new Date().toISOString()
@@ -834,9 +1664,8 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
           .single();
 
         if (memberError) {
-          // Handle unique constraint violation for email
-          if (memberError.code === '23505' && memberError.message.includes('email')) {
-            onError('A member with this email already exists');
+          if (memberError.code === '23505' && memberError.message.includes('phone')) {
+            onError('A member with this phone number already exists');
             return;
           }
           throw memberError;
@@ -844,25 +1673,17 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         memberId = memberData.id;
       }
 
-      // Add to department members if not already a member
-      const { data: existingDeptMember } = await supabase
+      // Add to department members
+      const { error: deptError } = await supabase
         .from('department_members')
-        .select('*')
-        .eq('department_id', department.id)
-        .eq('member_id', memberId)
-        .single();
+        .insert([{
+          department_id: department.id,
+          member_id: memberId,
+          role: 'member',
+          assigned_at: new Date().toISOString()
+        }]);
 
-      if (!existingDeptMember) {
-        const { error: deptError } = await supabase
-          .from('department_members')
-          .insert([{
-            department_id: department.id,
-            member_id: memberId,
-            role: 'member'
-          }]);
-
-        if (deptError) throw deptError;
-      }
+      if (deptError) throw deptError;
 
       // Record attendance for selected meeting
       if (selectedMeeting) {
@@ -874,21 +1695,13 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
             status: 'present',
             notes: 'First-time department visitor - ' + (formData.notes || 'No additional notes')
           }]);
-
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
 
-      setFormData({
-        name: '',
-        surname: '',
-        phone: '',
-        email: '',
-        address: '',
-        notes: ''
-      });
+      setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
       setShowForm(false);
       onNewcomerAdded();
-      
+      onError('Newcomer added successfully!');
     } catch (error: any) {
       console.error('Error adding newcomer:', error);
       onError('Failed to add newcomer: ' + (error.message || 'Unknown error'));
@@ -898,15 +1711,10 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <UserPlus className="h-8 w-8 text-purple-600" />
-        </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Add Department Newcomer</h3>
-        <p className="text-gray-600">
-          Register first-time visitors to the {department.name} department
-        </p>
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Add Department Newcomer</h3>
+        <p className="text-gray-600">Register first-time visitors to the {department.name} department</p>
       </div>
 
       {selectedMeeting && (
@@ -942,16 +1750,11 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
       {showForm && (
         <div className="bg-white border border-gray-200 rounded-2xl p-6">
-          <h4 className="text-lg font-semibold text-gray-900 mb-4">
-            Newcomer Information
-          </h4>
-          
+          <h4 className="text-lg font-semibold text-gray-900 mb-4">Newcomer Information</h4>
           <form onSubmit={addNewcomer} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  First Name *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
@@ -966,11 +1769,8 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                   />
                 </div>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Last Name *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
                 <input
                   type="text"
                   name="surname"
@@ -986,9 +1786,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
@@ -1001,29 +1799,61 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                   />
                 </div>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email Address
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Residence *</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Home className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
+                    type="text"
+                    name="residence"
+                    value={formData.residence}
                     onChange={handleInputChange}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter email address"
+                    placeholder="Enter residence"
+                    required
                   />
                 </div>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Additional Notes
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Invited By</label>
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <input
+                    type="text"
+                    placeholder="Search for church member..."
+                    value={searchInviterTerm}
+                    onChange={(e) => setSearchInviterTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                
+                <select
+                  name="invited_by"
+                  value={formData.invited_by}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">Not specified</option>
+                  {filteredInviters.map((member) => (
+                    <option key={member.id} value={`${member.name} ${member.surname}`}>
+                      {member.name} {member.surname} ({member.residence})
+                    </option>
+                  ))}
+                </select>
+                
+                {filteredInviters.length === 0 && searchInviterTerm && (
+                  <p className="text-sm text-gray-500 text-center py-2">
+                    No church members found matching your search
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
               <textarea
                 name="notes"
                 value={formData.notes}
@@ -1047,14 +1877,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
                 type="button"
                 onClick={() => {
                   setShowForm(false);
-                  setFormData({
-                    name: '',
-                    surname: '',
-                    phone: '',
-                    email: '',
-                    address: '',
-                    notes: ''
-                  });
+                  setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
                 }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
@@ -1067,7 +1890,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
 
       <div className="mt-6 text-center">
         <p className="text-sm text-gray-500">
-          Newcomers will be added as members of the {department.name} department
+          Newcomers will be added as members of the {department.name} department 
           {selectedMeeting && ' and marked as present for the current meeting'}.
         </p>
       </div>
@@ -1085,13 +1908,13 @@ interface DepartmentReportStepProps {
   onError: (message: string) => void;
 }
 
-const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
-  department,
-  meetings,
-  selectedMeeting,
-  onMeetingSelect,
-  onReportCreated,
-  onError
+const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({ 
+  department, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onReportCreated, 
+  onError 
 }) => {
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<DepartmentAttendanceRecord[]>([]);
@@ -1103,6 +1926,12 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
     next_meeting_date: '',
     additional_notes: ''
   });
+  const [attendanceStats, setAttendanceStats] = useState({
+    present: 0,
+    absent: 0,
+    absentWithReason: 0,
+    total: 0
+  });
 
   useEffect(() => {
     if (selectedMeeting) {
@@ -1111,25 +1940,41 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
     }
   }, [selectedMeeting]);
 
+  useEffect(() => {
+    // Update stats whenever attendance changes
+    const presentCount = attendance.filter(a => a.status === 'present').length;
+    const absentCount = attendance.filter(a => a.status === 'absent').length;
+    const absentWithReasonCount = attendance.filter(a => a.status === 'absent_with_reason').length;
+    const totalCount = attendance.length;
+
+    setAttendanceStats({
+      present: presentCount,
+      absent: absentCount,
+      absentWithReason: absentWithReasonCount,
+      total: totalCount
+    });
+  }, [attendance]);
+
   const loadAttendanceData = async () => {
     try {
       if (!selectedMeeting) return;
-      
+
       const { data, error } = await supabase
         .from('department_attendance')
         .select(`
           *,
           members:member_id (
-            id,
-            name,
-            surname,
-            email,
-            phone
+            id, name, surname, residence, phone
           )
         `)
         .eq('meeting_id', selectedMeeting.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading attendance:', error);
+        onError('Failed to load attendance data: ' + error.message);
+        return;
+      }
+      
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -1140,7 +1985,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   const loadExistingReport = async () => {
     try {
       if (!selectedMeeting) return;
-      
+
       const { data, error } = await supabase
         .from('department_reports')
         .select('*')
@@ -1174,10 +2019,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
   const handleReportChange = (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     const { name, value } = e.target;
-    setReportData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setReportData(prev => ({ ...prev, [name]: value }));
   };
 
   const generateReport = async () => {
@@ -1188,7 +2030,6 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
     try {
       setLoading(true);
-
       const reportPayload = {
         meeting_id: selectedMeeting.id,
         report_text: reportData.report_text,
@@ -1198,7 +2039,6 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
       };
 
       let error;
-      
       if (existingReport) {
         const { error: updateError } = await supabase
           .from('department_reports')
@@ -1228,7 +2068,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   };
 
   const handlePrint = () => {
-    const stats = getAttendanceStats();
+    const stats = attendanceStats;
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
@@ -1238,7 +2078,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
           <title>Department Meeting Report - ${department.name}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
-            h1 { color: #1e3a5f; border-bottom: 3px solid #8b5cf6; padding-bottom: 10px; }
+            h1 { color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
             h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
             .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
             .header-info p { margin: 8px 0; }
@@ -1324,6 +2164,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Residence</th>
                 <th>Status</th>
                 <th>Notes</th>
               </tr>
@@ -1332,6 +2173,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
               ${attendance.map(record => `
                 <tr>
                   <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+                  <td>${record.members?.residence || ''}</td>
                   <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
                     ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
                   </td>
@@ -1354,10 +2196,9 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   };
 
   const downloadReport = () => {
-    const stats = getAttendanceStats();
+    const stats = attendanceStats;
     const reportContent = `
 DEPARTMENT MEETING REPORT
-=========================
 
 Department: ${department.name}
 Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'}
@@ -1366,10 +2207,9 @@ Location: ${selectedMeeting?.location || department.location || 'N/A'}
 Topic: ${selectedMeeting?.topic || 'General Department Meeting'}
 Status: ${selectedMeeting?.status || 'N/A'}
 
-${selectedMeeting?.status === 'cancelled' ? `CANCELLATION REASON: ${selectedMeeting.cancellation_reason || 'No reason provided'}` : ''}
+${selectedMeeting?.status === 'cancelled' ? `CANCELLATION REASON: ${selectedMeeting.cancellation_reason || 'No reason provided'}\n` : ''}
 
 ATTENDANCE SUMMARY
-==================
 Total Members: ${stats.total}
 Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
 Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
@@ -1377,34 +2217,27 @@ Absent with Notes: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((st
 Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
 
 MEETING REPORT
-==============
 ${reportData.report_text || 'No report text recorded'}
 
 DECISIONS MADE
-===============
 ${reportData.decisions_made || 'No decisions recorded'}
 
 ACTION ITEMS
-============
 ${reportData.action_items || 'No action items recorded'}
 
 NEXT MEETING
-============
 ${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString()}` : 'No next meeting date set'}
 
 ADDITIONAL NOTES
-================
 ${reportData.additional_notes || 'No additional notes'}
 
 DETAILED ATTENDANCE
-===================
-${attendance.map(record => `
-${record.members?.name} ${record.members?.surname} - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}
-`).join('')}
+${attendance.map(record => 
+  `${record.members?.name} ${record.members?.surname} (${record.members?.residence || 'No residence'}) - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}`
+).join('\n')}
 
 ${selectedMeeting?.notes ? `
 MEETING NOTES
-=============
 ${selectedMeeting.notes}
 ` : ''}
 
@@ -1422,27 +2255,11 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
     URL.revokeObjectURL(url);
   };
 
-  const getAttendanceStats = () => {
-    const present = attendance.filter(a => a.status === 'present').length;
-    const absent = attendance.filter(a => a.status === 'absent').length;
-    const absentWithReason = attendance.filter(a => a.status === 'absent_with_reason').length;
-    const total = attendance.length;
-
-    return { present, absent, absentWithReason, total };
-  };
-
-  const stats = getAttendanceStats();
-
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <FileText className="h-8 w-8 text-blue-600" />
-        </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">Create Department Report</h3>
-        <p className="text-gray-600">
-          Generate a comprehensive report for the {department.name} department meeting
-        </p>
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Create Department Report</h3>
+        <p className="text-gray-600">Generate a comprehensive report for the {department.name} department meeting</p>
       </div>
 
       <div className="mb-6">
@@ -1453,8 +2270,8 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
               key={meeting.id}
               onClick={() => onMeetingSelect(meeting)}
               className={`p-4 border rounded-xl text-left transition-all duration-200 ${
-                selectedMeeting?.id === meeting.id
-                  ? 'border-blue-500 bg-blue-50'
+                selectedMeeting?.id === meeting.id 
+                  ? 'border-blue-500 bg-blue-50' 
                   : 'border-gray-300 hover:border-gray-400'
               }`}
             >
@@ -1473,7 +2290,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
               )}
               <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
                 meeting.status === 'completed' 
-                  ? 'bg-green-100 text-green-800'
+                  ? 'bg-green-100 text-green-800' 
                   : 'bg-blue-100 text-blue-800'
               }`}>
                 {meeting.status}
@@ -1530,7 +2347,6 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                 </div>
               </div>
             </div>
-            
             {selectedMeeting.status === 'cancelled' && selectedMeeting.cancellation_reason && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-start gap-2">
@@ -1548,54 +2364,42 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
             <div className="lg:col-span-1">
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
-                
                 <div className="space-y-4">
                   <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <CheckCircle className="h-5 w-5 text-green-600" />
                       <span className="text-green-800">Present</span>
                     </div>
-                    <span className="text-lg font-bold text-green-800">
-                      {stats.present}
-                    </span>
+                    <span className="text-lg font-bold text-green-800">{attendanceStats.present}</span>
                   </div>
-
                   <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <X className="h-5 w-5 text-red-600" />
                       <span className="text-red-800">Absent</span>
                     </div>
-                    <span className="text-lg font-bold text-red-800">
-                      {stats.absent}
-                    </span>
+                    <span className="text-lg font-bold text-red-800">{attendanceStats.absent}</span>
                   </div>
-
                   <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="h-5 w-5 text-yellow-600" />
                       <span className="text-yellow-800">Absent with Notes</span>
                     </div>
-                    <span className="text-lg font-bold text-yellow-800">
-                      {stats.absentWithReason}
-                    </span>
+                    <span className="text-lg font-bold text-yellow-800">{attendanceStats.absentWithReason}</span>
                   </div>
-
                   <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <Users className="h-5 w-5 text-blue-600" />
                       <span className="text-blue-800">Total</span>
                     </div>
-                    <span className="text-lg font-bold text-blue-800">
-                      {stats.total}
-                    </span>
+                    <span className="text-lg font-bold text-blue-800">{attendanceStats.total}</span>
                   </div>
                 </div>
 
-                {stats.total > 0 && (
+                {attendanceStats.total > 0 && (
                   <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-gray-900">
-                        {Math.round((stats.present / stats.total) * 100)}%
+                        {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
                       </div>
                       <div className="text-sm text-gray-600">Attendance Rate</div>
                     </div>
@@ -1630,19 +2434,16 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                           <div className="font-medium text-gray-900">
                             {record.members?.name} {record.members?.surname}
                           </div>
+                          <div className="text-sm text-gray-600">{record.members?.residence}</div>
                           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
-                            record.status === 'present'
-                              ? 'bg-green-100 text-green-800'
-                              : record.status === 'absent'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-yellow-100 text-yellow-800'
+                            record.status === 'present' ? 'bg-green-100 text-green-800' :
+                            record.status === 'absent' ? 'bg-red-100 text-red-800' :
+                            'bg-yellow-100 text-yellow-800'
                           }`}>
                             {(record.status || 'unknown').replace('_', ' ')}
                           </div>
                           {record.notes && (
-                            <p className="text-sm text-gray-600 mt-1">
-                              Notes: {record.notes}
-                            </p>
+                            <p className="text-sm text-gray-600 mt-1">Notes: {record.notes}</p>
                           )}
                         </div>
                       </div>
@@ -1662,12 +2463,10 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                     </span>
                   )}
                 </div>
-                
+
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Meeting Report *
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report *</label>
                     <textarea
                       name="report_text"
                       value={reportData.report_text}
@@ -1680,9 +2479,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Decisions Made
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Decisions Made</label>
                     <textarea
                       name="decisions_made"
                       value={reportData.decisions_made}
@@ -1694,9 +2491,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Action Items
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items</label>
                     <textarea
                       name="action_items"
                       value={reportData.action_items}
@@ -1709,9 +2504,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Next Meeting Date
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Next Meeting Date</label>
                       <input
                         type="date"
                         name="next_meeting_date"
@@ -1723,9 +2516,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Additional Notes
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
                     <textarea
                       name="additional_notes"
                       value={reportData.additional_notes}
@@ -1753,9 +2544,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                 <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-4">
                   <h4 className="text-lg font-semibold text-gray-900 mb-4">Meeting Notes</h4>
                   <div className="bg-gray-50 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">
-                      {selectedMeeting.notes}
-                    </p>
+                    <p className="text-gray-700 whitespace-pre-wrap">{selectedMeeting.notes}</p>
                   </div>
                 </div>
               )}
@@ -1777,13 +2566,13 @@ interface DepartmentWorkflowProps {
   onError: (message: string) => void;
 }
 
-const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
-  department,
-  meetings,
-  members: _members,
-  onClose,
-  onSuccess,
-  onError
+const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({ 
+  department, 
+  meetings, 
+  members: _members, 
+  onClose, 
+  onSuccess, 
+  onError 
 }) => {
   const { profile, canCreateDepartmentMeetings, canManageDepartmentAttendance, canAddDepartmentNewcomers, canCreateDepartmentReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
@@ -1798,7 +2587,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
   const canAccessStep = (stepNumber: number) => {
     if (!profile) return false;
-    
+
     switch (stepNumber) {
       case 1:
         return canCreateDepartmentMeetings(department.id);
@@ -1815,10 +2604,10 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between mb-8 relative">
-        <div className="absolute top-4 left-0 right-0 h-0.5 bg-gray-200 -z-10"></div>
+      {/* Progress Steps */}
+      <div className="flex justify-between items-center">
         {steps.map((step) => (
-          <div key={step.number} className="text-center flex-1">
+          <div key={step.number} className="flex-1 text-center">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 transition-all duration-300 ${
               currentStep >= step.number 
                 ? 'bg-blue-600 text-white shadow-lg' 
@@ -1831,16 +2620,15 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
             }`}>
               {step.title}
             </div>
-            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
-              {step.description}
-            </div>
+            <div className="text-xs text-gray-400 hidden md:block">{step.description}</div>
           </div>
         ))}
       </div>
 
+      {/* Step Content */}
       <div className="bg-gray-50 rounded-xl p-6 min-h-[400px]">
         {currentStep === 1 && (
-          <DepartmentMeetingCreationStep 
+          <DepartmentMeetingCreationStep
             department={department}
             onMeetingCreated={() => {
               onSuccess('Department meeting created successfully!');
@@ -1891,8 +2679,9 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
         )}
       </div>
 
+      {/* Navigation Buttons */}
       <div className="flex justify-between pt-6 border-t border-gray-200">
-        <button 
+        <button
           onClick={() => setCurrentStep(prev => prev - 1)}
           disabled={currentStep === 1}
           className="px-6 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition-all duration-200 font-medium disabled:opacity-50"
@@ -1907,8 +2696,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
           >
             Close
           </button>
-          
-          <button 
+          <button
             onClick={() => setCurrentStep(prev => prev + 1)}
             disabled={currentStep === 4 || !canAccessStep(currentStep + 1)}
             className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium disabled:opacity-50"
@@ -1923,7 +2711,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile, canViewDepartment, canManageDepartment, isAdmin: _isAdmin, isPastor: _isPastor, isDepartmentLeader: _isDepartmentLeader, isGroupLeader: _isGroupLeader, isDeacon: _isDeacon, getRoles } = useAuth();
+  const { profile, canViewDepartment, canManageDepartment, getRoles, isAdministrator, isPastor, isDepartmentLeader, isMember } = useAuth();
   
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
@@ -1931,51 +2719,123 @@ const Departments = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
+  const [showCreateDepartmentModal, setShowCreateDepartmentModal] = useState(false);
+  const [showEditDepartmentModal, setShowEditDepartmentModal] = useState(false);
+  const [showDeleteDepartmentModal, setShowDeleteDepartmentModal] = useState(false);
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  
+
   const [meetings, setMeetings] = useState<DepartmentMeeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
 
   useEffect(() => {
-    loadDepartments();
-    loadAllMembers();
-  }, []);
+    if (profile) {
+      loadDepartments();
+      loadAllMembers();
+    }
+  }, [profile]);
 
   const loadDepartments = async () => {
     try {
       setLoading(true);
       
+      // First, load all departments
       const { data: departmentsData, error: departmentsError } = await supabase
         .from('departments')
         .select('*')
         .order('name');
 
       if (departmentsError) throw departmentsError;
-      
-      const departmentsWithMemberCounts = await Promise.all(
+
+      // Get member count and leader information for each department
+      const departmentsWithDetails = await Promise.all(
         (departmentsData || []).map(async (department) => {
+          // Get member count from department_members table
           const { count } = await supabase
             .from('department_members')
             .select('*', { count: 'exact', head: true })
             .eq('department_id', department.id);
-
+          
+          // Get leader information if leader_id exists
+          let leaderInfo = null;
+          if (department.leader_id) {
+            const { data: leaderData } = await supabase
+              .from('members')
+              .select('name, surname, residence, phone')
+              .eq('id', department.leader_id)
+              .single();
+            
+            leaderInfo = leaderData;
+          }
+          
+          // Check if current user is the leader of this department
+          const isCurrentUserLeader = department.leader_id === profile?.id;
+          
           return {
             ...department,
-            memberCount: count || 0
+            leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
+            leader_residence: leaderInfo?.residence || null,
+            leader_phone: leaderInfo?.phone || null,
+            memberCount: count || 0,
+            is_current_user_leader: isCurrentUserLeader
           };
         })
       );
 
-      setDepartments(departmentsWithMemberCounts);
+      // Filter departments based on user role
+      let filteredDepartments = departmentsWithDetails;
+      
+      if (!isAdministrator && !isPastor) {
+        if (isDepartmentLeader) {
+          // Department Leaders can see only their own department
+          filteredDepartments = departmentsWithDetails.filter(department => 
+            department.leader_id === profile?.id
+          );
+        } else if (isMember) {
+          // Members can see only departments they belong to
+          const userDepartments = await getUserDepartments();
+          filteredDepartments = departmentsWithDetails.filter(department => 
+            userDepartments.some(ud => ud.id === department.id)
+          );
+        }
+      }
+      // Administrators and Pastors can see all departments (no filtering)
+
+      setDepartments(filteredDepartments);
     } catch (error: any) {
+      console.error('Error loading departments:', error);
       setError('Failed to load departments: ' + error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getUserDepartments = async (): Promise<Department[]> => {
+    try {
+      if (!profile?.id) return [];
+      
+      const { data: departmentMembers } = await supabase
+        .from('department_members')
+        .select('department_id')
+        .eq('member_id', profile.id);
+      
+      if (!departmentMembers || departmentMembers.length === 0) return [];
+      
+      const departmentIds = departmentMembers.map(dm => dm.department_id);
+      
+      const { data: departmentData } = await supabase
+        .from('departments')
+        .select('*')
+        .in('id', departmentIds);
+      
+      return departmentData || [];
+    } catch (error) {
+      console.error('Failed to get user departments:', error);
+      return [];
     }
   };
 
@@ -1985,7 +2845,7 @@ const Departments = () => {
         .from('members')
         .select('*')
         .order('name');
-      
+
       if (error) throw error;
       setMembers(data || []);
     } catch (error: any) {
@@ -2015,18 +2875,20 @@ const Departments = () => {
         .select(`
           *,
           members:member_id (
-            id,
-            name,
-            surname,
-            email,
-            phone
+            id, name, surname, residence, phone
           )
         `)
         .eq('meeting_id', meetingId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading attendance:', error);
+        setError('Failed to load attendance: ' + error.message);
+        return;
+      }
+      
       setAttendanceRecords(data || []);
     } catch (error: any) {
+      console.error('Failed to load attendance:', error);
       setError('Failed to load attendance: ' + error.message);
     }
   };
@@ -2063,7 +2925,28 @@ const Departments = () => {
     await loadMeetings(department.id);
   };
 
+  const openEditDepartmentModal = (department: Department) => {
+    if (!canEditDepartment(department)) {
+      setError('You do not have permission to edit this department');
+      return;
+    }
+    setSelectedDepartment(department);
+    setShowEditDepartmentModal(true);
+  };
+
+  const openDeleteDepartmentModal = (department: Department) => {
+    if (!canDeleteDepartment(department)) {
+      setError('Only administrators and pastors can delete departments');
+      return;
+    }
+    setSelectedDepartment(department);
+    setShowDeleteDepartmentModal(true);
+  };
+
   const closeAllModals = () => {
+    setShowCreateDepartmentModal(false);
+    setShowEditDepartmentModal(false);
+    setShowDeleteDepartmentModal(false);
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
@@ -2072,12 +2955,42 @@ const Departments = () => {
     setAttendanceRecords([]);
   };
 
-  const filteredDepartments = departments.filter(department =>
-    canViewDepartment(department.id) && (
-      department.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      department.location?.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  );
+  const handleDepartmentCreated = () => {
+    loadDepartments();
+    setSuccess('Department created successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleDepartmentUpdated = () => {
+    loadDepartments();
+    setSuccess('Department updated successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleDepartmentDeleted = () => {
+    loadDepartments();
+    setSuccess('Department deleted successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Permission functions
+  const canCreateDepartments = () => {
+    return isAdministrator || isPastor;
+  };
+
+  const canEditDepartment = (department: Department) => {
+    if (isAdministrator || isPastor) {
+      return true; // Admins & Pastors can edit all departments
+    }
+    if (isDepartmentLeader) {
+      return department.leader_id === profile?.id; // Leaders can edit only their own department
+    }
+    return false; // Members cannot edit any departments
+  };
+
+  const canDeleteDepartment = (department: Department) => {
+    return isAdministrator || isPastor; // Only admins & pastors can delete
+  };
 
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
@@ -2088,7 +3001,8 @@ const Departments = () => {
     if (roles.includes('deacon')) return 'Deacon';
     if (roles.includes('department_leader')) return 'Department Leader';
     if (roles.includes('group_leader')) return 'Group Leader';
-    return 'Member';
+    if (roles.includes('member')) return 'Member';
+    return 'Guest';
   };
 
   const getAttendanceStats = () => {
@@ -2101,21 +3015,19 @@ const Departments = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Church Departments
-            </h1>
-            <p className="text-gray-600">
-              {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
-            </p>
-          </div>
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Departments</h1>
+          <p className="text-lg text-gray-600">
+            {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
+          </p>
         </div>
 
-        <div className="mb-6">
-          <div className="relative max-w-md">
+        {/* Search and Create Department Bar */}
+        <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
+          <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
               type="text"
@@ -2125,8 +3037,19 @@ const Departments = () => {
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
+          
+          {canCreateDepartments() && (
+            <button
+              onClick={() => setShowCreateDepartmentModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
+            >
+              <Plus className="h-5 w-5" />
+              Create New Department
+            </button>
+          )}
         </div>
 
+        {/* Error/Success Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
@@ -2155,78 +3078,121 @@ const Departments = () => {
           </div>
         )}
 
+        {/* Departments Grid */}
         {!profile ? (
           <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
             <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">
-              Please Log In
-            </h3>
-            <p className="text-gray-500 mb-6">
-              You need to be logged in to view departments
-            </p>
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">Please Log In</h3>
+            <p className="text-gray-500 mb-6">You need to be logged in to view departments</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {loading && filteredDepartments.length === 0 ? (
+            {loading && departments.length === 0 ? (
               <div className="col-span-full text-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                 <p className="mt-4 text-gray-600">Loading departments...</p>
               </div>
-            ) : filteredDepartments.length === 0 ? (
+            ) : departments.length === 0 ? (
               <div className="col-span-full text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
                 <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-600 mb-2">
-                  No Accessible Departments
+                  {searchTerm ? 'No departments match your search' : 'No Accessible Departments'}
                 </h3>
                 <p className="text-gray-500 mb-6">
-                  {searchTerm ? 'No departments match your search' : 'You do not have access to any departments'}
+                  {searchTerm ? 'Try a different search term' : 'You do not have access to any departments'}
                 </p>
+                {canCreateDepartments() && (
+                  <button
+                    onClick={() => setShowCreateDepartmentModal(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mx-auto"
+                  >
+                    <Plus className="h-5 w-5" />
+                    Create Your First Department
+                  </button>
+                )}
               </div>
             ) : (
-              filteredDepartments.map((department: any) => {
+              departments.filter(department => 
+                department.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                department.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                department.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
+              ).map((department) => {
                 const canManage = canManageDepartment(department.id);
                 const canView = canViewDepartment(department.id);
+                const canEdit = canEditDepartment(department);
+                const canDelete = canDeleteDepartment(department);
                 
                 return (
                   <div
                     key={department.id}
                     className="bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
                   >
-                    <div className="flex items-start gap-4 mb-4">
-                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
-                        <Users className="h-7 w-7 text-white" />
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-start gap-4">
+                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-lg">
+                          <Users className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">{department.name}</h3>
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {department.is_current_user_leader && (
+                              <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Your Leadership
+                              </span>
+                            )}
+                            {canManage ? (
+                              <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Can Manage
+                              </span>
+                            ) : canView ? (
+                              <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                View Only
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">{department.name}</h3>
-                        {canManage ? (
-                          <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium mb-2">
-                            <Shield className="h-3 w-3 mr-1" />
-                            Can Manage
-                          </span>
-                        ) : canView ? (
-                          <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium mb-2">
-                            <Shield className="h-3 w-3 mr-1" />
-                            View Only
-                          </span>
-                        ) : null}
-                      </div>
+                      
+                      {(canEdit || canDelete) && (
+                        <div className="flex gap-1">
+                          {canEdit && (
+                            <button
+                              onClick={() => openEditDepartmentModal(department)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit Department"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => openDeleteDepartmentModal(department)}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Department"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-3 mb-4">
-                      <div className="flex items-center gap-3 text-gray-600">
-                        <User className="h-4 w-4" />
-                        <span className="text-sm">
-                          Leader: {department.leader_id ? 'Assigned' : 'Not assigned'}
-                        </span>
-                      </div>
-                      
+                      {department.leader_name && (
+                        <div className="flex items-center gap-3 text-gray-600">
+                          <User className="h-4 w-4" />
+                          <span className="text-sm">Leader: {department.leader_name}</span>
+                        </div>
+                      )}
                       {department.location && (
                         <div className="flex items-center gap-3 text-gray-600">
                           <MapPin className="h-4 w-4" />
                           <span className="text-sm">{department.location}</span>
                         </div>
                       )}
-                      
                       {(department.meeting_day || department.meeting_time) && (
                         <div className="flex items-center gap-3 text-gray-600">
                           <Calendar className="h-4 w-4" />
@@ -2235,11 +3201,8 @@ const Departments = () => {
                           </span>
                         </div>
                       )}
-                      
                       {department.description && (
-                        <p className="text-sm text-gray-600 line-clamp-2">
-                          {department.description}
-                        </p>
+                        <p className="text-sm text-gray-600 line-clamp-2">{department.description}</p>
                       )}
                     </div>
 
@@ -2271,13 +3234,47 @@ const Departments = () => {
           </div>
         )}
 
+        {/* Modals */}
+        <CreateDepartmentModal
+          isOpen={showCreateDepartmentModal}
+          onClose={() => setShowCreateDepartmentModal(false)}
+          onSuccess={handleDepartmentCreated}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          userId={profile?.id || null}
+        />
+
+        <EditDepartmentModal
+          isOpen={showEditDepartmentModal}
+          department={selectedDepartment}
+          onClose={() => setShowEditDepartmentModal(false)}
+          onSuccess={handleDepartmentUpdated}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          canEdit={selectedDepartment ? canEditDepartment(selectedDepartment) : false}
+        />
+
+        <DeleteDepartmentModal
+          isOpen={showDeleteDepartmentModal}
+          department={selectedDepartment}
+          onClose={() => setShowDeleteDepartmentModal(false)}
+          onConfirm={handleDepartmentDeleted}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          canDelete={selectedDepartment ? canDeleteDepartment(selectedDepartment) : false}
+        />
+
         {showMeetingsModal && selectedDepartment && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
             <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900">
-                  {selectedDepartment.name} - Meetings
-                </h3>
+                <h3 className="text-2xl font-bold text-gray-900">{selectedDepartment.name} - Meetings</h3>
                 <button
                   onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -2302,18 +3299,14 @@ const Departments = () => {
                             {meeting.meeting_time && ` at ${meeting.meeting_time}`}
                           </div>
                           {meeting.topic && (
-                            <div className="text-sm text-gray-600 mt-1">
-                              Topic: {meeting.topic}
-                            </div>
+                            <div className="text-sm text-gray-600 mt-1">Topic: {meeting.topic}</div>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            meeting.status === 'completed' 
-                              ? 'bg-green-100 text-green-800'
-                              : meeting.status === 'cancelled'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-blue-100 text-blue-800'
+                            meeting.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            meeting.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                            'bg-blue-100 text-blue-800'
                           }`}>
                             {meeting.status}
                           </span>
@@ -2365,11 +3358,8 @@ const Departments = () => {
                   <h1 className="text-3xl font-bold text-gray-900 print:text-black mb-2">
                     {selectedDepartment.name}
                   </h1>
-                  <p className="text-lg text-gray-600 print:text-black">
-                    Department Meeting Attendance Report
-                  </p>
+                  <p className="text-lg text-gray-600 print:text-black">Department Meeting Attendance Report</p>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4 mt-4">
                   <div>
                     <p className="text-sm text-gray-500 print:text-gray-700">Date</p>
@@ -2404,9 +3394,7 @@ const Departments = () => {
               </div>
 
               <div className="mb-8">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">
-                  Attendance Summary
-                </h4>
+                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Attendance Summary</h4>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-blue-50 print:bg-blue-50 border border-blue-200 print:border-blue-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
@@ -2419,7 +3407,6 @@ const Departments = () => {
                       <Users className="h-10 w-10 text-blue-400 print:text-blue-600" />
                     </div>
                   </div>
-
                   <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -2431,12 +3418,9 @@ const Departments = () => {
                       <CheckCircle className="h-10 w-10 text-green-400 print:text-green-600" />
                     </div>
                     <p className="text-xs text-green-600 print:text-green-700 mt-2">
-                      {getAttendanceStats().total > 0 
-                        ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%`
-                        : '0%'}
+                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%` : '0%'}
                     </p>
                   </div>
-
                   <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -2448,12 +3432,9 @@ const Departments = () => {
                       <X className="h-10 w-10 text-red-400 print:text-red-600" />
                     </div>
                     <p className="text-xs text-red-600 print:text-red-700 mt-2">
-                      {getAttendanceStats().total > 0 
-                        ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%`
-                        : '0%'}
+                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%` : '0%'}
                     </p>
                   </div>
-
                   <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -2465,25 +3446,18 @@ const Departments = () => {
                       <AlertCircle className="h-10 w-10 text-yellow-400 print:text-yellow-600" />
                     </div>
                     <p className="text-xs text-yellow-600 print:text-yellow-700 mt-2">
-                      {getAttendanceStats().total > 0 
-                        ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%`
-                        : '0%'}
+                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%` : '0%'}
                     </p>
                   </div>
                 </div>
               </div>
 
               <div className="mb-6">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">
-                  Detailed Attendance
-                </h4>
-
+                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Detailed Attendance</h4>
                 {attendanceRecords.length === 0 ? (
                   <div className="text-center py-8 bg-gray-50 print:bg-gray-50 rounded-lg">
                     <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 print:text-gray-700">
-                      No attendance records found
-                    </p>
+                    <p className="text-gray-600 print:text-gray-700">No attendance records found</p>
                   </div>
                 ) : (
                   <>
@@ -2568,9 +3542,7 @@ const Departments = () => {
 
               {selectedMeetingForReport.notes && (
                 <div className="mb-6">
-                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">
-                    Meeting Notes
-                  </h4>
+                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">Meeting Notes</h4>
                   <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-lg p-4">
                     <p className="text-gray-700 print:text-black whitespace-pre-wrap">
                       {selectedMeetingForReport.notes}
@@ -2592,9 +3564,7 @@ const Departments = () => {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900">
-                  Manage {selectedDepartment.name}
-                </h3>
+                <h3 className="text-2xl font-bold text-gray-900">Manage {selectedDepartment.name}</h3>
                 <button
                   onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -2603,7 +3573,7 @@ const Departments = () => {
                 </button>
               </div>
 
-              <DepartmentManagementWorkflow 
+              <DepartmentManagementWorkflow
                 department={selectedDepartment}
                 meetings={meetings}
                 members={members}
@@ -2628,40 +3598,31 @@ const Departments = () => {
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
           }
-          
           @page {
             margin: 1cm;
             size: A4;
           }
-          
           .print\\:hidden {
             display: none !important;
           }
-          
           .print\\:block {
             display: block !important;
           }
-          
           .print\\:p-0 {
             padding: 0 !important;
           }
-          
           .print\\:bg-white {
             background-color: white !important;
           }
-          
           .print\\:text-black {
             color: black !important;
           }
-          
           .print\\:max-h-none {
             max-height: none !important;
           }
-          
           .print\\:rounded-none {
             border-radius: 0 !important;
           }
-          
           .print\\:shadow-none {
             box-shadow: none !important;
           }
