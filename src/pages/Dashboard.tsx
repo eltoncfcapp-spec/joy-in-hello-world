@@ -109,6 +109,7 @@ interface AbsentMember {
   surname: string;
   phone: string | null;
   consecutiveAbsences: number;
+  lastEventDate: string;
 }
 
 // Permission checking utilities
@@ -256,14 +257,16 @@ const Dashboard = () => {
   const loadAbsentMembers = async () => {
     try {
       // Get all Sunday Service events in descending order
+      // Using ilike to match various Sunday service naming conventions
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
-        .ilike('name', '%sunday%service%')
+        .or('name.ilike.%sunday%,name.ilike.%service%')
         .order('event_date', { ascending: false })
         .limit(10);
 
       if (eventsError) throw eventsError;
+      
       if (!sundayEvents || sundayEvents.length < 2) {
         setAbsentMembers([]);
         return;
@@ -275,18 +278,18 @@ const Dashboard = () => {
       // Get all members
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, phone, assigned_groups, assigned_departments');
+        .select('id, name, surname, phone, cell_group_id, created_at, status');
 
       if (membersError) throw membersError;
-      if (!allMembers) {
+      if (!allMembers || allMembers.length === 0) {
         setAbsentMembers([]);
         return;
       }
 
-      // Get attendance for the last 2 Sunday services
+      // Get attendance records for the last 2 Sunday services
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
-        .select('members_id, event_id')
+        .select('members_id, event_id, attendance_status')
         .in('event_id', lastTwoSundays.map(e => e.id));
 
       if (attendanceError) throw attendanceError;
@@ -295,22 +298,119 @@ const Dashboard = () => {
       const absent: AbsentMember[] = [];
       
       allMembers.forEach(member => {
+        // Filter attendance records for this member
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
-        // Check if member was absent for both Sundays (no attendance record = absent)
-        const absentCount = lastTwoSundays.filter(sunday => {
-          const hasAttendance = memberAttendances.some(a => a.event_id === sunday.id);
-          return !hasAttendance; // No attendance record means absent
-        }).length;
-
-        if (absentCount === 2) {
+        // Check attendance for each of the last 2 Sundays
+        let absentForBoth = true;
+        
+        for (const sunday of lastTwoSundays) {
+          const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
+          
+          // Member is considered present if:
+          // 1. They have an attendance record AND attendance_status is 'present'
+          // 2. OR they don't have a record but the event might not require attendance tracking
+          if (attendanceForEvent) {
+            // If there's an attendance record, check the status
+            if (attendanceForEvent.attendance_status === 'present') {
+              absentForBoth = false;
+              break;
+            }
+          } else {
+            // No attendance record exists
+            // We need to check if we should count this as absent
+            // For now, we'll count it as absent if there's no record
+            continue;
+          }
+        }
+        
+        if (absentForBoth && memberAttendances.length > 0) {
+          // Only include members who have some attendance history
+          // (to avoid flagging brand new members who haven't attended any events yet)
           absent.push({
             id: member.id,
             name: member.name,
             surname: member.surname,
             phone: member.phone,
-            consecutiveAbsences: 2
+            consecutiveAbsences: 2,
+            lastEventDate: lastTwoSundays[0].event_date
           });
+        }
+      });
+
+      setAbsentMembers(absent);
+    } catch (error) {
+      console.error('Error loading absent members:', error);
+      setAbsentMembers([]);
+    }
+  };
+
+  // Alternative approach - More strict: Only flag members who have 'absent' status records
+  const loadAbsentMembersAlternative = async () => {
+    try {
+      // Get all Sunday Service events in descending order
+      const { data: sundayEvents, error: eventsError } = await supabase
+        .from('events')
+        .select('id, event_date, name')
+        .or('name.ilike.%sunday%,name.ilike.%service%')
+        .order('event_date', { ascending: false })
+        .limit(10);
+
+      if (eventsError) throw eventsError;
+      
+      if (!sundayEvents || sundayEvents.length < 2) {
+        setAbsentMembers([]);
+        return;
+      }
+
+      const lastTwoSundays = sundayEvents.slice(0, 2);
+      
+      // Get all members
+      const { data: allMembers, error: membersError } = await supabase
+        .from('members')
+        .select('id, name, surname, phone');
+
+      if (membersError) throw membersError;
+      if (!allMembers || allMembers.length === 0) {
+        setAbsentMembers([]);
+        return;
+      }
+
+      // Get attendance records where attendance_status = 'absent' for the last 2 Sundays
+      const { data: absentAttendances, error: attendanceError } = await supabase
+        .from('event_attendees')
+        .select('members_id, event_id, attendance_status')
+        .in('event_id', lastTwoSundays.map(e => e.id))
+        .eq('attendance_status', 'absent');
+
+      if (attendanceError) throw attendanceError;
+
+      // Group absent records by member
+      const absentByMember: { [memberId: string]: number } = {};
+      
+      absentAttendances?.forEach(attendance => {
+        if (!absentByMember[attendance.members_id]) {
+          absentByMember[attendance.members_id] = 0;
+        }
+        absentByMember[attendance.members_id]++;
+      });
+
+      // Find members with 2 consecutive absences
+      const absent: AbsentMember[] = [];
+      
+      Object.entries(absentByMember).forEach(([memberId, absentCount]) => {
+        if (absentCount >= 2) {
+          const member = allMembers.find(m => m.id === memberId);
+          if (member) {
+            absent.push({
+              id: member.id,
+              name: member.name,
+              surname: member.surname,
+              phone: member.phone,
+              consecutiveAbsences: absentCount,
+              lastEventDate: lastTwoSundays[0].event_date
+            });
+          }
         }
       });
 
@@ -597,7 +697,7 @@ const Dashboard = () => {
 
   const filteredMembers = getFilteredMembers();
   const filteredEvents = getFilteredEvents();
-  getFilteredAbsentMembers(); // Called for side effects
+  const filteredAbsentMembers = getFilteredAbsentMembers();
   const filteredSermons = getFilteredSermons();
 
   return (
@@ -1016,6 +1116,71 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* Absent Members Modal */}
+      {activeModal === 'viewAbsentMembers' && (
+        <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">
+              Members who have been absent for the last 2 Sunday services
+            </p>
+            
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {filteredAbsentMembers.map((member) => (
+                <div key={member.id} className="flex items-center justify-between p-4 border border-red-200 rounded-xl bg-red-50">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                      <p className="text-sm text-gray-500">{member.phone || 'No phone number'}</p>
+                      <p className="text-xs text-red-600 mt-1">
+                        Absent for {member.consecutiveAbsences} consecutive Sundays
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <a
+                      href={`tel:${member.phone}`}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!member.phone}
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                      Follow Up Call
+                    </a>
+                    <button 
+                      onClick={() => {
+                        // Find the member in the members list
+                        const fullMember = members.find(m => m.id === member.id);
+                        if (fullMember) {
+                          openMemberDetail(fullMember);
+                          closeModal();
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Details
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredAbsentMembers.length === 0 && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="h-8 w-8 text-green-600" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">Great News!</h4>
+                  <p className="text-gray-600">
+                    All members have attended at least one of the last 2 Sunday services.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Sermons Modal */}
       {activeModal === 'viewSermons' && (
         <Modal title="All Sermons" size="max-w-4xl">
@@ -1238,8 +1403,6 @@ const Dashboard = () => {
           </div>
         </Modal>
       )}
-
-      {/* ... (other modals remain the same) ... */}
 
       {/* Pamphlet Viewer Modal */}
       {viewingPamphlet && (
