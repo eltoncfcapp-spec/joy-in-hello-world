@@ -45,6 +45,11 @@ interface Member {
   status?: string | null;
   admin_role?: string | null;
   invited_by?: string | null;
+  is_admin?: boolean;
+  pastor_role?: boolean;
+  deacon_role?: boolean;
+  department_leader?: boolean;
+  group_leader?: boolean;
 }
 
 interface DepartmentAttendanceRecord {
@@ -2725,7 +2730,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile, canViewDepartment, canManageDepartment, getRoles, isAdministrator, isPastor, isDepartmentLeader, isMember } = useAuth();
+  const { profile, canViewDepartment, canManageDepartment, getRoles } = useAuth();
   
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
@@ -2745,6 +2750,42 @@ const Departments = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
+
+  // Check if user has administrator privileges
+  const isAdministrator = () => {
+    if (!profile) return false;
+    
+    // Check all possible admin fields
+    const adminRole = profile.admin_role?.toLowerCase();
+    const isAdminField = profile.is_admin === true;
+    const isPastorField = profile.pastor_role === true;
+    
+    return isAdminField || 
+           profile.is_developer === true ||
+           isPastorField ||
+           (adminRole && ['admin', 'administrator', 'pastor', 'deacon'].includes(adminRole));
+  };
+
+  // Check if user has pastor privileges
+  const isPastor = () => {
+    if (!profile) return false;
+    return profile.pastor_role === true || 
+           (profile.admin_role?.toLowerCase() === 'pastor') ||
+           profile.is_admin === true;
+  };
+
+  // Check if user is a department leader
+  const isDepartmentLeader = () => {
+    if (!profile) return false;
+    return profile.department_leader === true || 
+           profile.admin_role?.toLowerCase() === 'department_leader';
+  };
+
+  // Check if user is a regular member
+  const isMember = () => {
+    if (!profile) return false;
+    return !isAdministrator() && !isPastor() && !isDepartmentLeader();
+  };
 
   useEffect(() => {
     if (profile) {
@@ -2803,13 +2844,13 @@ const Departments = () => {
       // Filter departments based on user role
       let filteredDepartments = departmentsWithDetails;
       
-      if (!isAdministrator && !isPastor) {
-        if (isDepartmentLeader) {
+      if (!isAdministrator() && !isPastor()) {
+        if (isDepartmentLeader()) {
           // Department Leaders can see only their own department
           filteredDepartments = departmentsWithDetails.filter(department => 
             department.leader_id === profile?.id
           );
-        } else if (isMember) {
+        } else if (isMember()) {
           // Members can see only departments they belong to
           const userDepartments = await getUserDepartments();
           filteredDepartments = departmentsWithDetails.filter(department => 
@@ -2997,34 +3038,46 @@ const Departments = () => {
 
   // Permission functions - FIXED for administrators and pastors
   const canCreateDepartments = () => {
-    return isAdministrator || isPastor;
+    return isAdministrator() || isPastor();
   };
 
   const canEditDepartment = (department: Department) => {
-    if (isAdministrator || isPastor) {
+    if (isAdministrator() || isPastor()) {
       return true; // Admins & Pastors can edit all departments
     }
-    if (isDepartmentLeader) {
+    if (isDepartmentLeader()) {
       return department.leader_id === profile?.id; // Leaders can edit only their own department
     }
     return false; // Members cannot edit any departments
   };
 
   const canDeleteDepartment = (department: Department) => {
-    return isAdministrator || isPastor; // Only admins & pastors can delete
+    return isAdministrator() || isPastor(); // Only admins & pastors can delete
   };
 
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    const roles = getRoles();
-    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
-    if (roles.includes('pastor')) return 'Pastor';
-    if (roles.includes('deacon')) return 'Deacon';
-    if (roles.includes('department_leader')) return 'Department Leader';
-    if (roles.includes('group_leader')) return 'Group Leader';
-    if (roles.includes('member')) return 'Member';
-    return 'Guest';
+    if (isAdministrator()) {
+      if (profile.pastor_role === true || profile.admin_role?.toLowerCase() === 'pastor') {
+        return 'Pastor/Administrator';
+      }
+      return 'Administrator';
+    }
+    
+    if (isDepartmentLeader()) {
+      return 'Department Leader';
+    }
+    
+    if (profile.admin_role === 'deacon') {
+      return 'Deacon';
+    }
+    
+    if (profile.admin_role === 'group_leader') {
+      return 'Group Leader';
+    }
+    
+    return 'Member';
   };
 
   const getAttendanceStats = () => {
@@ -3045,7 +3098,7 @@ const Departments = () => {
           <p className="text-lg text-gray-600">
             {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
           </p>
-          {(isAdministrator || isPastor) && (
+          {(isAdministrator() || isPastor()) && (
             <div className="mt-2 text-sm text-purple-600 font-medium">
               ⚡ Full Administrative Access
             </div>
@@ -3546,7 +3599,7 @@ const Departments = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
