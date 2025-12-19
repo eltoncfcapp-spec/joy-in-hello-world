@@ -1103,7 +1103,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const loadDepartmentMembers = async () => {
     try {
-      const { data: departmentMembers, error } = await supabase
+      const { data: departmentMembersData, error } = await supabase
         .from('department_members')
         .select(`
           *,
@@ -1113,7 +1113,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       if (error) throw error;
       
-      const memberData = departmentMembers?.map(dm => ({
+      const memberData = departmentMembersData?.map(dm => ({
         ...dm.members,
         department_role: dm.role
       })) || [];
@@ -1211,6 +1211,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       if (error) throw error;
       
+      // Refresh department members list
       await loadDepartmentMembers();
       setShowAddAttendeeModal(false);
       setSearchMemberTerm('');
@@ -1238,6 +1239,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
+      // First delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('department_attendance')
         .delete()
@@ -1245,11 +1247,14 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       if (deleteError) throw deleteError;
 
-      const { error: insertError } = await supabase
-        .from('department_attendance')
-        .insert(attendanceRecords);
+      // Then insert new attendance records
+      if (attendanceRecords.length > 0) {
+        const { error: insertError } = await supabase
+          .from('department_attendance')
+          .insert(attendanceRecords);
 
-      if (insertError) throw insertError;
+        if (insertError) throw insertError;
+      }
       
       // Reload attendance data after saving
       await loadExistingAttendance();
@@ -1975,6 +1980,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
         return;
       }
       
+      console.log('Loaded department attendance data:', data);
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2743,7 +2749,6 @@ const Departments = () => {
     try {
       setLoading(true);
       
-      // First, load all departments
       const { data: departmentsData, error: departmentsError } = await supabase
         .from('departments')
         .select('*')
@@ -2751,16 +2756,13 @@ const Departments = () => {
 
       if (departmentsError) throw departmentsError;
 
-      // Get member count and leader information for each department
       const departmentsWithDetails = await Promise.all(
         (departmentsData || []).map(async (department) => {
-          // Get member count from department_members table
           const { count } = await supabase
             .from('department_members')
             .select('*', { count: 'exact', head: true })
             .eq('department_id', department.id);
           
-          // Get leader information if leader_id exists
           let leaderInfo = null;
           if (department.leader_id) {
             const { data: leaderData } = await supabase
@@ -2772,7 +2774,6 @@ const Departments = () => {
             leaderInfo = leaderData;
           }
           
-          // Check if current user is the leader of this department
           const isCurrentUserLeader = department.leader_id === profile?.id;
           
           return {
@@ -2786,24 +2787,20 @@ const Departments = () => {
         })
       );
 
-      // Filter departments based on user role
       let filteredDepartments = departmentsWithDetails;
       
       if (!isAdministrator && !isPastor) {
         if (isDepartmentLeader) {
-          // Department Leaders can see only their own department
           filteredDepartments = departmentsWithDetails.filter(department => 
             department.leader_id === profile?.id
           );
         } else if (isMember) {
-          // Members can see only departments they belong to
           const userDepartments = await getUserDepartments();
           filteredDepartments = departmentsWithDetails.filter(department => 
             userDepartments.some(ud => ud.id === department.id)
           );
         }
       }
-      // Administrators and Pastors can see all departments (no filtering)
 
       setDepartments(filteredDepartments);
     } catch (error: any) {
@@ -2886,6 +2883,7 @@ const Departments = () => {
         return;
       }
       
+      console.log('Loaded attendance for report:', data);
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -2973,23 +2971,22 @@ const Departments = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Permission functions
   const canCreateDepartments = () => {
     return isAdministrator || isPastor;
   };
 
   const canEditDepartment = (department: Department) => {
     if (isAdministrator || isPastor) {
-      return true; // Admins & Pastors can edit all departments
+      return true;
     }
     if (isDepartmentLeader) {
-      return department.leader_id === profile?.id; // Leaders can edit only their own department
+      return department.leader_id === profile?.id;
     }
-    return false; // Members cannot edit any departments
+    return false;
   };
 
   const canDeleteDepartment = (department: Department) => {
-    return isAdministrator || isPastor; // Only admins & pastors can delete
+    return isAdministrator || isPastor;
   };
 
   const getUserRoleDisplay = () => {
@@ -3017,7 +3014,6 @@ const Departments = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Departments</h1>
           <p className="text-lg text-gray-600">
@@ -3025,7 +3021,6 @@ const Departments = () => {
           </p>
         </div>
 
-        {/* Search and Create Department Bar */}
         <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
@@ -3049,7 +3044,6 @@ const Departments = () => {
           )}
         </div>
 
-        {/* Error/Success Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
@@ -3078,7 +3072,6 @@ const Departments = () => {
           </div>
         )}
 
-        {/* Departments Grid */}
         {!profile ? (
           <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
             <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -3234,7 +3227,6 @@ const Departments = () => {
           </div>
         )}
 
-        {/* Modals */}
         <CreateDepartmentModal
           isOpen={showCreateDepartmentModal}
           onClose={() => setShowCreateDepartmentModal(false)}
@@ -3519,7 +3511,7 @@ const Departments = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
