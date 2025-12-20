@@ -262,13 +262,13 @@ const Dashboard = () => {
       if (sermonsError) throw sermonsError;
       setSermons(sermonsData || []);
 
-      // Load absent members first
+      // Load absent members FIRST (moved here)
       await loadAbsentMembers();
 
-      // Calculate stats with all data (everyone can see) - AFTER absent members are loaded
+      // Calculate stats AFTER absent members are loaded
       calculateStats(membersData || [], eventsData || [], sermonsData || []);
 
-      // Generate recent activities with all data
+      // Generate recent activities
       generateRecentActivities(membersData || [], eventsData || [], sermonsData || []);
 
     } catch (error) {
@@ -279,16 +279,16 @@ const Dashboard = () => {
     }
   };
 
+  // Updated loadAbsentMembers function
   const loadAbsentMembers = async () => {
     try {
-      // Get all Sunday Service events in descending order
-      // Using ilike to match various Sunday service naming conventions
+      // Get the last 2 Sunday services
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
-        .or('name.ilike.%sunday%,name.ilike.%service%')
+        .ilike('name', '%sunday%')
         .order('event_date', { ascending: false })
-        .limit(10);
+        .limit(2);
 
       if (eventsError) throw eventsError;
       
@@ -297,58 +297,65 @@ const Dashboard = () => {
         return;
       }
 
-      // Get the last 2 Sunday services
-      const lastTwoSundays = sundayEvents.slice(0, 2);
-      
-      // Get all members with email
-      const { data: allMembers, error: membersError } = await supabase
-        .from('members')
-        .select('id, name, surname, phone, email, cell_group_id, created_at, status');
+      const eventIds = sundayEvents.map(e => e.id);
 
-      if (membersError) throw membersError;
-      if (!allMembers || allMembers.length === 0) {
-        setAbsentMembers([]);
-        return;
-      }
-
-      // Get attendance records for the last 2 Sunday services
-      const { data: attendances, error: attendanceError } = await supabase
+      // Get all members who were marked as absent for both Sunday services
+      const { data: absentAttendances, error: attendanceError } = await supabase
         .from('event_attendees')
-        .select('members_id, event_id, attendance_status')
-        .in('event_id', lastTwoSundays.map(e => e.id));
+        .select(`
+          members_id,
+          event_id,
+          attendance_status,
+          members (
+            id,
+            name,
+            surname,
+            phone,
+            email,
+            cell_group_id
+          )
+        `)
+        .in('event_id', eventIds)
+        .eq('attendance_status', 'absent');
 
       if (attendanceError) throw attendanceError;
 
-      // Find members who were absent for both services
-      const absent: AbsentMember[] = [];
-      
-      allMembers.forEach(member => {
-        // Filter attendance records for this member
-        const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
+      // Group by member and count absences
+      const memberAbsenceMap = new Map<string, {
+        member: any;
+        absentCount: number;
+        dates: string[];
+      }>();
+
+      absentAttendances?.forEach((attendance: any) => {
+        const memberId = attendance.members_id;
+        const eventDate = sundayEvents.find(e => e.id === attendance.event_id)?.event_date || '';
         
-        // Check attendance for each of the last 2 Sundays
-        let absentCount = 0;
-        
-        for (const sunday of lastTwoSundays) {
-          const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
-          
-          // Member is considered absent if:
-          // 1. They have an attendance record with attendance_status = 'absent'
-          // 2. OR they don't have any attendance record at all for that event
-          if (!attendanceForEvent || attendanceForEvent.attendance_status === 'absent') {
-            absentCount++;
-          }
+        if (!memberAbsenceMap.has(memberId)) {
+          memberAbsenceMap.set(memberId, {
+            member: attendance.members,
+            absentCount: 0,
+            dates: []
+          });
         }
         
-        if (absentCount >= 2) {
+        const record = memberAbsenceMap.get(memberId)!;
+        record.absentCount++;
+        record.dates.push(eventDate);
+      });
+
+      // Filter members who were absent for both Sundays
+      const absent: AbsentMember[] = [];
+      memberAbsenceMap.forEach((record) => {
+        if (record.absentCount === 2 && record.member) {
           absent.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            phone: member.phone,
-            email: member.email,
-            consecutiveAbsences: absentCount,
-            lastEventDate: lastTwoSundays[0].event_date
+            id: record.member.id,
+            name: record.member.name,
+            surname: record.member.surname,
+            phone: record.member.phone,
+            email: record.member.email,
+            consecutiveAbsences: record.absentCount,
+            lastEventDate: sundayEvents[0].event_date
           });
         }
       });
