@@ -859,20 +859,26 @@ const Events = () => {
       let videoUrl = sermonFormData.existingVideoUrl;
       let documentUrl = sermonFormData.existingDocumentUrl;
 
+      // Only upload files if they exist
       if (sermonFormData.videoFile) {
         setUploadingSermonFile({ type: 'video' });
         try {
           videoUrl = await uploadSermonFile(sermonFormData.videoFile, 'video');
         } catch (error: any) {
           throw new Error(`Failed to upload video: ${error.message}`);
+        } finally {
+          setUploadingSermonFile(null);
         }
       }
+      
       if (sermonFormData.documentFile) {
         setUploadingSermonFile({ type: 'document' });
         try {
           documentUrl = await uploadSermonFile(sermonFormData.documentFile, 'document');
         } catch (error: any) {
           throw new Error(`Failed to upload document: ${error.message}`);
+        } finally {
+          setUploadingSermonFile(null);
         }
       }
 
@@ -926,7 +932,6 @@ const Events = () => {
       setError(error.message || `Failed to ${editingSermon ? 'update' : 'save'} sermon. Please try again.`);
     } finally {
       setSermonLoading(null);
-      setUploadingSermonFile(null);
     }
   };
 
@@ -1014,6 +1019,7 @@ const Events = () => {
       existingDocumentUrl: '',
     });
     setError(null);
+    setUploadingSermonFile(null);
   };
 
   const removeSermonFile = async (sermonId: string, fileType: 'video' | 'document') => {
@@ -1386,16 +1392,24 @@ const Events = () => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
-    const initialAttendance: Record<string, 'present' | 'absent'> = {};
-    const initialNotes: Record<string, string> = {};
+    const [targetMembers] = await Promise.all([
+      (async () => {
+        const membersList: Member[] = [];
+        for (const member of members) {
+          if (member.status === 'not_attending') continue;
+          const shouldAttend = await isMemberInTargetGroups(member, event);
+          if (shouldAttend) {
+            membersList.push(member);
+          }
+        }
+        return membersList;
+      })()
+    ]);
 
-    for (const member of members) {
-      if (member.status === 'not_attending') continue;
-      
-      const shouldAttend = await isMemberInTargetGroups(member, event);
-      if (shouldAttend) {
-        initialAttendance[member.id] = 'present';
-      }
+    const initialAttendance: Record<string, 'present' | 'absent'> = {};
+
+    for (const member of targetMembers) {
+      initialAttendance[member.id] = 'present';
     }
 
     const existingAttendees = getEventAttendees(eventId);
@@ -1404,7 +1418,6 @@ const Events = () => {
     });
 
     setBulkAttendance(initialAttendance);
-    setAttendanceNotes(initialNotes);
   };
 
   const closeBulkAttendanceModal = () => {
