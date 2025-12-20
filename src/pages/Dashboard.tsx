@@ -27,7 +27,8 @@ import {
   Home,
   CheckCircle,
   Clock,
-  User
+  User,
+  Image as ImageIcon
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -148,6 +149,7 @@ const Dashboard = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -771,6 +773,25 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
+      {/* Expanded Image Modal */}
+      {expandedImage && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4" onClick={() => setExpandedImage(null)}>
+          <button 
+            className="absolute top-4 right-4 text-white hover:text-gray-300 z-10"
+            onClick={() => setExpandedImage(null)}
+          >
+            <X className="h-8 w-8" />
+          </button>
+          <div className="relative max-w-4xl max-h-[90vh] w-full" onClick={(e) => e.stopPropagation()}>
+            <img 
+              src={expandedImage} 
+              alt="Event Pamphlet" 
+              className="w-full h-auto max-h-[90vh] object-contain rounded-lg"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
@@ -949,39 +970,39 @@ const Dashboard = () => {
                       {event.location || 'No location'}
                     </p>
                     
-                    {/* Pamphlet Section - Show existing pamphlets only */}
+                    {/* Pamphlet Section - SMALL PREVIEW */}
                     {event.pamphlet_url && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        {/* Automatic fitting preview */}
+                        {/* Small Image Preview */}
                         <div className="mb-2">
-                          <div className="relative h-40 w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="w-full h-full">
-                                <iframe
-                                  src={event.pamphlet_url}
-                                  className="w-full h-full"
-                                  title={`${event.name} pamphlet preview`}
-                                  loading="lazy"
-                                  sandbox="allow-same-origin allow-scripts"
-                                  style={{ 
-                                    transform: 'none',
-                                    zoom: '0.7', // Automatically zoom out to fit
-                                    MozTransform: 'scale(0.7)', // For Firefox
-                                    MozTransformOrigin: '0 0',
-                                    WebkitTransform: 'scale(0.7)', // For Safari/Chrome
-                                    WebkitTransformOrigin: '0 0'
-                                  }}
-                                />
+                          <div className="flex items-center gap-2 mb-2">
+                            <ImageIcon className="h-4 w-4 text-blue-500" />
+                            <span className="text-sm font-medium text-gray-700">Event Pamphlet</span>
+                          </div>
+                          <div 
+                            className="relative group cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white"
+                            onClick={() => setExpandedImage(event.pamphlet_url)}
+                          >
+                            <img 
+                              src={event.pamphlet_url} 
+                              alt={`${event.name} pamphlet`}
+                              className="w-full h-32 object-contain transition-transform duration-300 group-hover:scale-105"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-300 flex items-center justify-center">
+                              <div className="text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black bg-opacity-50 px-2 py-1 rounded-full">
+                                Click to enlarge
                               </div>
                             </div>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1 text-center">
-                            Pamphlet Preview (Auto-fitted)
-                          </p>
+                          <p className="text-xs text-gray-500 mt-1 text-center">Click image to view full size</p>
                         </div>
                         
                         {/* Action Buttons */}
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between mt-2">
                           <div className="flex items-center gap-2">
                             <FileText className="h-4 w-4 text-green-600" />
                             <span className="text-xs text-green-600 font-medium">Pamphlet Available</span>
@@ -993,7 +1014,7 @@ const Dashboard = () => {
                               title="Quick View"
                             >
                               <Eye className="h-3 w-3" />
-                              <span className="hidden sm:inline">Quick View</span>
+                              <span className="hidden sm:inline">View</span>
                             </button>
                             <a
                               href={event.pamphlet_url}
