@@ -952,31 +952,23 @@ const Dashboard = () => {
                     {/* Pamphlet Section - Show existing pamphlets only */}
                     {event.pamphlet_url && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        {/* Automatic fitting preview */}
+                        {/* SMALL PREVIEW - Fixed size */}
                         <div className="mb-2">
-                          <div className="relative h-40 w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                          <div className="relative h-32 w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
                             <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="w-full h-full">
+                              <div className="w-full h-full transform scale-[0.35] origin-top-left">
                                 <iframe
                                   src={event.pamphlet_url}
                                   className="w-full h-full"
                                   title={`${event.name} pamphlet preview`}
                                   loading="lazy"
                                   sandbox="allow-same-origin allow-scripts"
-                                  style={{ 
-                                    transform: 'none',
-                                    zoom: '0.7', // Automatically zoom out to fit
-                                    MozTransform: 'scale(0.7)', // For Firefox
-                                    MozTransformOrigin: '0 0',
-                                    WebkitTransform: 'scale(0.7)', // For Safari/Chrome
-                                    WebkitTransformOrigin: '0 0'
-                                  }}
                                 />
                               </div>
                             </div>
                           </div>
                           <p className="text-xs text-gray-500 mt-1 text-center">
-                            Pamphlet Preview (Auto-fitted)
+                            Pamphlet Preview (Click buttons below)
                           </p>
                         </div>
                         
@@ -993,7 +985,7 @@ const Dashboard = () => {
                               title="Quick View"
                             >
                               <Eye className="h-3 w-3" />
-                              <span className="hidden sm:inline">Quick View</span>
+                              <span className="hidden sm:inline">View</span>
                             </button>
                             <a
                               href={event.pamphlet_url}
