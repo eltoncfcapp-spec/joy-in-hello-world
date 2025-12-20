@@ -309,7 +309,6 @@ const Dashboard = () => {
           RETURN total_count;
       END;
       $$;
-      */
 
       // Try to call the RPC function
       const { data, error } = await supabase.rpc('get_absent_member_count');
