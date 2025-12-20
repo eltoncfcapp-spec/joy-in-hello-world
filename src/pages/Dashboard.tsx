@@ -24,7 +24,6 @@ import {
   BookOpen,
   PlayCircle,
   Phone,
-  Mail,
   MessageSquare,
   Home,
   CheckCircle,
@@ -35,12 +34,11 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
 
-// Types - Updated to match your database schema
+// Types - Updated to match your database schema (NO EMAIL)
 interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
@@ -120,7 +118,6 @@ interface AbsentMember {
   residence: string | null;
   consecutiveAbsences: number;
   lastEventDate: string;
-  email?: string | null;
   cell_group_id?: string | null;
   status?: string | null;
 }
@@ -353,7 +350,6 @@ const Dashboard = () => {
             surname: member.surname,
             phone: member.phone,
             residence: member.residence,
-            email: member.email,
             cell_group_id: member.cell_group_id,
             status: member.status,
             consecutiveAbsences: absentCount,
@@ -572,32 +568,74 @@ const Dashboard = () => {
     }
   };
 
-  // UPDATED: Fixed upload pamphlet function with RPC method
+  // FIXED: Upload pamphlet function using RPC
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
       setUploadingPamphlet(eventId);
       setError(null);
+      setSuccess(null);
 
       // Check user permissions
       if (!currentUserCanEdit) {
         throw new Error('You do not have permission to upload pamphlets. Please contact an administrator.');
       }
 
+      // Validate file
+      if (!file) {
+        throw new Error('Please select a file to upload.');
+      }
+
+      const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+      const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+      
+      if (!validExtensions.includes(fileExtension)) {
+        throw new Error(`Invalid file type. Please upload one of: ${validExtensions.join(', ')}`);
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('File size too large. Maximum size is 10MB.');
+      }
+
+      // Create unique file name
       const fileExt = file.name.split('.').pop();
-      const fileName = `${eventId}/pamphlet.${fileExt}`;
+      const timestamp = Date.now();
+      const randomString = Math.random().toString(36).substring(7);
+      const fileName = `${eventId}_${timestamp}_${randomString}_pamphlet.${fileExt}`;
       const filePath = `event-pamphlets/${fileName}`;
+
+      console.log('Starting pamphlet upload for event:', eventId);
 
       // Step 1: Upload to storage
       const { error: uploadError } = await supabase.storage
         .from('event-pamphlets')
         .upload(filePath, file, {
           cacheControl: '3600',
-          upsert: true
+          upsert: false
         });
 
       if (uploadError) {
+        console.error('Storage upload error:', uploadError);
+        
         if (uploadError.message.includes('Bucket not found')) {
-          throw new Error('Storage bucket not found. Please create a bucket named "event-pamphlets" in Supabase Storage.');
+          throw new Error('Storage bucket "event-pamphlets" not found. Please create it in Supabase Storage.');
+        } else if (uploadError.message.includes('already exists')) {
+          // Try with a different random name
+          const newRandomString = Math.random().toString(36).substring(7);
+          const newFileName = `${eventId}_${timestamp}_${newRandomString}_pamphlet.${fileExt}`;
+          const newFilePath = `event-pamphlets/${newFileName}`;
+          
+          const { error: retryError } = await supabase.storage
+            .from('event-pamphlets')
+            .upload(newFilePath, file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+          
+          if (retryError) throw retryError;
+          
+          // Use the new file path
+          filePath = newFilePath;
         } else {
           throw uploadError;
         }
@@ -608,8 +646,10 @@ const Dashboard = () => {
         .from('event-pamphlets')
         .getPublicUrl(filePath);
 
-      // Step 3: Update event using a service role client or RPC
-      // First try direct update
+      console.log('File uploaded successfully. Public URL:', publicUrl);
+
+      // Step 3: First try direct update
+      console.log('Attempting direct update...');
       const { error: directError } = await supabase
         .from('events')
         .update({ 
@@ -619,66 +659,57 @@ const Dashboard = () => {
         .eq('id', eventId);
 
       if (directError) {
-        console.log('Direct update failed due to RLS, trying RPC:', directError.message);
+        console.log('Direct update failed due to RLS, trying RPC function...', directError.message);
         
-        // Try using RPC function
-        const { error: rpcError } = await supabase.rpc('update_event_pamphlet', {
+        // Step 4: Use the RPC function as fallback
+        console.log('Calling RPC function update_event_pamphlet...');
+        
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
           event_id_param: eventId,
           pamphlet_url_param: publicUrl
         });
 
         if (rpcError) {
-          console.log('RPC failed, trying alternative method:', rpcError);
+          console.error('RPC function error:', rpcError);
           
-          // Last resort: Create a service role client for this specific operation
-          // This requires you to have a service role key
-          try {
-            // Import service role client (you need to create this)
-            const serviceClient = await getServiceClient();
-            if (serviceClient) {
-              const { error: serviceError } = await serviceClient
-                .from('events')
-                .update({ 
-                  pamphlet_url: publicUrl,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', eventId);
+          // Try alternative approach - update via API if needed
+          throw new Error(`Failed to update event. RPC Error: ${rpcError.message}`);
+        }
 
-              if (serviceError) throw serviceError;
-            } else {
-              throw new Error('Unable to update event due to RLS restrictions. Please contact administrator.');
-            }
-          } catch (serviceError: any) {
-            throw new Error(`Failed to update event: ${serviceError.message}. The file was uploaded but database update failed.`);
-          }
+        // Check if RPC returned success
+        if (rpcResult && typeof rpcResult === 'object' && rpcResult.success === false) {
+          throw new Error(`RPC failed: ${rpcResult.message || 'Unknown error'}`);
         }
       }
 
-      // Update local state
+      // Step 5: Update local state
       setUpcomingEvents(prev => prev.map(event => 
-        event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
+        event.id === eventId ? { 
+          ...event, 
+          pamphlet_url: publicUrl
+        } : event
       ));
 
       setSuccess('Pamphlet uploaded successfully!');
       setTimeout(() => setSuccess(null), 3000);
+
     } catch (error: any) {
-      console.error('Error uploading pamphlet:', error);
-      setError(error.message || 'Failed to upload pamphlet. Please try again or contact support.');
+      console.error('Error in uploadPamphlet:', error);
+      
+      // User-friendly error messages
+      let errorMessage = error.message || 'Failed to upload pamphlet.';
+      
+      if (errorMessage.includes('permission denied') || errorMessage.includes('row-level security')) {
+        errorMessage = 'Permission denied. Your account may not have sufficient privileges to update events.';
+      } else if (errorMessage.includes('bucket')) {
+        errorMessage = 'Storage configuration issue. Please contact administrator.';
+      } else if (errorMessage.includes('size')) {
+        errorMessage = 'File is too large. Maximum size is 10MB.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setUploadingPamphlet(null);
-    }
-  };
-
-  // Helper function to get service client (optional)
-  const getServiceClient = async () => {
-    try {
-      // Create a client with service role key (only for server-side)
-      // Note: Never expose service role key in client-side code
-      // This is a placeholder - you should implement server-side API endpoint
-      return null;
-    } catch (error) {
-      console.error('Failed to get service client:', error);
-      return null;
     }
   };
 
@@ -731,7 +762,6 @@ const Dashboard = () => {
       id: member.id,
       name: member.name,
       surname: member.surname,
-      email: 'email' in member ? member.email : null,
       residence: member.residence,
       phone: member.phone,
       cell_group_id: 'cell_group_id' in member ? member.cell_group_id : null,
@@ -790,7 +820,7 @@ const Dashboard = () => {
     </div>
   );
 
-  // Member Detail Modal Component
+  // Member Detail Modal Component (UPDATED - NO EMAIL)
   const MemberDetailModal = ({ member }: { member: Member }) => (
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-6">
@@ -810,12 +840,6 @@ const Dashboard = () => {
             <div className="flex items-center gap-2 text-gray-600">
               <Phone className="h-4 w-4" />
               <span>{member.phone}</span>
-            </div>
-          )}
-          {member.email && (
-            <div className="flex items-center gap-2 text-gray-600">
-              <Mail className="h-4 w-4" />
-              <span>{member.email}</span>
             </div>
           )}
           {member.residence && (
@@ -1105,7 +1129,14 @@ const Dashboard = () => {
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                         <label className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-700 cursor-pointer w-fit">
                           <Upload className="h-3 w-3" />
-                          {uploadingPamphlet === event.id ? 'Uploading...' : 'Upload Pamphlet'}
+                          {uploadingPamphlet === event.id ? (
+                            <>
+                              <span className="animate-pulse">Uploading...</span>
+                              <div className="h-2 w-16 bg-gray-200 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-500 animate-pulse" style={{ width: '70%' }}></div>
+                              </div>
+                            </>
+                          ) : 'Upload Pamphlet'}
                           <input
                             type="file"
                             accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
@@ -1114,6 +1145,8 @@ const Dashboard = () => {
                               if (file) {
                                 uploadPamphlet(event.id, file);
                               }
+                              // Reset input
+                              e.target.value = '';
                             }}
                             className="hidden"
                             disabled={uploadingPamphlet === event.id}
