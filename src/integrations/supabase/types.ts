@@ -813,7 +813,7 @@ export type Database = {
           created_at: string | null
           deacon_role: boolean | null
           department_leader: boolean | null
-          email: string | null
+          residence: string | null
           first_time_visit_date: string | null
           gender: Database["public"]["Enums"]["gender_type"] | null
           group_leader: boolean | null
@@ -846,7 +846,7 @@ export type Database = {
           created_at?: string | null
           deacon_role?: boolean | null
           department_leader?: boolean | null
-          email?: string | null
+          residence?: string | null
           first_time_visit_date?: string | null
           gender?: Database["public"]["Enums"]["gender_type"] | null
           group_leader?: boolean | null
@@ -879,7 +879,7 @@ export type Database = {
           created_at?: string | null
           deacon_role?: boolean | null
           department_leader?: boolean | null
-          email?: string | null
+          residence?: string | null
           first_time_visit_date?: string | null
           gender?: Database["public"]["Enums"]["gender_type"] | null
           group_leader?: boolean | null
@@ -946,7 +946,7 @@ export type Database = {
         Row: {
           cell_group_id: string | null
           created_at: string | null
-          email: string | null
+          residence: string | null
           id: string
           name: string | null
           phone: string | null
@@ -956,7 +956,7 @@ export type Database = {
         Insert: {
           cell_group_id?: string | null
           created_at?: string | null
-          email?: string | null
+          residence?: string | null
           id: string
           name?: string | null
           phone?: string | null
@@ -966,7 +966,7 @@ export type Database = {
         Update: {
           cell_group_id?: string | null
           created_at?: string | null
-          email?: string | null
+          residence?: string | null
           id?: string
           name?: string | null
           phone?: string | null
