@@ -572,7 +572,7 @@ const Dashboard = () => {
     }
   };
 
-  // FIXED: Upload pamphlet function with RLS bypass
+  // UPDATED: Fixed upload pamphlet function with RPC method
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
       setUploadingPamphlet(eventId);
@@ -597,15 +597,7 @@ const Dashboard = () => {
 
       if (uploadError) {
         if (uploadError.message.includes('Bucket not found')) {
-          // Try to create the bucket if it doesn't exist
-          const { error: createBucketError } = await supabase.storage
-            .from('event-pamphlets')
-            .upload(filePath, file, {
-              cacheControl: '3600',
-              upsert: true
-            });
-          
-          if (createBucketError) throw createBucketError;
+          throw new Error('Storage bucket not found. Please create a bucket named "event-pamphlets" in Supabase Storage.');
         } else {
           throw uploadError;
         }
@@ -616,12 +608,9 @@ const Dashboard = () => {
         .from('event-pamphlets')
         .getPublicUrl(filePath);
 
-      // Step 3: Update event with multiple approaches to handle RLS
-      let updateSuccessful = false;
-      let lastErrorMessage = '';
-
-      // Approach 1: Direct update (might fail due to RLS)
-      const { error: directUpdateError } = await supabase
+      // Step 3: Update event using a service role client or RPC
+      // First try direct update
+      const { error: directError } = await supabase
         .from('events')
         .update({ 
           pamphlet_url: publicUrl,
@@ -629,60 +618,40 @@ const Dashboard = () => {
         })
         .eq('id', eventId);
 
-      if (!directUpdateError) {
-        updateSuccessful = true;
-      } else {
-        lastErrorMessage = directUpdateError.message;
-        console.log('Direct update failed, trying alternative methods:', directUpdateError);
+      if (directError) {
+        console.log('Direct update failed due to RLS, trying RPC:', directError.message);
+        
+        // Try using RPC function
+        const { error: rpcError } = await supabase.rpc('update_event_pamphlet', {
+          event_id_param: eventId,
+          pamphlet_url_param: publicUrl
+        });
 
-        // Approach 2: Use RPC function if it exists
-        try {
-          const { error: rpcError } = await supabase.rpc('update_event_pamphlet', {
-            p_event_id: eventId,
-            p_pamphlet_url: publicUrl
-          });
-
-          if (!rpcError) {
-            updateSuccessful = true;
-          } else {
-            lastErrorMessage = rpcError.message;
-            
-            // Approach 3: Create a workaround using event_sync_logs
-            const { error: syncError } = await supabase
-              .from('event_sync_logs')
-              .insert({
-                event_id: eventId,
-                sync_data: { 
-                  action: 'upload_pamphlet',
+        if (rpcError) {
+          console.log('RPC failed, trying alternative method:', rpcError);
+          
+          // Last resort: Create a service role client for this specific operation
+          // This requires you to have a service role key
+          try {
+            // Import service role client (you need to create this)
+            const serviceClient = await getServiceClient();
+            if (serviceClient) {
+              const { error: serviceError } = await serviceClient
+                .from('events')
+                .update({ 
                   pamphlet_url: publicUrl,
-                  updated_at: new Date().toISOString(),
-                  updated_by: profile?.id || 'unknown'
-                },
-                synced_at: new Date().toISOString(),
-                synced_by: profile?.id,
-                synced_by_name: `${profile?.name} ${profile?.surname}`
-              });
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', eventId);
 
-            if (!syncError) {
-              updateSuccessful = true;
-              
-              // Also update local state
-              setUpcomingEvents(prev => prev.map(event => 
-                event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
-              ));
-              
-              setSuccess('Pamphlet uploaded successfully! (Logged for admin review)');
-              setTimeout(() => setSuccess(null), 3000);
-              return;
+              if (serviceError) throw serviceError;
+            } else {
+              throw new Error('Unable to update event due to RLS restrictions. Please contact administrator.');
             }
+          } catch (serviceError: any) {
+            throw new Error(`Failed to update event: ${serviceError.message}. The file was uploaded but database update failed.`);
           }
-        } catch (rpcError: any) {
-          lastErrorMessage = rpcError.message;
         }
-      }
-
-      if (!updateSuccessful) {
-        throw new Error(`Failed to update event record: ${lastErrorMessage}. The file was uploaded to storage but the database update failed.`);
       }
 
       // Update local state
@@ -697,6 +666,19 @@ const Dashboard = () => {
       setError(error.message || 'Failed to upload pamphlet. Please try again or contact support.');
     } finally {
       setUploadingPamphlet(null);
+    }
+  };
+
+  // Helper function to get service client (optional)
+  const getServiceClient = async () => {
+    try {
+      // Create a client with service role key (only for server-side)
+      // Note: Never expose service role key in client-side code
+      // This is a placeholder - you should implement server-side API endpoint
+      return null;
+    } catch (error) {
+      console.error('Failed to get service client:', error);
+      return null;
     }
   };
 
