@@ -240,10 +240,13 @@ const Dashboard = () => {
       if (sermonsError) throw sermonsError;
       setSermons(sermonsData || []);
 
-      // Load absent members FIRST - MOVED HERE
+      // Load absent count FIRST using your SQL query
+      await loadAbsentCount();
+
+      // Load detailed absent members list
       await loadAbsentMembers();
 
-      // Calculate stats with all data (everyone can see) - AFTER absent members loaded
+      // Calculate stats with all data (everyone can see) - AFTER absent count loaded
       calculateStats(membersData || [], eventsData || [], sermonsData || []);
 
       // Generate recent activities with all data
@@ -257,40 +260,94 @@ const Dashboard = () => {
     }
   };
 
-  // Function to get count of absent members using SQL query
-  const getAbsentCount = async (): Promise<number> => {
+  // Function to get count of absent members using your SQL query
+  const loadAbsentCount = async () => {
     try {
+      // First, let's check if we can use RPC
+      // Create a PostgreSQL function first in Supabase SQL Editor:
+      
+      CREATE OR REPLACE FUNCTION get_absent_member_count()
+      RETURNS integer
+      LANGUAGE plpgsql
+      AS $$
+      DECLARE
+          total_count integer;
+      BEGIN
+          WITH last_two_sundays AS (
+            SELECT id, name, event_date
+            FROM events
+            WHERE LOWER(name) LIKE '%sunday%'
+            ORDER BY event_date DESC
+            LIMIT 2
+          ),
+          all_members AS (
+            SELECT id, name, surname, phone, residence
+            FROM members
+          ),
+          member_attendance_check AS (
+            SELECT 
+              m.id,
+              m.name,
+              m.surname,
+              m.phone,
+              m.residence,
+              COUNT(CASE 
+                WHEN ea.attendance_status = 'absent' OR ea.members_id IS NULL 
+                THEN 1 
+              END) as absent_count
+            FROM all_members m
+            CROSS JOIN last_two_sundays e
+            LEFT JOIN event_attendees ea 
+              ON ea.members_id = m.id 
+              AND ea.event_id = e.id
+            GROUP BY m.id, m.name, m.surname, m.phone, m.residence
+          )
+          SELECT COUNT(*) INTO total_count
+          FROM member_attendance_check
+          WHERE absent_count = 2;
+          
+          RETURN total_count;
+      END;
+      $$;
+      */
+
+      // Try to call the RPC function
       const { data, error } = await supabase.rpc('get_absent_member_count');
       
-      if (error) {
-        console.error('Error getting absent count:', error);
-        return 0;
+      if (!error && data !== null) {
+        setAbsentCount(data);
+        return;
       }
       
-      return data || 0;
+      // If RPC fails, use the alternative method
+      console.log('RPC failed, using alternative method:', error);
+      
+      // Alternative method: Execute the query step by step
+      const count = await getAbsentCountAlternative();
+      setAbsentCount(count);
+      
     } catch (error) {
-      console.error('Error in getAbsentCount:', error);
-      return 0;
+      console.error('Error loading absent count:', error);
+      setAbsentCount(0);
     }
   };
 
-  // Alternative: If you can't use RPC, use this direct query
-  const getAbsentCountDirect = async (): Promise<number> => {
+  // Alternative method to get absent count
+  const getAbsentCountAlternative = async (): Promise<number> => {
     try {
-      const { data, error } = await supabase
+      // Get the last 2 Sunday events
+      const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
-        .select('id, name, event_date')
+        .select('id, event_date')
         .ilike('name', '%sunday%')
         .order('event_date', { ascending: false })
         .limit(2);
 
-      if (error || !data || data.length < 2) {
-        console.error('Error getting Sunday events:', error);
+      if (eventsError || !sundayEvents || sundayEvents.length < 2) {
+        console.error('Error getting Sunday events:', eventsError);
         return 0;
       }
 
-      const lastTwoSundays = data;
-      
       // Get all members
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
@@ -305,7 +362,7 @@ const Dashboard = () => {
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
         .select('members_id, event_id, attendance_status')
-        .in('event_id', lastTwoSundays.map(e => e.id));
+        .in('event_id', sundayEvents.map(e => e.id));
 
       if (attendanceError) {
         console.error('Error getting attendance:', attendanceError);
@@ -313,39 +370,39 @@ const Dashboard = () => {
       }
 
       // Count members absent for both Sundays
-      let absentCount = 0;
+      let count = 0;
       
       allMembers.forEach(member => {
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         let absentForBoth = true;
         
-        for (const sunday of lastTwoSundays) {
+        for (const sunday of sundayEvents) {
           const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
           
           // Member is considered present if they have 'present' status
+          // Absent if: no record OR status = 'absent'
           if (attendanceForEvent && attendanceForEvent.attendance_status === 'present') {
             absentForBoth = false;
             break;
           }
         }
         
-        if (absentForBoth && memberAttendances.length > 0) {
-          absentCount++;
+        if (absentForBoth) {
+          count++;
         }
       });
 
-      return absentCount;
+      return count;
     } catch (error) {
-      console.error('Error in getAbsentCountDirect:', error);
+      console.error('Error in getAbsentCountAlternative:', error);
       return 0;
     }
   };
 
-  // Fixed loadAbsentMembers function
+  // Fixed loadAbsentMembers function - loads detailed list
   const loadAbsentMembers = async () => {
     try {
       // Get all Sunday Service events in descending order
-      // Using ilike to match various Sunday service naming conventions
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
@@ -357,7 +414,6 @@ const Dashboard = () => {
       
       if (!sundayEvents || sundayEvents.length < 2) {
         setAbsentMembers([]);
-        setAbsentCount(0);
         return;
       }
 
@@ -372,7 +428,6 @@ const Dashboard = () => {
       if (membersError) throw membersError;
       if (!allMembers || allMembers.length === 0) {
         setAbsentMembers([]);
-        setAbsentCount(0);
         return;
       }
 
@@ -386,7 +441,6 @@ const Dashboard = () => {
 
       // Find members who were absent for both services
       const absent: AbsentMember[] = [];
-      let count = 0;
       
       allMembers.forEach(member => {
         // Filter attendance records for this member
@@ -408,7 +462,6 @@ const Dashboard = () => {
         
         // If member was absent for both Sundays, add them to the list
         if (absentCount >= 2) {
-          count++;
           absent.push({
             id: member.id,
             name: member.name,
@@ -422,11 +475,9 @@ const Dashboard = () => {
       });
 
       setAbsentMembers(absent);
-      setAbsentCount(count);
     } catch (error) {
       console.error('Error loading absent members:', error);
       setAbsentMembers([]);
-      setAbsentCount(0);
     }
   };
 
@@ -493,7 +544,7 @@ const Dashboard = () => {
       { 
         icon: AlertTriangle, 
         label: 'Absent 2 Sundays', 
-        value: absentCount.toString(), // Using the counted value
+        value: absentCount.toString(), // Using the counted value from SQL query
         change: absentCount > 0 ? 'Need follow-up' : 'All members present',
         changeType: absentCount > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
