@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Eye, EyeOff, Mail, User, Calendar, Clock, MapPin, ChevronLeft, ChevronRight, FileText, ExternalLink, X } from 'lucide-react';
+import { Eye, EyeOff, Mail, User, Calendar, Clock, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
-
 interface UpcomingEvent {
   id: string;
   name: string;
