@@ -569,7 +569,6 @@ const Dashboard = () => {
   };
 
   // FIXED: Upload pamphlet function using RPC
-  // FIXED: Upload pamphlet function using RPC
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
       setUploadingPamphlet(eventId);
@@ -648,26 +647,43 @@ const Dashboard = () => {
       console.log('File uploaded successfully. Public URL:', publicUrl);
 
       // Step 3: Use RPC function directly (more reliable than direct update)
-      console.log('Calling RPC function update_event_pamphlet...');
+      console.log('=== CALLING RPC FUNCTION ===');
+      console.log('Event ID:', eventId);
+      console.log('Public URL:', publicUrl);
+      
       const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
         event_id_param: eventId,
         pamphlet_url_param: publicUrl
       });
 
-      console.log('RPC Result:', rpcResult);
-      console.log('RPC Error:', rpcError);
+      console.log('=== RPC RESPONSE ===');
+      console.log('RPC Result:', JSON.stringify(rpcResult, null, 2));
+      console.log('RPC Error:', JSON.stringify(rpcError, null, 2));
 
       if (rpcError) {
-        console.error('RPC function error:', rpcError);
-        throw new Error(`Database update failed: ${rpcError.message}. Please ensure the RPC function exists and you have proper permissions.`);
+        console.error('❌ RPC function error:', rpcError);
+        
+        // Detailed error message
+        let detailedError = `Database update failed: ${rpcError.message || 'Unknown error'}`;
+        
+        if (rpcError.code === '42883') {
+          detailedError = 'RPC function "update_event_pamphlet" does not exist. Please run the SQL script to create it.';
+        } else if (rpcError.message?.includes('permission')) {
+          detailedError = 'Permission denied. Please run the SQL script to disable RLS or fix permissions.';
+        }
+        
+        throw new Error(detailedError);
       }
 
       // Check if RPC returned success
       if (rpcResult && typeof rpcResult === 'object') {
+        console.log('RPC Success status:', rpcResult.success);
         if (rpcResult.success === false) {
           throw new Error(rpcResult.message || 'Failed to update event');
         }
       }
+      
+      console.log('✅ RPC function completed successfully');
 
       // Step 4: Update local state
       setUpcomingEvents(prev => 
