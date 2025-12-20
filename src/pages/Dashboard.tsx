@@ -147,7 +147,6 @@ const Dashboard = () => {
   const [sermonSearchTerm, setSermonSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
 
@@ -568,235 +567,12 @@ const Dashboard = () => {
     }
   };
 
-  // FIXED: Upload pamphlet function using RPC
-  const uploadPamphlet = async (eventId: string, file: File) => {
-    try {
-      setUploadingPamphlet(eventId);
-      setError(null);
-      setSuccess(null);
-
-      // Check user permissions
-      if (!currentUserCanEdit) {
-        throw new Error('You do not have permission to upload pamphlets. Please contact an administrator.');
-      }
-
-      // Validate file
-      if (!file) {
-        throw new Error('Please select a file to upload.');
-      }
-
-      const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
-      const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
-      if (!validExtensions.includes(fileExtension)) {
-        throw new Error(`Invalid file type. Please upload one of: ${validExtensions.join(', ')}`);
-      }
-
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        throw new Error('File size too large. Maximum size is 10MB.');
-      }
-
-      // Create unique file name
-      const fileExt = file.name.split('.').pop();
-      const timestamp = Date.now();
-      const randomString = Math.random().toString(36).substring(7);
-      const fileName = `${eventId}_${timestamp}_${randomString}_pamphlet.${fileExt}`;
-      let filePath = `event-pamphlets/${fileName}`;
-
-      console.log('Starting pamphlet upload for event:', eventId);
-
-      // Step 1: Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('event-pamphlets')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) {
-        console.error('Storage upload error:', uploadError);
-        if (uploadError.message.includes('Bucket not found')) {
-          throw new Error('Storage bucket "event-pamphlets" not found. Please create it in Supabase Storage.');
-        } else if (uploadError.message.includes('already exists')) {
-          // Try with a different random name
-          const newRandomString = Math.random().toString(36).substring(7);
-          const newFileName = `${eventId}_${timestamp}_${newRandomString}_pamphlet.${fileExt}`;
-          const newFilePath = `event-pamphlets/${newFileName}`;
-          
-          const { error: retryError } = await supabase.storage
-            .from('event-pamphlets')
-            .upload(newFilePath, file, {
-              cacheControl: '3600',
-              upsert: false
-            });
-
-          if (retryError) throw retryError;
-          
-          // Use the new file path
-          filePath = newFilePath;
-        } else {
-          throw uploadError;
-        }
-      }
-
-      // Step 2: Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('event-pamphlets')
-        .getPublicUrl(filePath);
-
-      console.log('File uploaded successfully. Public URL:', publicUrl);
-
-      // Step 3: Try multiple methods to update the database
-      console.log('=== ATTEMPTING DATABASE UPDATE ===');
-      console.log('Event ID:', eventId);
-      console.log('Public URL:', publicUrl);
-      
-      let updateSuccess = false;
-      let lastError = null;
-
-      // Method 1: Try direct update first
-      console.log('Method 1: Trying direct update...');
-      try {
-        const { error: directError } = await supabase
-          .from('events')
-          .update({ 
-            pamphlet_url: publicUrl,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', eventId);
-
-        if (!directError) {
-          console.log('✅ Direct update succeeded!');
-          updateSuccess = true;
-        } else {
-          console.log('❌ Direct update failed:', directError.message);
-          lastError = directError;
-        }
-      } catch (err: any) {
-        console.log('❌ Direct update exception:', err.message);
-        lastError = err;
-      }
-
-      // Method 2: Try RPC function if direct update failed
-      if (!updateSuccess) {
-        console.log('Method 2: Trying RPC function update_event_pamphlet...');
-        try {
-          const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
-            event_id_param: eventId,
-            pamphlet_url_param: publicUrl
-          });
-
-          console.log('RPC Result:', rpcResult);
-          console.log('RPC Error:', rpcError);
-
-          if (rpcError) {
-            console.log('❌ RPC function failed:', rpcError.message);
-            lastError = rpcError;
-          } else if (rpcResult?.success === false) {
-            console.log('❌ RPC returned failure:', rpcResult.message);
-            lastError = new Error(rpcResult.message);
-          } else {
-            console.log('✅ RPC function succeeded!');
-            updateSuccess = true;
-          }
-        } catch (err: any) {
-          console.log('❌ RPC exception:', err.message);
-          lastError = err;
-        }
-      }
-
-      // Method 3: Try alternative direct_update_event function
-      if (!updateSuccess) {
-        console.log('Method 3: Trying alternative RPC function direct_update_event...');
-        try {
-          const { data: directRpcResult, error: directRpcError } = await supabase.rpc('direct_update_event', {
-            event_id_param: eventId,
-            pamphlet_url_param: publicUrl
-          });
-
-          console.log('Direct RPC Result:', directRpcResult);
-          console.log('Direct RPC Error:', directRpcError);
-
-          if (directRpcError) {
-            console.log('❌ Direct RPC failed:', directRpcError.message);
-            lastError = directRpcError;
-          } else if (directRpcResult === 'SUCCESS') {
-            console.log('✅ Direct RPC succeeded!');
-            updateSuccess = true;
-          } else {
-            console.log('❌ Direct RPC returned:', directRpcResult);
-            lastError = new Error(directRpcResult || 'Unknown error');
-          }
-        } catch (err: any) {
-          console.log('❌ Direct RPC exception:', err.message);
-          lastError = err;
-        }
-      }
-
-      // If all methods failed, throw error
-      if (!updateSuccess) {
-        console.error('=== ALL UPDATE METHODS FAILED ===');
-        console.error('Last error:', lastError);
-        
-        let errorMessage = 'Failed to update event in database. ';
-        
-        if (lastError?.code === '42883') {
-          errorMessage += 'RPC functions do not exist. Please run the complete SQL script.';
-        } else if (lastError?.message?.includes('permission') || lastError?.message?.includes('policy')) {
-          errorMessage += 'Permission denied. Please run the SQL script to disable RLS.';
-        } else if (lastError?.code === '42501') {
-          errorMessage += 'Insufficient privileges. RLS may still be enabled.';
-        } else {
-          errorMessage += lastError?.message || 'Unknown error occurred.';
-        }
-        
-        throw new Error(errorMessage);
-      }
-      
-      console.log('✅ Database update completed successfully!');
-
-      // Step 4: Update local state
-      setUpcomingEvents(prev => 
-        prev.map(event => 
-          event.id === eventId 
-            ? { ...event, pamphlet_url: publicUrl } 
-            : event
-        )
-      );
-
-      setSuccess('Pamphlet uploaded successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-
-      // Refresh dashboard data to ensure sync
-      setTimeout(() => loadDashboardData(), 1000);
-
-    } catch (error: any) {
-      console.error('Error in uploadPamphlet:', error);
-      
-      // User-friendly error messages
-      let errorMessage = error.message || 'Failed to upload pamphlet.';
-      
-      if (errorMessage.includes('permission denied') || errorMessage.includes('row-level security')) {
-        errorMessage = 'Permission denied. Please run the SQL script to fix RLS policies, or contact your database administrator.';
-      } else if (errorMessage.includes('bucket')) {
-        errorMessage = 'Storage configuration issue. Please contact administrator.';
-      } else if (errorMessage.includes('size')) {
-        errorMessage = 'File is too large. Maximum size is 10MB.';
-      } else if (errorMessage.includes('function') && errorMessage.includes('does not exist')) {
-        errorMessage = 'Database function missing. Please run the provided SQL script to create the update_event_pamphlet function.';
-      }
-      
-      setError(errorMessage);
-    } finally {
-      setUploadingPamphlet(null);
-    }
-  };
-  // Close pamphlet modal///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Close pamphlet modal
   const closePamphletModal = () => {
     setViewingPamphlet(null);
   };
 
-  // Quick view pamphlet on event card
+  // Quick view pamphlet on event card - show cropped preview
   const openQuickView = (event: Event) => {
     setQuickViewEvent(event);
   };
@@ -1174,62 +950,53 @@ const Dashboard = () => {
                       {event.location || 'No location'}
                     </p>
                     
-                    {/* Pamphlet Section */}
+                    {/* Pamphlet Section - Show existing pamphlets only, no upload option */}
                     {event.pamphlet_url && (
-                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-green-600" />
-                          <span className="text-xs text-green-600 font-medium">Pamphlet Available</span>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => openQuickView(event)}
-                            className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-lg transition-colors duration-200"
-                            title="Quick View"
-                          >
-                            <Eye className="h-3 w-3" />
-                          </button>
-                          <a
-                            href={event.pamphlet_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
-                            title="Download"
-                          >
-                            <Download className="h-3 w-3" />
-                          </a>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Upload Option for Admins */}
-                    {currentUserCanEdit && !event.pamphlet_url && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        <label className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-700 cursor-pointer w-fit">
-                          <Upload className="h-3 w-3" />
-                          {uploadingPamphlet === event.id ? (
-                            <>
-                              <span className="animate-pulse">Uploading...</span>
-                              <div className="h-2 w-16 bg-gray-200 rounded-full overflow-hidden">
-                                <div className="h-full bg-blue-500 animate-pulse" style={{ width: '70%' }}></div>
-                              </div>
-                            </>
-                          ) : 'Upload Pamphlet'}
-                          <input
-                            type="file"
-                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                uploadPamphlet(event.id, file);
-                              }
-                              // Reset input
-                              e.target.value = '';
-                            }}
-                            className="hidden"
-                            disabled={uploadingPamphlet === event.id}
-                          />
-                        </label>
+                        {/* Cropped Preview Section */}
+                        <div className="mb-2">
+                          <div className="relative h-40 w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                            <iframe
+                              src={event.pamphlet_url}
+                              className="absolute inset-0 w-full h-full scale-[0.85] origin-top-left"
+                              title={`${event.name} pamphlet preview`}
+                              loading="lazy"
+                              sandbox="allow-same-origin allow-scripts"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-white/20 to-transparent pointer-events-none" />
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1 text-center">
+                            Preview - cropped to fit
+                          </p>
+                        </div>
+                        
+                        {/* Action Buttons */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-green-600" />
+                            <span className="text-xs text-green-600 font-medium">Pamphlet Available</span>
+                          </div>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => openQuickView(event)}
+                              className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
+                              title="Quick View"
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span className="hidden sm:inline">Quick View</span>
+                            </button>
+                            <a
+                              href={event.pamphlet_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
+                              title="Download"
+                            >
+                              <Download className="h-3 w-3" />
+                              <span className="hidden sm:inline">Download</span>
+                            </a>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1340,37 +1107,16 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Quick Actions */}
-      {currentUserCanEdit && (
-        <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
-          <div className="flex flex-wrap gap-3">
-            <button 
-              onClick={() => openModal('addMember')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add New Member
-            </button>
-            <button 
-              onClick={() => openModal('createEvent')}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
-            >
-              <Plus className="h-4 w-4" />
-              Create Event
-            </button>
-          </div>
-        </div>
-      )}
+      {/* QUICK ACTIONS SECTION REMOVED - As requested */}
 
       {/* Quick View Pamphlet Modal */}
       {quickViewEvent && quickViewEvent.pamphlet_url && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
             <div className="flex justify-between items-center p-4 border-b border-gray-200">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">{quickViewEvent.name}</h3>
-                <p className="text-sm text-gray-600">Event Pamphlet</p>
+                <p className="text-sm text-gray-600">Event Pamphlet - Full View</p>
               </div>
               <div className="flex items-center gap-2">
                 <a
@@ -1390,7 +1136,7 @@ const Dashboard = () => {
                 </button>
               </div>
             </div>
-            <div className="p-4 h-96">
+            <div className="p-4 h-[70vh]">
               <iframe
                 src={quickViewEvent.pamphlet_url}
                 className="w-full h-full rounded-lg border border-gray-200"
@@ -1404,15 +1150,25 @@ const Dashboard = () => {
                   <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
                   {quickViewEvent.location && <p><strong>Location:</strong> {quickViewEvent.location}</p>}
                 </div>
-                <a
-                  href={quickViewEvent.pamphlet_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
-                >
-                  <Download className="h-4 w-4" />
-                  Download
-                </a>
+                <div className="flex gap-2">
+                  <a
+                    href={quickViewEvent.pamphlet_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open Full View
+                  </a>
+                  <a
+                    href={quickViewEvent.pamphlet_url}
+                    download
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </a>
+                </div>
               </div>
             </div>
           </div>
