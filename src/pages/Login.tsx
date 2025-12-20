@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Eye, EyeOff, Mail, User, Calendar, Clock, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
+
 interface UpcomingEvent {
   id: string;
   name: string;
@@ -10,7 +11,6 @@ interface UpcomingEvent {
   event_date: string;
   event_time: string;
   location: string | null;
-  pamphlet_url: string | null;
 }
 
 export default function Login() {
@@ -25,9 +25,6 @@ export default function Login() {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [currentEventIndex, setCurrentEventIndex] = useState(0);
-  const [pamphletLoading, setPamphletLoading] = useState(true);
-  const [showPamphletModal, setShowPamphletModal] = useState(false);
-  const scrollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -45,7 +42,7 @@ export default function Login() {
         
         const { data, error } = await supabase
           .from('events')
-          .select('id, name, topic, event_date, event_time, location, pamphlet_url')
+          .select('id, name, topic, event_date, event_time, location')
           .gte('event_date', today)
           .order('event_date', { ascending: true })
           .limit(5);
@@ -62,23 +59,6 @@ export default function Login() {
 
     fetchUpcomingEvents();
   }, []);
-
-  // Setup auto-scroll
-  useEffect(() => {
-    if (upcomingEvents.length <= 1) return;
-    
-    scrollIntervalRef.current = setInterval(() => {
-      setCurrentEventIndex((prevIndex) => 
-        prevIndex === upcomingEvents.length - 1 ? 0 : prevIndex + 1
-      );
-    }, 8000); // Increased to 8 seconds for better pamphlet viewing
-    
-    return () => {
-      if (scrollIntervalRef.current) {
-        clearInterval(scrollIntervalRef.current);
-      }
-    };
-  }, [upcomingEvents.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +85,8 @@ export default function Login() {
     return date.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
+      year: 'numeric'
     });
   };
 
@@ -118,97 +99,76 @@ export default function Login() {
   };
 
   const nextEvent = () => {
-    if (scrollIntervalRef.current) {
-      clearInterval(scrollIntervalRef.current);
-    }
-    
     if (upcomingEvents.length > 0) {
       setCurrentEventIndex((prevIndex) => 
         prevIndex === upcomingEvents.length - 1 ? 0 : prevIndex + 1
       );
     }
-    
-    // Reset auto-scroll
-    if (upcomingEvents.length > 1) {
-      scrollIntervalRef.current = setInterval(() => {
-        setCurrentEventIndex((prevIndex) => 
-          prevIndex === upcomingEvents.length - 1 ? 0 : prevIndex + 1
-        );
-      }, 8000);
-    }
   };
 
   const prevEvent = () => {
-    if (scrollIntervalRef.current) {
-      clearInterval(scrollIntervalRef.current);
-    }
-    
     if (upcomingEvents.length > 0) {
       setCurrentEventIndex((prevIndex) => 
         prevIndex === 0 ? upcomingEvents.length - 1 : prevIndex - 1
       );
     }
+  };
+
+  // Auto-scroll events every 5 seconds
+  useEffect(() => {
+    if (upcomingEvents.length <= 1) return;
     
-    // Reset auto-scroll
-    if (upcomingEvents.length > 1) {
-      scrollIntervalRef.current = setInterval(() => {
-        setCurrentEventIndex((prevIndex) => 
-          prevIndex === upcomingEvents.length - 1 ? 0 : prevIndex + 1
-        );
-      }, 8000);
-    }
-  };
-
-  const handlePamphletLoad = () => {
-    setPamphletLoading(false);
-  };
-
-  const currentEvent = upcomingEvents[currentEventIndex];
+    const interval = setInterval(() => {
+      nextEvent();
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [upcomingEvents.length]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4 md:p-6">
-      <div className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-        {/* Login Form Column - Mobile first design */}
-        <div className="space-y-6 md:space-y-8">
-          <div className="bg-white/90 backdrop-blur-sm rounded-2xl md:rounded-3xl shadow-xl p-6 md:p-8">
-            <div className="text-center mb-6 md:mb-8">
-              <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-3 md:mb-4">
-                <span className="text-white font-bold text-lg md:text-xl">CM</span>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 p-4">
+      <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Login Form Column */}
+        <div className="space-y-8">
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-white font-bold text-xl">CM</span>
               </div>
-              <h2 className="text-2xl md:text-3xl font-bold text-gray-900">Church Management</h2>
-              <p className="mt-2 text-gray-600 text-sm md:text-base">Sign in to your account</p>
+              <h2 className="text-3xl font-bold text-gray-900">Church Management</h2>
+              <p className="mt-2 text-gray-600">Sign in to your account</p>
             </div>
 
-            {/* Login Method Toggle - Responsive */}
-            <div className="flex bg-gray-100 rounded-lg p-1 mb-4 md:mb-6">
+            {/* Login Method Toggle */}
+            <div className="flex bg-gray-100 rounded-lg p-1 mb-6">
               <button
                 type="button"
                 onClick={() => setLoginMethod('email')}
-                className={`flex items-center justify-center gap-1 md:gap-2 flex-1 py-2 px-3 md:px-4 rounded-md text-sm md:text-base transition-all ${
+                className={`flex items-center justify-center gap-2 flex-1 py-2 px-4 rounded-md transition-all ${
                   loginMethod === 'email'
                     ? 'bg-white text-blue-600 shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <Mail className="h-3 w-3 md:h-4 md:w-4" />
-                <span className="truncate">Email Login</span>
+                <Mail className="h-4 w-4" />
+                Email Login
               </button>
               <button
                 type="button"
                 onClick={() => setLoginMethod('username')}
-                className={`flex items-center justify-center gap-1 md:gap-2 flex-1 py-2 px-3 md:px-4 rounded-md text-sm md:text-base transition-all ${
+                className={`flex items-center justify-center gap-2 flex-1 py-2 px-4 rounded-md transition-all ${
                   loginMethod === 'username'
                     ? 'bg-white text-blue-600 shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <User className="h-3 w-3 md:h-4 md:w-4" />
-                <span className="truncate">Username/PIN</span>
+                <User className="h-4 w-4" />
+                Username/PIN
               </button>
             </div>
 
-            <form className="space-y-4 md:space-y-6" onSubmit={handleSubmit}>
-              <div className="space-y-3 md:space-y-4">
+            <form className="space-y-6" onSubmit={handleSubmit}>
+              <div className="space-y-4">
                 <div>
                   <label htmlFor="identifier" className="block text-sm font-medium text-gray-700">
                     {loginMethod === 'email' ? 'Email Address' : 'Username'}
@@ -219,8 +179,8 @@ export default function Login() {
                     required
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    className="mt-1 block w-full px-3 py-2.5 md:py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm md:text-base"
-                    placeholder={loginMethod === 'email' ? 'Enter your email' : 'Enter your username'}
+                    className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    placeholder={loginMethod === 'email' ? 'admin@church.com' : 'Enter your username'}
                     disabled={loading}
                   />
                 </div>
@@ -236,8 +196,8 @@ export default function Login() {
                       required
                       value={credential}
                       onChange={(e) => setCredential(e.target.value)}
-                      className="mt-1 block w-full px-3 py-2.5 md:py-3 pr-10 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm md:text-base"
-                      placeholder={loginMethod === 'email' ? '••••••••' : 'Enter PIN'}
+                      className="mt-1 block w-full px-3 py-3 pr-10 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      placeholder={loginMethod === 'email' ? '••••••••' : 'Enter your 4-digit PIN'}
                       maxLength={loginMethod === 'username' ? 4 : undefined}
                       inputMode={loginMethod === 'username' ? 'numeric' : 'text'}
                       disabled={loading}
@@ -268,13 +228,12 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex justify-center items-center py-2.5 md:py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm md:text-base font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <div className="flex items-center gap-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span className="hidden sm:inline">Signing in...</span>
-                    <span className="sm:hidden">Signing in...</span>
+                    Signing in...
                   </div>
                 ) : (
                   'Sign In'
@@ -285,7 +244,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={toggleLoginMethod}
-                  className="text-blue-600 hover:text-blue-700 text-xs md:text-sm font-medium disabled:opacity-50"
+                  className="text-blue-600 hover:text-blue-700 text-sm font-medium disabled:opacity-50"
                   disabled={loading}
                 >
                   Switch to {loginMethod === 'email' ? 'Username/PIN Login' : 'Email Login'}
@@ -294,282 +253,172 @@ export default function Login() {
             </form>
 
             {/* Information about login methods */}
-            <div className="bg-gray-50/80 rounded-xl p-4 border border-gray-200 mt-6">
-              <h4 className="font-medium text-gray-900 text-xs md:text-sm mb-2">About Login Methods:</h4>
+            <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 mt-6">
+              <h4 className="font-medium text-gray-900 text-sm mb-2">About Login Methods:</h4>
               <ul className="text-xs text-gray-600 space-y-1">
-                <li className="flex items-start gap-1">
-                  <span className="min-w-[1rem]">•</span>
-                  <span><strong>Email Login:</strong> For administrators with email/password</span>
-                </li>
-                <li className="flex items-start gap-1">
-                  <span className="min-w-[1rem]">•</span>
-                  <span><strong>Username/PIN:</strong> For members with generated credentials</span>
-                </li>
-                <li className="flex items-start gap-1">
-                  <span className="min-w-[1rem]">•</span>
-                  <span>Members get credentials from church administrators</span>
-                </li>
+                <li>• <strong>Email Login:</strong> For administrators with email/password</li>
+                <li>• <strong>Username/PIN:</strong> For members with generated credentials</li>
+                <li>• Members get username/PIN from church administrators</li>
               </ul>
             </div>
           </div>
         </div>
 
         {/* Upcoming Events Column */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl md:rounded-3xl shadow-xl p-6 md:p-8">
-          <div className="text-center mb-6 md:mb-8">
-            <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center mx-auto mb-3 md:mb-4">
-              <Calendar className="h-6 w-6 md:h-8 md:w-8 text-white" />
+        <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Calendar className="h-8 w-8 text-white" />
             </div>
-            <h2 className="text-2xl md:text-3xl font-bold text-gray-900">Upcoming Events</h2>
-            <p className="mt-2 text-gray-600 text-sm md:text-base">Discover our upcoming church activities</p>
+            <h2 className="text-3xl font-bold text-gray-900">Upcoming Events</h2>
+            <p className="mt-2 text-gray-600">Stay informed about church activities</p>
           </div>
 
           {eventsLoading ? (
-            <div className="flex flex-col items-center justify-center py-8 md:py-12">
-              <div className="animate-spin rounded-full h-8 w-8 md:h-10 md:h-10 border-b-2 border-orange-600 mb-3 md:mb-4"></div>
-              <p className="text-gray-600 text-sm">Loading events...</p>
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             </div>
           ) : upcomingEvents.length === 0 ? (
-            <div className="text-center py-8 md:py-12">
-              <Calendar className="h-12 w-12 md:h-16 md:w-16 text-gray-400 mx-auto mb-3 md:mb-4" />
-              <h3 className="text-lg md:text-xl font-semibold text-gray-600 mb-1 md:mb-2">No Upcoming Events</h3>
-              <p className="text-gray-500 text-sm md:text-base">Check back later for upcoming church events</p>
+            <div className="text-center py-12">
+              <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-600 mb-2">No Upcoming Events</h3>
+              <p className="text-gray-500">Check back later for upcoming church events</p>
             </div>
           ) : (
-            <div className="space-y-6 md:space-y-8">
-              {/* Main Event Card with Pamphlet */}
-              <div className="relative bg-gradient-to-br from-orange-50 to-red-50 border border-orange-200 rounded-2xl overflow-hidden">
-                {/* Event Info Header */}
-                <div className="p-4 md:p-6 bg-gradient-to-r from-orange-500/10 to-red-500/10">
-                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 md:gap-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg md:text-xl font-bold text-gray-900 truncate">
-                        {currentEvent.name}
+            <div className="space-y-6">
+              <div className="relative">
+                {/* Event Card */}
+                <div className="bg-gradient-to-br from-blue-50 to-purple-50 border border-blue-200 rounded-2xl p-6 hover:shadow-lg transition-all duration-300">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900 mb-1">
+                        {upcomingEvents[currentEventIndex].name}
                       </h3>
-                      {currentEvent.topic && (
-                        <p className="text-orange-600 font-medium text-sm md:text-base truncate">
-                          {currentEvent.topic}
+                      {upcomingEvents[currentEventIndex].topic && (
+                        <p className="text-blue-600 font-medium">
+                          {upcomingEvents[currentEventIndex].topic}
                         </p>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="px-2 md:px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs md:text-sm font-medium whitespace-nowrap">
+                      <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                         Coming Soon
                       </span>
-                      {currentEvent.pamphlet_url && (
-                        <span className="px-2 md:px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs md:text-sm font-medium flex items-center gap-1 whitespace-nowrap">
-                          <FileText className="h-3 w-3 md:h-3.5 md:w-3.5" />
-                          Pamphlet
-                        </span>
-                      )}
                     </div>
                   </div>
 
-                  {/* Event Details */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                    <div className="flex items-center gap-2 md:gap-3">
-                      <Calendar className="h-4 w-4 md:h-5 md:w-5 text-orange-500 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-gray-500">Date</p>
-                        <p className="font-medium text-gray-900 text-sm md:text-base">
-                          {formatDate(currentEvent.event_date)}
-                        </p>
-                      </div>
+                  <div className="space-y-3 text-gray-600">
+                    <div className="flex items-center gap-3">
+                      <Calendar className="h-5 w-5 text-blue-500" />
+                      <span className="font-medium">
+                        {formatDate(upcomingEvents[currentEventIndex].event_date)}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2 md:gap-3">
-                      <Clock className="h-4 w-4 md:h-5 md:w-5 text-orange-500 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-gray-500">Time</p>
-                        <p className="font-medium text-gray-900 text-sm md:text-base">
-                          {formatTime(currentEvent.event_time)}
-                        </p>
-                      </div>
+                    <div className="flex items-center gap-3">
+                      <Clock className="h-5 w-5 text-blue-500" />
+                      <span className="font-medium">
+                        {formatTime(upcomingEvents[currentEventIndex].event_time)}
+                      </span>
                     </div>
-                    {currentEvent.location && (
-                      <div className="sm:col-span-2 flex items-start gap-2 md:gap-3">
-                        <MapPin className="h-4 w-4 md:h-5 md:w-5 text-orange-500 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-gray-500">Location</p>
-                          <p className="font-medium text-gray-900 text-sm md:text-base truncate">
-                            {currentEvent.location}
-                          </p>
-                        </div>
+                    {upcomingEvents[currentEventIndex].location && (
+                      <div className="flex items-center gap-3">
+                        <MapPin className="h-5 w-5 text-blue-500" />
+                        <span className="font-medium">
+                          {upcomingEvents[currentEventIndex].location}
+                        </span>
                       </div>
                     )}
                   </div>
-                </div>
 
-                {/* Pamphlet Display Section */}
-                {currentEvent.pamphlet_url ? (
-                  <div className="p-4 md:p-6 bg-white">
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="font-medium text-gray-900 text-sm md:text-base flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-blue-600" />
-                        Event Pamphlet
-                      </h4>
-                      <button
-                        onClick={() => setShowPamphletModal(true)}
-                        className="text-xs md:text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
-                      >
-                        <ExternalLink className="h-3 w-3 md:h-3.5 md:w-3.5" />
-                        <span className="hidden sm:inline">Full Screen</span>
-                        <span className="sm:hidden">Expand</span>
-                      </button>
-                    </div>
-                    
-                    {/* Responsive Pamphlet Container */}
-                    <div className="relative bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
-                      {pamphletLoading && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                        </div>
-                      )}
-                      <div className="aspect-[3/4] md:aspect-[4/3] max-h-[300px] md:max-h-[350px] overflow-hidden">
-                        <iframe
-                          src={currentEvent.pamphlet_url}
-                          className="w-full h-full border-0"
-                          title={`Pamphlet for ${currentEvent.name}`}
-                          loading="lazy"
-                          onLoad={handlePamphletLoad}
-                          sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-6 md:p-8 bg-white text-center">
-                    <FileText className="h-12 w-12 md:h-16 md:w-16 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-500 text-sm md:text-base">No pamphlet available for this event</p>
-                  </div>
-                )}
-
-                {/* Event Counter */}
-                <div className="px-4 md:px-6 py-3 bg-gray-50/50 border-t border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500">
+                  <div className="mt-6 pt-4 border-t border-blue-100">
+                    <p className="text-sm text-gray-500">
                       Event {currentEventIndex + 1} of {upcomingEvents.length}
                     </p>
-                    <p className="text-xs text-gray-500">
-                      Auto-rotates every 8s
-                    </p>
                   </div>
                 </div>
+
+                {/* Navigation Arrows */}
+                {upcomingEvents.length > 1 && (
+                  <>
+                    <button
+                      onClick={prevEvent}
+                      className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-all duration-200 hover:scale-110"
+                    >
+                      <ChevronLeft className="h-5 w-5 text-gray-700" />
+                    </button>
+                    <button
+                      onClick={nextEvent}
+                      className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-all duration-200 hover:scale-110"
+                    >
+                      <ChevronRight className="h-5 w-5 text-gray-700" />
+                    </button>
+                  </>
+                )}
               </div>
 
-              {/* Navigation Controls */}
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={prevEvent}
-                  className="flex items-center gap-2 px-4 py-2 md:px-5 md:py-2.5 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all duration-200 active:scale-95"
-                  disabled={upcomingEvents.length <= 1}
-                >
-                  <ChevronLeft className="h-4 w-4 md:h-5 md:w-5" />
-                  <span className="text-sm font-medium hidden sm:inline">Previous</span>
-                </button>
-
-                {/* Event Dots */}
-                <div className="flex gap-1.5 md:gap-2">
+              {/* Event Dots Indicator */}
+              {upcomingEvents.length > 1 && (
+                <div className="flex justify-center gap-2">
                   {upcomingEvents.map((_, index) => (
                     <button
                       key={index}
                       onClick={() => setCurrentEventIndex(index)}
-                      className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full transition-all duration-300 ${
+                      className={`w-2 h-2 rounded-full transition-all duration-200 ${
                         index === currentEventIndex
-                          ? 'bg-orange-600 scale-125'
+                          ? 'bg-blue-600 w-6'
                           : 'bg-gray-300 hover:bg-gray-400'
                       }`}
                       aria-label={`Go to event ${index + 1}`}
                     />
                   ))}
                 </div>
-
-                <button
-                  onClick={nextEvent}
-                  className="flex items-center gap-2 px-4 py-2 md:px-5 md:py-2.5 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-all duration-200 active:scale-95"
-                  disabled={upcomingEvents.length <= 1}
-                >
-                  <span className="text-sm font-medium hidden sm:inline">Next</span>
-                  <ChevronRight className="h-4 w-4 md:h-5 md:h-5" />
-                </button>
-              </div>
+              )}
 
               {/* Upcoming Events List */}
-              <div className="bg-gray-50/80 rounded-xl p-4 border border-gray-200">
-                <h4 className="font-medium text-gray-900 text-sm md:text-base mb-3">Upcoming Events:</h4>
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                <h4 className="font-medium text-gray-900 text-sm mb-3">All Upcoming Events:</h4>
+                <div className="space-y-3 max-h-60 overflow-y-auto">
                   {upcomingEvents.map((event, index) => (
-                    <button
+                    <div
                       key={event.id}
                       onClick={() => setCurrentEventIndex(index)}
-                      className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
+                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
                         index === currentEventIndex
-                          ? 'bg-white border border-orange-200 shadow-sm'
-                          : 'hover:bg-white/70 hover:shadow-sm'
+                          ? 'bg-white border border-blue-200 shadow-sm'
+                          : 'hover:bg-white hover:shadow-sm'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 text-sm truncate">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-gray-900 text-sm">
                             {event.name}
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                            <Calendar className="h-3 w-3 flex-shrink-0" />
-                            <span className="truncate">{formatDate(event.event_date)}</span>
-                            {event.pamphlet_url && (
-                              <FileText className="h-3 w-3 text-blue-500 ml-auto" />
-                            )}
+                          <div className="text-xs text-gray-500 flex items-center gap-2">
+                            <Calendar className="h-3 w-3" />
+                            {formatDate(event.event_date)}
+                            <Clock className="h-3 w-3 ml-2" />
+                            {formatTime(event.event_time)}
                           </div>
                         </div>
                         {index === currentEventIndex && (
-                          <div className="w-2 h-2 rounded-full bg-orange-600 flex-shrink-0"></div>
+                          <div className="w-2 h-2 rounded-full bg-blue-600"></div>
                         )}
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
 
-              {/* Note */}
+              {/* Note about events */}
               <div className="text-center">
                 <p className="text-xs text-gray-500">
-                  Log in to view all events, manage attendance, and access full features
+                  Log in to view all events and manage attendance
                 </p>
               </div>
             </div>
           )}
         </div>
       </div>
-
-      {/* Pamphlet Modal */}
-      {showPamphletModal && currentEvent?.pamphlet_url && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-200">
-              <div>
-                <h3 className="text-lg md:text-xl font-bold text-gray-900">
-                  {currentEvent.name} - Pamphlet
-                </h3>
-                <p className="text-gray-600 text-sm mt-1">
-                  {formatDate(currentEvent.event_date)} at {formatTime(currentEvent.event_time)}
-                </p>
-              </div>
-              <button
-                onClick={() => setShowPamphletModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X className="h-5 w-5 text-gray-500" />
-              </button>
-            </div>
-            <div className="p-4 md:p-6 h-[calc(90vh-80px)]">
-              <iframe
-                src={currentEvent.pamphlet_url}
-                className="w-full h-full rounded-lg border-0"
-                title={`Full screen pamphlet for ${currentEvent.name}`}
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
