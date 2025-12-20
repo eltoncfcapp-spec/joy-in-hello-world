@@ -19,7 +19,6 @@ import {
   RefreshCw,
   FileText,
   Download,
-  Upload,
   ExternalLink,
   BookOpen,
   PlayCircle,
@@ -572,7 +571,7 @@ const Dashboard = () => {
     setViewingPamphlet(null);
   };
 
-  // Quick view pamphlet on event card - show cropped preview
+  // Quick view pamphlet on event card
   const openQuickView = (event: Event) => {
     setQuickViewEvent(event);
   };
@@ -950,23 +949,34 @@ const Dashboard = () => {
                       {event.location || 'No location'}
                     </p>
                     
-                    {/* Pamphlet Section - Show existing pamphlets only, no upload option */}
+                    {/* Pamphlet Section - Show existing pamphlets only */}
                     {event.pamphlet_url && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        {/* Cropped Preview Section */}
+                        {/* Automatic fitting preview */}
                         <div className="mb-2">
                           <div className="relative h-40 w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
-                            <iframe
-                              src={event.pamphlet_url}
-                              className="absolute inset-0 w-full h-full scale-[0.85] origin-top-left"
-                              title={`${event.name} pamphlet preview`}
-                              loading="lazy"
-                              sandbox="allow-same-origin allow-scripts"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-white/20 to-transparent pointer-events-none" />
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="w-full h-full">
+                                <iframe
+                                  src={event.pamphlet_url}
+                                  className="w-full h-full"
+                                  title={`${event.name} pamphlet preview`}
+                                  loading="lazy"
+                                  sandbox="allow-same-origin allow-scripts"
+                                  style={{ 
+                                    transform: 'none',
+                                    zoom: '0.7', // Automatically zoom out to fit
+                                    MozTransform: 'scale(0.7)', // For Firefox
+                                    MozTransformOrigin: '0 0',
+                                    WebkitTransform: 'scale(0.7)', // For Safari/Chrome
+                                    WebkitTransformOrigin: '0 0'
+                                  }}
+                                />
+                              </div>
+                            </div>
                           </div>
                           <p className="text-xs text-gray-500 mt-1 text-center">
-                            Preview - cropped to fit
+                            Pamphlet Preview (Auto-fitted)
                           </p>
                         </div>
                         
@@ -1109,25 +1119,16 @@ const Dashboard = () => {
 
       {/* QUICK ACTIONS SECTION REMOVED - As requested */}
 
-      {/* Quick View Pamphlet Modal */}
+      {/* Quick View Pamphlet Modal - Optimized for mobile */}
       {quickViewEvent && quickViewEvent.pamphlet_url && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
             <div className="flex justify-between items-center p-4 border-b border-gray-200">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{quickViewEvent.name}</h3>
-                <p className="text-sm text-gray-600">Event Pamphlet - Full View</p>
+              <div className="max-w-[70%]">
+                <h3 className="text-lg font-bold text-gray-900 truncate">{quickViewEvent.name}</h3>
+                <p className="text-sm text-gray-600 truncate">Event Pamphlet</p>
               </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={quickViewEvent.pamphlet_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
-                  title="Open in new tab"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </a>
+              <div className="flex items-center gap-1">
                 <button
                   onClick={closeQuickView}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
@@ -1136,37 +1137,39 @@ const Dashboard = () => {
                 </button>
               </div>
             </div>
-            <div className="p-4 h-[70vh]">
-              <iframe
-                src={quickViewEvent.pamphlet_url}
-                className="w-full h-full rounded-lg border border-gray-200"
-                title="Event Pamphlet"
-              />
+            <div className="p-2 sm:p-4 h-[70vh]">
+              <div className="w-full h-full rounded-lg border border-gray-200 overflow-auto">
+                <iframe
+                  src={quickViewEvent.pamphlet_url}
+                  className="w-full h-full min-h-[500px]"
+                  title="Event Pamphlet"
+                />
+              </div>
             </div>
-            <div className="p-4 border-t border-gray-200 bg-gray-50">
-              <div className="flex justify-between items-center">
-                <div className="text-sm text-gray-600">
+            <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <div className="text-sm text-gray-600 space-y-1">
                   <p><strong>Date:</strong> {quickViewEvent.event_date}</p>
                   <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
-                  {quickViewEvent.location && <p><strong>Location:</strong> {quickViewEvent.location}</p>}
+                  {quickViewEvent.location && <p className="truncate"><strong>Location:</strong> {quickViewEvent.location}</p>}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <a
                     href={quickViewEvent.pamphlet_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium"
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 font-medium text-sm"
                   >
                     <ExternalLink className="h-4 w-4" />
-                    Open Full View
+                    <span className="hidden xs:inline">Full View</span>
                   </a>
                   <a
                     href={quickViewEvent.pamphlet_url}
                     download
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium"
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium text-sm"
                   >
                     <Download className="h-4 w-4" />
-                    Download
+                    <span className="hidden xs:inline">Download</span>
                   </a>
                 </div>
               </div>
@@ -1185,8 +1188,8 @@ const Dashboard = () => {
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {filteredAbsentMembers.map((member) => (
-                <div key={member.id} className="flex items-center justify-between p-4 border border-red-200 rounded-xl bg-red-50">
-                  <div className="flex items-center gap-4">
+                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-red-200 rounded-xl bg-red-50">
+                  <div className="flex items-center gap-4 mb-3 sm:mb-0">
                     <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
                       {member.name.charAt(0)}{member.surname.charAt(0)}
                     </div>
@@ -1206,24 +1209,24 @@ const Dashboard = () => {
                       </p>
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {member.phone && (
                       <a
                         href={`tel:${member.phone}`}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+                        className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium text-sm"
                       >
                         <Phone className="h-4 w-4" />
-                        Call Now
+                        <span className="hidden sm:inline">Call</span>
                       </a>
                     )}
                     <button 
                       onClick={() => {
                         openMemberDetail(member);
                       }}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                      className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium text-sm"
                     >
                       <Eye className="h-4 w-4" />
-                      View Details
+                      <span className="hidden sm:inline">Details</span>
                     </button>
                   </div>
                 </div>
@@ -1277,14 +1280,14 @@ const Dashboard = () => {
                   className="border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors duration-200 cursor-pointer"
                   onClick={() => openSermonDetail(sermon)}
                 >
-                  <div className="flex justify-between items-start mb-3">
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-3 gap-2">
                     <div className="flex-1">
                       <h4 className="font-bold text-lg text-gray-900 mb-1">{sermon.title}</h4>
                       <p className="text-orange-600 font-medium text-sm">
                         {sermon.events?.name || 'Standalone Sermon'}
                       </p>
                     </div>
-                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full self-start sm:self-auto">
                       {formatDate(sermon.sermon_date)}
                     </span>
                   </div>
@@ -1437,8 +1440,8 @@ const Dashboard = () => {
                   (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase()))
                 )
                 .map(member => (
-                <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-4">
+                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center gap-4 mb-3 sm:mb-0">
                     <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
                       {member.name.charAt(0)}{member.surname.charAt(0)}
                     </div>
