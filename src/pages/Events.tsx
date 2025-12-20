@@ -2754,207 +2754,207 @@ const Events = () => {
                       Change type
                     </button>
                   </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {eventFormData.eventType === 'sunday' ? (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
-                    <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
-                      Sunday
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
-                    <input
-                      type="text"
-                      value={eventFormData.name}
-                      onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter event name"
-                      required
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
-                  <input
-                    type="text"
-                    value={eventFormData.topic}
-                    onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event topic or theme"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
-                  <input
-                    type="date"
-                    value={eventFormData.eventDate}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
-                  <input
-                    type="time"
-                    value={eventFormData.eventTime}
-                    onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
-                  <input
-                    type="text"
-                    value={eventFormData.location}
-                    onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Event location"
-                  />
-                </div>
-
-                <div className="md:col-span-2 space-y-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {eventFormData.eventType === 'sunday' ? (
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
+                        <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
+                          Sunday
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                        <input
+                          type="text"
+                          value={eventFormData.name}
+                          onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          placeholder="Enter event name"
+                          required
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
                       <input
-                        type="radio"
-                        name="eventScope"
-                        checked={eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                        type="text"
+                        value={eventFormData.topic}
+                        onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Event topic or theme"
                       />
-                      <Building className="h-5 w-5 text-purple-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date *</label>
                       <input
-                        type="radio"
-                        name="eventScope"
-                        checked={!eventFormData.isWholeChurch}
-                        onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
-                        className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                        type="date"
+                        value={eventFormData.eventDate}
+                        onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        required
                       />
-                      <UsersIcon className="h-5 w-5 text-orange-600" />
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Time *</label>
+                      <input
+                        type="time"
+                        value={eventFormData.eventTime}
+                        onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        required
+                      />
+                    </div>
+                    <div className="md:col-span-2 space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                      <input
+                        type="text"
+                        value={eventFormData.location}
+                        onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Event location"
+                      />
+                    </div>
 
-                {!eventFormData.isWholeChurch && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {cellGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetCellGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: [...eventFormData.targetCellGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
+                    <div className="md:col-span-2 space-y-4">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Scope</label>
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                          <input
+                            type="radio"
+                            name="eventScope"
+                            checked={eventFormData.isWholeChurch}
+                            onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: true, targetCellGroups: [], targetMinistryGroups: [], targetDepartments: [] })}
+                            className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                          <Building className="h-5 w-5 text-purple-600" />
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
+                          </div>
+                        </label>
+                        <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
+                          <input
+                            type="radio"
+                            name="eventScope"
+                            checked={!eventFormData.isWholeChurch}
+                            onChange={() => setEventFormData({ ...eventFormData, isWholeChurch: false })}
+                            className="text-blue-600 border-gray-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                          <UsersIcon className="h-5 w-5 text-orange-600" />
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
+                            <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
+                          </div>
+                        </label>
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {ministryGroups.map((group) => (
-                          <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetMinistryGroups.includes(group.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {departments.map((dept) => (
-                          <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
-                            <input
-                              type="checkbox"
-                              checked={eventFormData.targetDepartments.includes(dept.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetDepartments: [...eventFormData.targetDepartments, dept.id]
-                                  });
-                                } else {
-                                  setEventFormData({
-                                    ...eventFormData,
-                                    targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
-                                  });
-                                }
-                              }}
-                              className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Creating...' : 'Create Event'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowEventForm(false)}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-                >
-                  Cancel
-                </button>
-              </div>
+
+                    {!eventFormData.isWholeChurch && (
+                      <>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Cell Groups</label>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {cellGroups.map((group) => (
+                              <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={eventFormData.targetCellGroups.includes(group.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetCellGroups: [...eventFormData.targetCellGroups, group.id]
+                                      });
+                                    } else {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetCellGroups: eventFormData.targetCellGroups.filter(id => id !== group.id)
+                                      });
+                                    }
+                                  }}
+                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Ministry Groups</label>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {ministryGroups.map((group) => (
+                              <label key={group.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={eventFormData.targetMinistryGroups.includes(group.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetMinistryGroups: [...eventFormData.targetMinistryGroups, group.id]
+                                      });
+                                    } else {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetMinistryGroups: eventFormData.targetMinistryGroups.filter(id => id !== group.id)
+                                      });
+                                    }
+                                  }}
+                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Target Departments</label>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {departments.map((dept) => (
+                              <label key={dept.id} className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={eventFormData.targetDepartments.includes(dept.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetDepartments: [...eventFormData.targetDepartments, dept.id]
+                                      });
+                                    } else {
+                                      setEventFormData({
+                                        ...eventFormData,
+                                        targetDepartments: eventFormData.targetDepartments.filter(id => id !== dept.id)
+                                      });
+                                    }
+                                  }}
+                                  className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Creating...' : 'Create Event'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowEventForm(false)}
+                      className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </>
               )}
             </form>
