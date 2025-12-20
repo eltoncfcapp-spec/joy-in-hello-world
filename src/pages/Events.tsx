@@ -824,8 +824,8 @@ const Events = () => {
     }
   };
 
-  const handleSermonSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSermonSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     
     if (!hasAccess()) {
       setError('You do not have permission to manage sermons');
@@ -2250,6 +2250,10 @@ const Events = () => {
   const SermonModal = () => {
     if (!showSermonModal) return null;
 
+    const handleSubmit = async () => {
+      await handleSermonSubmit();
+    };
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -2264,7 +2268,7 @@ const Events = () => {
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
-          <form onSubmit={handleSermonSubmit} className="p-6 space-y-6">
+          <div className="p-6 space-y-6">
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2420,7 +2424,7 @@ const Events = () => {
 
             <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
               <button
-                type="submit"
+                onClick={handleSubmit}
                 disabled={sermonLoading === 'saving'}
                 className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -2428,14 +2432,13 @@ const Events = () => {
                 {sermonLoading === 'saving' ? 'Saving...' : (editingSermon ? 'Update Sermon' : 'Save Sermon')}
               </button>
               <button
-                type="button"
                 onClick={closeSermonModal}
                 className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
               >
                 Cancel
               </button>
             </div>
-          </form>
+          </div>
         </div>
       </div>
     );
