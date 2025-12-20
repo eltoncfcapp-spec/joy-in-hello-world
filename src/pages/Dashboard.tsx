@@ -646,44 +646,114 @@ const Dashboard = () => {
 
       console.log('File uploaded successfully. Public URL:', publicUrl);
 
-      // Step 3: Use RPC function directly (more reliable than direct update)
-      console.log('=== CALLING RPC FUNCTION ===');
+      // Step 3: Try multiple methods to update the database
+      console.log('=== ATTEMPTING DATABASE UPDATE ===');
       console.log('Event ID:', eventId);
       console.log('Public URL:', publicUrl);
       
-      const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
-        event_id_param: eventId,
-        pamphlet_url_param: publicUrl
-      });
+      let updateSuccess = false;
+      let lastError = null;
 
-      console.log('=== RPC RESPONSE ===');
-      console.log('RPC Result:', JSON.stringify(rpcResult, null, 2));
-      console.log('RPC Error:', JSON.stringify(rpcError, null, 2));
+      // Method 1: Try direct update first
+      console.log('Method 1: Trying direct update...');
+      try {
+        const { error: directError } = await supabase
+          .from('events')
+          .update({ 
+            pamphlet_url: publicUrl,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', eventId);
 
-      if (rpcError) {
-        console.error('❌ RPC function error:', rpcError);
-        
-        // Detailed error message
-        let detailedError = `Database update failed: ${rpcError.message || 'Unknown error'}`;
-        
-        if (rpcError.code === '42883') {
-          detailedError = 'RPC function "update_event_pamphlet" does not exist. Please run the SQL script to create it.';
-        } else if (rpcError.message?.includes('permission')) {
-          detailedError = 'Permission denied. Please run the SQL script to disable RLS or fix permissions.';
+        if (!directError) {
+          console.log('✅ Direct update succeeded!');
+          updateSuccess = true;
+        } else {
+          console.log('❌ Direct update failed:', directError.message);
+          lastError = directError;
         }
-        
-        throw new Error(detailedError);
+      } catch (err: any) {
+        console.log('❌ Direct update exception:', err.message);
+        lastError = err;
       }
 
-      // Check if RPC returned success
-      if (rpcResult && typeof rpcResult === 'object') {
-        console.log('RPC Success status:', rpcResult.success);
-        if (rpcResult.success === false) {
-          throw new Error(rpcResult.message || 'Failed to update event');
+      // Method 2: Try RPC function if direct update failed
+      if (!updateSuccess) {
+        console.log('Method 2: Trying RPC function update_event_pamphlet...');
+        try {
+          const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
+            event_id_param: eventId,
+            pamphlet_url_param: publicUrl
+          });
+
+          console.log('RPC Result:', rpcResult);
+          console.log('RPC Error:', rpcError);
+
+          if (rpcError) {
+            console.log('❌ RPC function failed:', rpcError.message);
+            lastError = rpcError;
+          } else if (rpcResult?.success === false) {
+            console.log('❌ RPC returned failure:', rpcResult.message);
+            lastError = new Error(rpcResult.message);
+          } else {
+            console.log('✅ RPC function succeeded!');
+            updateSuccess = true;
+          }
+        } catch (err: any) {
+          console.log('❌ RPC exception:', err.message);
+          lastError = err;
         }
+      }
+
+      // Method 3: Try alternative direct_update_event function
+      if (!updateSuccess) {
+        console.log('Method 3: Trying alternative RPC function direct_update_event...');
+        try {
+          const { data: directRpcResult, error: directRpcError } = await supabase.rpc('direct_update_event', {
+            event_id_param: eventId,
+            pamphlet_url_param: publicUrl
+          });
+
+          console.log('Direct RPC Result:', directRpcResult);
+          console.log('Direct RPC Error:', directRpcError);
+
+          if (directRpcError) {
+            console.log('❌ Direct RPC failed:', directRpcError.message);
+            lastError = directRpcError;
+          } else if (directRpcResult === 'SUCCESS') {
+            console.log('✅ Direct RPC succeeded!');
+            updateSuccess = true;
+          } else {
+            console.log('❌ Direct RPC returned:', directRpcResult);
+            lastError = new Error(directRpcResult || 'Unknown error');
+          }
+        } catch (err: any) {
+          console.log('❌ Direct RPC exception:', err.message);
+          lastError = err;
+        }
+      }
+
+      // If all methods failed, throw error
+      if (!updateSuccess) {
+        console.error('=== ALL UPDATE METHODS FAILED ===');
+        console.error('Last error:', lastError);
+        
+        let errorMessage = 'Failed to update event in database. ';
+        
+        if (lastError?.code === '42883') {
+          errorMessage += 'RPC functions do not exist. Please run the complete SQL script.';
+        } else if (lastError?.message?.includes('permission') || lastError?.message?.includes('policy')) {
+          errorMessage += 'Permission denied. Please run the SQL script to disable RLS.';
+        } else if (lastError?.code === '42501') {
+          errorMessage += 'Insufficient privileges. RLS may still be enabled.';
+        } else {
+          errorMessage += lastError?.message || 'Unknown error occurred.';
+        }
+        
+        throw new Error(errorMessage);
       }
       
-      console.log('✅ RPC function completed successfully');
+      console.log('✅ Database update completed successfully!');
 
       // Step 4: Update local state
       setUpcomingEvents(prev => 
@@ -721,7 +791,7 @@ const Dashboard = () => {
       setUploadingPamphlet(null);
     }
   };
-  // Close pamphlet modal
+  // Close pamphlet modal///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   const closePamphletModal = () => {
     setViewingPamphlet(null);
   };
