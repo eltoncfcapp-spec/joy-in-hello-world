@@ -22,7 +22,9 @@ import {
   Upload,
   ExternalLink,
   BookOpen,
-  PlayCircle
+  PlayCircle,
+  Phone,
+  Home
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,8 +34,8 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null; // Note: This might not exist in your members table
-  residence: string | null; // This is the field that exists in your members table
+  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
@@ -109,9 +111,12 @@ interface AbsentMember {
   name: string;
   surname: string;
   phone: string | null;
-  residence: string | null; // Updated from email to residence
+  residence: string | null;
   consecutiveAbsences: number;
   lastEventDate: string;
+  email?: string | null;
+  cell_group_id?: string | null;
+  status?: string | null;
 }
 
 // Permission checking utilities
@@ -126,7 +131,7 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
-  const [_selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [_selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
@@ -148,15 +153,16 @@ const Dashboard = () => {
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [_cellGroups, setCellGroups] = useState<CellGroup[]>([]);
+  const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
   const [absentCount, setAbsentCount] = useState<number>(0);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Check user permissions - use admin_role from profile instead of role
+  // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
 
-  // All users can see data - no filtering for viewing
+  // Filter functions
   const getFilteredMembers = () => {
     return members;
   };
@@ -191,119 +197,30 @@ const Dashboard = () => {
     });
   };
 
-  // Load dashboard data from Supabase
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Load members with additional fields for permissions
-      // Updated to match your actual database schema
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select(`
-          id,
-          name,
-          surname,
-          residence,
-          phone,
-          cell_group_id,
-          invited_by,
-          created_at,
-          status,
-          admin_role,
-          permissions,
-          assigned_groups,
-          assigned_departments,
-          can_add_members,
-          can_edit_members,
-          can_view_own_data,
-          login_username,
-          login_pin
-        `)
-        .order('created_at', { ascending: false });
-
-      if (membersError) throw membersError;
-      setMembers(membersData || []);
-
-      // Load cell groups
-      const { data: cellGroupsData, error: cellGroupsError } = await supabase
-        .from('cell_groups')
-        .select('id, name')
-        .order('name');
-
-      if (cellGroupsError) throw cellGroupsError;
-      setCellGroups(cellGroupsData || []);
-
-      // Load events with pamphlet URLs
-      const { data: eventsData, error: eventsError } = await supabase
-        .from('events')
-        .select('*')
-        .gte('event_date', new Date().toISOString().split('T')[0])
-        .order('event_date', { ascending: true });
-
-      if (eventsError) throw eventsError;
-      setUpcomingEvents(eventsData || []);
-
-      // Load sermons
-      const { data: sermonsData, error: sermonsError } = await supabase
-        .from('sermons')
-        .select(`
-          *,
-          events (
-            name,
-            topic
-          )
-        `)
-        .order('sermon_date', { ascending: false });
-
-      if (sermonsError) throw sermonsError;
-      setSermons(sermonsData || []);
-
-      // Load absent count FIRST
-      await loadAbsentCount();
-
-      // Load detailed absent members list
-      await loadAbsentMembers();
-
-      // Calculate stats with all data (everyone can see) - AFTER absent count loaded
-      calculateStats(membersData || [], eventsData || [], sermonsData || []);
-
-      // Generate recent activities with all data
-      generateRecentActivities(membersData || [], eventsData || [], sermonsData || []);
-
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-      setError('Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Function to get count of absent members using your SQL query
+  // Load absent count
   const loadAbsentCount = async () => {
     try {
-      // First try to get the count using the direct query approach
       const count = await getAbsentCountDirect();
       setAbsentCount(count);
-      
+      return count;
     } catch (error) {
       console.error('Error loading absent count:', error);
       setAbsentCount(0);
+      return 0;
     }
   };
 
-  // Direct method to get absent count based on your SQL query
+  // Direct method to get absent count
   const getAbsentCountDirect = async (): Promise<number> => {
     try {
-      // First, check if the get_absent_member_count function exists
+      // Try to use the RPC function first
       const { data: rpcData, error: rpcError } = await supabase.rpc('get_absent_member_count');
       
       if (!rpcError && rpcData !== null) {
         return rpcData;
       }
       
-      // If RPC fails or doesn't exist, use the manual approach
+      // Manual approach if RPC fails
       console.log('RPC not available, using manual count:', rpcError);
       
       // Get the last 2 Sunday events
@@ -350,8 +267,6 @@ const Dashboard = () => {
         for (const sunday of sundayEvents) {
           const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
           
-          // Member is considered present if they have 'present' status
-          // Absent if: no record OR status = 'absent'
           if (attendanceForEvent && attendanceForEvent.attendance_status === 'present') {
             absentForBoth = false;
             break;
@@ -370,75 +285,10 @@ const Dashboard = () => {
     }
   };
 
-  // Create the PostgreSQL function if it doesn't exist
-  const createAbsentMemberCountFunction = async () => {
-    try {
-      // Check if the function already exists by trying to call it
-      const { error } = await supabase.rpc('get_absent_member_count');
-      
-      // If the function doesn't exist, create it
-      if (error && error.message.includes('function')) {
-        console.log('Creating get_absent_member_count function...');
-        
-        // Note: You would need to run this SQL in your Supabase SQL Editor
-        // The code below shows what SQL to run
-        console.log(`
-          Run this SQL in your Supabase SQL Editor:
-          
-          CREATE OR REPLACE FUNCTION get_absent_member_count()
-          RETURNS integer
-          LANGUAGE plpgsql
-          AS $$
-          DECLARE
-              total_count integer;
-          BEGIN
-              WITH last_two_sundays AS (
-                SELECT id, name, event_date
-                FROM events
-                WHERE LOWER(name) LIKE '%sunday%'
-                ORDER BY event_date DESC
-                LIMIT 2
-              ),
-              all_members AS (
-                SELECT id, name, surname, phone, residence
-                FROM members
-              ),
-              member_attendance_check AS (
-                SELECT 
-                  m.id,
-                  m.name,
-                  m.surname,
-                  m.phone,
-                  m.residence,
-                  COUNT(CASE 
-                    WHEN ea.attendance_status = 'absent' OR ea.members_id IS NULL 
-                    THEN 1 
-                  END) as absent_count
-                FROM all_members m
-                CROSS JOIN last_two_sundays e
-                LEFT JOIN event_attendees ea 
-                  ON ea.members_id = m.id 
-                  AND ea.event_id = e.id
-                GROUP BY m.id, m.name, m.surname, m.phone, m.residence
-              )
-              SELECT COUNT(*) INTO total_count
-              FROM member_attendance_check
-              WHERE absent_count = 2;
-              
-              RETURN total_count;
-          END;
-          $$;
-        `);
-      }
-    } catch (error) {
-      console.error('Error checking/creating function:', error);
-    }
-  };
-
-  // Load absent members with residence field
+  // Load absent members with details
   const loadAbsentMembers = async () => {
     try {
-      // Get all Sunday Service events in descending order
+      // Get all Sunday Service events
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
@@ -450,24 +300,23 @@ const Dashboard = () => {
       
       if (!sundayEvents || sundayEvents.length < 2) {
         setAbsentMembers([]);
-        return;
+        return [];
       }
 
-      // Get the last 2 Sunday services
       const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      // Get all members with residence field
+      // Get all members with all fields for detailed view
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, phone, residence, cell_group_id, created_at, status');
+        .select('*');
 
       if (membersError) throw membersError;
       if (!allMembers || allMembers.length === 0) {
         setAbsentMembers([]);
-        return;
+        return [];
       }
 
-      // Get attendance records for the last 2 Sunday services
+      // Get attendance records
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
         .select('members_id, event_id, attendance_status')
@@ -479,31 +328,28 @@ const Dashboard = () => {
       const absent: AbsentMember[] = [];
       
       allMembers.forEach(member => {
-        // Filter attendance records for this member
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
-        // Check attendance for each of the last 2 Sundays
         let absentCount = 0;
         
         for (const sunday of lastTwoSundays) {
           const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
           
-          // Member is considered absent if:
-          // 1. They have an attendance record with attendance_status = 'absent'
-          // 2. OR they don't have any attendance record at all for that event
           if (!attendanceForEvent || attendanceForEvent.attendance_status === 'absent') {
             absentCount++;
           }
         }
         
-        // If member was absent for both Sundays, add them to the list
         if (absentCount >= 2) {
           absent.push({
             id: member.id,
             name: member.name,
             surname: member.surname,
             phone: member.phone,
-            residence: member.residence, // Using residence instead of email
+            residence: member.residence,
+            email: member.email,
+            cell_group_id: member.cell_group_id,
+            status: member.status,
             consecutiveAbsences: absentCount,
             lastEventDate: lastTwoSundays[0].event_date
           });
@@ -511,13 +357,16 @@ const Dashboard = () => {
       });
 
       setAbsentMembers(absent);
+      return absent;
     } catch (error) {
       console.error('Error loading absent members:', error);
       setAbsentMembers([]);
+      return [];
     }
   };
 
-  const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
+  // Calculate stats
+  const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[], currentAbsentCount: number) => {
     const totalMembers = allMembers.length;
     const newcomers = allMembers.filter(m => m.status === 'newcomer').length;
     const signedMembers = allMembers.filter(m => m.status === 'signed_member').length;
@@ -580,9 +429,9 @@ const Dashboard = () => {
       { 
         icon: AlertTriangle, 
         label: 'Absent 2 Sundays', 
-        value: absentCount.toString(), // Using the counted value
-        change: absentCount > 0 ? 'Need follow-up' : 'All members present',
-        changeType: absentCount > 0 ? 'negative' : 'positive',
+        value: currentAbsentCount.toString(),
+        change: currentAbsentCount > 0 ? 'Need follow-up' : 'All members present',
+        changeType: currentAbsentCount > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
         bgColor: 'bg-red-50 dark:bg-red-950/20',
         action: 'viewAbsentMembers'
@@ -592,6 +441,7 @@ const Dashboard = () => {
     setStats(statsData);
   };
 
+  // Generate recent activities
   const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
@@ -650,6 +500,72 @@ const Dashboard = () => {
     return `${Math.floor(diffInHours / 168)} weeks ago`;
   };
 
+  // Load all dashboard data
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      setRefreshing(true);
+      setError(null);
+      
+      // Load all data in parallel for better performance
+      const [
+        membersData,
+        cellGroupsData,
+        eventsData,
+        sermonsData
+      ] = await Promise.all([
+        // Load members
+        supabase.from('members').select('*').order('created_at', { ascending: false }),
+        
+        // Load cell groups
+        supabase.from('cell_groups').select('id, name').order('name'),
+        
+        // Load events
+        supabase.from('events').select('*')
+          .gte('event_date', new Date().toISOString().split('T')[0])
+          .order('event_date', { ascending: true }),
+        
+        // Load sermons
+        supabase.from('sermons').select(`
+          *,
+          events (
+            name,
+            topic
+          )
+        `).order('sermon_date', { ascending: false })
+      ]);
+
+      if (membersData.error) throw membersData.error;
+      if (cellGroupsData.error) throw cellGroupsData.error;
+      if (eventsData.error) throw eventsData.error;
+      if (sermonsData.error) throw sermonsData.error;
+
+      setMembers(membersData.data || []);
+      setCellGroups(cellGroupsData.data || []);
+      setUpcomingEvents(eventsData.data || []);
+      setSermons(sermonsData.data || []);
+
+      // Load absent count and members in parallel
+      const [absentCount, absentMembersList] = await Promise.all([
+        loadAbsentCount(),
+        loadAbsentMembers()
+      ]);
+
+      // Calculate stats with the actual absent count
+      calculateStats(membersData.data || [], eventsData.data || [], sermonsData.data || [], absentCount);
+      
+      // Generate activities
+      generateRecentActivities(membersData.data || [], eventsData.data || [], sermonsData.data || []);
+
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      setError('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   // Upload pamphlet function
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
@@ -680,7 +596,6 @@ const Dashboard = () => {
 
       if (updateError) throw updateError;
 
-      // Update local state
       setUpcomingEvents(prev => prev.map(event => 
         event.id === eventId ? { ...event, pamphlet_url: publicUrl } : event
       ));
@@ -715,14 +630,12 @@ const Dashboard = () => {
     setActiveModal('sermonDetail');
   };
 
+  // Initialize data on component mount
   useEffect(() => {
     loadDashboardData();
-    // Optional: Create the function on first load
-    // createAbsentMemberCountFunction();
   }, []);
 
   const openModal = (modalType: string) => {
-    // Check permissions for editing modals only
     if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
       setError('You do not have permission to perform this action');
       return;
@@ -740,8 +653,31 @@ const Dashboard = () => {
     setError(null);
   };
 
-  const openMemberDetail = (member: Member) => {
-    setSelectedMember(member);
+  const openMemberDetail = (member: Member | AbsentMember) => {
+    // Convert AbsentMember to Member if needed
+    const fullMember: Member = {
+      id: member.id,
+      name: member.name,
+      surname: member.surname,
+      email: 'email' in member ? member.email : null,
+      residence: member.residence,
+      phone: member.phone,
+      cell_group_id: 'cell_group_id' in member ? member.cell_group_id : null,
+      invited_by: null,
+      created_at: null,
+      status: 'status' in member ? member.status as any : null,
+      admin_role: undefined,
+      permissions: undefined,
+      assigned_groups: undefined,
+      assigned_departments: undefined,
+      can_add_members: undefined,
+      can_edit_members: undefined,
+      can_view_own_data: undefined,
+      login_username: undefined,
+      login_pin: undefined
+    };
+    
+    setSelectedMember(fullMember);
     setActiveModal('memberDetail');
   };
 
@@ -778,6 +714,92 @@ const Dashboard = () => {
         <div className="p-6">
           {children}
         </div>
+      </div>
+    </div>
+  );
+
+  // Member Detail Modal Component
+  const MemberDetailModal = ({ member }: { member: Member }) => (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4 mb-6">
+        <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-2xl">
+          {member.name.charAt(0)}{member.surname.charAt(0)}
+        </div>
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900">{member.name} {member.surname}</h3>
+          <p className="text-gray-600">{member.status ? `Status: ${member.status.replace('_', ' ')}` : 'No status'}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
+          <h4 className="font-semibold text-gray-900">Contact Information</h4>
+          {member.phone && (
+            <div className="flex items-center gap-2 text-gray-600">
+              <Phone className="h-4 w-4" />
+              <span>{member.phone}</span>
+            </div>
+          )}
+          {member.email && (
+            <div className="flex items-center gap-2 text-gray-600">
+              <Users className="h-4 w-4" />
+              <span>{member.email}</span>
+            </div>
+          )}
+          {member.residence && (
+            <div className="flex items-center gap-2 text-gray-600">
+              <Home className="h-4 w-4" />
+              <span>{member.residence}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <h4 className="font-semibold text-gray-900">Membership Details</h4>
+          {member.cell_group_id && (
+            <div className="text-gray-600">
+              <span className="font-medium">Cell Group:</span>{' '}
+              {cellGroups.find(g => g.id === member.cell_group_id)?.name || member.cell_group_id}
+            </div>
+          )}
+          {member.created_at && (
+            <div className="text-gray-600">
+              <span className="font-medium">Joined:</span>{' '}
+              {formatDate(member.created_at)}
+            </div>
+          )}
+          {member.login_username && (
+            <div className="flex items-center gap-2 text-gray-600">
+              <Key className="h-4 w-4" />
+              <span>Login: {member.login_username}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {member.admin_role && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <h4 className="font-semibold text-blue-900 mb-2">Administrative Role</h4>
+          <p className="text-blue-700">{member.admin_role}</p>
+        </div>
+      )}
+
+      <div className="flex gap-3 pt-4 border-t border-gray-200">
+        {member.phone && (
+          <a
+            href={`tel:${member.phone}`}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+          >
+            <Phone className="h-4 w-4" />
+            Call Member
+          </a>
+        )}
+        <button
+          onClick={closeModal}
+          className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+        >
+          Close
+        </button>
       </div>
     </div>
   );
@@ -821,11 +843,11 @@ const Dashboard = () => {
         <div className="flex items-center gap-4">
           <button
             onClick={loadDashboardData}
-            disabled={loading}
+            disabled={refreshing}
             className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Refreshing...' : 'Refresh'}
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
           <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold">
             {profile?.name?.charAt(0)}{profile?.surname?.charAt(0) || 'U'}
@@ -855,7 +877,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Stats Grid - All users can see */}
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6 mb-8">
         {stats.map((stat) => (
           <button
@@ -895,7 +917,7 @@ const Dashboard = () => {
         ))}
       </div>
 
-      {/* Content Grid - All users can see */}
+      {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Activity */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
@@ -978,7 +1000,7 @@ const Dashboard = () => {
                       {event.location || 'No location'}
                     </p>
                     
-                    {/* Pamphlet Section on Event Card */}
+                    {/* Pamphlet Section */}
                     {event.pamphlet_url && (
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                         <div className="flex items-center gap-2">
@@ -1135,7 +1157,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Quick Actions - Only show if user has edit permissions */}
+      {/* Quick Actions */}
       {currentUserCanEdit && (
         <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
@@ -1231,30 +1253,33 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">{member.phone || 'No phone number'}</p>
-                      <p className="text-sm text-gray-600">{member.residence || 'No residence'}</p>
+                      <p className="text-sm text-gray-500">
+                        <Phone className="h-3 w-3 inline mr-1" />
+                        {member.phone || 'No phone number'}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        <Home className="h-3 w-3 inline mr-1" />
+                        {member.residence || 'No residence'}
+                      </p>
                       <p className="text-xs text-red-600 mt-1">
+                        <AlertTriangle className="h-3 w-3 inline mr-1" />
                         Absent for {member.consecutiveAbsences} consecutive Sundays
                       </p>
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <a
-                      href={`tel:${member.phone}`}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={!member.phone}
-                    >
-                      <AlertTriangle className="h-4 w-4" />
-                      Follow Up Call
-                    </a>
+                    {member.phone && (
+                      <a
+                        href={`tel:${member.phone}`}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+                      >
+                        <Phone className="h-4 w-4" />
+                        Call Now
+                      </a>
+                    )}
                     <button 
                       onClick={() => {
-                        // Find the member in the members list
-                        const fullMember = members.find(m => m.id === member.id);
-                        if (fullMember) {
-                          openMemberDetail(fullMember);
-                          closeModal();
-                        }
+                        openMemberDetail(member);
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                     >
@@ -1277,6 +1302,13 @@ const Dashboard = () => {
               )}
             </div>
           </div>
+        </Modal>
+      )}
+
+      {/* Member Detail Modal */}
+      {activeModal === 'memberDetail' && selectedMember && (
+        <Modal title="Member Details" size="max-w-md">
+          <MemberDetailModal member={selectedMember} />
         </Modal>
       )}
 
