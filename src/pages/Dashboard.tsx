@@ -24,10 +24,16 @@ import {
   BookOpen,
   PlayCircle,
   Phone,
-  Home
+  Mail,
+  MessageSquare,
+  Home,
+  CheckCircle,
+  Clock,
+  User
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+
 
 // Types - Updated to match your database schema
 interface Member {
