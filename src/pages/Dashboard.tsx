@@ -22,14 +22,7 @@ import {
   Upload,
   ExternalLink,
   BookOpen,
-  PlayCircle,
-  Phone,
-  Mail,
-  MessageSquare,
-  Home,
-  CheckCircle,
-  Clock,
-  User
+  PlayCircle
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -39,7 +32,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  residence: string | null;
+  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
@@ -115,17 +108,8 @@ interface AbsentMember {
   name: string;
   surname: string;
   phone: string | null;
-  residence: string | null;
   consecutiveAbsences: number;
   lastEventDate: string;
-}
-
-interface FollowUpFormData {
-  memberId: string;
-  followUpDate: string;
-  followUpType: 'phone_call' | 'visit' | 'residence' | 'sms';
-  notes: string;
-  callMade: boolean;
 }
 
 // Permission checking utilities
@@ -156,15 +140,6 @@ const Dashboard = () => {
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
-  const [selectedAbsentMember, setSelectedAbsentMember] = useState<AbsentMember | null>(null);
-  const [followUpForm, setFollowUpForm] = useState<FollowUpFormData>({
-    memberId: '',
-    followUpDate: new Date().toISOString().split('T')[0],
-    followUpType: 'phone_call',
-    notes: '',
-    callMade: false
-  });
-  const [followUpLoading, setFollowUpLoading] = useState(false);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -262,14 +237,14 @@ const Dashboard = () => {
       if (sermonsError) throw sermonsError;
       setSermons(sermonsData || []);
 
-      // Load absent members first
-      await loadAbsentMembers();
-
-      // Calculate stats with all data (everyone can see) - AFTER absent members are loaded
+      // Calculate stats with all data (everyone can see)
       calculateStats(membersData || [], eventsData || [], sermonsData || []);
 
       // Generate recent activities with all data
       generateRecentActivities(membersData || [], eventsData || [], sermonsData || []);
+
+      // Load absent members
+      await loadAbsentMembers();
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -279,7 +254,6 @@ const Dashboard = () => {
     }
   };
 
-  // CORRECTED loadAbsentMembers function
   const loadAbsentMembers = async () => {
     try {
       // Get all Sunday Service events in descending order
@@ -301,10 +275,10 @@ const Dashboard = () => {
       // Get the last 2 Sunday services
       const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      // Get all members with residence
+      // Get all members
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, phone, residence, cell_group_id, created_at, status');
+        .select('id, name, surname, phone, cell_group_id, created_at, status');
 
       if (membersError) throw membersError;
       if (!allMembers || allMembers.length === 0) {
@@ -328,29 +302,115 @@ const Dashboard = () => {
         const memberAttendances = attendances?.filter(a => a.members_id === member.id) || [];
         
         // Check attendance for each of the last 2 Sundays
-        let absentCount = 0;
+        let absentForBoth = true;
         
         for (const sunday of lastTwoSundays) {
           const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
           
-          // Member is considered absent if:
-          // 1. They have an attendance record with attendance_status = 'absent'
-          // 2. OR they don't have any attendance record at all for that event
-          if (!attendanceForEvent || attendanceForEvent.attendance_status === 'absent') {
-            absentCount++;
+          // Member is considered present if:
+          // 1. They have an attendance record AND attendance_status is 'present'
+          // 2. OR they don't have a record but the event might not require attendance tracking
+          if (attendanceForEvent) {
+            // If there's an attendance record, check the status
+            if (attendanceForEvent.attendance_status === 'present') {
+              absentForBoth = false;
+              break;
+            }
+          } else {
+            // No attendance record exists
+            // We need to check if we should count this as absent
+            // For now, we'll count it as absent if there's no record
+            continue;
           }
         }
         
-        if (absentCount >= 2) {
+        if (absentForBoth && memberAttendances.length > 0) {
+          // Only include members who have some attendance history
+          // (to avoid flagging brand new members who haven't attended any events yet)
           absent.push({
             id: member.id,
             name: member.name,
             surname: member.surname,
             phone: member.phone,
-            residence: member.residence,
-            consecutiveAbsences: absentCount,
+            consecutiveAbsences: 2,
             lastEventDate: lastTwoSundays[0].event_date
           });
+        }
+      });
+
+      setAbsentMembers(absent);
+    } catch (error) {
+      console.error('Error loading absent members:', error);
+      setAbsentMembers([]);
+    }
+  };
+
+  // Alternative approach - More strict: Only flag members who have 'absent' status records
+  const loadAbsentMembersAlternative = async () => {
+    try {
+      // Get all Sunday Service events in descending order
+      const { data: sundayEvents, error: eventsError } = await supabase
+        .from('events')
+        .select('id, event_date, name')
+        .or('name.ilike.%sunday%,name.ilike.%service%')
+        .order('event_date', { ascending: false })
+        .limit(10);
+
+      if (eventsError) throw eventsError;
+      
+      if (!sundayEvents || sundayEvents.length < 2) {
+        setAbsentMembers([]);
+        return;
+      }
+
+      const lastTwoSundays = sundayEvents.slice(0, 2);
+      
+      // Get all members
+      const { data: allMembers, error: membersError } = await supabase
+        .from('members')
+        .select('id, name, surname, phone');
+
+      if (membersError) throw membersError;
+      if (!allMembers || allMembers.length === 0) {
+        setAbsentMembers([]);
+        return;
+      }
+
+      // Get attendance records where attendance_status = 'absent' for the last 2 Sundays
+      const { data: absentAttendances, error: attendanceError } = await supabase
+        .from('event_attendees')
+        .select('members_id, event_id, attendance_status')
+        .in('event_id', lastTwoSundays.map(e => e.id))
+        .eq('attendance_status', 'absent');
+
+      if (attendanceError) throw attendanceError;
+
+      // Group absent records by member
+      const absentByMember: { [memberId: string]: number } = {};
+      
+      absentAttendances?.forEach(attendance => {
+        if (!absentByMember[attendance.members_id]) {
+          absentByMember[attendance.members_id] = 0;
+        }
+        absentByMember[attendance.members_id]++;
+      });
+
+      // Find members with 2 consecutive absences
+      const absent: AbsentMember[] = [];
+      
+      Object.entries(absentByMember).forEach(([memberId, absentCount]) => {
+        if (absentCount >= 2) {
+          const member = allMembers.find(m => m.id === memberId);
+          if (member) {
+            absent.push({
+              id: member.id,
+              name: member.name,
+              surname: member.surname,
+              phone: member.phone,
+              consecutiveAbsences: absentCount,
+              lastEventDate: lastTwoSundays[0].event_date
+            });
+          }
         }
       });
 
@@ -369,9 +429,6 @@ const Dashboard = () => {
     const totalSermons = allSermons.length;
     
     const uniqueGroups = [...new Set(allMembers.map(m => m.cell_group_id).filter(Boolean))].length;
-
-    // Use the current absentMembers state (already loaded)
-    const absentCount = absentMembers.length;
 
     const statsData: StatCard[] = [
       { 
@@ -427,9 +484,9 @@ const Dashboard = () => {
       { 
         icon: AlertTriangle, 
         label: 'Absent 2 Sundays', 
-        value: absentCount.toString(), 
-        change: absentCount > 0 ? `${absentCount} need follow-up` : 'All members present',
-        changeType: absentCount > 0 ? 'negative' : 'positive',
+        value: absentMembers.length.toString(), 
+        change: absentMembers.length > 0 ? 'Need follow-up' : 'All members present',
+        changeType: absentMembers.length > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
         bgColor: 'bg-red-50 dark:bg-red-950/20',
         action: 'viewAbsentMembers'
@@ -542,49 +599,6 @@ const Dashboard = () => {
     }
   };
 
-  // Submit follow-up action
-  const submitFollowUp = async () => {
-    try {
-      if (!selectedAbsentMember) return;
-      
-      setFollowUpLoading(true);
-      setError(null);
-
-      const { error: followUpError } = await supabase
-        .from('follow_up_actions')
-        .insert({
-          member_id: selectedAbsentMember.id,
-          follow_up_date: followUpForm.followUpDate,
-          follow_up_type: followUpForm.followUpType,
-          status: followUpForm.callMade ? 'completed' : 'pending',
-          notes: followUpForm.notes,
-          assigned_to: profile?.id || null
-        });
-
-      if (followUpError) throw followUpError;
-
-      setSuccess('Follow-up action recorded successfully!');
-      setTimeout(() => {
-        setSuccess(null);
-        setSelectedAbsentMember(null);
-        setFollowUpForm({
-          memberId: '',
-          followUpDate: new Date().toISOString().split('T')[0],
-          followUpType: 'phone_call',
-          notes: '',
-          callMade: false
-        });
-        closeModal();
-      }, 2000);
-      
-    } catch (error: any) {
-      console.error('Error submitting follow-up:', error);
-      setError(error.message || 'Failed to record follow-up action');
-    } finally {
-      setFollowUpLoading(false);
-    }
-  };
-
   // Close pamphlet modal
   const closePamphletModal = () => {
     setViewingPamphlet(null);
@@ -610,6 +624,12 @@ const Dashboard = () => {
   }, []);
 
   const openModal = (modalType: string) => {
+    // Check permissions for editing modals only
+    if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
+      setError('You do not have permission to perform this action');
+      return;
+    }
+
     setActiveModal(modalType);
     setError(null);
   };
@@ -619,14 +639,6 @@ const Dashboard = () => {
     setSelectedMember(null);
     setSelectedEvent(null);
     setSelectedSermon(null);
-    setSelectedAbsentMember(null);
-    setFollowUpForm({
-      memberId: '',
-      followUpDate: new Date().toISOString().split('T')[0],
-      followUpType: 'phone_call',
-      notes: '',
-      callMade: false
-    });
     setError(null);
   };
 
@@ -651,35 +663,6 @@ const Dashboard = () => {
     if (type === 'positive') return <ArrowUp className="h-3 w-3" />;
     if (type === 'negative') return <ArrowDown className="h-3 w-3" />;
     return null;
-  };
-
-  const getFollowUpTypeIcon = (type: string) => {
-    switch(type) {
-      case 'phone_call': return <Phone className="h-4 w-4" />;
-      case 'visit': return <Home className="h-4 w-4" />;
-      case 'residence': return <Mail className="h-4 w-4" />;
-      case 'sms': return <MessageSquare className="h-4 w-4" />;
-      default: return <Phone className="h-4 w-4" />;
-    }
-  };
-
-  const getFollowUpTypeColor = (type: string) => {
-    switch(type) {
-      case 'phone_call': return 'bg-blue-100 text-blue-700';
-      case 'visit': return 'bg-green-100 text-green-700';
-      case 'residence': return 'bg-purple-100 text-purple-700';
-      case 'sms': return 'bg-orange-100 text-orange-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
-  const openFollowUpForm = (member: AbsentMember) => {
-    setSelectedAbsentMember(member);
-    setFollowUpForm(prev => ({
-      ...prev,
-      memberId: member.id
-    }));
-    setActiveModal('followUpForm');
   };
 
   const Modal = ({ children, title, size = 'max-w-md' }: { children: React.ReactNode; title: string; size?: string }) => (
@@ -1054,6 +1037,29 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Quick Actions - Only show if user has edit permissions */}
+      {currentUserCanEdit && (
+        <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
+          <div className="flex flex-wrap gap-3">
+            <button 
+              onClick={() => openModal('addMember')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+            >
+              <UserPlus className="h-4 w-4" />
+              Add New Member
+            </button>
+            <button 
+              onClick={() => openModal('createEvent')}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 hover:scale-105 font-medium"
+            >
+              <Plus className="h-4 w-4" />
+              Create Event
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Quick View Pamphlet Modal */}
       {quickViewEvent && quickViewEvent.pamphlet_url && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -1112,75 +1118,57 @@ const Dashboard = () => {
 
       {/* Absent Members Modal */}
       {activeModal === 'viewAbsentMembers' && (
-        <Modal title="Members Absent for 2 Sundays" size="max-w-6xl">
-          <div className="space-y-6">
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="h-6 w-6 text-red-600" />
-                <div>
-                  <h4 className="font-bold text-gray-900">Follow-up Required</h4>
-                  <p className="text-sm text-gray-600">
-                    {filteredAbsentMembers.length} member{filteredAbsentMembers.length !== 1 ? 's' : ''} have missed 2 consecutive Sunday services.
-                  </p>
-                </div>
-              </div>
-            </div>
+        <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">
+              Members who have been absent for the last 2 Sunday services
+            </p>
             
-            <div className="space-y-4 max-h-96 overflow-y-auto">
+            <div className="space-y-3 max-h-96 overflow-y-auto">
               {filteredAbsentMembers.map((member) => (
-                <div key={member.id} className="border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors duration-200">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {member.name.charAt(0)}{member.surname.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                          {member.phone && (
-                            <div className="flex items-center gap-1 text-sm text-gray-600">
-                              <Phone className="h-3 w-3" />
-                              <span>{member.phone}</span>
-                            </div>
-                          )}
-                          {member.residence && (
-                            <div className="flex items-center gap-1 text-sm text-gray-600">
-                              <Mail className="h-3 w-3" />
-                              <span>{member.residence}</span>
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-xs text-red-600 mt-2">
-                          <AlertTriangle className="h-3 w-3 inline mr-1" />
-                          Absent for {member.consecutiveAbsences} consecutive Sundays
-                        </p>
-                      </div>
+                <div key={member.id} className="flex items-center justify-between p-4 border border-red-200 rounded-xl bg-red-50">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
                     </div>
-                    <div className="flex gap-2">
-                      {member.phone && (
-                        <a
-                          href={`tel:${member.phone}`}
-                          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
-                        >
-                          <Phone className="h-4 w-4" />
-                          Call Now
-                        </a>
-                      )}
-                      <button 
-                        onClick={() => openFollowUpForm(member)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-                      >
-                        <Clock className="h-4 w-4" />
-                        Record Follow-up
-                      </button>
+                    <div>
+                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                      <p className="text-sm text-gray-500">{member.phone || 'No phone number'}</p>
+                      <p className="text-xs text-red-600 mt-1">
+                        Absent for {member.consecutiveAbsences} consecutive Sundays
+                      </p>
                     </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <a
+                      href={`tel:${member.phone}`}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!member.phone}
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                      Follow Up Call
+                    </a>
+                    <button 
+                      onClick={() => {
+                        // Find the member in the members list
+                        const fullMember = members.find(m => m.id === member.id);
+                        if (fullMember) {
+                          openMemberDetail(fullMember);
+                          closeModal();
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Details
+                    </button>
                   </div>
                 </div>
               ))}
               {filteredAbsentMembers.length === 0 && (
                 <div className="text-center py-8">
                   <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <CheckCircle className="h-8 w-8 text-green-600" />
+                    <Users className="h-8 w-8 text-green-600" />
                   </div>
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">Great News!</h4>
                   <p className="text-gray-600">
@@ -1188,120 +1176,6 @@ const Dashboard = () => {
                   </p>
                 </div>
               )}
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Follow-up Form Modal */}
-      {activeModal === 'followUpForm' && selectedAbsentMember && (
-        <Modal title="Record Follow-up Action" size="max-w-md">
-          <div className="space-y-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <User className="h-5 w-5 text-blue-600" />
-                <div>
-                  <h4 className="font-bold text-gray-900">{selectedAbsentMember.name} {selectedAbsentMember.surname}</h4>
-                  <div className="flex items-center gap-2 mt-1">
-                    {selectedAbsentMember.phone && (
-                      <div className="flex items-center gap-1 text-sm text-gray-600">
-                        <Phone className="h-3 w-3" />
-                        <span>{selectedAbsentMember.phone}</span>
-                      </div>
-                    )}
-                    {selectedAbsentMember.residence && (
-                      <div className="flex items-center gap-1 text-sm text-gray-600">
-                        <Mail className="h-3 w-3" />
-                        <span className="truncate max-w-[150px]">{selectedAbsentMember.residence}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Follow-up Date *
-                </label>
-                <input
-                  type="date"
-                  value={followUpForm.followUpDate}
-                  onChange={(e) => setFollowUpForm({...followUpForm, followUpDate: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Follow-up Type *
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['phone_call', 'visit', 'residence', 'sms'] as const).map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setFollowUpForm({...followUpForm, followUpType: type})}
-                      className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-                        followUpForm.followUpType === type 
-                          ? `${getFollowUpTypeColor(type).split(' ')[0]} border-transparent font-medium`
-                          : 'border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      {getFollowUpTypeIcon(type)}
-                      <span className="capitalize">{type.replace('_', ' ')}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes
-                </label>
-                <textarea
-                  value={followUpForm.notes}
-                  onChange={(e) => setFollowUpForm({...followUpForm, notes: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
-                  placeholder="Enter any notes about the follow-up..."
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="callMade"
-                  checked={followUpForm.callMade}
-                  onChange={(e) => setFollowUpForm({...followUpForm, callMade: e.target.checked})}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="callMade" className="text-sm font-medium text-gray-700">
-                  Follow-up completed
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-4 border-t border-gray-200">
-              <button
-                onClick={closeModal}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitFollowUp}
-                disabled={followUpLoading}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {followUpLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Saving...
-                  </span>
-                ) : 'Save Follow-up'}
-              </button>
             </div>
           </div>
         </Modal>
@@ -1478,7 +1352,7 @@ const Dashboard = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search members by name, residence, or phone..."
+                placeholder="Search members by name, email, or phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1489,7 +1363,7 @@ const Dashboard = () => {
               {filteredMembers
                 .filter(member => 
                   `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
                   (member.phone && member.phone.includes(searchTerm))
                 )
                 .map(member => (
@@ -1500,7 +1374,7 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">{member.residence || member.phone || 'No contact'}</p>
+                      <p className="text-sm text-gray-500">{member.email || member.phone || 'No contact'}</p>
                       {member.login_username && (
                         <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                           <Key className="h-3 w-3" />
