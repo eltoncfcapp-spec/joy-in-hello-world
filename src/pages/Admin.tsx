@@ -24,6 +24,19 @@ interface Member {
   cell_group_id: string | null;
   status: string | null;
   created_at: string | null;
+  residence: string;
+  gender: string | null;
+  baptism: string | null;
+  ministry_group_id: string | null;
+  is_permanent_member: boolean;
+  permanent_member_date: string | null;
+  invited_by: string | null;
+  first_time_visit_date: string | null;
+  is_leader: boolean;
+  is_hidden: boolean;
+  is_developer: boolean;
+  is_admin: boolean;
+  auth_user_id: string | null;
 }
 
 interface Group {
@@ -463,22 +476,17 @@ const cloudService = {
           const rows = content.split('\n').filter(row => row.trim() !== '');
           
           if (rows.length === 0) {
-            throw new Error('File is empty');
+            reject(new Error('The uploaded file is empty. Please upload a CSV file with data.'));
+            return;
           }
 
           const headerRow = rows[0];
           const headers = headerRow.split(',').map(col => col.replace(/^"|"$/g, '').trim());
           
-          const availableDatabaseFields = [
-            'surname', 'name', 'residence', 'cell_group', 'gender', 'baptism'
-          ];
-          
-          // Validate required fields are mapped
-          const requiredFields = ['surname', 'name'];
-          const missingRequired = requiredFields.filter(field => !Object.values(fieldMapping).includes(field));
-          
-          if (missingRequired.length > 0) {
-            throw new Error(`Missing required field mapping: ${missingRequired.join(', ')}`);
+          // Validate that we have headers
+          if (headers.length === 0 || headers.every(h => !h.trim())) {
+            reject(new Error('CSV file has no valid headers. Please check your file format.'));
+            return;
           }
 
           const errorMessages: string[] = [];
@@ -496,45 +504,98 @@ const cloudService = {
               const memberData: any = {
                 status: 'newcomer',
                 created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                first_time_visit_date: new Date().toISOString(),
+                is_permanent_member: false,
+                is_leader: false,
+                is_hidden: false,
+                is_developer: false,
+                is_admin: false,
+                assigned_groups: [],
+                assigned_departments: [],
+                permissions: [],
+                can_add_members: false,
+                can_edit_members: false,
+                can_view_own_data: false,
+                pastor_role: false,
+                deacon_role: false,
+                group_leader: false,
+                department_leader: false,
+                admin_role: 'member'
               };
               
               // Process each mapped field
               for (const csvHeader of headers) {
                 const dbField = fieldMapping[csvHeader];
-                if (dbField && availableDatabaseFields.includes(dbField)) {
+                if (dbField) {
                   const columnIndex = headers.indexOf(csvHeader);
                   if (columnIndex >= 0 && columnIndex < columns.length) {
                     const value = columns[columnIndex];
                     
+                    // Skip empty values for non-required fields
+                    if (!value && !['surname', 'name'].includes(dbField)) {
+                      continue;
+                    }
+
                     switch (dbField) {
                       case 'surname':
-                        memberData.surname = value;
+                        memberData.surname = value.trim();
                         break;
                       case 'name':
-                        memberData.name = value;
+                        memberData.name = value.trim();
                         break;
                       case 'residence':
-                        memberData.residence = value || null;
+                        memberData.residence = value.trim();
+                        break;
+                      case 'phone':
+                        memberData.phone = value.trim();
                         break;
                       case 'cell_group':
                         // Find cell group by name
                         const cellGroup = cellGroups.find(g => 
                           g.type === 'cell_group' && 
-                          g.name.toLowerCase() === value.toLowerCase()
+                          g.name.toLowerCase() === value.toLowerCase().trim()
                         );
-                        memberData.cell_group_id = cellGroup?.id || null;
+                        if (cellGroup) {
+                          memberData.cell_group_id = cellGroup.id;
+                        } else if (value.trim()) {
+                          throw new Error(`Cell group "${value}" not found. Please create it first or check spelling.`);
+                        }
                         break;
                       case 'gender':
-                        memberData.gender = value.toLowerCase() === 'male' ? 'male' : 
-                                          value.toLowerCase() === 'female' ? 'female' : null;
+                        const genderValue = value.toLowerCase().trim();
+                        if (genderValue === 'male' || genderValue === 'female') {
+                          memberData.gender = genderValue;
+                        } else if (value.trim()) {
+                          throw new Error(`Gender must be "Male" or "Female", got "${value}"`);
+                        }
                         break;
                       case 'baptism':
-                        if (value) {
+                        if (value.trim()) {
                           const baptismDate = new Date(value);
                           if (!isNaN(baptismDate.getTime())) {
                             memberData.baptism = baptismDate.toISOString();
+                          } else {
+                            throw new Error(`Invalid baptism date format: "${value}". Use YYYY-MM-DD format.`);
                           }
+                        }
+                        break;
+                      case 'is_permanent_member':
+                        memberData.is_permanent_member = value.toLowerCase().trim() === 'true' || 
+                                                        value.toLowerCase().trim() === 'yes' || 
+                                                        value === '1';
+                        break;
+                      case 'is_leader':
+                        memberData.is_leader = value.toLowerCase().trim() === 'true' || 
+                                              value.toLowerCase().trim() === 'yes' || 
+                                              value === '1';
+                        break;
+                      case 'status':
+                        const validStatuses = ['newcomer', 'active', 'inactive', 'not_attending'];
+                        if (validStatuses.includes(value.toLowerCase().trim())) {
+                          memberData.status = value.toLowerCase().trim();
+                        } else if (value.trim()) {
+                          throw new Error(`Invalid status: "${value}". Must be one of: ${validStatuses.join(', ')}`);
                         }
                         break;
                     }
@@ -543,49 +604,50 @@ const cloudService = {
               }
 
               // Validate required fields
-              if (!memberData.name || !memberData.surname) {
-                errorMessages.push(`Row ${i}: Missing name or surname`);
-                errors++;
-                continue;
+              if (!memberData.name || !memberData.surname || !memberData.residence) {
+                const missingFields = [];
+                if (!memberData.name) missingFields.push('name');
+                if (!memberData.surname) missingFields.push('surname');
+                if (!memberData.residence) missingFields.push('residence');
+                
+                throw new Error(`Missing required fields: ${missingFields.join(', ')}. These fields are required in the database.`);
               }
 
+              // Check if member exists (by name, surname, and phone if available)
+              let existingMemberId: string | null = null;
               if (options.updateExisting) {
-                // Try to update existing member by name and surname
-                const { data: existingMembers, error: findError } = await supabase
+                const query = supabase
                   .from('members')
                   .select('id')
                   .eq('name', memberData.name)
-                  .eq('surname', memberData.surname)
-                  .limit(1);
+                  .eq('surname', memberData.surname);
+                
+                if (memberData.phone) {
+                  query.eq('phone', memberData.phone);
+                }
+                
+                const { data: existingMembers, error: findError } = await query.limit(1);
 
                 if (!findError && existingMembers && existingMembers.length > 0) {
-                  const { error: updateError } = await supabase
-                    .from('members')
-                    .update(memberData)
-                    .eq('id', existingMembers[0].id);
+                  existingMemberId = existingMembers[0].id;
+                }
+              }
 
-                  if (!updateError) {
-                    success++;
-                  } else {
-                    errorMessages.push(`Row ${i}: Failed to update - ${updateError.message}`);
-                    errors++;
-                  }
-                } else if (options.createMissing) {
-                  const { error: insertError } = await supabase
-                    .from('members')
-                    .insert(memberData);
+              if (existingMemberId) {
+                // Update existing member
+                const { error: updateError } = await supabase
+                  .from('members')
+                  .update(memberData)
+                  .eq('id', existingMemberId);
 
-                  if (!insertError) {
-                    success++;
-                  } else {
-                    errorMessages.push(`Row ${i}: Failed to create - ${insertError.message}`);
-                    errors++;
-                  }
+                if (!updateError) {
+                  success++;
                 } else {
-                  errorMessages.push(`Row ${i}: Member not found and createMissing is false`);
+                  errorMessages.push(`Row ${i}: Failed to update member "${memberData.name} ${memberData.surname}" - ${updateError.message}`);
                   errors++;
                 }
               } else if (options.createMissing) {
+                // Create new member
                 const { error: insertError } = await supabase
                   .from('members')
                   .insert(memberData);
@@ -593,12 +655,16 @@ const cloudService = {
                 if (!insertError) {
                   success++;
                 } else {
-                  errorMessages.push(`Row ${i}: Failed to create - ${insertError.message}`);
+                  errorMessages.push(`Row ${i}: Failed to create new member "${memberData.name} ${memberData.surname}" - ${insertError.message}`);
                   errors++;
                 }
+              } else {
+                errorMessages.push(`Row ${i}: Member "${memberData.name} ${memberData.surname}" not found and "Create missing members" is disabled`);
+                errors++;
               }
             } catch (rowError) {
-              errorMessages.push(`Row ${i}: ${rowError instanceof Error ? rowError.message : 'Unknown error'}`);
+              const errorMsg = rowError instanceof Error ? rowError.message : 'Unknown error';
+              errorMessages.push(`Row ${i}: ${errorMsg}`);
               errors++;
               console.error('Error processing row:', rowError);
             }
@@ -610,7 +676,7 @@ const cloudService = {
         }
       };
 
-      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.onerror = () => reject(new Error('Failed to read the file. Please make sure it is a valid CSV file.'));
       reader.readAsText(file);
     });
   },
@@ -805,6 +871,7 @@ const Admin = () => {
   const [importFieldMapping, setImportFieldMapping] = useState<ImportFieldMapping>({});
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [showImportMapping, setShowImportMapping] = useState(false);
+  const [importProgress, setImportProgress] = useState<{current: number; total: number} | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -875,14 +942,18 @@ const Admin = () => {
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
 
-  // Database fields for import mapping
+  // Database fields for import mapping - updated to match actual table structure
   const databaseFields = [
-    { value: 'surname', label: 'Surname', required: true, description: 'Last name of the member' },
-    { value: 'name', label: 'Name', required: true, description: 'First name of the member' },
-    { value: 'residence', label: 'Residence', required: false, description: 'Address or location' },
+    { value: 'surname', label: 'Surname', required: true, description: 'Last name of the member (Required)' },
+    { value: 'name', label: 'Name', required: true, description: 'First name of the member (Required)' },
+    { value: 'residence', label: 'Residence', required: true, description: 'Address or location (Required)' },
+    { value: 'phone', label: 'Phone', required: false, description: 'Phone number' },
     { value: 'cell_group', label: 'Cell Group', required: false, description: 'Cell group name (must match existing group)' },
     { value: 'gender', label: 'Gender', required: false, description: 'Male or Female' },
-    { value: 'baptism', label: 'Baptism Date', required: false, description: 'Date format: YYYY-MM-DD' }
+    { value: 'baptism', label: 'Baptism Date', required: false, description: 'Date format: YYYY-MM-DD' },
+    { value: 'is_permanent_member', label: 'Permanent Member', required: false, description: 'true/false or yes/no' },
+    { value: 'is_leader', label: 'Is Leader', required: false, description: 'true/false or yes/no' },
+    { value: 'status', label: 'Status', required: false, description: 'newcomer, active, inactive, or not_attending' }
   ];
 
   const loadData = async () => {
@@ -940,7 +1011,20 @@ const Admin = () => {
         can_view_own_data: profile.can_view_own_data || false,
         cell_group_id: profile.cell_group_id || null,
         status: (profile as any).status || null,
-        created_at: (profile as any).created_at || null
+        created_at: (profile as any).created_at || null,
+        residence: profile.residence || '',
+        gender: (profile as any).gender || null,
+        baptism: (profile as any).baptism || null,
+        ministry_group_id: (profile as any).ministry_group_id || null,
+        is_permanent_member: (profile as any).is_permanent_member || false,
+        permanent_member_date: (profile as any).permanent_member_date || null,
+        invited_by: (profile as any).invited_by || null,
+        first_time_visit_date: (profile as any).first_time_visit_date || null,
+        is_leader: (profile as any).is_leader || false,
+        is_hidden: (profile as any).is_hidden || false,
+        is_developer: (profile as any).is_developer || false,
+        is_admin: (profile as any).is_admin || false,
+        auth_user_id: (profile as any).auth_user_id || null
       };
 
       if (profile.cell_group_id) {
@@ -988,7 +1072,20 @@ const Admin = () => {
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
       status: null,
-      created_at: null
+      created_at: null,
+      residence: profile.residence || '',
+      gender: (profile as any).gender || null,
+      baptism: (profile as any).baptism || null,
+      ministry_group_id: (profile as any).ministry_group_id || null,
+      is_permanent_member: (profile as any).is_permanent_member || false,
+      permanent_member_date: (profile as any).permanent_member_date || null,
+      invited_by: (profile as any).invited_by || null,
+      first_time_visit_date: (profile as any).first_time_visit_date || null,
+      is_leader: (profile as any).is_leader || false,
+      is_hidden: (profile as any).is_hidden || false,
+      is_developer: (profile as any).is_developer || false,
+      is_admin: (profile as any).is_admin || false,
+      auth_user_id: (profile as any).auth_user_id || null
     };
 
     if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'view_members')) {
@@ -1055,6 +1152,7 @@ const Admin = () => {
     setImportFieldMapping({});
     setCsvHeaders([]);
     setShowImportMapping(false);
+    setImportProgress(null);
   };
 
   const handleUpdateSecuritySettings = async () => {
@@ -1098,14 +1196,19 @@ const Admin = () => {
 
     setLoading(true);
     setError(null);
+    setImportProgress({ current: 0, total: 0 });
+    
     try {
       const results = await cloudService.importData(importFile, importOptions, importFieldMapping, groups);
       setImportResults(results);
       await loadData();
     } catch (err) {
-      setError('Failed to import data');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to import data';
+      setError(`Import failed: ${errorMessage}. Please check your CSV format and field mappings.`);
+      console.error('Import error:', err);
     } finally {
       setLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -1127,6 +1230,26 @@ const Admin = () => {
   };
 
   const handleFileUpload = (file: File) => {
+    // Reset previous state
+    setImportFile(null);
+    setImportResults(null);
+    setImportFieldMapping({});
+    setCsvHeaders([]);
+    setShowImportMapping(false);
+    setError(null);
+
+    // Validate file type
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setError('Please upload a CSV file. Only .csv files are supported.');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File is too large. Maximum size is 10MB.');
+      return;
+    }
+
     const reader = new FileReader();
     
     reader.onload = (e) => {
@@ -1135,10 +1258,18 @@ const Admin = () => {
         const rows = content.split('\n');
         
         if (rows.length === 0) {
-          throw new Error('File is empty');
+          setError('File is empty. Please upload a CSV file with data.');
+          return;
         }
 
         const headers = rows[0].split(',').map(col => col.replace(/^"|"$/g, '').trim());
+        
+        // Validate headers
+        if (headers.length === 0 || headers.every(h => !h.trim())) {
+          setError('CSV file has no valid headers. Please check your file format.');
+          return;
+        }
+
         setCsvHeaders(headers);
         setImportFile(file);
         setShowImportMapping(true);
@@ -1154,23 +1285,40 @@ const Admin = () => {
             autoMapping[header] = 'name';
           } else if (headerLower.includes('residence') || headerLower.includes('address')) {
             autoMapping[header] = 'residence';
+          } else if (headerLower.includes('phone') || headerLower.includes('mobile') || headerLower.includes('contact')) {
+            autoMapping[header] = 'phone';
           } else if (headerLower.includes('cell') || headerLower.includes('group')) {
             autoMapping[header] = 'cell_group';
           } else if (headerLower.includes('gender') || headerLower.includes('sex')) {
             autoMapping[header] = 'gender';
           } else if (headerLower.includes('baptism') || headerLower.includes('baptised')) {
             autoMapping[header] = 'baptism';
+          } else if (headerLower.includes('permanent') || headerLower.includes('member')) {
+            autoMapping[header] = 'is_permanent_member';
+          } else if (headerLower.includes('leader')) {
+            autoMapping[header] = 'is_leader';
+          } else if (headerLower.includes('status')) {
+            autoMapping[header] = 'status';
           }
         });
         
         setImportFieldMapping(autoMapping);
+        
+        // Show warning if required fields aren't auto-mapped
+        const requiredFields = ['surname', 'name', 'residence'];
+        const missingRequired = requiredFields.filter(field => !Object.values(autoMapping).includes(field));
+        
+        if (missingRequired.length > 0) {
+          setError(`Warning: Could not auto-detect required fields: ${missingRequired.join(', ')}. Please map them manually.`);
+        }
       } catch (error) {
-        setError('Failed to parse CSV file');
+        setError('Failed to parse CSV file. Please make sure it is a valid CSV format.');
+        console.error('CSV parsing error:', error);
       }
     };
     
     reader.onerror = () => {
-      setError('Failed to read file');
+      setError('Failed to read file. Please try again with a different file.');
     };
     
     reader.readAsText(file);
@@ -1199,7 +1347,20 @@ const Admin = () => {
       can_view_own_data: profile!.can_view_own_data || false,
       cell_group_id: profile!.cell_group_id || null,
       status: null,
-      created_at: null
+      created_at: null,
+      residence: profile!.residence || '',
+      gender: (profile as any).gender || null,
+      baptism: (profile as any).baptism || null,
+      ministry_group_id: (profile as any).ministry_group_id || null,
+      is_permanent_member: (profile as any).is_permanent_member || false,
+      permanent_member_date: (profile as any).permanent_member_date || null,
+      invited_by: (profile as any).invited_by || null,
+      first_time_visit_date: (profile as any).first_time_visit_date || null,
+      is_leader: (profile as any).is_leader || false,
+      is_hidden: (profile as any).is_hidden || false,
+      is_developer: (profile as any).is_developer || false,
+      is_admin: (profile as any).is_admin || false,
+      auth_user_id: (profile as any).auth_user_id || null
     };
     
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions || [], 'edit_members')) {
@@ -1254,7 +1415,20 @@ const Admin = () => {
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
       status: null,
-      created_at: null
+      created_at: null,
+      residence: profile.residence || '',
+      gender: (profile as any).gender || null,
+      baptism: (profile as any).baptism || null,
+      ministry_group_id: (profile as any).ministry_group_id || null,
+      is_permanent_member: (profile as any).is_permanent_member || false,
+      permanent_member_date: (profile as any).permanent_member_date || null,
+      invited_by: (profile as any).invited_by || null,
+      first_time_visit_date: (profile as any).first_time_visit_date || null,
+      is_leader: (profile as any).is_leader || false,
+      is_hidden: (profile as any).is_hidden || false,
+      is_developer: (profile as any).is_developer || false,
+      is_admin: (profile as any).is_admin || false,
+      auth_user_id: (profile as any).auth_user_id || null
     };
 
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'edit_members')) {
@@ -1350,6 +1524,7 @@ const Admin = () => {
       filtered = filtered.filter(member =>
         `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (member.phone && member.phone.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase())) ||
         getRolesFromMember(member).some(role => role.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
@@ -1375,7 +1550,20 @@ const Admin = () => {
       can_view_own_data: profile.can_view_own_data || false,
       cell_group_id: profile.cell_group_id || null,
       status: null,
-      created_at: null
+      created_at: null,
+      residence: profile.residence || '',
+      gender: (profile as any).gender || null,
+      baptism: (profile as any).baptism || null,
+      ministry_group_id: (profile as any).ministry_group_id || null,
+      is_permanent_member: (profile as any).is_permanent_member || false,
+      permanent_member_date: (profile as any).permanent_member_date || null,
+      invited_by: (profile as any).invited_by || null,
+      first_time_visit_date: (profile as any).first_time_visit_date || null,
+      is_leader: (profile as any).is_leader || false,
+      is_hidden: (profile as any).is_hidden || false,
+      is_developer: (profile as any).is_developer || false,
+      is_admin: (profile as any).is_admin || false,
+      auth_user_id: (profile as any).auth_user_id || null
     };
 
     if (isAdminOrPastor(currentUser)) {
@@ -1521,7 +1709,8 @@ const Admin = () => {
                     <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <p className="text-sm text-gray-600 mb-2">Upload CSV file with member data</p>
                     <p className="text-xs text-gray-500 mb-4">
-                      Supported fields: Surname, Name, Residence, Cell Group, Gender, Baptism Date
+                      <strong>Required fields:</strong> Surname, Name, Residence<br />
+                      <strong>Optional fields:</strong> Phone, Cell Group, Gender, Baptism Date, etc.
                     </p>
                     <input 
                       type="file" 
@@ -1543,6 +1732,12 @@ const Admin = () => {
                 )}
               </div>
               
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-red-700 text-sm font-medium">{error}</p>
+                </div>
+              )}
+              
               <div className="space-y-3 bg-white p-4 rounded-lg border">
                 <h4 className="font-medium text-gray-900">Import Options</h4>
                 <label className="flex items-center gap-2">
@@ -1552,7 +1747,7 @@ const Admin = () => {
                     onChange={(e) => setImportOptions(prev => ({...prev, updateExisting: e.target.checked}))}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="text-sm text-gray-700">Update existing members</span>
+                  <span className="text-sm text-gray-700">Update existing members (by name and surname)</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input 
@@ -1571,13 +1766,13 @@ const Admin = () => {
                 <h4 className="font-medium text-gray-900 mb-4">Map CSV Columns to Database Fields</h4>
                 <p className="text-sm text-gray-600 mb-4">
                   Please map each CSV column to its corresponding database field.
-                  Required fields are marked with *
+                  <span className="text-red-500 font-medium"> Required fields are marked with *</span>
                 </p>
                 
                 <div className="space-y-4">
                   {csvHeaders.map((header, index) => (
                     <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
+                      <div className="flex-1">
                         <span className="font-medium text-gray-900">CSV Column: </span>
                         <code className="bg-gray-200 px-2 py-1 rounded text-sm">{header}</code>
                       </div>
@@ -1592,7 +1787,7 @@ const Admin = () => {
                         <option value="">Select database field...</option>
                         {databaseFields.map(field => (
                           <option key={field.value} value={field.value}>
-                            {field.label} {field.required ? '*' : ''}
+                            {field.label} {field.required ? '* (Required)' : ''}
                           </option>
                         ))}
                       </select>
@@ -1601,23 +1796,31 @@ const Admin = () => {
                 </div>
                 
                 <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                  <h5 className="font-medium text-blue-900 mb-2">Available Database Fields:</h5>
+                  <h5 className="font-medium text-blue-900 mb-2">Database Fields Description:</h5>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {databaseFields.map(field => (
                       <div key={field.value} className="text-sm">
-                        <span className="font-medium text-gray-900">{field.label}</span>
-                        <span className="text-red-500">{field.required ? ' *' : ''}</span>
-                        <p className="text-xs text-gray-500">{field.description}</p>
+                        <span className={`font-medium ${field.required ? 'text-red-700' : 'text-gray-900'}`}>
+                          {field.label}
+                        </span>
+                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                        <p className="text-xs text-gray-500 mt-1">{field.description}</p>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
               
+              {error && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <p className="text-yellow-700 text-sm font-medium">{error}</p>
+                </div>
+              )}
+              
               <div className="flex gap-3">
                 <button
                   onClick={handleImportData}
-                  disabled={loading || Object.keys(importFieldMapping).length === 0}
+                  disabled={loading || Object.keys(importFieldMapping).filter(k => importFieldMapping[k]).length < 3}
                   className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
                 >
                   <Upload className="h-4 w-4" />
@@ -1630,29 +1833,68 @@ const Admin = () => {
                   Back
                 </button>
               </div>
+              
+              <div className="text-sm text-gray-500">
+                <p><strong>Note:</strong> At minimum, you must map the 3 required fields: Surname, Name, and Residence.</p>
+                <p className="mt-1">Cell groups must already exist in the system. The import will match by exact group name.</p>
+              </div>
             </div>
           )}
 
           {importResults && (
-            <div className={`mt-4 p-4 rounded-lg ${
+            <div className={`mt-6 p-6 rounded-lg ${
               importResults.errors > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'
             }`}>
-              <h4 className={`font-medium mb-2 ${importResults.errors > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
-                Import Results: {importResults.success} successful, {importResults.errors} errors
-              </h4>
+              <div className="flex items-center justify-between mb-4">
+                <h4 className={`text-lg font-bold ${importResults.errors > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
+                  Import Complete!
+                </h4>
+                <button
+                  onClick={() => setImportResults(null)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="text-center p-4 bg-white rounded-lg border">
+                  <div className="text-3xl font-bold text-green-600">{importResults.success}</div>
+                  <div className="text-sm text-gray-600">Successful</div>
+                </div>
+                <div className="text-center p-4 bg-white rounded-lg border">
+                  <div className="text-3xl font-bold text-red-600">{importResults.errors}</div>
+                  <div className="text-sm text-gray-600">Errors</div>
+                </div>
+              </div>
               
               {importResults.errorMessages.length > 0 && (
-                <div className="mt-3">
-                  <h5 className="text-sm font-medium text-red-700 mb-2">Error Details:</h5>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                <div className="mt-4">
+                  <h5 className="text-sm font-medium text-red-700 mb-3">Error Details:</h5>
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
                     {importResults.errorMessages.map((msg, idx) => (
-                      <div key={idx} className="text-xs text-red-600 bg-red-50 p-2 rounded">
-                        {msg}
+                      <div key={idx} className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-100">
+                        <span className="font-medium">Row {idx + 2}:</span> {msg}
                       </div>
                     ))}
                   </div>
+                  <p className="text-xs text-gray-500 mt-3">
+                    Note: Row numbers start from 2 (Row 1 is headers)
+                  </p>
                 </div>
               )}
+              
+              <div className="mt-6 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    setImportResults(null);
+                    closeModal();
+                  }}
+                  className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                >
+                  Close and View Members
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1662,7 +1904,7 @@ const Admin = () => {
           <h3 className="text-lg font-semibold mb-4">Data Cleanup</h3>
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              Remove inactive members who have been inactive for more than 1 year. This action cannot be undone.
+              Remove inactive members who have been marked as "not attending" for more than 1 year. This action cannot be undone.
             </p>
             <button
               onClick={handleCleanupData}
@@ -1795,6 +2037,7 @@ const Admin = () => {
                     <p className="text-sm text-gray-500">
                       {member.phone || 'No phone'} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                     </p>
+                    <p className="text-xs text-gray-500">{member.residence}</p>
                   </div>
                 </div>
                 <button
@@ -1816,7 +2059,12 @@ const Admin = () => {
       <div className="space-y-6">
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-            <p className="text-red-700 font-medium">{error}</p>
+            <div className="flex items-center justify-between">
+              <p className="text-red-700 font-medium">{error}</p>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -1829,8 +2077,8 @@ const Admin = () => {
               <h4 className="text-xl font-bold text-gray-900">
                 {selectedUser?.name} {selectedUser?.surname}
               </h4>
+              <p className="text-gray-600">{selectedUser?.residence || 'No residence'}</p>
               <p className="text-gray-600">{selectedUser?.phone || 'No phone'}</p>
-              <p className="text-sm text-gray-500">{selectedUser?.phone}</p>
               {selectedUser?.cell_group_id && (
                 <p className="text-sm text-gray-500">Cell Group ID: {selectedUser?.cell_group_id}</p>
               )}
@@ -1908,6 +2156,9 @@ const Admin = () => {
                     <span className="text-xs text-green-700">PIN:</span>
                     <p className="font-mono font-semibold text-green-900 text-2xl tracking-wider">{generatedCredentials.pin}</p>
                   </div>
+                  <p className="text-xs text-green-600 mt-2">
+                    Note: These credentials allow the user to log into their account. Save them securely.
+                  </p>
                 </div>
               </div>
             )}
@@ -2122,7 +2373,20 @@ const Admin = () => {
                   can_view_own_data: profile.can_view_own_data || false,
                   cell_group_id: profile.cell_group_id || null,
                   status: null,
-                  created_at: null
+                  created_at: null,
+                  residence: profile.residence || '',
+                  gender: (profile as any).gender || null,
+                  baptism: (profile as any).baptism || null,
+                  ministry_group_id: (profile as any).ministry_group_id || null,
+                  is_permanent_member: (profile as any).is_permanent_member || false,
+                  permanent_member_date: (profile as any).permanent_member_date || null,
+                  invited_by: (profile as any).invited_by || null,
+                  first_time_visit_date: (profile as any).first_time_visit_date || null,
+                  is_leader: (profile as any).is_leader || false,
+                  is_hidden: (profile as any).is_hidden || false,
+                  is_developer: (profile as any).is_developer || false,
+                  is_admin: (profile as any).is_admin || false,
+                  auth_user_id: (profile as any).auth_user_id || null
                 };
                 
                 if (isAdminOrPastor(currentUser)) return 'Full administrative access';
@@ -2180,7 +2444,20 @@ const Admin = () => {
               can_view_own_data: profile.can_view_own_data || false,
               cell_group_id: profile.cell_group_id || null,
               status: null,
-              created_at: null
+              created_at: null,
+              residence: profile.residence || '',
+              gender: (profile as any).gender || null,
+              baptism: (profile as any).baptism || null,
+              ministry_group_id: (profile as any).ministry_group_id || null,
+              is_permanent_member: (profile as any).is_permanent_member || false,
+              permanent_member_date: (profile as any).permanent_member_date || null,
+              invited_by: (profile as any).invited_by || null,
+              first_time_visit_date: (profile as any).first_time_visit_date || null,
+              is_leader: (profile as any).is_leader || false,
+              is_hidden: (profile as any).is_hidden || false,
+              is_developer: (profile as any).is_developer || false,
+              is_admin: (profile as any).is_admin || false,
+              auth_user_id: (profile as any).auth_user_id || null
             };
             
             const sectionHasAccess = isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], section.permission);
@@ -2231,7 +2508,20 @@ const Admin = () => {
             can_view_own_data: profile.can_view_own_data || false,
             cell_group_id: profile.cell_group_id || null,
             status: null,
-            created_at: null
+            created_at: null,
+            residence: profile.residence || '',
+            gender: (profile as any).gender || null,
+            baptism: (profile as any).baptism || null,
+            ministry_group_id: (profile as any).ministry_group_id || null,
+            is_permanent_member: (profile as any).is_permanent_member || false,
+            permanent_member_date: (profile as any).permanent_member_date || null,
+            invited_by: (profile as any).invited_by || null,
+            first_time_visit_date: (profile as any).first_time_visit_date || null,
+            is_leader: (profile as any).is_leader || false,
+            is_hidden: (profile as any).is_hidden || false,
+            is_developer: (profile as any).is_developer || false,
+            is_admin: (profile as any).is_admin || false,
+            auth_user_id: (profile as any).auth_user_id || null
           };
 
           return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], 'view_members')) && (
@@ -2253,7 +2543,7 @@ const Admin = () => {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search users by name, email, or role..."
+                  placeholder="Search users by name, phone, residence, or role..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2294,6 +2584,7 @@ const Admin = () => {
                           <p className="text-sm text-gray-500">
                             {member.phone || 'No phone'} • {getRolesFromMember(member).map(role => roles.find(r => r.value === role)?.label || role).join(', ')}
                           </p>
+                          <p className="text-xs text-gray-500">{member.residence}</p>
                           {member.cell_group_id && (
                             <p className="text-xs text-gray-500">
                               Cell Group ID: {member.cell_group_id}
@@ -2357,7 +2648,20 @@ const Admin = () => {
             can_view_own_data: profile.can_view_own_data || false,
             cell_group_id: profile.cell_group_id || null,
             status: null,
-            created_at: null
+            created_at: null,
+            residence: profile.residence || '',
+            gender: (profile as any).gender || null,
+            baptism: (profile as any).baptism || null,
+            ministry_group_id: (profile as any).ministry_group_id || null,
+            is_permanent_member: (profile as any).is_permanent_member || false,
+            permanent_member_date: (profile as any).permanent_member_date || null,
+            invited_by: (profile as any).invited_by || null,
+            first_time_visit_date: (profile as any).first_time_visit_date || null,
+            is_leader: (profile as any).is_leader || false,
+            is_hidden: (profile as any).is_hidden || false,
+            is_developer: (profile as any).is_developer || false,
+            is_admin: (profile as any).is_admin || false,
+            auth_user_id: (profile as any).auth_user_id || null
           };
 
           return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], 'view_reports')) && (
