@@ -39,7 +39,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
@@ -115,7 +115,7 @@ interface AbsentMember {
   name: string;
   surname: string;
   phone: string | null;
-  email: string | null;
+  residence: string | null;
   consecutiveAbsences: number;
   lastEventDate: string;
 }
@@ -123,7 +123,7 @@ interface AbsentMember {
 interface FollowUpFormData {
   memberId: string;
   followUpDate: string;
-  followUpType: 'phone_call' | 'visit' | 'email' | 'sms';
+  followUpType: 'phone_call' | 'visit' | 'residence' | 'sms';
   notes: string;
   callMade: boolean;
 }
@@ -311,7 +311,7 @@ const Dashboard = () => {
             name,
             surname,
             phone,
-            email,
+            residence,
             cell_group_id
           )
         `)
@@ -353,7 +353,7 @@ const Dashboard = () => {
             name: record.member.name,
             surname: record.member.surname,
             phone: record.member.phone,
-            email: record.member.email,
+            residence: record.member.residence,
             consecutiveAbsences: record.absentCount,
             lastEventDate: sundayEvents[0].event_date
           });
@@ -663,7 +663,7 @@ const Dashboard = () => {
     switch(type) {
       case 'phone_call': return <Phone className="h-4 w-4" />;
       case 'visit': return <Home className="h-4 w-4" />;
-      case 'email': return <Mail className="h-4 w-4" />;
+      case 'residence': return <Mail className="h-4 w-4" />;
       case 'sms': return <MessageSquare className="h-4 w-4" />;
       default: return <Phone className="h-4 w-4" />;
     }
@@ -673,7 +673,7 @@ const Dashboard = () => {
     switch(type) {
       case 'phone_call': return 'bg-blue-100 text-blue-700';
       case 'visit': return 'bg-green-100 text-green-700';
-      case 'email': return 'bg-purple-100 text-purple-700';
+      case 'residence': return 'bg-purple-100 text-purple-700';
       case 'sms': return 'bg-orange-100 text-orange-700';
       default: return 'bg-gray-100 text-gray-700';
     }
@@ -1149,10 +1149,10 @@ const Dashboard = () => {
                               <span>{member.phone}</span>
                             </div>
                           )}
-                          {member.email && (
+                          {member.residence && (
                             <div className="flex items-center gap-1 text-sm text-gray-600">
                               <Mail className="h-3 w-3" />
-                              <span>{member.email}</span>
+                              <span>{member.residence}</span>
                             </div>
                           )}
                         </div>
@@ -1215,10 +1215,10 @@ const Dashboard = () => {
                         <span>{selectedAbsentMember.phone}</span>
                       </div>
                     )}
-                    {selectedAbsentMember.email && (
+                    {selectedAbsentMember.residence && (
                       <div className="flex items-center gap-1 text-sm text-gray-600">
                         <Mail className="h-3 w-3" />
-                        <span className="truncate max-w-[150px]">{selectedAbsentMember.email}</span>
+                        <span className="truncate max-w-[150px]">{selectedAbsentMember.residence}</span>
                       </div>
                     )}
                   </div>
@@ -1245,7 +1245,7 @@ const Dashboard = () => {
                   Follow-up Type *
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['phone_call', 'visit', 'email', 'sms'] as const).map((type) => (
+                  {(['phone_call', 'visit', 'residence', 'sms'] as const).map((type) => (
                     <button
                       key={type}
                       type="button"
@@ -1484,7 +1484,7 @@ const Dashboard = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search members by name, email, or phone..."
+                placeholder="Search members by name, residence, or phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1495,7 +1495,7 @@ const Dashboard = () => {
               {filteredMembers
                 .filter(member => 
                   `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                  (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase())) ||
                   (member.phone && member.phone.includes(searchTerm))
                 )
                 .map(member => (
@@ -1506,7 +1506,7 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">{member.email || member.phone || 'No contact'}</p>
+                      <p className="text-sm text-gray-500">{member.residence || member.phone || 'No contact'}</p>
                       {member.login_username && (
                         <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                           <Key className="h-3 w-3" />
