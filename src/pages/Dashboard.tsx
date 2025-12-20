@@ -32,7 +32,7 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
+  residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
   invited_by: string | null;
@@ -1352,7 +1352,7 @@ const Dashboard = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search members by name, email, or phone..."
+                placeholder="Search members by name, residence, or phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1363,7 +1363,7 @@ const Dashboard = () => {
               {filteredMembers
                 .filter(member => 
                   `${member.name} ${member.surname}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (member.email && member.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                  (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase())) ||
                   (member.phone && member.phone.includes(searchTerm))
                 )
                 .map(member => (
@@ -1374,7 +1374,7 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">{member.email || member.phone || 'No contact'}</p>
+                      <p className="text-sm text-gray-500">{member.residence || member.phone || 'No contact'}</p>
                       {member.login_username && (
                         <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                           <Key className="h-3 w-3" />
