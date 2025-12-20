@@ -569,6 +569,7 @@ const Dashboard = () => {
   };
 
   // FIXED: Upload pamphlet function using RPC
+  // FIXED: Upload pamphlet function using RPC
   const uploadPamphlet = async (eventId: string, file: File) => {
     try {
       setUploadingPamphlet(eventId);
@@ -587,7 +588,6 @@ const Dashboard = () => {
 
       const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
       const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
-      
       if (!validExtensions.includes(fileExtension)) {
         throw new Error(`Invalid file type. Please upload one of: ${validExtensions.join(', ')}`);
       }
@@ -602,7 +602,7 @@ const Dashboard = () => {
       const timestamp = Date.now();
       const randomString = Math.random().toString(36).substring(7);
       const fileName = `${eventId}_${timestamp}_${randomString}_pamphlet.${fileExt}`;
-      const filePath = `event-pamphlets/${fileName}`;
+      let filePath = `event-pamphlets/${fileName}`;
 
       console.log('Starting pamphlet upload for event:', eventId);
 
@@ -616,7 +616,6 @@ const Dashboard = () => {
 
       if (uploadError) {
         console.error('Storage upload error:', uploadError);
-        
         if (uploadError.message.includes('Bucket not found')) {
           throw new Error('Storage bucket "event-pamphlets" not found. Please create it in Supabase Storage.');
         } else if (uploadError.message.includes('already exists')) {
@@ -631,7 +630,7 @@ const Dashboard = () => {
               cacheControl: '3600',
               upsert: false
             });
-          
+
           if (retryError) throw retryError;
           
           // Use the new file path
@@ -648,50 +647,42 @@ const Dashboard = () => {
 
       console.log('File uploaded successfully. Public URL:', publicUrl);
 
-      // Step 3: First try direct update
-      console.log('Attempting direct update...');
-      const { error: directError } = await supabase
-        .from('events')
-        .update({ 
-          pamphlet_url: publicUrl,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', eventId);
+      // Step 3: Use RPC function directly (more reliable than direct update)
+      console.log('Calling RPC function update_event_pamphlet...');
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
+        event_id_param: eventId,
+        pamphlet_url_param: publicUrl
+      });
 
-      if (directError) {
-        console.log('Direct update failed due to RLS, trying RPC function...', directError.message);
-        
-        // Step 4: Use the RPC function as fallback
-        console.log('Calling RPC function update_event_pamphlet...');
-        
-        const { data: rpcResult, error: rpcError } = await supabase.rpc('update_event_pamphlet', {
-          event_id_param: eventId,
-          pamphlet_url_param: publicUrl
-        });
+      console.log('RPC Result:', rpcResult);
+      console.log('RPC Error:', rpcError);
 
-        if (rpcError) {
-          console.error('RPC function error:', rpcError);
-          
-          // Try alternative approach - update via API if needed
-          throw new Error(`Failed to update event. RPC Error: ${rpcError.message}`);
-        }
+      if (rpcError) {
+        console.error('RPC function error:', rpcError);
+        throw new Error(`Database update failed: ${rpcError.message}. Please ensure the RPC function exists and you have proper permissions.`);
+      }
 
-        // Check if RPC returned success
-        if (rpcResult && typeof rpcResult === 'object' && rpcResult.success === false) {
-          throw new Error(`RPC failed: ${rpcResult.message || 'Unknown error'}`);
+      // Check if RPC returned success
+      if (rpcResult && typeof rpcResult === 'object') {
+        if (rpcResult.success === false) {
+          throw new Error(rpcResult.message || 'Failed to update event');
         }
       }
 
-      // Step 5: Update local state
-      setUpcomingEvents(prev => prev.map(event => 
-        event.id === eventId ? { 
-          ...event, 
-          pamphlet_url: publicUrl
-        } : event
-      ));
+      // Step 4: Update local state
+      setUpcomingEvents(prev => 
+        prev.map(event => 
+          event.id === eventId 
+            ? { ...event, pamphlet_url: publicUrl } 
+            : event
+        )
+      );
 
       setSuccess('Pamphlet uploaded successfully!');
       setTimeout(() => setSuccess(null), 3000);
+
+      // Refresh dashboard data to ensure sync
+      setTimeout(() => loadDashboardData(), 1000);
 
     } catch (error: any) {
       console.error('Error in uploadPamphlet:', error);
@@ -700,11 +691,13 @@ const Dashboard = () => {
       let errorMessage = error.message || 'Failed to upload pamphlet.';
       
       if (errorMessage.includes('permission denied') || errorMessage.includes('row-level security')) {
-        errorMessage = 'Permission denied. Your account may not have sufficient privileges to update events.';
+        errorMessage = 'Permission denied. Please run the SQL script to fix RLS policies, or contact your database administrator.';
       } else if (errorMessage.includes('bucket')) {
         errorMessage = 'Storage configuration issue. Please contact administrator.';
       } else if (errorMessage.includes('size')) {
         errorMessage = 'File is too large. Maximum size is 10MB.';
+      } else if (errorMessage.includes('function') && errorMessage.includes('does not exist')) {
+        errorMessage = 'Database function missing. Please run the provided SQL script to create the update_event_pamphlet function.';
       }
       
       setError(errorMessage);
@@ -712,7 +705,6 @@ const Dashboard = () => {
       setUploadingPamphlet(null);
     }
   };
-
   // Close pamphlet modal
   const closePamphletModal = () => {
     setViewingPamphlet(null);
