@@ -28,11 +28,15 @@ import {
   CheckCircle,
   Clock,
   User,
-  Image as ImageIcon
+  Image as ImageIcon,
+  HelpCircle,
+  Info,
+  Book,
+  Download as DownloadIcon,
+  ChevronRight
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-
 
 // Types - Updated to match your database schema (NO EMAIL)
 interface Member {
@@ -140,7 +144,8 @@ const Dashboard = () => {
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
     activity: true,
-    sermons: true
+    sermons: true,
+    userManual: false
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -150,6 +155,9 @@ const Dashboard = () => {
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<Event | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [showAllEvents, setShowAllEvents] = useState(false);
+  const [showAllActivities, setShowAllActivities] = useState(false);
+  const [showAllSermons, setShowAllSermons] = useState(false);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -489,7 +497,7 @@ const Dashboard = () => {
       });
     });
 
-    setRecentActivities(activities.sort((a, b) => b.id - a.id).slice(0, 6));
+    setRecentActivities(activities.sort((a, b) => b.id - a.id));
   };
 
   const formatTimeAgo = (date: Date): string => {
@@ -609,6 +617,9 @@ const Dashboard = () => {
     setSelectedEvent(null);
     setSelectedSermon(null);
     setError(null);
+    setShowAllEvents(false);
+    setShowAllActivities(false);
+    setShowAllSermons(false);
   };
 
   const openMemberDetail = (member: Member | AbsentMember) => {
@@ -771,6 +782,11 @@ const Dashboard = () => {
   const filteredAbsentMembers = getFilteredAbsentMembers();
   const filteredSermons = getFilteredSermons();
 
+  // Get display items (last 3 or all based on showAll state)
+  const displayedActivities = showAllActivities ? recentActivities : recentActivities.slice(0, 3);
+  const displayedEvents = showAllEvents ? filteredEvents : filteredEvents.slice(0, 3);
+  const displayedSermons = showAllSermons ? filteredSermons : filteredSermons.slice(0, 3);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
       {/* Expanded Image Modal */}
@@ -889,7 +905,7 @@ const Dashboard = () => {
 
       {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Activity */}
+        {/* Recent Activity - Show last 3 */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
             onClick={() => toggleSection('activity')}
@@ -902,7 +918,7 @@ const Dashboard = () => {
           {expandedSections.activity && (
             <div className="p-6 pt-0">
               <div className="space-y-4">
-                {recentActivities.map((activity) => (
+                {displayedActivities.map((activity) => (
                   <button
                     key={activity.id}
                     onClick={activity.action}
@@ -926,17 +942,30 @@ const Dashboard = () => {
                   <p className="text-gray-500 dark:text-gray-400 text-center py-4">No recent activity</p>
                 )}
               </div>
+              
+              {/* Show "View All" button if there are more than 3 activities */}
+              {recentActivities.length > 3 && (
+                <button 
+                  onClick={() => setShowAllActivities(!showAllActivities)}
+                  className="w-full mt-4 flex items-center justify-center gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors py-2"
+                >
+                  {showAllActivities ? 'Show Less' : `View All (${recentActivities.length})`}
+                  <ChevronRight className={`h-4 w-4 transition-transform ${showAllActivities ? 'rotate-90' : ''}`} />
+                </button>
+              )}
+              
+              {/* Always show "View All Activity" link to open modal */}
               <button 
                 onClick={() => openModal('viewMembers')}
-                className="w-full mt-4 text-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors py-2"
+                className="w-full text-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 text-sm transition-colors py-2"
               >
-                View All Activity
+                Open All Activity
               </button>
             </div>
           )}
         </div>
 
-        {/* Upcoming Events */}
+        {/* Upcoming Events - Show last 3 */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
             onClick={() => toggleSection('events')}
@@ -949,7 +978,7 @@ const Dashboard = () => {
           {expandedSections.events && (
             <div className="p-6 pt-0">
               <div className="space-y-4">
-                {filteredEvents.map((event) => (
+                {displayedEvents.map((event) => (
                   <div
                     key={event.id}
                     className="w-full border-l-4 border-blue-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group"
@@ -1036,17 +1065,30 @@ const Dashboard = () => {
                   <p className="text-gray-500 dark:text-gray-400 text-center py-4">No upcoming events</p>
                 )}
               </div>
+              
+              {/* Show "View All" button if there are more than 3 events */}
+              {filteredEvents.length > 3 && (
+                <button 
+                  onClick={() => setShowAllEvents(!showAllEvents)}
+                  className="w-full mt-4 flex items-center justify-center gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors py-2"
+                >
+                  {showAllEvents ? 'Show Less' : `View All (${filteredEvents.length})`}
+                  <ChevronRight className={`h-4 w-4 transition-transform ${showAllEvents ? 'rotate-90' : ''}`} />
+                </button>
+              )}
+              
+              {/* Always show "View Calendar" link to open modal */}
               <button 
                 onClick={() => openModal('viewEvents')}
-                className="w-full mt-4 text-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors py-2"
+                className="w-full text-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 text-sm transition-colors py-2"
               >
-                View Calendar
+                Open Calendar
               </button>
             </div>
           )}
         </div>
 
-        {/* Recent Sermons */}
+        {/* Recent Sermons - Show last 3 */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
             onClick={() => toggleSection('sermons')}
@@ -1059,7 +1101,7 @@ const Dashboard = () => {
           {expandedSections.sermons && (
             <div className="p-6 pt-0">
               <div className="space-y-4">
-                {filteredSermons.slice(0, 5).map((sermon) => (
+                {displayedSermons.map((sermon) => (
                   <div
                     key={sermon.id}
                     className="w-full border-l-4 border-orange-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
@@ -1127,18 +1169,289 @@ const Dashboard = () => {
                   <p className="text-gray-500 dark:text-gray-400 text-center py-4">No sermons available</p>
                 )}
               </div>
+              
+              {/* Show "View All" button if there are more than 3 sermons */}
+              {filteredSermons.length > 3 && (
+                <button 
+                  onClick={() => setShowAllSermons(!showAllSermons)}
+                  className="w-full mt-4 flex items-center justify-center gap-2 text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium transition-colors py-2"
+                >
+                  {showAllSermons ? 'Show Less' : `View All (${filteredSermons.length})`}
+                  <ChevronRight className={`h-4 w-4 transition-transform ${showAllSermons ? 'rotate-90' : ''}`} />
+                </button>
+              )}
+              
+              {/* Always show "View All Sermons" link to open modal */}
               <button 
                 onClick={() => openModal('viewSermons')}
-                className="w-full mt-4 text-center text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium transition-colors py-2"
+                className="w-full text-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 text-sm transition-colors py-2"
               >
-                View All Sermons
+                Open All Sermons
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* QUICK ACTIONS SECTION REMOVED - As requested */}
+      {/* User Manual Section - New Section Added */}
+      <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
+        <button 
+          onClick={() => toggleSection('userManual')}
+          className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <Book className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">User Manual</h2>
+          </div>
+          {expandedSections.userManual ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+        </button>
+        
+        {expandedSections.userManual && (
+          <div className="p-6 pt-0">
+            <div className="space-y-6">
+              {/* Introduction */}
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/50 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Info className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <h3 className="font-bold text-lg text-gray-900 dark:text-white">Welcome to Church Management System</h3>
+                </div>
+                <p className="text-gray-700 dark:text-gray-300">
+                  This guide will help you navigate and use the church management dashboard effectively.
+                  All users can view data, but editing permissions are restricted to pastors and administrators.
+                </p>
+              </div>
+
+              {/* Dashboard Sections */}
+              <div>
+                <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-lg">Dashboard Overview</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Stats Cards */}
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                        <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <h5 className="font-medium text-gray-900 dark:text-white">Statistics Cards</h5>
+                    </div>
+                    <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                      <li className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 mt-1.5 bg-blue-500 rounded-full"></div>
+                        <span>Click any stat card to view detailed information</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 mt-1.5 bg-blue-500 rounded-full"></div>
+                        <span>Green arrows indicate positive trends</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 mt-1.5 bg-blue-500 rounded-full"></div>
+                        <span>Red arrows indicate areas needing attention</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Quick Access */}
+                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="p-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                        <Eye className="h-4 w-4 text-green-600 dark:text-green-400" />
+                      </div>
+                      <h5 className="font-medium text-gray-900 dark:text-white">Viewing Data</h5>
+                    </div>
+                    <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                      <li className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 mt-1.5 bg-green-500 rounded-full"></div>
+                        <span>Each section shows the last 3 items by default</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 mt-1.5 bg-green-500 rounded-full"></div>
+                        <span>Click "View All" to see complete lists</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 mt-1.5 bg-green-500 rounded-full"></div>
+                        <span>Use "Open All" buttons for full-screen modal view</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Key Features */}
+              <div>
+                <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-lg">Key Features Guide</h4>
+                <div className="space-y-4">
+                  {/* Members Management */}
+                  <div className="border-l-4 border-blue-400 pl-4 py-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Users className="h-4 w-4 text-blue-500" />
+                      <h5 className="font-medium text-gray-900 dark:text-white">Members Management</h5>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      View all church members, their contact information, and membership status.
+                      Search by name, phone number, or residence. Click on any member to see detailed information.
+                    </p>
+                  </div>
+
+                  {/* Events & Pamphlets */}
+                  <div className="border-l-4 border-purple-400 pl-4 py-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Calendar className="h-4 w-4 text-purple-500" />
+                      <h5 className="font-medium text-gray-900 dark:text-white">Events & Pamphlets</h5>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      View upcoming events with dates, times, and locations. Event pamphlets can be:
+                    </p>
+                    <ul className="text-sm text-gray-600 dark:text-gray-400 mt-1 space-y-1">
+                      <li className="flex items-center gap-2">
+                        <Eye className="h-3 w-3 text-blue-500" />
+                        <span>Viewed inline with click-to-enlarge functionality</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <DownloadIcon className="h-3 w-3 text-green-500" />
+                        <span>Downloaded for offline viewing</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <ExternalLink className="h-3 w-3 text-purple-500" />
+                        <span>Opened in a new tab for full-screen viewing</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Sermons Library */}
+                  <div className="border-l-4 border-orange-400 pl-4 py-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <BookOpen className="h-4 w-4 text-orange-500" />
+                      <h5 className="font-medium text-gray-900 dark:text-white">Sermons Library</h5>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Access past sermons with notes and video recordings. Features include:
+                    </p>
+                    <ul className="text-sm text-gray-600 dark:text-gray-400 mt-1 space-y-1">
+                      <li className="flex items-center gap-2">
+                        <Search className="h-3 w-3 text-gray-500" />
+                        <span>Search sermons by title, pastor, or content</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <DownloadIcon className="h-3 w-3 text-green-500" />
+                        <span>Download sermon notes (PDF format)</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <PlayCircle className="h-3 w-3 text-purple-500" />
+                        <span>Watch sermon videos online</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Absent Members Tracking */}
+                  <div className="border-l-4 border-red-400 pl-4 py-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <AlertTriangle className="h-4 w-4 text-red-500" />
+                      <h5 className="font-medium text-gray-900 dark:text-white">Attendance Tracking</h5>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Automatically tracks members who have been absent for 2 consecutive Sundays.
+                      Provides contact information for follow-up and shows member details for easy outreach.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Permissions & Access */}
+              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Key className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                  <h4 className="font-semibold text-gray-900 dark:text-white">Permissions & Access Levels</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h5 className="font-medium text-gray-900 dark:text-white mb-2">All Members Can:</h5>
+                    <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span>View all member information</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span>Access event pamphlets and details</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span>View and download sermons</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span>See attendance statistics</span>
+                      </li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h5 className="font-medium text-gray-900 dark:text-white mb-2">Pastors/Admins Can:</h5>
+                    <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                      <li className="flex items-center gap-2">
+                        <UserPlus className="h-4 w-4 text-blue-500" />
+                        <span>Add new members to the system</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Plus className="h-4 w-4 text-blue-500" />
+                        <span>Create and manage events</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-blue-500" />
+                        <span>Upload event pamphlets</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Book className="h-4 w-4 text-blue-500" />
+                        <span>Add new sermons and resources</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tips & Best Practices */}
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700/50 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <HelpCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <h4 className="font-semibold text-gray-900 dark:text-white">Tips & Best Practices</h4>
+                </div>
+                <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                  <p className="flex items-start gap-2">
+                    <span className="font-bold">🔄</span>
+                    <span><strong>Regular Refresh:</strong> Click the "Refresh" button to get the latest data</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="font-bold">🔍</span>
+                    <span><strong>Use Search:</strong> Quickly find members or sermons using the search functionality</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="font-bold">📱</span>
+                    <span><strong>Mobile Friendly:</strong> The dashboard is optimized for both desktop and mobile use</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="font-bold">📞</span>
+                    <span><strong>Direct Contact:</strong> Click phone numbers to call members directly from the dashboard</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="font-bold">📊</span>
+                    <span><strong>Monitor Absences:</strong> Regularly check the "Absent 2 Sundays" section for follow-up</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Support Information */}
+              <div className="text-center pt-4 border-t border-gray-200 dark:border-gray-600">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Need help? Contact your church administrator or pastor for assistance.
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Church Management System v1.0 • Designed for effective church administration
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Quick View Pamphlet Modal - Optimized for mobile */}
       {quickViewEvent && quickViewEvent.pamphlet_url && (
