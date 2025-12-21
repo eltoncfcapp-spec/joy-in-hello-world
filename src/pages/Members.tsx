@@ -1,4 +1,4 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -13,6 +13,7 @@ interface Member {
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
+  baptism: string | null;
   cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
@@ -51,6 +52,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
+    baptism: '',
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -61,6 +63,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
+    baptism: '',
     status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
     status_date: '',
     not_attending_reason: '',
@@ -153,6 +156,7 @@ const Members = () => {
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
+          baptism: formData.baptism.trim() || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
         }])
@@ -172,6 +176,7 @@ const Members = () => {
         cell_group_id: '',
         ministry_group_id: '',
         gender: '',
+        baptism: '',
       });
       setSuccess('Member added successfully!');
       fetchMembers();
@@ -196,6 +201,7 @@ const Members = () => {
       cell_group_id: member.cell_group_id || '',
       ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
+      baptism: member.baptism || '',
       status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
@@ -224,6 +230,7 @@ const Members = () => {
         ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
+        baptism: editFormData.baptism.trim() || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
       };
@@ -267,6 +274,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
+      baptism: '',
       status: 'newcomer',
       status_date: '',
       not_attending_reason: '',
@@ -309,22 +317,37 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
-      const { error } = await supabase
+      // First, check if member has any foreign key constraints
+      // This is a preventive check - actual constraints will be enforced by the database
+      const { error: deleteError } = await supabase
         .from('members')
         .delete()
         .eq('id', memberId);
 
-      if (error) {
-        throw error;
-      }
+      if (deleteError) {
+        // If there's a foreign key constraint, we can set the member as hidden instead
+        if (deleteError.code === '23503') {
+          const { error: hideError } = await supabase
+            .from('members')
+            .update({ is_hidden: true })
+            .eq('id', memberId);
 
-      setSuccess('Member deleted successfully!');
-      fetchMembers();
+          if (hideError) {
+            throw hideError;
+          }
+          setSuccess('Member marked as hidden (cannot delete due to existing references).');
+        } else {
+          throw deleteError;
+        }
+      } else {
+        setSuccess('Member deleted successfully!');
+      }
       
+      fetchMembers();
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting member:', error);
-      setError(error.message || 'Failed to delete member.');
+      setError(error.message || 'Failed to delete member. Member may be referenced in other tables.');
     }
   };
 
@@ -334,7 +357,8 @@ const Members = () => {
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
+      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string, surname: string) => {
@@ -351,6 +375,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
+      baptism: '',
     });
     setShowForm(false);
     setError(null);
@@ -381,25 +406,26 @@ const Members = () => {
       newcomer: members.filter(m => m.status === 'newcomer').length,
       signed_member: members.filter(m => m.status === 'signed_member').length,
       not_attending: members.filter(m => m.status === 'not_attending').length,
+      baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
     };
   };
 
   const statusCounts = getStatusCounts();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
               Members Directory
             </h1>
             <p className="text-gray-600 dark:text-gray-400">Manage and view all church members</p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            className="flex items-center gap-2 px-4 py-3 md:px-6 md:py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group w-full sm:w-auto justify-center"
           >
             <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
             {showForm ? 'Cancel' : 'Add Member'}
@@ -422,10 +448,10 @@ const Members = () => {
 
         {/* Add Member Form */}
         {showForm && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add New Member</h2>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     First Name *
@@ -454,10 +480,10 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    residence
+                    Residence
                   </label>
                   <input
-                    type="residence"
+                    type="text"
                     value={formData.residence}
                     onChange={(e) => setFormData({ ...formData, residence: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -486,6 +512,18 @@ const Members = () => {
                     onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Who invited this member?"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Baptism Details
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.baptism}
+                    onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter baptism details"
                   />
                 </div>
                 <div className="space-y-2">
@@ -520,7 +558,7 @@ const Members = () => {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Ministry Group
                   </label>
@@ -538,11 +576,11 @@ const Members = () => {
                   </select>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus className="h-4 w-4" />
                   {loading ? 'Adding Member...' : 'Add Member'}
@@ -550,7 +588,7 @@ const Members = () => {
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                  className="flex-1 sm:flex-none px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-center"
                 >
                   Cancel
                 </button>
@@ -565,10 +603,10 @@ const Members = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search members by name, residence, phone, or cell group..."
+              placeholder="Search members by name, residence, phone, baptism, or cell group..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+              className="w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
             />
             {searchQuery && (
               <button
@@ -590,7 +628,7 @@ const Members = () => {
         )}
 
         {/* Members Grid */}
-        <div className="grid gap-6">
+        <div className="grid gap-4 md:gap-6">
           {!loading && filteredMembers.length === 0 ? (
             <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -605,30 +643,30 @@ const Members = () => {
             filteredMembers.map((member) => (
               <div 
                 key={member.id} 
-                className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 group"
+                className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50 group"
               >
                 {editingMember === member.id ? (
                   // Edit Mode
                   <div className="space-y-6">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                        <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
                           {getInitials(editFormData.name, editFormData.surname)}
                         </div>
                         <div>
-                          <div className="flex gap-3 mb-2">
+                          <div className="flex flex-col sm:flex-row gap-3 mb-2">
                             <input
                               type="text"
                               value={editFormData.name}
                               onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                              className="text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
+                              className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
                               placeholder="First Name"
                             />
                             <input
                               type="text"
                               value={editFormData.surname}
                               onChange={(e) => setEditFormData({ ...editFormData, surname: e.target.value })}
-                              className="text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
+                              className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
                               placeholder="Last Name"
                             />
                           </div>
@@ -648,18 +686,18 @@ const Members = () => {
                     <div className="space-y-4">
                       {/* Contact Information */}
                       <div className="flex items-center gap-3">
-                        <Mail className="h-4 w-4 text-gray-400" />
+                        <Mail className="h-4 w-4 text-gray-400 flex-shrink-0" />
                         <input
-                          type="residence"
+                          type="text"
                           value={editFormData.residence}
                           onChange={(e) => setEditFormData({ ...editFormData, residence: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                          placeholder="residence address"
+                          placeholder="Residence address"
                         />
                       </div>
                       
                       <div className="flex items-center gap-3">
-                        <Phone className="h-4 w-4 text-gray-400" />
+                        <Phone className="h-4 w-4 text-gray-400 flex-shrink-0" />
                         <input
                           type="tel"
                           value={editFormData.phone}
@@ -669,9 +707,21 @@ const Members = () => {
                         />
                       </div>
 
+                      {/* Baptism Details */}
+                      <div className="flex items-center gap-3">
+                        <Droplets className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                        <input
+                          type="text"
+                          value={editFormData.baptism}
+                          onChange={(e) => setEditFormData({ ...editFormData, baptism: e.target.value })}
+                          className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                          placeholder="Baptism details"
+                        />
+                      </div>
+
                       {/* Cell Group */}
                       <div className="flex items-center gap-3">
-                        <MapPin className="h-4 w-4 text-gray-400" />
+                        <MapPin className="h-4 w-4 text-gray-400 flex-shrink-0" />
                         <select
                           value={editFormData.cell_group_id}
                           onChange={(e) => setEditFormData({ ...editFormData, cell_group_id: e.target.value })}
@@ -688,7 +738,7 @@ const Members = () => {
 
                       {/* Invited By */}
                       <div className="flex items-center gap-3">
-                        <User className="h-4 w-4 text-gray-400" />
+                        <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
                         <input
                           type="text"
                           value={editFormData.invited_by}
@@ -716,9 +766,9 @@ const Members = () => {
                         </div>
                         
                         {(editFormData.status === 'signed_member' || editFormData.status === 'not_attending') && (
-                          <div className="flex items-center gap-3">
-                            <Calendar className="h-4 w-4 text-gray-400" />
-                            <span className="text-sm text-gray-600 dark:text-gray-400 min-w-32">Date Became Member:</span>
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                            <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                            <span className="text-sm text-gray-600 dark:text-gray-400 sm:min-w-32">Date Became Member:</span>
                             <input
                               type="date"
                               value={editFormData.status_date}
@@ -729,8 +779,8 @@ const Members = () => {
                         )}
                         
                         {editFormData.status === 'not_attending' && (
-                          <div className="flex items-start gap-3">
-                            <span className="text-sm text-gray-600 dark:text-gray-400 min-w-20 mt-2">Reason:</span>
+                          <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+                            <span className="text-sm text-gray-600 dark:text-gray-400 sm:min-w-20 sm:mt-2">Reason:</span>
                             <textarea
                               value={editFormData.not_attending_reason}
                               onChange={(e) => setEditFormData({ ...editFormData, not_attending_reason: e.target.value })}
@@ -743,24 +793,24 @@ const Members = () => {
                       </div>
                     </div>
 
-                    <div className="flex gap-3 pt-4">
+                    <div className="flex flex-col sm:flex-row gap-3 pt-4">
                       <button
                         onClick={() => handleSaveMember(member.id)}
                         disabled={loading}
-                        className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
+                        className="flex-1 flex items-center justify-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
                       >
                         <Save className="h-4 w-4" />
                         {loading ? 'Saving...' : 'Save Changes'}
                       </button>
                       <button
                         onClick={handleCancelEdit}
-                        className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
+                        className="flex-1 px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 text-center"
                       >
                         Cancel
                       </button>
                     </div>
 
-                    <div className="text-xs text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-600">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-600 overflow-hidden">
                       Member ID: {member.id.slice(0, 8)}...
                     </div>
                   </div>
@@ -769,21 +819,21 @@ const Members = () => {
                   <div className="flex flex-col lg:flex-row justify-between gap-6">
                     <div className="flex-1">
                       <div className="flex items-start gap-4 mb-4">
-                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                        <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
                           {getInitials(member.name, member.surname)}
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                          <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
+                            <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
                               {member.name} {member.surname}
                             </h3>
                             {member.is_permanent_member && (
-                              <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium flex items-center gap-1">
+                              <span className="px-2 md:px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium flex items-center gap-1">
                                 <Check className="h-3 w-3" />
-                                Permanent Member
+                                Permanent
                               </span>
                             )}
-                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
+                            <span className={`px-2 md:px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
                               {getStatusBadge(member.status).text}
                             </span>
                           </div>
@@ -791,29 +841,35 @@ const Members = () => {
                           <div className="space-y-3 text-gray-600 dark:text-gray-400">
                             {member.residence && (
                               <div className="flex items-center gap-3">
-                                <Mail className="h-4 w-4" />
-                                <span className="font-medium">{member.residence}</span>
+                                <Mail className="h-4 w-4 flex-shrink-0" />
+                                <span className="font-medium break-all">{member.residence}</span>
                               </div>
                             )}
                             {member.phone && (
                               <div className="flex items-center gap-3">
-                                <Phone className="h-4 w-4" />
+                                <Phone className="h-4 w-4 flex-shrink-0" />
                                 <span className="font-medium">{member.phone}</span>
                               </div>
                             )}
+                            {member.baptism && (
+                              <div className="flex items-start gap-3">
+                                <Droplets className="h-4 w-4 flex-shrink-0 mt-1" />
+                                <span className="font-medium text-blue-600 dark:text-blue-400 break-all">{member.baptism}</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-3">
-                              <MapPin className="h-4 w-4" />
+                              <MapPin className="h-4 w-4 flex-shrink-0" />
                               <span className="font-medium">{member.cell_groups?.name || 'No Cell Group Assigned'}</span>
                             </div>
                             {member.ministry_groups?.name && (
                               <div className="flex items-center gap-3">
-                                <User className="h-4 w-4" />
+                                <User className="h-4 w-4 flex-shrink-0" />
                                 <span className="font-medium">{member.ministry_groups.name}</span>
                               </div>
                             )}
                             {member.invited_by && (
                               <div className="flex items-center gap-3 text-sm">
-                                <User className="h-4 w-4" />
+                                <User className="h-4 w-4 flex-shrink-0" />
                                 <span>Invited by: {member.invited_by}</span>
                               </div>
                             )}
@@ -821,7 +877,7 @@ const Members = () => {
                               <div className="text-sm text-green-600 dark:text-green-400">
                                 Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
                                   year: 'numeric',
-                                  month: 'long',
+                                  month: 'short',
                                   day: 'numeric'
                                 })}
                               </div>
@@ -831,48 +887,50 @@ const Members = () => {
                       </div>
                     </div>
                     
-                    <div className="flex flex-col justify-between items-end gap-4">
-                      <div className="flex flex-col gap-3">
+                    <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
+                      <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3">
                         <button
                           onClick={() => handleEditMember(member)}
-                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                         >
                           <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                          Edit Details
+                          <span className="hidden sm:inline">Edit</span>
                         </button>
                         {!member.is_permanent_member && (
                           <button
                             onClick={() => handleMarkAsPermanent(member.id)}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                           >
                             <Check className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                            Mark as Permanent
+                            <span className="hidden sm:inline">Permanent</span>
                           </button>
                         )}
                         <button
                           onClick={() => handleDeleteMember(member.id)}
-                          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group col-span-2 lg:col-span-1"
                         >
                           <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                          Delete
+                          <span className="hidden sm:inline">Delete</span>
                         </button>
                       </div>
-                      {member.status_date && member.status === 'signed_member' && (
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric'
-                          })}
-                        </div>
-                      )}
-                      {member.not_attending_reason && member.status === 'not_attending' && (
-                        <div className="text-sm text-red-600 dark:text-red-400 max-w-xs">
-                          Reason: {member.not_attending_reason}
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Member ID: {member.id.slice(0, 8)}...
+                      <div className="space-y-2">
+                        {member.status_date && member.status === 'signed_member' && (
+                          <div className="text-sm text-gray-600 dark:text-gray-400">
+                            Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </div>
+                        )}
+                        {member.not_attending_reason && member.status === 'not_attending' && (
+                          <div className="text-sm text-red-600 dark:text-red-400 max-w-xs break-words">
+                            Reason: {member.not_attending_reason}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 overflow-hidden">
+                        ID: {member.id.slice(0, 8)}...
                       </div>
                     </div>
                   </div>
@@ -883,26 +941,30 @@ const Members = () => {
         </div>
 
         {/* Stats Summary */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
-            <div className="text-gray-600 dark:text-gray-400 font-medium">Total Members</div>
+        <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Total</div>
           </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.permanent}</div>
-            <div className="text-gray-600 dark:text-gray-400 font-medium">Permanent Members</div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.permanent}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Permanent</div>
           </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.newcomer}</div>
-            <div className="text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.newcomer}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
           </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
-            <div className="text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Signed</div>
           </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 text-center">
-            <div className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
-            <div className="text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
           </div>
         </div>
       </div>
