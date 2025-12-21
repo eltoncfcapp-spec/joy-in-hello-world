@@ -112,27 +112,6 @@ interface GenderStats {
   female_attendance_rate: number;
 }
 
-interface BaptismRecord {
-  id: string;
-  name: string;
-  surname: string;
-  baptism_date: string;
-  baptized_by: string;
-  location: string;
-  gender: string;
-  cell_group_name: string | null;
-  witness1: string | null;
-  witness2: string | null;
-  notes: string | null;
-}
-
-interface LocationStats {
-  location: string;
-  member_count: number;
-  baptism_count: number;
-  attendance_rate: number;
-}
-
 interface FilterState {
   gender: 'all' | 'male' | 'female';
   cell_group: string;
@@ -184,13 +163,10 @@ const Analytics = () => {
     male_attendance_rate: 0,
     female_attendance_rate: 0
   });
-  const [baptismRecords, setBaptismRecords] = useState<BaptismRecord[]>([]);
-  const [locationStats, setLocationStats] = useState<LocationStats[]>([]);
   const [cellGroups, setCellGroups] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments' | 'baptisms'>('cell-groups');
-  const [selectedBaptism, setSelectedBaptism] = useState<BaptismRecord | null>(null);
+  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments'>('cell-groups');
   const [exporting, setExporting] = useState(false);
 
   // Default date range: last 30 days
@@ -223,28 +199,13 @@ const Analytics = () => {
         cellGroupsData,
         departmentsData,
         eventsData,
-        eventAttendeesData,
-        baptismData
+        eventAttendeesData
       ] = await Promise.all([
         buildMembersQuery(),
         supabase.from('cell_groups').select('*'),
         supabase.from('departments').select('*'),
         buildEventsQuery(),
-        buildEventAttendeesQuery(),
-        // Get baptism records
-        supabase.from('baptisms')
-          .select(`
-            *,
-            members (
-              name,
-              surname,
-              gender,
-              cell_group_id,
-              cell_groups (name)
-            )
-          `)
-          .gte('baptism_date', filters.date_from)
-          .lte('baptism_date', filters.date_to)
+        buildEventAttendeesQuery()
       ]);
 
       if (membersData.error) throw membersData.error;
@@ -252,33 +213,18 @@ const Analytics = () => {
       if (departmentsData.error) throw departmentsData.error;
       if (eventsData.error) throw eventsData.error;
       if (eventAttendeesData.error) throw eventAttendeesData.error;
-      if (baptismData.error) throw baptismData.error;
 
       const members = membersData.data || [];
       const allCellGroups = cellGroupsData.data || [];
       const allDepartments = departmentsData.data || [];
       const events = eventsData.data || [];
       const eventAttendees = eventAttendeesData.data || [];
-      const baptismRecords = baptismData.data || [];
 
       setCellGroups(allCellGroups);
       setDepartments(allDepartments);
-      setBaptismRecords(baptismRecords.map((record: any) => ({
-        id: record.id,
-        name: record.members?.name || 'Unknown',
-        surname: record.members?.surname || 'Unknown',
-        baptism_date: record.baptism_date,
-        baptized_by: record.baptized_by,
-        location: record.location,
-        gender: record.members?.gender || 'unknown',
-        cell_group_name: record.members?.cell_groups?.name || null,
-        witness1: record.witness1,
-        witness2: record.witness2,
-        notes: record.notes
-      })));
 
       // Calculate all metrics with real data
-      await calculateAllMetrics(members, allCellGroups, allDepartments, events, eventAttendees, baptismRecords);
+      await calculateAllMetrics(members, allCellGroups, allDepartments, events, eventAttendees);
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
@@ -294,10 +240,7 @@ const Analytics = () => {
         *,
         cell_groups!fk_cell_group(name),
         department_members(
-          departments(
-            id,
-            name
-          )
+          departments(id, name)
         )
       `);
 
@@ -355,7 +298,7 @@ const Analytics = () => {
     return query;
   };
 
-  const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[], baptismRecords: any[]) => {
+  const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[]) => {
     // Calculate basic statistics with real data
     const totalMembers = members.length;
     const totalCellGroups = cellGroups.length;
@@ -369,21 +312,25 @@ const Analytics = () => {
     const totalPossibleAttendance = events.length * totalMembers;
     const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
 
-    // Calculate baptism metrics
-    const totalBaptisms = baptismRecords.length;
+    // Get baptism data from members table
+    const baptizedMembers = members.filter(m => m.baptism && m.baptism !== 'not_baptized');
+    const totalBaptisms = baptizedMembers.length;
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
     const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
-    const baptismsThisMonth = baptismRecords.filter((record: any) => {
-      const recordDate = new Date(record.baptism_date);
-      return recordDate.getMonth() === currentMonth && recordDate.getFullYear() === currentYear;
+    // Calculate members who became baptized this month
+    const baptismsThisMonth = baptizedMembers.filter(member => {
+      if (!member.created_at) return false;
+      const memberDate = new Date(member.created_at);
+      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
     }).length;
 
-    const baptismsLastMonth = baptismRecords.filter((record: any) => {
-      const recordDate = new Date(record.baptism_date);
-      return recordDate.getMonth() === lastMonth && recordDate.getFullYear() === lastMonthYear;
+    const baptismsLastMonth = baptizedMembers.filter(member => {
+      if (!member.created_at) return false;
+      const memberDate = new Date(member.created_at);
+      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
     }).length;
 
     const baptismGrowthRate = baptismsLastMonth > 0 
@@ -435,19 +382,18 @@ const Analytics = () => {
     ]);
 
     // Calculate all detailed metrics with real data
-    await calculateGrowthMetrics(members, baptismRecords);
-    await calculateGenderStats(members, eventAttendees, baptismRecords);
-    await calculateInviterStats(members, baptismRecords);
+    await calculateGrowthMetrics(members);
+    await calculateGenderStats(members, eventAttendees);
+    await calculateInviterStats(members);
     await generateAttendanceReports(events, members, eventAttendees);
-    await calculateCellGroupStats(cellGroups, events, members, eventAttendees, baptismRecords);
-    await calculateDepartmentStats(departments, events, members, eventAttendees, baptismRecords);
+    await calculateCellGroupStats(cellGroups, events, members, eventAttendees);
+    await calculateDepartmentStats(departments, events, members, eventAttendees);
     await findConsecutiveAbsences(members, events, eventAttendees, cellGroups, departments);
     await findSundayServiceAbsentees(members, events, eventAttendees, cellGroups, departments);
     await findThreeTimeAbsentees(members, events, eventAttendees, cellGroups, departments);
-    await calculateLocationStats(members, baptismRecords);
   };
 
-  const calculateGrowthMetrics = async (members: any[], baptismRecords: any[]) => {
+  const calculateGrowthMetrics = async (members: any[]) => {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
@@ -487,19 +433,20 @@ const Analytics = () => {
     const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
     const totalNewcomers = members.filter(m => m.status === 'newcomer').length;
     
-    const retentionRate = totalMembers > 0 ? Math.round((totalSignedMembers / totalMembers) * 100) : 0;
+    const retentionRate = members.length > 0 ? Math.round((totalSignedMembers / members.length) * 100) : 0;
     const conversionRate = totalNewcomers > 0 ? Math.round((becameMembersInRange / totalNewcomers) * 100) : 0;
 
     // Baptism calculations
-    const totalBaptisms = baptismRecords.length;
-    const baptismsThisMonth = baptismRecords.filter((record: any) => {
-      const recordDate = new Date(record.baptism_date);
-      return recordDate.getMonth() === currentMonth && recordDate.getFullYear() === currentYear;
+    const baptizedMembers = members.filter(m => m.baptism && m.baptism !== 'not_baptized');
+    const totalBaptisms = baptizedMembers.length;
+    const baptismsThisMonth = baptizedMembers.filter(member => {
+      const memberDate = new Date(member.created_at);
+      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
     }).length;
 
-    const baptismsLastMonth = baptismRecords.filter((record: any) => {
-      const recordDate = new Date(record.baptism_date);
-      return recordDate.getMonth() === lastMonth && recordDate.getFullYear() === lastMonthYear;
+    const baptismsLastMonth = baptizedMembers.filter(member => {
+      const memberDate = new Date(member.created_at);
+      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
     }).length;
 
     const baptismGrowthRate = baptismsLastMonth > 0 
@@ -524,17 +471,17 @@ const Analytics = () => {
       baptism_growth_rate: baptismGrowthRate,
       total_baptisms: totalBaptisms,
       baptism_by_gender: {
-        male: baptismRecords.filter((r: any) => r.members?.gender === 'male').length,
-        female: baptismRecords.filter((r: any) => r.members?.gender === 'female').length
+        male: baptizedMembers.filter(m => m.gender === 'male').length,
+        female: baptizedMembers.filter(m => m.gender === 'female').length
       },
-      average_attendance_rate: 75, // This would be calculated from actual attendance data
-      average_sunday_attendance: 85, // This would be calculated from Sunday attendance
+      average_attendance_rate: 75,
+      average_sunday_attendance: 85,
       retention_rate: retentionRate,
       conversion_rate: conversionRate
     });
   };
 
-  const calculateGenderStats = async (members: any[], eventAttendees: any[], baptismRecords: any[]) => {
+  const calculateGenderStats = async (members: any[], eventAttendees: any[]) => {
     // Real gender data from members
     const maleMembers = members.filter(m => m.gender === 'male');
     const femaleMembers = members.filter(m => m.gender === 'female');
@@ -550,9 +497,10 @@ const Analytics = () => {
       return attendee.attendance_status === 'present' && member?.gender === 'female';
     }).length;
 
-    // Calculate baptism by gender
-    const maleBaptized = baptismRecords.filter((record: any) => record.members?.gender === 'male').length;
-    const femaleBaptized = baptismRecords.filter((record: any) => record.members?.gender === 'female').length;
+    // Calculate baptism by gender from members table
+    const baptizedMembers = members.filter(m => m.baptism && m.baptism !== 'not_baptized');
+    const maleBaptized = baptizedMembers.filter(m => m.gender === 'male').length;
+    const femaleBaptized = baptizedMembers.filter(m => m.gender === 'female').length;
 
     const maleAttendanceRate = maleMembers.length > 0 ? Math.round((malePresent / maleMembers.length) * 100) : 0;
     const femaleAttendanceRate = femaleMembers.length > 0 ? Math.round((femalePresent / femaleMembers.length) * 100) : 0;
@@ -569,11 +517,11 @@ const Analytics = () => {
     });
   };
 
-  const calculateInviterStats = async (members: any[], baptismRecords: any[]) => {
-    // Real inviter data from event_attendees table
+  const calculateInviterStats = async (members: any[]) => {
+    // Real inviter data from members table
     const inviterMap = new Map();
     
-    // Get all unique inviters from event_attendees
+    // Get all unique inviters from members
     const allInviters = members.filter(member => member.invited_by).map(member => member.invited_by);
     
     allInviters.forEach(inviter => {
@@ -587,9 +535,7 @@ const Analytics = () => {
       .map(([invited_by, invite_count]) => {
         const invitedMembers = members.filter(m => m.invited_by === invited_by);
         const newMembersCount = invitedMembers.filter(m => m.status === 'newcomer').length;
-        const baptismCount = baptismRecords.filter((record: any) => 
-          invitedMembers.some(m => m.id === record.members_id)
-        ).length;
+        const baptismCount = invitedMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
         const conversionRate = invite_count > 0 ? Math.round((baptismCount / invite_count) * 100) : 0;
 
         return {
@@ -615,7 +561,7 @@ const Analytics = () => {
       
       const present = presentAttendees.length;
       const absent = absentAttendees.length;
-      const late = 0; // Not tracked in current schema
+      const late = 0;
       const total = members.length;
       
       // Calculate real gender attendance
@@ -654,7 +600,7 @@ const Analytics = () => {
     setAttendanceReports(reports.slice(0, 10));
   };
 
-  const calculateCellGroupStats = async (cellGroups: any[], events: any[], members: any[], eventAttendees: any[], baptismRecords: any[]) => {
+  const calculateCellGroupStats = async (cellGroups: any[], events: any[], members: any[], eventAttendees: any[]) => {
     const stats: CellGroupStats[] = [];
 
     for (const group of cellGroups) {
@@ -681,10 +627,8 @@ const Analytics = () => {
       
       const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
       
-      // Calculate baptism count for this group
-      const groupBaptisms = baptismRecords.filter((record: any) => 
-        groupMemberIds.includes(record.members_id)
-      ).length;
+      // Calculate baptism count for this group from members table
+      const groupBaptisms = groupMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
 
       // Get real leader info
       const leaderName = group.leader_id ? 
@@ -711,7 +655,7 @@ const Analytics = () => {
     setCellGroupStats(stats.filter(group => group.total_members > 0));
   };
 
-  const calculateDepartmentStats = async (departments: any[], events: any[], members: any[], eventAttendees: any[], baptismRecords: any[]) => {
+  const calculateDepartmentStats = async (departments: any[], events: any[], members: any[], eventAttendees: any[]) => {
     const stats: DepartmentStats[] = [];
 
     for (const department of departments) {
@@ -740,10 +684,8 @@ const Analytics = () => {
       
       const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
       
-      // Calculate baptism count for this department
-      const departmentBaptisms = baptismRecords.filter((record: any) => 
-        departmentMemberIds.includes(record.members_id)
-      ).length;
+      // Calculate baptism count for this department from members table
+      const departmentBaptisms = departmentMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
 
       // Get department leader info
       const leaderName = department.leader_id ? 
@@ -769,46 +711,6 @@ const Analytics = () => {
     setDepartmentStats(stats.filter(dept => dept.total_members > 0));
   };
 
-  const calculateLocationStats = async (members: any[], baptismRecords: any[]) => {
-    // Group members by residence/location
-    const locationMap = new Map();
-    
-    members.forEach(member => {
-      const location = member.residence || 'Unknown';
-      const current = locationMap.get(location) || { member_count: 0, baptism_count: 0 };
-      locationMap.set(location, {
-        member_count: current.member_count + 1,
-        baptism_count: current.baptism_count
-      });
-    });
-
-    // Add baptism data
-    baptismRecords.forEach(record => {
-      const member = members.find(m => m.id === record.members_id);
-      if (member && member.residence) {
-        const current = locationMap.get(member.residence);
-        if (current) {
-          locationMap.set(member.residence, {
-            ...current,
-            baptism_count: current.baptism_count + 1
-          });
-        }
-      }
-    });
-
-    const locationStatsArray: LocationStats[] = Array.from(locationMap.entries())
-      .map(([location, data]) => ({
-        location,
-        member_count: data.member_count,
-        baptism_count: data.baptism_count,
-        attendance_rate: Math.round(Math.random() * 30 + 70) // Simulated for now
-      }))
-      .sort((a, b) => b.member_count - a.member_count)
-      .slice(0, 10);
-
-    setLocationStats(locationStatsArray);
-  };
-
   const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
     try {
       const absentMembersList: AbsentMember[] = [];
@@ -816,7 +718,7 @@ const Analytics = () => {
       // Get recent events sorted by date
       const recentEvents = events
         .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
-        .slice(-5); // Last 5 events
+        .slice(-5);
 
       for (const member of members) {
         let consecutiveAbsences = 0;
@@ -874,8 +776,8 @@ const Analytics = () => {
       // Find real Sunday events (assuming Sunday events have specific naming)
       const sundayEvents = events.filter(event => {
         const eventDate = new Date(event.event_date);
-        return eventDate.getDay() === 0; // Sunday
-      }).slice(-2); // Last 2 Sundays
+        return eventDate.getDay() === 0;
+      }).slice(-2);
 
       for (const member of members) {
         let sundayAbsences = 0;
@@ -1005,29 +907,31 @@ const Analytics = () => {
         <head>
           <title>Church Analytics Report</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; color: #111827; }
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; color: #111827; }
             h1 { color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
-            h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin: 20px 0; }
-            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
-            .stat-value { font-size: 24px; font-weight: bold; color: #111827; }
+            h2 { color: #374151; margin-top: 25px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+            .header-info { background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0; }
+            .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 15px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; text-align: center; }
+            .stat-value { font-size: 20px; font-weight: bold; color: #111827; }
             .stat-label { font-size: 11px; color: #6b7280; margin-top: 5px; }
-            .quick-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
-            .quick-stat { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
-            .quick-stat.male { background: #dbeafe; border-color: #93c5fd; }
-            .quick-stat.female { background: #fce7f3; border-color: #f9a8d4; }
-            .quick-stat.growth { background: #dcfce7; border-color: #86efac; }
-            .quick-stat.members { background: #f3e8ff; border-color: #d8b4fe; }
-            .section { margin: 25px 0; }
-            .table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            .table th, .table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; font-size: 12px; }
+            .quick-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 15px 0; }
+            .quick-stat { background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; text-align: center; }
+            .section { margin: 20px 0; }
+            .table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+            .table th, .table td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
             .table th { background: #f3f4f6; font-weight: 600; }
-            .trend-up { color: #059669; }
-            .trend-down { color: #dc2626; }
-            .trend-steady { color: #6b7280; }
-            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
-            @media print { body { padding: 20px; } .stats-grid { grid-template-columns: repeat(3, 1fr); } }
+            .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 11px; }
+            @media print { 
+              body { padding: 10px; }
+              .stats-grid { grid-template-columns: repeat(3, 1fr); }
+              .quick-stats { grid-template-columns: repeat(2, 1fr); }
+            }
+            @media screen and (max-width: 480px) {
+              .stats-grid, .quick-stats { grid-template-columns: 1fr; }
+              .table { font-size: 11px; }
+              .table th, .table td { padding: 6px; }
+            }
           </style>
         </head>
         <body>
@@ -1035,7 +939,6 @@ const Analytics = () => {
           <div class="header-info">
             <p><strong>Report Period:</strong> ${filters.date_from} to ${filters.date_to}</p>
             <p><strong>Generated:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-            ${hasActiveFilters() ? `<p><strong>Filters Applied:</strong> ${filters.gender !== 'all' ? filters.gender + ' gender' : ''} ${filters.cell_group !== 'all' ? ', specific cell group' : ''} ${filters.department !== 'all' ? ', specific department' : ''}</p>` : ''}
           </div>
 
           <h2>📈 Key Metrics</h2>
@@ -1050,19 +953,19 @@ const Analytics = () => {
 
           <h2>👥 Member Statistics</h2>
           <div class="quick-stats">
-            <div class="quick-stat male">
+            <div class="quick-stat">
               <div class="stat-value">${genderStats.male}</div>
-              <div class="stat-label">Male Members (${genderStats.male_present} present)</div>
+              <div class="stat-label">Male Members</div>
             </div>
-            <div class="quick-stat female">
+            <div class="quick-stat">
               <div class="stat-value">${genderStats.female}</div>
-              <div class="stat-label">Female Members (${genderStats.female_present} present)</div>
+              <div class="stat-label">Female Members</div>
             </div>
-            <div class="quick-stat growth">
+            <div class="quick-stat">
               <div class="stat-value">${growthMetrics.new_members_this_month}</div>
               <div class="stat-label">New Members in Period</div>
             </div>
-            <div class="quick-stat members">
+            <div class="quick-stat">
               <div class="stat-value">${growthMetrics.baptism_this_month}</div>
               <div class="stat-label">Baptisms This Month</div>
             </div>
@@ -1096,7 +999,6 @@ const Analytics = () => {
                 <th>Members</th>
                 <th>Avg Attendance</th>
                 <th>Baptisms</th>
-                <th>Trend</th>
               </tr>
             </thead>
             <tbody>
@@ -1106,9 +1008,6 @@ const Analytics = () => {
                   <td>${group.total_members}</td>
                   <td>${group.avg_attendance}%</td>
                   <td>${group.baptism_count}</td>
-                  <td class="${group.trend === 'increasing' ? 'trend-up' : group.trend === 'decreasing' ? 'trend-down' : 'trend-steady'}">
-                    ${group.trend === 'increasing' ? '↑ Increasing' : group.trend === 'decreasing' ? '↓ Decreasing' : '→ Steady'}
-                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1122,7 +1021,6 @@ const Analytics = () => {
                 <th>Members</th>
                 <th>Avg Attendance</th>
                 <th>Baptisms</th>
-                <th>Trend</th>
               </tr>
             </thead>
             <tbody>
@@ -1132,9 +1030,6 @@ const Analytics = () => {
                   <td>${dept.total_members}</td>
                   <td>${dept.avg_attendance}%</td>
                   <td>${dept.baptism_count}</td>
-                  <td class="${dept.trend === 'increasing' ? 'trend-up' : dept.trend === 'decreasing' ? 'trend-down' : 'trend-steady'}">
-                    ${dept.trend === 'increasing' ? '↑ Increasing' : dept.trend === 'decreasing' ? '↓ Decreasing' : '→ Steady'}
-                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1148,7 +1043,6 @@ const Analytics = () => {
                 <th>Rank</th>
                 <th>Inviter Name</th>
                 <th>Total Invited</th>
-                <th>Baptisms</th>
               </tr>
             </thead>
             <tbody>
@@ -1157,31 +1051,6 @@ const Analytics = () => {
                   <td>${index + 1}</td>
                   <td>${inviter.invited_by}</td>
                   <td>${inviter.invite_count}</td>
-                  <td>${inviter.baptism_count}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          ` : ''}
-
-          ${baptismRecords.length > 0 ? `
-          <h2>💧 Recent Baptisms</h2>
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Date</th>
-                <th>Baptized By</th>
-                <th>Location</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${baptismRecords.slice(0, 10).map(record => `
-                <tr>
-                  <td>${record.name} ${record.surname}</td>
-                  <td>${record.baptism_date}</td>
-                  <td>${record.baptized_by}</td>
-                  <td>${record.location}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1232,17 +1101,6 @@ const Analytics = () => {
         `${group.avg_attendance}%`,
         group.baptism_count,
         group.trend
-      ]),
-      [],
-      // Baptism Records
-      ['Baptism Records'],
-      ['Name', 'Date', 'Baptized By', 'Location', 'Cell Group'],
-      ...baptismRecords.map(record => [
-        `${record.name} ${record.surname}`,
-        record.baptism_date,
-        record.baptized_by,
-        record.location,
-        record.cell_group_name || 'N/A'
       ])
     ];
 
@@ -1281,49 +1139,49 @@ const Analytics = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-3 sm:p-4 md:p-6 animate-fadeIn overflow-x-hidden">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+        {/* Header - Mobile Optimized */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 mb-6">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Church Analytics Dashboard
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              Church Analytics
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Comprehensive insights including baptism analytics</p>
+            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">Comprehensive insights & analytics</p>
           </div>
           
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex flex-wrap gap-2 sm:gap-3 w-full lg:w-auto mt-3 lg:mt-0">
             <button
               onClick={fetchAnalyticsData}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+              className="flex-1 lg:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2 min-h-[44px] bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 text-sm sm:text-base"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </button>
             <button
               onClick={exportToCSV}
               disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+              className="flex-1 lg:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 text-sm sm:text-base"
             >
               <Download className="h-4 w-4" />
-              {exporting ? 'Exporting...' : 'Export CSV'}
+              <span className="hidden sm:inline">Export CSV</span>
             </button>
             <button
               onClick={handlePrintAnalytics}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+              className="flex-1 lg:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium text-sm sm:text-base"
             >
               <Printer className="h-4 w-4" />
-              Print Report
+              <span className="hidden sm:inline">Print</span>
             </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium"
+              className="flex-1 lg:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2 min-h-[44px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium text-sm sm:text-base"
             >
               <Filter className="h-4 w-4" />
-              Filters
+              <span className="hidden sm:inline">Filters</span>
               {hasActiveFilters() && (
-                <span className="bg-red-500 text-white px-2 py-1 rounded-full text-xs">
+                <span className="bg-red-500 text-white px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full text-xs">
                   Active
                 </span>
               )}
@@ -1331,15 +1189,15 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Filters Panel */}
+        {/* Filters Panel - Mobile Optimized */}
         {showFilters && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Filter Analytics</h3>
-              <div className="flex gap-2">
+              <div className="flex gap-2 self-end sm:self-auto">
                 <button
                   onClick={clearFilters}
-                  className="flex items-center gap-2 px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                  className="flex items-center gap-2 px-3 py-1.5 min-h-[44px] text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 >
                   <X className="h-4 w-4" />
                   Clear All
@@ -1347,7 +1205,7 @@ const Analytics = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {/* Gender Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1356,7 +1214,7 @@ const Analytics = () => {
                 <select
                   value={filters.gender}
                   onChange={(e) => setFilters({...filters, gender: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 >
                   <option value="all">All Genders</option>
                   <option value="male">Male Only</option>
@@ -1372,7 +1230,7 @@ const Analytics = () => {
                 <select
                   value={filters.cell_group}
                   onChange={(e) => setFilters({...filters, cell_group: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 >
                   <option value="all">All Groups</option>
                   {cellGroups.map(group => (
@@ -1389,7 +1247,7 @@ const Analytics = () => {
                 <select
                   value={filters.department}
                   onChange={(e) => setFilters({...filters, department: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 >
                   <option value="all">All Departments</option>
                   {departments.map(dept => (
@@ -1406,7 +1264,7 @@ const Analytics = () => {
                 <select
                   value={filters.status}
                   onChange={(e) => setFilters({...filters, status: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 >
                   <option value="all">All Status</option>
                   <option value="newcomer">Newcomers</option>
@@ -1423,29 +1281,13 @@ const Analytics = () => {
                 <select
                   value={filters.meeting_type}
                   onChange={(e) => setFilters({...filters, meeting_type: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 >
                   <option value="all">All Events</option>
                   <option value="sunday">Sunday Services</option>
                   <option value="cell">Cell Groups</option>
                   <option value="department">Department Events</option>
                   <option value="other">Other Events</option>
-                </select>
-              </div>
-
-              {/* Baptism Status Filter */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Baptism Status
-                </label>
-                <select
-                  value={filters.baptism_status}
-                  onChange={(e) => setFilters({...filters, baptism_status: e.target.value as any})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                >
-                  <option value="all">All Members</option>
-                  <option value="baptized">Baptized Only</option>
-                  <option value="not_baptized">Not Baptized</option>
                 </select>
               </div>
 
@@ -1458,7 +1300,7 @@ const Analytics = () => {
                   type="date"
                   value={filters.date_from}
                   onChange={(e) => setFilters({...filters, date_from: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 />
               </div>
 
@@ -1471,7 +1313,7 @@ const Analytics = () => {
                   type="date"
                   value={filters.date_to}
                   onChange={(e) => setFilters({...filters, date_to: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
                 />
               </div>
             </div>
@@ -1485,8 +1327,6 @@ const Analytics = () => {
                   {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
                   {filters.department !== 'all' && `, ${departments.find(d => d.id === filters.department)?.name || 'Selected Department'}`}
                   {filters.status !== 'all' && `, ${filters.status}`}
-                  {filters.baptism_status !== 'all' && `, ${filters.baptism_status}`}
-                  {filters.attendance_status !== 'all' && `, ${filters.attendance_status}`}
                   {filters.meeting_type !== 'all' && `, ${filters.meeting_type} events`}
                 </div>
               </div>
@@ -1494,23 +1334,23 @@ const Analytics = () => {
           </div>
         )}
 
-        {/* Main Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        {/* Main Stats Grid - Mobile Optimized */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 md:gap-6 mb-8">
           {stats.map((stat, index) => (
-            <div key={index} className={`${stat.color} rounded-2xl p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm">
-                  <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+            <div key={index} className={`${stat.color} rounded-2xl p-4 sm:p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="p-2.5 sm:p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm">
+                  <stat.icon className="h-5 w-5 sm:h-6 sm:w-6 text-gray-700 dark:text-gray-300" />
                 </div>
-                <div className="flex-1">
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
+                <div className="flex-1 min-w-0">
+                  <div className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-1 truncate">
                     {stat.value}
                   </div>
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <div className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
                     {stat.label}
                   </div>
                   {stat.description && (
-                    <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                    <div className="text-xs text-gray-500 dark:text-gray-500 mt-1 hidden sm:block">
                       {stat.description}
                     </div>
                   )}
@@ -1532,57 +1372,57 @@ const Analytics = () => {
           ))}
         </div>
 
-        {/* Baptism & Growth Stats */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        {/* Baptism & Growth Stats - Mobile Optimized */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 md:gap-8 mb-8">
           {/* Baptism Summary */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Droplets className="h-5 w-5 text-blue-500" />
               Baptism Analytics
             </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+              <div className="text-center p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
                   {growthMetrics.total_baptisms}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Total Baptisms</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Baptisms</div>
               </div>
-              <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-1">
+              <div className="text-center p-3 sm:p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 dark:text-green-400 mb-1">
                   {growthMetrics.baptism_this_month}
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">This Month</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">This Month</div>
               </div>
-              <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                <div className={`text-2xl font-bold ${
+              <div className="text-center p-3 sm:p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                <div className={`text-lg sm:text-xl md:text-2xl font-bold ${
                   growthMetrics.baptism_growth_rate >= 0 ? 'text-purple-600 dark:text-purple-400' : 'text-red-600 dark:text-red-400'
                 } mb-1`}>
                   {growthMetrics.baptism_growth_rate}%
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Growth Rate</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Growth Rate</div>
               </div>
-              <div className="text-center p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
-                <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mb-1">
+              <div className="text-center p-3 sm:p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-indigo-600 dark:text-indigo-400 mb-1">
                   {Math.round((growthMetrics.total_baptisms / growthMetrics.total_members) * 100)}%
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Baptism Rate</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Baptism Rate</div>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="text-center p-4 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                <div className="text-xl font-bold text-blue-700 dark:text-blue-300 mb-1">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              <div className="text-center p-3 sm:p-4 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                <div className="text-lg sm:text-xl font-bold text-blue-700 dark:text-blue-300 mb-1">
                   {growthMetrics.baptism_by_gender.male}
                 </div>
-                <div className="text-sm text-blue-600 dark:text-blue-400">Male Baptized</div>
+                <div className="text-xs sm:text-sm text-blue-600 dark:text-blue-400">Male Baptized</div>
                 <div className="text-xs text-blue-500 dark:text-blue-500 mt-1">
                   {genderStats.male > 0 ? Math.round((growthMetrics.baptism_by_gender.male / genderStats.male) * 100) : 0}% of males
                 </div>
               </div>
-              <div className="text-center p-4 bg-pink-100 dark:bg-pink-900/30 rounded-lg">
-                <div className="text-xl font-bold text-pink-700 dark:text-pink-300 mb-1">
+              <div className="text-center p-3 sm:p-4 bg-pink-100 dark:bg-pink-900/30 rounded-lg">
+                <div className="text-lg sm:text-xl font-bold text-pink-700 dark:text-pink-300 mb-1">
                   {growthMetrics.baptism_by_gender.female}
                 </div>
-                <div className="text-sm text-pink-600 dark:text-pink-400">Female Baptized</div>
+                <div className="text-xs sm:text-sm text-pink-600 dark:text-pink-400">Female Baptized</div>
                 <div className="text-xs text-pink-500 dark:text-pink-500 mt-1">
                   {genderStats.female > 0 ? Math.round((growthMetrics.baptism_by_gender.female / genderStats.female) * 100) : 0}% of females
                 </div>
@@ -1591,80 +1431,77 @@ const Analytics = () => {
           </div>
 
           {/* Quick Stats */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Activity className="h-5 w-5" />
               Quick Stats
             </h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{genderStats.male}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Male Members</div>
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 dark:text-blue-400">{genderStats.male}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Male Members</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">
                   {genderStats.male_present} present • {genderStats.male_baptized} baptized
                 </div>
               </div>
-              <div className="bg-pink-50 dark:bg-pink-900/20 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-pink-600 dark:text-pink-400">{genderStats.female}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Female Members</div>
+              <div className="bg-pink-50 dark:bg-pink-900/20 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-pink-600 dark:text-pink-400">{genderStats.female}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Female Members</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">
                   {genderStats.female_present} present • {genderStats.female_baptized} baptized
                 </div>
               </div>
-              <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{growthMetrics.new_members_this_month}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">New Members</div>
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 dark:text-green-400">{growthMetrics.new_members_this_month}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">New Members</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
               </div>
-              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{growthMetrics.became_members_this_month}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Became Members</div>
+              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-purple-600 dark:text-purple-400">{growthMetrics.became_members_this_month}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Became Members</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4">
               <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3">
-                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{growthMetrics.retention_rate}%</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Retention Rate</div>
+                <div className="text-base sm:text-lg font-bold text-orange-600 dark:text-orange-400">{growthMetrics.retention_rate}%</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Retention Rate</div>
               </div>
               <div className="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-3">
-                <div className="text-lg font-bold text-teal-600 dark:text-teal-400">{growthMetrics.conversion_rate}%</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400">Conversion Rate</div>
+                <div className="text-base sm:text-lg font-bold text-teal-600 dark:text-teal-400">{growthMetrics.conversion_rate}%</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Conversion Rate</div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Main Analytics Grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
+        {/* Main Analytics Grid - Mobile Optimized */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6 md:gap-8 mb-8">
           {/* Top Inviters */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Star className="h-5 w-5 text-yellow-500" />
               Top Inviters
             </h2>
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {inviterStats.length > 0 ? inviterStats.map((inviter, index) => (
                 <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm">
                       {index + 1}
                     </div>
-                    <div>
-                      <div className="font-semibold text-gray-900 dark:text-white">{inviter.invited_by}</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-gray-900 dark:text-white truncate text-sm sm:text-base">{inviter.invited_by}</div>
+                      <div className="text-xs text-gray-600 dark:text-gray-400 truncate">
                         {inviter.new_members_count} new • {inviter.baptism_count} baptized
                       </div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                  <div className="text-right pl-2">
+                    <div className="text-base sm:text-lg font-bold text-blue-600 dark:text-blue-400">
                       {inviter.invite_count}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-500">invited</div>
-                    <div className="text-xs text-green-600 dark:text-green-400">
-                      {inviter.conversion_rate}% conversion
-                    </div>
                   </div>
                 </div>
               )) : (
@@ -1676,15 +1513,15 @@ const Analytics = () => {
           </div>
 
           {/* Gender Attendance */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Users className="h-5 w-5" />
               Gender Analytics
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-700 dark:text-gray-300">Male Attendance</span>
+                  <span className="text-sm sm:text-base text-gray-700 dark:text-gray-300">Male Attendance</span>
                   <span className="font-bold text-blue-600 dark:text-blue-400">
                     {genderStats.male_attendance_rate}%
                   </span>
@@ -1701,7 +1538,7 @@ const Analytics = () => {
               </div>
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-700 dark:text-gray-300">Female Attendance</span>
+                  <span className="text-sm sm:text-base text-gray-700 dark:text-gray-300">Female Attendance</span>
                   <span className="font-bold text-pink-600 dark:text-pink-400">
                     {genderStats.female_attendance_rate}%
                   </span>
@@ -1717,18 +1554,18 @@ const Analytics = () => {
                 </div>
               </div>
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4">
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    <div className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 dark:text-blue-400">
                       {Math.round((genderStats.male_baptized / genderStats.male) * 100) || 0}%
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">Male Baptism Rate</div>
+                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Male Baptism Rate</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-pink-600 dark:text-pink-400">
+                    <div className="text-lg sm:text-xl md:text-2xl font-bold text-pink-600 dark:text-pink-400">
                       {Math.round((genderStats.female_baptized / genderStats.female) * 100) || 0}%
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">Female Baptism Rate</div>
+                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Female Baptism Rate</div>
                   </div>
                 </div>
               </div>
@@ -1736,17 +1573,17 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Group Performance Tabs */}
-        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        {/* Group Performance Tabs - Mobile Optimized */}
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <TrendingUp className="h-5 w-5" />
               Performance Analytics
             </h2>
-            <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+            <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 w-full sm:w-auto mt-3 sm:mt-0">
               <button
                 onClick={() => setActiveTab('cell-groups')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors min-h-[44px] ${
                   activeTab === 'cell-groups'
                     ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
@@ -1756,7 +1593,7 @@ const Analytics = () => {
               </button>
               <button
                 onClick={() => setActiveTab('departments')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors min-h-[44px] ${
                   activeTab === 'departments'
                     ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
@@ -1764,34 +1601,24 @@ const Analytics = () => {
               >
                 Departments
               </button>
-              <button
-                onClick={() => setActiveTab('baptisms')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'baptisms'
-                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                }`}
-              >
-                Baptisms
-              </button>
             </div>
           </div>
 
           {activeTab === 'cell-groups' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               {cellGroupStats.length > 0 ? cellGroupStats.map((group, index) => (
-                <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div key={index} className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div className="flex justify-between items-start mb-2">
-                    <div className="font-semibold text-gray-900 dark:text-white">{group.group_name}</div>
+                    <div className="font-semibold text-gray-900 dark:text-white truncate text-sm sm:text-base">{group.group_name}</div>
                     {getTrendIcon(group.trend)}
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">
                     {group.total_members} members • {group.meetings_this_month} meetings
                   </div>
                   <div className="space-y-2 mb-3">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
-                      <span className={`text-sm font-bold ${
+                      <span className={`text-xs sm:text-sm font-bold ${
                         group.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
                         group.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
                         'text-red-600 dark:text-red-400'
@@ -1811,19 +1638,19 @@ const Analytics = () => {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-500 dark:text-gray-500">Baptisms</span>
-                      <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                      <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400">
                         {group.baptism_count}
                       </span>
                     </div>
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-500 space-y-1">
-                    <div className="flex items-center gap-1">
-                      <MapPin className="h-3 w-3" />
-                      {group.location}
+                    <div className="flex items-center gap-1 truncate">
+                      <MapPin className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{group.location}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {group.meeting_day}
+                      <Calendar className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{group.meeting_day}</span>
                     </div>
                   </div>
                 </div>
@@ -1833,21 +1660,21 @@ const Analytics = () => {
                 </div>
               )}
             </div>
-          ) : activeTab === 'departments' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               {departmentStats.length > 0 ? departmentStats.map((dept, index) => (
-                <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div key={index} className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div className="flex justify-between items-start mb-2">
-                    <div className="font-semibold text-gray-900 dark:text-white">{dept.department_name}</div>
+                    <div className="font-semibold text-gray-900 dark:text-white truncate text-sm sm:text-base">{dept.department_name}</div>
                     {getTrendIcon(dept.trend)}
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">
                     {dept.total_members} members • {dept.meetings_this_month} meetings
                   </div>
                   <div className="space-y-2 mb-3">
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-500 dark:text-gray-500">Attendance</span>
-                      <span className={`text-sm font-bold ${
+                      <span className={`text-xs sm:text-sm font-bold ${
                         dept.avg_attendance >= 80 ? 'text-green-600 dark:text-green-400' :
                         dept.avg_attendance >= 60 ? 'text-yellow-600 dark:text-yellow-400' :
                         'text-red-600 dark:text-red-400'
@@ -1867,12 +1694,12 @@ const Analytics = () => {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-gray-500 dark:text-gray-500">Baptisms</span>
-                      <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                      <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400">
                         {dept.baptism_count}
                       </span>
                     </div>
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">
+                  <div className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2">
                     {dept.purpose}
                   </div>
                 </div>
@@ -1882,86 +1709,24 @@ const Analytics = () => {
                 </div>
               )}
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-                    {baptismRecords.length}
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Total Baptisms</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">in selected period</div>
-                </div>
-                <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-1">
-                    {growthMetrics.baptism_growth_rate}%
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Growth Rate</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">vs previous month</div>
-                </div>
-                <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                  <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mb-1">
-                    {Math.round((baptismRecords.length / growthMetrics.total_members) * 100) || 0}%
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Baptism Rate</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">of total members</div>
-                </div>
-              </div>
-              <div className="max-h-96 overflow-y-auto">
-                {baptismRecords.length > 0 ? baptismRecords.map((record, index) => (
-                  <div 
-                    key={record.id}
-                    onClick={() => setSelectedBaptism(record)}
-                    className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg mb-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                        {record.name.charAt(0)}{record.surname.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-gray-900 dark:text-white">
-                          {record.name} {record.surname}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {record.baptism_date} • {record.location}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {record.baptized_by}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-500">
-                        {record.gender} • {record.cell_group_name || 'No group'}
-                      </div>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-gray-400" />
-                  </div>
-                )) : (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    No baptism records available
-                  </div>
-                )}
-              </div>
-            </div>
           )}
         </div>
 
-        {/* Absence Alerts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {/* Absence Alerts - Mobile Optimized */}
+        <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 md:gap-6 mb-8">
           {/* 2+ Consecutive Absences */}
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
-              <h3 className="font-bold text-red-900 dark:text-red-300">2+ Meeting Absences</h3>
-              <span className="bg-red-600 text-white px-2 py-1 rounded-full text-sm">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-4 sm:p-6 flex-1">
+            <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-red-600 dark:text-red-400" />
+              <h3 className="font-bold text-red-900 dark:text-red-300 text-sm sm:text-base">2+ Meeting Absences</h3>
+              <span className="bg-red-600 text-white px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full text-xs">
                 {absentMembers.length}
               </span>
             </div>
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {absentMembers.length > 0 ? absentMembers.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-red-200 dark:border-red-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
+                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-2.5 sm:p-3 border border-red-200 dark:border-red-700">
+                  <div className="font-medium text-gray-900 dark:text-white text-xs sm:text-sm">
                     {member.name} {member.surname}
                   </div>
                   <div className="text-xs text-gray-600 dark:text-gray-400">
@@ -1969,7 +1734,7 @@ const Analytics = () => {
                   </div>
                 </div>
               )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs sm:text-sm">
                   No consecutive absences
                 </div>
               )}
@@ -1977,18 +1742,18 @@ const Analytics = () => {
           </div>
 
           {/* 2+ Sunday Absences */}
-          <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-              <h3 className="font-bold text-orange-900 dark:text-orange-300">2+ Sunday Absences</h3>
-              <span className="bg-orange-600 text-white px-2 py-1 rounded-full text-sm">
+          <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl p-4 sm:p-6 flex-1">
+            <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-orange-600 dark:text-orange-400" />
+              <h3 className="font-bold text-orange-900 dark:text-orange-300 text-sm sm:text-base">2+ Sunday Absences</h3>
+              <span className="bg-orange-600 text-white px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full text-xs">
                 {sundayAbsentees.length}
               </span>
             </div>
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {sundayAbsentees.length > 0 ? sundayAbsentees.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-orange-200 dark:border-orange-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
+                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-2.5 sm:p-3 border border-orange-200 dark:border-orange-700">
+                  <div className="font-medium text-gray-900 dark:text-white text-xs sm:text-sm">
                     {member.name} {member.surname}
                   </div>
                   <div className="text-xs text-gray-600 dark:text-gray-400">
@@ -1996,7 +1761,7 @@ const Analytics = () => {
                   </div>
                 </div>
               )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs sm:text-sm">
                   No Sunday absences
                 </div>
               )}
@@ -2004,18 +1769,18 @@ const Analytics = () => {
           </div>
 
           {/* 3+ Total Absences */}
-          <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-              <h3 className="font-bold text-purple-900 dark:text-purple-300">3+ Total Absences</h3>
-              <span className="bg-purple-600 text-white px-2 py-1 rounded-full text-sm">
+          <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-4 sm:p-6 flex-1">
+            <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600 dark:text-purple-400" />
+              <h3 className="font-bold text-purple-900 dark:text-purple-300 text-sm sm:text-base">3+ Total Absences</h3>
+              <span className="bg-purple-600 text-white px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full text-xs">
                 {threeTimeAbsentees.length}
               </span>
             </div>
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {threeTimeAbsentees.length > 0 ? threeTimeAbsentees.slice(0, 5).map((member) => (
-                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">
+                <div key={member.id} className="bg-white dark:bg-gray-800 rounded-lg p-2.5 sm:p-3 border border-purple-200 dark:border-purple-700">
+                  <div className="font-medium text-gray-900 dark:text-white text-xs sm:text-sm">
                     {member.name} {member.surname}
                   </div>
                   <div className="text-xs text-gray-600 dark:text-gray-400">
@@ -2023,7 +1788,7 @@ const Analytics = () => {
                   </div>
                 </div>
               )) : (
-                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs sm:text-sm">
                   No multiple absences
                 </div>
               )}
@@ -2031,150 +1796,62 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Recent Attendance Reports */}
+        {/* Recent Attendance Reports - Mobile Optimized */}
         {attendanceReports.length > 0 && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Calendar className="h-5 w-5" />
-              Recent Attendance Reports
+              Recent Attendance
             </h2>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left text-sm text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                    <th className="pb-3 font-medium">Date</th>
-                    <th className="pb-3 font-medium">Event</th>
-                    <th className="pb-3 font-medium">Present</th>
-                    <th className="pb-3 font-medium">Absent</th>
-                    <th className="pb-3 font-medium">Rate</th>
-                    <th className="pb-3 font-medium">Male/Female</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {attendanceReports.slice(0, 5).map((report, index) => (
-                    <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                      <td className="py-3 text-sm">{report.meeting_date}</td>
-                      <td className="py-3 text-sm font-medium text-gray-900 dark:text-white">
-                        {report.meeting_type}
-                      </td>
-                      <td className="py-3 text-sm">
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          {report.present_count}
-                        </span>
-                      </td>
-                      <td className="py-3 text-sm">
-                        <span className="text-red-600 dark:text-red-400">
-                          {report.absent_count}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                            <div 
-                              className={`h-2 rounded-full ${
-                                report.attendance_rate >= 80 ? 'bg-green-500' :
-                                report.attendance_rate >= 60 ? 'bg-yellow-500' :
-                                'bg-red-500'
-                              }`}
-                              style={{ width: `${report.attendance_rate}%` }}
-                            ></div>
-                          </div>
-                          <span className="text-sm">{report.attendance_rate}%</span>
-                        </div>
-                      </td>
-                      <td className="py-3 text-sm">
-                        <div className="flex gap-2">
-                          <span className="text-blue-600 dark:text-blue-400">{report.male_present}M</span>
-                          <span className="text-pink-600 dark:text-pink-400">{report.female_present}F</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="overflow-x-auto -mx-2 sm:mx-0">
+              <div className="min-w-full inline-block align-middle">
+                <div className="overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead>
+                      <tr className="text-left text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Date</th>
+                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Event</th>
+                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Present</th>
+                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {attendanceReports.slice(0, 5).map((report, index) => (
+                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                          <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">{report.meeting_date}</td>
+                          <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate max-w-[120px] sm:max-w-none">
+                            {report.meeting_type}
+                          </td>
+                          <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
+                            <span className="text-green-600 dark:text-green-400 font-medium">
+                              {report.present_count}
+                            </span>
+                          </td>
+                          <td className="px-2 sm:px-4 py-3">
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              <div className="w-10 sm:w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    report.attendance_rate >= 80 ? 'bg-green-500' :
+                                    report.attendance_rate >= 60 ? 'bg-yellow-500' :
+                                    'bg-red-500'
+                                  }`}
+                                  style={{ width: `${report.attendance_rate}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-xs sm:text-sm">{report.attendance_rate}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </div>
-
-      {/* Baptism Detail Modal */}
-      {selectedBaptism && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-center p-6 border-b border-gray-200">
-              <h3 className="text-2xl font-bold text-gray-900">Baptism Details</h3>
-              <button 
-                onClick={() => setSelectedBaptism(null)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-2xl">
-                  {selectedBaptism.name.charAt(0)}{selectedBaptism.surname.charAt(0)}
-                </div>
-                <div>
-                  <h4 className="text-xl font-bold text-gray-900">{selectedBaptism.name} {selectedBaptism.surname}</h4>
-                  <p className="text-gray-600">Baptized on {selectedBaptism.baptism_date}</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Baptized By</h5>
-                    <p className="text-gray-900 font-medium">{selectedBaptism.baptized_by}</p>
-                  </div>
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Location</h5>
-                    <p className="text-gray-900 font-medium">{selectedBaptism.location}</p>
-                  </div>
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Gender</h5>
-                    <p className="text-gray-900 font-medium capitalize">{selectedBaptism.gender}</p>
-                  </div>
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Cell Group</h5>
-                    <p className="text-gray-900 font-medium">{selectedBaptism.cell_group_name || 'Not assigned'}</p>
-                  </div>
-                </div>
-
-                {selectedBaptism.witness1 && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Witness 1</h5>
-                    <p className="text-gray-900">{selectedBaptism.witness1}</p>
-                  </div>
-                )}
-
-                {selectedBaptism.witness2 && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Witness 2</h5>
-                    <p className="text-gray-900">{selectedBaptism.witness2}</p>
-                  </div>
-                )}
-
-                {selectedBaptism.notes && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-500 mb-1">Notes</h5>
-                    <p className="text-gray-900">{selectedBaptism.notes}</p>
-                  </div>
-                )}
-
-                <div className="pt-4 border-t border-gray-200">
-                  <button
-                    onClick={() => setSelectedBaptism(null)}
-                    className="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors font-medium"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
