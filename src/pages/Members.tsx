@@ -13,7 +13,7 @@ interface Member {
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
-  baptism: string | null; // Using baptism from your schema
+  baptism: string | null;
   cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'member' | 'signed_member' | 'permanent' | null;
@@ -52,7 +52,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism: '', // Using baptism from your schema
+    baptism: '',
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -63,8 +63,8 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism: '', // Using baptism from your schema
-    status: 'newcomer' as 'newcomer' | 'member' | 'signed_member' | 'permanent',
+    baptism: '',
+    status: 'newcomer' as 'newcomer' | 'regular' | 'signed' | 'permanent',
     status_date: '',
     not_attending_reason: '',
   });
@@ -162,7 +162,7 @@ const Members = () => {
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
-          baptism: formData.baptism || null, // Using baptism from your schema
+          baptism: formData.baptism || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -183,7 +183,7 @@ const Members = () => {
         cell_group_id: '',
         ministry_group_id: '',
         gender: '',
-        baptism: '', // Using baptism from your schema
+        baptism: '',
       });
       setSuccess('Member added successfully as a newcomer!');
       fetchMembers();
@@ -208,8 +208,8 @@ const Members = () => {
       cell_group_id: member.cell_group_id || '',
       ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
-      baptism: member.baptism || '', // Using baptism from your schema
-      status: member.status || 'newcomer',
+      baptism: member.baptism || '',
+      status: (member.status as any) || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
     });
@@ -236,7 +236,7 @@ const Members = () => {
         ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
-        baptism: editFormData.baptism || null, // Using baptism from your schema
+        baptism: editFormData.baptism || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         is_permanent_member: editFormData.status === 'permanent',
@@ -279,7 +279,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
-      baptism: '', // Using baptism from your schema
+      baptism: '',
       status: 'newcomer',
       status_date: '',
       not_attending_reason: '',
@@ -350,7 +350,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
-      baptism: '', // Using baptism from your schema
+      baptism: '',
     });
     setShowForm(false);
     setError(null);
@@ -362,11 +362,11 @@ const Members = () => {
         color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', 
         text: 'Newcomer' 
       },
-      member: { 
+      regular: { 
         color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', 
-        text: 'Member' 
+        text: 'Regular Member' 
       },
-      signed_member: { 
+      signed: { 
         color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', 
         text: 'Signed Member' 
       },
@@ -375,16 +375,17 @@ const Members = () => {
         text: 'Permanent' 
       },
     };
-    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
+    const statusKey = (status as keyof typeof badges) || 'newcomer';
+    return badges[statusKey] || badges.newcomer;
   };
 
   const getStatusCounts = () => {
     return {
       total: members.length,
       permanent: members.filter(m => m.status === 'permanent').length,
-      member: members.filter(m => m.status === 'member').length,
+      regular: members.filter(m => m.status === 'regular').length,
       newcomer: members.filter(m => m.status === 'newcomer').length,
-      signed_member: members.filter(m => m.status === 'signed_member').length,
+      signed: members.filter(m => m.status === 'signed').length,
       baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
     };
   };
@@ -656,8 +657,8 @@ const Members = () => {
                             className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
                           >
                             <option value="newcomer">Newcomer</option>
-                            <option value="member">Member</option>
-                            <option value="signed_member">Signed Member</option>
+                            <option value="regular">Regular Member</option>
+                            <option value="signed">Signed Member</option>
                             <option value="permanent">Permanent</option>
                           </select>
                         </div>
@@ -741,8 +742,8 @@ const Members = () => {
                             className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <option value="newcomer">Newcomer</option>
-                            <option value="member">Member</option>
-                            <option value="signed_member">Signed Member</option>
+                            <option value="regular">Regular Member</option>
+                            <option value="signed">Signed Member</option>
                             <option value="permanent">Permanent</option>
                           </select>
                         </div>
@@ -875,8 +876,8 @@ const Members = () => {
                         {member.status_date && (
                           <div className="text-sm text-gray-600 dark:text-gray-400">
                             {member.status === 'newcomer' ? 'Newcomer since: ' :
-                             member.status === 'member' ? 'Member since: ' :
-                             member.status === 'signed_member' ? 'Signed member since: ' :
+                             member.status === 'regular' ? 'Member since: ' :
+                             member.status === 'signed' ? 'Signed member since: ' :
                              member.status === 'permanent' ? 'Permanent since: ' : ''}
                             {new Date(member.status_date).toLocaleDateString('en-US', {
                               year: 'numeric',
@@ -917,12 +918,12 @@ const Members = () => {
             <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.member}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Members</div>
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.regular}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Regular Members</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Signed</div>
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
             <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
