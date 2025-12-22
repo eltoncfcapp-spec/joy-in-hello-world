@@ -66,7 +66,11 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    const success = await login(identifier, credential);
+    // Normalize inputs: trim spaces and convert to lowercase for case-insensitive comparison
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+    const normalizedCredential = credential.trim();
+
+    const success = await login(normalizedIdentifier, normalizedCredential);
 
     if (success) {
       navigate('/');
@@ -302,6 +306,7 @@ export default function Login() {
                 <li>• <strong>Email Login:</strong> For administrators with email/password</li>
                 <li>• <strong>Username/PIN:</strong> For members with generated credentials</li>
                 <li>• Members get username/PIN from church administrators</li>
+                <li>• Login is case-insensitive and automatically trims spaces</li>
               </ul>
             </div>
           </div>
