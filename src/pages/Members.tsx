@@ -13,10 +13,10 @@ interface Member {
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
-  baptism: string | null;
+  baptism_date: string | null; // Changed from baptism to baptism_date
   cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
-  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  status: 'newcomer' | 'member' | 'signed_member' | 'permanent' | null; // Added 'member' status
   status_date: string | null;
   not_attending_reason: string | null;
   created_at: string | null;
@@ -52,7 +52,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism: '',
+    baptism_date: '', // Changed from baptism to baptism_date
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -63,8 +63,8 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism: '',
-    status: 'newcomer' as 'newcomer' | 'signed_member' | 'not_attending',
+    baptism_date: '',
+    status: 'newcomer' as 'newcomer' | 'member' | 'signed_member' | 'permanent', // Added 'member'
     status_date: '',
     not_attending_reason: '',
   });
@@ -144,6 +144,13 @@ const Members = () => {
     setError(null);
     setSuccess(null);
     
+    // Validate required fields
+    if (!formData.name.trim() || !formData.surname.trim() || !formData.gender) {
+      setError('Name, surname, and gender are required fields.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('members')
@@ -156,9 +163,10 @@ const Members = () => {
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
-          baptism: formData.baptism.trim() || null,
+          baptism_date: formData.baptism_date || null, // Changed from baptism to baptism_date
           status: 'newcomer',
           status_date: new Date().toISOString(),
+          is_permanent_member: false, // Default to false
         }])
         .select();
 
@@ -176,9 +184,9 @@ const Members = () => {
         cell_group_id: '',
         ministry_group_id: '',
         gender: '',
-        baptism: '',
+        baptism_date: '',
       });
-      setSuccess('Member added successfully!');
+      setSuccess('Member added successfully as a newcomer!');
       fetchMembers();
       
       setTimeout(() => setSuccess(null), 3000);
@@ -201,7 +209,7 @@ const Members = () => {
       cell_group_id: member.cell_group_id || '',
       ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
-      baptism: member.baptism || '',
+      baptism_date: member.baptism_date || '', // Changed from baptism to baptism_date
       status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
@@ -230,15 +238,14 @@ const Members = () => {
         ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
-        baptism: editFormData.baptism.trim() || null,
+        baptism_date: editFormData.baptism_date || null, // Changed from baptism to baptism_date
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
+        is_permanent_member: editFormData.status === 'permanent', // Update is_permanent_member based on status
       };
 
-      if (editFormData.status === 'not_attending') {
-        updateData.not_attending_reason = editFormData.not_attending_reason.trim();
-      } else {
-        updateData.not_attending_reason = null;
+      if (editFormData.status === 'permanent') {
+        updateData.permanent_member_date = new Date().toISOString();
       }
 
       const { error } = await supabase
@@ -274,36 +281,49 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
-      baptism: '',
+      baptism_date: '',
       status: 'newcomer',
       status_date: '',
       not_attending_reason: '',
     });
   };
 
-  const handleMarkAsPermanent = async (memberId: string) => {
+  const handleStatusChange = async (memberId: string, newStatus: 'member' | 'signed_member' | 'permanent') => {
     try {
       setError(null);
       setSuccess(null);
       
+      const updateData: any = {
+        status: newStatus,
+        status_date: new Date().toISOString(),
+      };
+
+      if (newStatus === 'permanent') {
+        updateData.is_permanent_member = true;
+        updateData.permanent_member_date = new Date().toISOString();
+      }
+
       const { error } = await supabase
         .from('members')
-        .update({
-          is_permanent_member: true,
-          permanent_member_date: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', memberId);
 
       if (error) {
         throw error;
       }
 
-      setSuccess('Member marked as permanent!');
+      const statusMessages = {
+        member: 'Member promoted to regular member!',
+        signed_member: 'Member promoted to signed member!',
+        permanent: 'Member marked as permanent!'
+      };
+
+      setSuccess(statusMessages[newStatus]);
       fetchMembers();
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
-      console.error('Error marking as permanent:', error);
+      console.error('Error updating member status:', error);
       setError(error.message || 'Failed to update member status.');
     }
   };
@@ -317,15 +337,12 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
-      // First, check if member has any foreign key constraints
-      // This is a preventive check - actual constraints will be enforced by the database
       const { error: deleteError } = await supabase
         .from('members')
         .delete()
         .eq('id', memberId);
 
       if (deleteError) {
-        // If there's a foreign key constraint, we can set the member as hidden instead
         if (deleteError.code === '23503') {
           const { error: hideError } = await supabase
             .from('members')
@@ -358,7 +375,7 @@ const Members = () => {
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase())
+      member.baptism_date?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string, surname: string) => {
@@ -375,7 +392,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
-      baptism: '',
+      baptism_date: '',
     });
     setShowForm(false);
     setError(null);
@@ -387,13 +404,17 @@ const Members = () => {
         color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', 
         text: 'Newcomer' 
       },
+      member: { 
+        color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', 
+        text: 'Member' 
+      },
       signed_member: { 
         color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', 
         text: 'Signed Member' 
       },
-      not_attending: { 
-        color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', 
-        text: 'Not Attending' 
+      permanent: { 
+        color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', 
+        text: 'Permanent' 
       },
     };
     return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
@@ -402,12 +423,18 @@ const Members = () => {
   const getStatusCounts = () => {
     return {
       total: members.length,
-      permanent: members.filter(m => m.is_permanent_member).length,
+      permanent: members.filter(m => m.status === 'permanent').length,
+      member: members.filter(m => m.status === 'member').length,
       newcomer: members.filter(m => m.status === 'newcomer').length,
       signed_member: members.filter(m => m.status === 'signed_member').length,
-      not_attending: members.filter(m => m.status === 'not_attending').length,
-      baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
+      baptized: members.filter(m => m.baptism_date && m.baptism_date.trim() !== '').length,
     };
+  };
+
+  const getNextStatus = (currentStatus: string): string => {
+    const statusFlow = ['newcomer', 'member', 'signed_member', 'permanent'];
+    const currentIndex = statusFlow.indexOf(currentStatus);
+    return currentIndex < statusFlow.length - 1 ? statusFlow[currentIndex + 1] : currentStatus;
   };
 
   const statusCounts = getStatusCounts();
@@ -516,14 +543,14 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Baptism Details
+                    Baptism Date
                   </label>
                   <input
-                    type="text"
-                    value={formData.baptism}
-                    onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
+                    type="date"
+                    value={formData.baptism_date}
+                    onChange={(e) => setFormData({ ...formData, baptism_date: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter baptism details"
+                    placeholder="Select baptism date"
                   />
                 </div>
                 <div className="space-y-2">
@@ -603,7 +630,7 @@ const Members = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search members by name, residence, phone, baptism, or cell group..."
+              placeholder="Search members by name, residence, phone, or cell group..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -676,8 +703,9 @@ const Members = () => {
                             className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
                           >
                             <option value="newcomer">Newcomer</option>
+                            <option value="member">Member</option>
                             <option value="signed_member">Signed Member</option>
-                            <option value="not_attending">Not Attending</option>
+                            <option value="permanent">Permanent</option>
                           </select>
                         </div>
                       </div>
@@ -707,15 +735,14 @@ const Members = () => {
                         />
                       </div>
 
-                      {/* Baptism Details */}
+                      {/* Baptism Date */}
                       <div className="flex items-center gap-3">
                         <Droplets className="h-4 w-4 text-gray-400 flex-shrink-0" />
                         <input
-                          type="text"
-                          value={editFormData.baptism}
-                          onChange={(e) => setEditFormData({ ...editFormData, baptism: e.target.value })}
+                          type="date"
+                          value={editFormData.baptism_date}
+                          onChange={(e) => setEditFormData({ ...editFormData, baptism_date: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                          placeholder="Baptism details"
                         />
                       </div>
 
@@ -760,36 +787,22 @@ const Members = () => {
                             className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <option value="newcomer">Newcomer</option>
+                            <option value="member">Member</option>
                             <option value="signed_member">Signed Member</option>
-                            <option value="not_attending">Not Attending</option>
+                            <option value="permanent">Permanent</option>
                           </select>
                         </div>
                         
-                        {(editFormData.status === 'signed_member' || editFormData.status === 'not_attending') && (
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                            <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                            <span className="text-sm text-gray-600 dark:text-gray-400 sm:min-w-32">Date Became Member:</span>
-                            <input
-                              type="date"
-                              value={editFormData.status_date}
-                              onChange={(e) => setEditFormData({ ...editFormData, status_date: e.target.value })}
-                              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                        )}
-                        
-                        {editFormData.status === 'not_attending' && (
-                          <div className="flex flex-col sm:flex-row sm:items-start gap-3">
-                            <span className="text-sm text-gray-600 dark:text-gray-400 sm:min-w-20 sm:mt-2">Reason:</span>
-                            <textarea
-                              value={editFormData.not_attending_reason}
-                              onChange={(e) => setEditFormData({ ...editFormData, not_attending_reason: e.target.value })}
-                              placeholder="Reason for not attending..."
-                              className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              rows={3}
-                            />
-                          </div>
-                        )}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                          <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          <span className="text-sm text-gray-600 dark:text-gray-400 sm:min-w-32">Status Date:</span>
+                          <input
+                            type="date"
+                            value={editFormData.status_date}
+                            onChange={(e) => setEditFormData({ ...editFormData, status_date: e.target.value })}
+                            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -827,12 +840,6 @@ const Members = () => {
                             <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
                               {member.name} {member.surname}
                             </h3>
-                            {member.is_permanent_member && (
-                              <span className="px-2 md:px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium flex items-center gap-1">
-                                <Check className="h-3 w-3" />
-                                Permanent
-                              </span>
-                            )}
                             <span className={`px-2 md:px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
                               {getStatusBadge(member.status).text}
                             </span>
@@ -851,10 +858,16 @@ const Members = () => {
                                 <span className="font-medium">{member.phone}</span>
                               </div>
                             )}
-                            {member.baptism && (
+                            {member.baptism_date && (
                               <div className="flex items-start gap-3">
                                 <Droplets className="h-4 w-4 flex-shrink-0 mt-1" />
-                                <span className="font-medium text-blue-600 dark:text-blue-400 break-all">{member.baptism}</span>
+                                <span className="font-medium text-blue-600 dark:text-blue-400 break-all">
+                                  Baptized: {new Date(member.baptism_date).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric'
+                                  })}
+                                </span>
                               </div>
                             )}
                             <div className="flex items-center gap-3">
@@ -874,7 +887,7 @@ const Members = () => {
                               </div>
                             )}
                             {member.permanent_member_date && (
-                              <div className="text-sm text-green-600 dark:text-green-400">
+                              <div className="text-sm text-purple-600 dark:text-purple-400">
                                 Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
                                   year: 'numeric',
                                   month: 'short',
@@ -888,7 +901,7 @@ const Members = () => {
                     </div>
                     
                     <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
-                      <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3">
+                      <div className="grid grid-cols-3 lg:flex lg:flex-col gap-3">
                         <button
                           onClick={() => handleEditMember(member)}
                           className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -896,34 +909,37 @@ const Members = () => {
                           <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
                           <span className="hidden sm:inline">Edit</span>
                         </button>
-                        {!member.is_permanent_member && (
+                        {member.status !== 'permanent' && (
                           <button
-                            onClick={() => handleMarkAsPermanent(member.id)}
+                            onClick={() => handleStatusChange(member.id, getNextStatus(member.status || 'newcomer') as any)}
                             className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                           >
                             <Check className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                            <span className="hidden sm:inline">Permanent</span>
+                            <span className="hidden sm:inline">Promote</span>
                           </button>
                         )}
                         <button
                           onClick={() => handleDeleteMember(member.id)}
-                          className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group col-span-2 lg:col-span-1"
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                         >
                           <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
                           <span className="hidden sm:inline">Delete</span>
                         </button>
                       </div>
                       <div className="space-y-2">
-                        {member.status_date && member.status === 'signed_member' && (
+                        {member.status_date && (
                           <div className="text-sm text-gray-600 dark:text-gray-400">
-                            Member since: {new Date(member.status_date).toLocaleDateString('en-US', {
+                            {member.status === 'newcomer' ? 'Newcomer since: ' :
+                             member.status === 'member' ? 'Member since: ' :
+                             member.status === 'signed_member' ? 'Signed member since: ' : ''}
+                            {new Date(member.status_date).toLocaleDateString('en-US', {
                               year: 'numeric',
                               month: 'short',
                               day: 'numeric'
                             })}
                           </div>
                         )}
-                        {member.not_attending_reason && member.status === 'not_attending' && (
+                        {member.not_attending_reason && (
                           <div className="text-sm text-red-600 dark:text-red-400 max-w-xs break-words">
                             Reason: {member.not_attending_reason}
                           </div>
@@ -955,16 +971,16 @@ const Members = () => {
             <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.member}</div>
+            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Members</div>
+          </div>
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
             <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed_member}</div>
             <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Signed</div>
           </div>
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
             <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
             <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
-          </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{cellGroups.length}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Cell Groups</div>
           </div>
         </div>
       </div>
