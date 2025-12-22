@@ -13,10 +13,10 @@ interface Member {
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
-  baptism_date: string | null; // Changed from baptism to baptism_date
+  baptism_date: string | null;
   cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
-  status: 'newcomer' | 'member' | 'signed_member' | 'permanent' | null; // Added 'member' status
+  status: 'newcomer' | 'member' | 'signed_member' | 'permanent' | null;
   status_date: string | null;
   not_attending_reason: string | null;
   created_at: string | null;
@@ -52,7 +52,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism_date: '', // Changed from baptism to baptism_date
+    baptism_date: '',
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -64,7 +64,7 @@ const Members = () => {
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     baptism_date: '',
-    status: 'newcomer' as 'newcomer' | 'member' | 'signed_member' | 'permanent', // Added 'member'
+    status: 'newcomer' as 'newcomer' | 'member' | 'signed_member' | 'permanent',
     status_date: '',
     not_attending_reason: '',
   });
@@ -144,7 +144,6 @@ const Members = () => {
     setError(null);
     setSuccess(null);
     
-    // Validate required fields
     if (!formData.name.trim() || !formData.surname.trim() || !formData.gender) {
       setError('Name, surname, and gender are required fields.');
       setLoading(false);
@@ -163,10 +162,10 @@ const Members = () => {
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
-          baptism_date: formData.baptism_date || null, // Changed from baptism to baptism_date
+          baptism_date: formData.baptism_date || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
-          is_permanent_member: false, // Default to false
+          is_permanent_member: false,
         }])
         .select();
 
@@ -209,7 +208,7 @@ const Members = () => {
       cell_group_id: member.cell_group_id || '',
       ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
-      baptism_date: member.baptism_date || '', // Changed from baptism to baptism_date
+      baptism_date: member.baptism_date || '',
       status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
@@ -222,7 +221,6 @@ const Members = () => {
     setSuccess(null);
     
     try {
-      // Validate required fields
       if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.gender) {
         setError('Name, surname, and gender are required fields.');
         setLoading(false);
@@ -238,10 +236,10 @@ const Members = () => {
         ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
-        baptism_date: editFormData.baptism_date || null, // Changed from baptism to baptism_date
+        baptism_date: editFormData.baptism_date || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
-        is_permanent_member: editFormData.status === 'permanent', // Update is_permanent_member based on status
+        is_permanent_member: editFormData.status === 'permanent',
       };
 
       if (editFormData.status === 'permanent') {
@@ -286,46 +284,6 @@ const Members = () => {
       status_date: '',
       not_attending_reason: '',
     });
-  };
-
-  const handleStatusChange = async (memberId: string, newStatus: 'member' | 'signed_member' | 'permanent') => {
-    try {
-      setError(null);
-      setSuccess(null);
-      
-      const updateData: any = {
-        status: newStatus,
-        status_date: new Date().toISOString(),
-      };
-
-      if (newStatus === 'permanent') {
-        updateData.is_permanent_member = true;
-        updateData.permanent_member_date = new Date().toISOString();
-      }
-
-      const { error } = await supabase
-        .from('members')
-        .update(updateData)
-        .eq('id', memberId);
-
-      if (error) {
-        throw error;
-      }
-
-      const statusMessages = {
-        member: 'Member promoted to regular member!',
-        signed_member: 'Member promoted to signed member!',
-        permanent: 'Member marked as permanent!'
-      };
-
-      setSuccess(statusMessages[newStatus]);
-      fetchMembers();
-      
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error updating member status:', error);
-      setError(error.message || 'Failed to update member status.');
-    }
   };
 
   const handleDeleteMember = async (memberId: string) => {
@@ -429,12 +387,6 @@ const Members = () => {
       signed_member: members.filter(m => m.status === 'signed_member').length,
       baptized: members.filter(m => m.baptism_date && m.baptism_date.trim() !== '').length,
     };
-  };
-
-  const getNextStatus = (currentStatus: string): string => {
-    const statusFlow = ['newcomer', 'member', 'signed_member', 'permanent'];
-    const currentIndex = statusFlow.indexOf(currentStatus);
-    return currentIndex < statusFlow.length - 1 ? statusFlow[currentIndex + 1] : currentStatus;
   };
 
   const statusCounts = getStatusCounts();
@@ -901,7 +853,7 @@ const Members = () => {
                     </div>
                     
                     <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
-                      <div className="grid grid-cols-3 lg:flex lg:flex-col gap-3">
+                      <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3">
                         <button
                           onClick={() => handleEditMember(member)}
                           className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -909,15 +861,6 @@ const Members = () => {
                           <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
                           <span className="hidden sm:inline">Edit</span>
                         </button>
-                        {member.status !== 'permanent' && (
-                          <button
-                            onClick={() => handleStatusChange(member.id, getNextStatus(member.status || 'newcomer') as any)}
-                            className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                          >
-                            <Check className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                            <span className="hidden sm:inline">Promote</span>
-                          </button>
-                        )}
                         <button
                           onClick={() => handleDeleteMember(member.id)}
                           className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -931,7 +874,8 @@ const Members = () => {
                           <div className="text-sm text-gray-600 dark:text-gray-400">
                             {member.status === 'newcomer' ? 'Newcomer since: ' :
                              member.status === 'member' ? 'Member since: ' :
-                             member.status === 'signed_member' ? 'Signed member since: ' : ''}
+                             member.status === 'signed_member' ? 'Signed member since: ' :
+                             member.status === 'permanent' ? 'Permanent since: ' : ''}
                             {new Date(member.status_date).toLocaleDateString('en-US', {
                               year: 'numeric',
                               month: 'short',
