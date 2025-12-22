@@ -13,7 +13,7 @@ interface Member {
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
-  baptism_date: string | null;
+  baptism: string | null; // Using baptism from your schema
   cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
   status: 'newcomer' | 'member' | 'signed_member' | 'permanent' | null;
@@ -52,7 +52,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism_date: '',
+    baptism: '', // Using baptism from your schema
   });
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -63,7 +63,7 @@ const Members = () => {
     cell_group_id: '',
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
-    baptism_date: '',
+    baptism: '', // Using baptism from your schema
     status: 'newcomer' as 'newcomer' | 'member' | 'signed_member' | 'permanent',
     status_date: '',
     not_attending_reason: '',
@@ -162,7 +162,7 @@ const Members = () => {
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
-          baptism_date: formData.baptism_date || null,
+          baptism: formData.baptism || null, // Using baptism from your schema
           status: 'newcomer',
           status_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -183,7 +183,7 @@ const Members = () => {
         cell_group_id: '',
         ministry_group_id: '',
         gender: '',
-        baptism_date: '',
+        baptism: '', // Using baptism from your schema
       });
       setSuccess('Member added successfully as a newcomer!');
       fetchMembers();
@@ -208,7 +208,7 @@ const Members = () => {
       cell_group_id: member.cell_group_id || '',
       ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
-      baptism_date: member.baptism_date || '',
+      baptism: member.baptism || '', // Using baptism from your schema
       status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
@@ -236,7 +236,7 @@ const Members = () => {
         ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
-        baptism_date: editFormData.baptism_date || null,
+        baptism: editFormData.baptism || null, // Using baptism from your schema
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         is_permanent_member: editFormData.status === 'permanent',
@@ -279,7 +279,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
-      baptism_date: '',
+      baptism: '', // Using baptism from your schema
       status: 'newcomer',
       status_date: '',
       not_attending_reason: '',
@@ -333,7 +333,7 @@ const Members = () => {
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.baptism_date?.toLowerCase().includes(searchQuery.toLowerCase())
+      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string, surname: string) => {
@@ -350,7 +350,7 @@ const Members = () => {
       cell_group_id: '',
       ministry_group_id: '',
       gender: '',
-      baptism_date: '',
+      baptism: '', // Using baptism from your schema
     });
     setShowForm(false);
     setError(null);
@@ -385,7 +385,7 @@ const Members = () => {
       member: members.filter(m => m.status === 'member').length,
       newcomer: members.filter(m => m.status === 'newcomer').length,
       signed_member: members.filter(m => m.status === 'signed_member').length,
-      baptized: members.filter(m => m.baptism_date && m.baptism_date.trim() !== '').length,
+      baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
     };
   };
 
@@ -459,7 +459,7 @@ const Members = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Residence
+                    Residence *
                   </label>
                   <input
                     type="text"
@@ -467,6 +467,7 @@ const Members = () => {
                     onChange={(e) => setFormData({ ...formData, residence: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter residence address"
+                    required
                   />
                 </div>
                 <div className="space-y-2">
@@ -499,8 +500,8 @@ const Members = () => {
                   </label>
                   <input
                     type="date"
-                    value={formData.baptism_date}
-                    onChange={(e) => setFormData({ ...formData, baptism_date: e.target.value })}
+                    value={formData.baptism}
+                    onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Select baptism date"
                   />
@@ -673,6 +674,7 @@ const Members = () => {
                           onChange={(e) => setEditFormData({ ...editFormData, residence: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
                           placeholder="Residence address"
+                          required
                         />
                       </div>
                       
@@ -692,8 +694,8 @@ const Members = () => {
                         <Droplets className="h-4 w-4 text-gray-400 flex-shrink-0" />
                         <input
                           type="date"
-                          value={editFormData.baptism_date}
-                          onChange={(e) => setEditFormData({ ...editFormData, baptism_date: e.target.value })}
+                          value={editFormData.baptism}
+                          onChange={(e) => setEditFormData({ ...editFormData, baptism: e.target.value })}
                           className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
                         />
                       </div>
@@ -810,11 +812,11 @@ const Members = () => {
                                 <span className="font-medium">{member.phone}</span>
                               </div>
                             )}
-                            {member.baptism_date && (
+                            {member.baptism && (
                               <div className="flex items-start gap-3">
                                 <Droplets className="h-4 w-4 flex-shrink-0 mt-1" />
                                 <span className="font-medium text-blue-600 dark:text-blue-400 break-all">
-                                  Baptized: {new Date(member.baptism_date).toLocaleDateString('en-US', {
+                                  Baptized: {new Date(member.baptism).toLocaleDateString('en-US', {
                                     year: 'numeric',
                                     month: 'short',
                                     day: 'numeric'
