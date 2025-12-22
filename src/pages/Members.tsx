@@ -16,7 +16,7 @@ interface Member {
   baptism: string | null;
   cell_groups: { name: string } | null;
   ministry_groups: { name: string } | null;
-  status: 'newcomer' | 'member' | 'signed_member' | 'permanent' | null;
+  status: string | null; // Changed to string since we don't know the enum values
   status_date: string | null;
   not_attending_reason: string | null;
   created_at: string | null;
@@ -43,6 +43,7 @@ const Members = () => {
   const [editingMember, setEditingMember] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
@@ -64,7 +65,7 @@ const Members = () => {
     ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     baptism: '',
-    status: 'newcomer' as 'newcomer' | 'regular' | 'signed' | 'permanent',
+    status: 'newcomer',
     status_date: '',
     not_attending_reason: '',
   });
@@ -74,6 +75,22 @@ const Members = () => {
     fetchCellGroups();
     fetchMinistryGroups();
   }, []);
+
+  useEffect(() => {
+    // Extract unique status values from members
+    if (members.length > 0) {
+      const statuses = Array.from(new Set(members
+        .map(m => m.status)
+        .filter((status): status is string => status !== null && status !== '')
+      ));
+      setAvailableStatuses(statuses);
+      
+      // If we don't have 'newcomer' in the list (which is default), add it
+      if (!statuses.includes('newcomer')) {
+        setAvailableStatuses(prev => ['newcomer', ...prev]);
+      }
+    }
+  }, [members]);
 
   const fetchMembers = async () => {
     try {
@@ -144,8 +161,9 @@ const Members = () => {
     setError(null);
     setSuccess(null);
     
-    if (!formData.name.trim() || !formData.surname.trim() || !formData.gender) {
-      setError('Name, surname, and gender are required fields.');
+    // Validate required fields
+    if (!formData.name.trim() || !formData.surname.trim() || !formData.residence.trim() || !formData.gender) {
+      setError('Name, surname, residence, and gender are required fields.');
       setLoading(false);
       return;
     }
@@ -156,14 +174,14 @@ const Members = () => {
         .insert([{
           name: formData.name.trim(),
           surname: formData.surname.trim(),
-          residence: formData.residence.trim() || null,
+          residence: formData.residence.trim(),
           phone: formData.phone.trim() || null,
           cell_group_id: formData.cell_group_id || null,
           ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
           baptism: formData.baptism || null,
-          status: 'newcomer',
+          status: 'newcomer', // Default status
           status_date: new Date().toISOString(),
           is_permanent_member: false,
         }])
@@ -209,7 +227,7 @@ const Members = () => {
       ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
       baptism: member.baptism || '',
-      status: (member.status as any) || 'newcomer',
+      status: member.status || 'newcomer',
       status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
       not_attending_reason: member.not_attending_reason || '',
     });
@@ -221,8 +239,9 @@ const Members = () => {
     setSuccess(null);
     
     try {
-      if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.gender) {
-        setError('Name, surname, and gender are required fields.');
+      // Validate required fields
+      if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.residence.trim() || !editFormData.gender) {
+        setError('Name, surname, residence, and gender are required fields.');
         setLoading(false);
         return;
       }
@@ -230,7 +249,7 @@ const Members = () => {
       const updateData: any = {
         name: editFormData.name.trim(),
         surname: editFormData.surname.trim(),
-        residence: editFormData.residence.trim() || null,
+        residence: editFormData.residence.trim(),
         phone: editFormData.phone.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
         ministry_group_id: editFormData.ministry_group_id || null,
@@ -239,10 +258,11 @@ const Members = () => {
         baptism: editFormData.baptism || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
-        is_permanent_member: editFormData.status === 'permanent',
+        is_permanent_member: editFormData.status.toLowerCase().includes('permanent'),
       };
 
-      if (editFormData.status === 'permanent') {
+      // If status includes "permanent", set the permanent member date
+      if (editFormData.status.toLowerCase().includes('permanent')) {
         updateData.permanent_member_date = new Date().toISOString();
       }
 
@@ -262,7 +282,7 @@ const Members = () => {
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error updating member:', error);
-      setError(error.message || 'Failed to update member details.');
+      setError(error.message || 'Failed to update member details. Please check if the status value is valid.');
     } finally {
       setLoading(false);
     }
@@ -357,35 +377,34 @@ const Members = () => {
   };
 
   const getStatusBadge = (status: string | null) => {
-    const badges = {
-      newcomer: { 
-        color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', 
-        text: 'Newcomer' 
-      },
-      regular: { 
-        color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', 
-        text: 'Regular Member' 
-      },
-      signed: { 
-        color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', 
-        text: 'Signed Member' 
-      },
-      permanent: { 
-        color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', 
-        text: 'Permanent' 
-      },
-    };
-    const statusKey = (status as keyof typeof badges) || 'newcomer';
-    return badges[statusKey] || badges.newcomer;
+    if (!status) return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: 'No Status' };
+    
+    const statusLower = status.toLowerCase();
+    
+    if (statusLower.includes('newcomer')) {
+      return { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: status };
+    } else if (statusLower.includes('member') && !statusLower.includes('signed') && !statusLower.includes('permanent')) {
+      return { color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', text: status };
+    } else if (statusLower.includes('signed')) {
+      return { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: status };
+    } else if (statusLower.includes('permanent')) {
+      return { color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', text: status };
+    } else {
+      return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: status };
+    }
   };
 
   const getStatusCounts = () => {
+    const counts: Record<string, number> = {};
+    
+    members.forEach(member => {
+      const status = member.status || 'No Status';
+      counts[status] = (counts[status] || 0) + 1;
+    });
+    
     return {
       total: members.length,
-      permanent: members.filter(m => m.status === 'permanent').length,
-      regular: members.filter(m => m.status === 'regular').length,
-      newcomer: members.filter(m => m.status === 'newcomer').length,
-      signed: members.filter(m => m.status === 'signed').length,
+      ...counts,
       baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
     };
   };
@@ -653,13 +672,21 @@ const Members = () => {
                           </div>
                           <select
                             value={editFormData.status}
-                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
                             className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
                           >
-                            <option value="newcomer">Newcomer</option>
-                            <option value="regular">Regular Member</option>
-                            <option value="signed">Signed Member</option>
-                            <option value="permanent">Permanent</option>
+                            {availableStatuses.length > 0 ? (
+                              availableStatuses.map(status => (
+                                <option key={status} value={status}>{status}</option>
+                              ))
+                            ) : (
+                              <>
+                                <option value="newcomer">Newcomer</option>
+                                <option value="member">Member</option>
+                                <option value="signed_member">Signed Member</option>
+                                <option value="permanent">Permanent</option>
+                              </>
+                            )}
                           </select>
                         </div>
                       </div>
@@ -738,13 +765,21 @@ const Members = () => {
                           <span className="text-sm text-gray-600 dark:text-gray-400 min-w-20">Status:</span>
                           <select
                             value={editFormData.status}
-                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as any })}
+                            onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
                             className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
-                            <option value="newcomer">Newcomer</option>
-                            <option value="regular">Regular Member</option>
-                            <option value="signed">Signed Member</option>
-                            <option value="permanent">Permanent</option>
+                            {availableStatuses.length > 0 ? (
+                              availableStatuses.map(status => (
+                                <option key={status} value={status}>{status}</option>
+                              ))
+                            ) : (
+                              <>
+                                <option value="newcomer">Newcomer</option>
+                                <option value="member">Member</option>
+                                <option value="signed_member">Signed Member</option>
+                                <option value="permanent">Permanent</option>
+                              </>
+                            )}
                           </select>
                         </div>
                         
@@ -875,10 +910,7 @@ const Members = () => {
                       <div className="space-y-2">
                         {member.status_date && (
                           <div className="text-sm text-gray-600 dark:text-gray-400">
-                            {member.status === 'newcomer' ? 'Newcomer since: ' :
-                             member.status === 'regular' ? 'Member since: ' :
-                             member.status === 'signed' ? 'Signed member since: ' :
-                             member.status === 'permanent' ? 'Permanent since: ' : ''}
+                            {member.status ? `${member.status} since: ` : 'Member since: '}
                             {new Date(member.status_date).toLocaleDateString('en-US', {
                               year: 'numeric',
                               month: 'short',
@@ -909,22 +941,17 @@ const Members = () => {
             <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
             <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Total</div>
           </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.permanent}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Permanent</div>
-          </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.newcomer}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Newcomers</div>
-          </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.regular}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Regular Members</div>
-          </div>
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-            <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.signed}</div>
-            <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Signed Members</div>
-          </div>
+          {Object.entries(statusCounts)
+            .filter(([key]) => key !== 'total' && key !== 'baptized')
+            .slice(0, 4) // Show top 4 statuses plus baptized
+            .map(([status, count]) => (
+              <div key={status} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{count}</div>
+                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={status}>
+                  {status === 'baptized' ? 'Baptized' : status}
+                </div>
+              </div>
+            ))}
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
             <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
             <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
