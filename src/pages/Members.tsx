@@ -74,6 +74,28 @@ const Members = () => {
     is_hidden: false,
   });
 
+  // Define statuses that should be hidden
+  const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
+  const ACTIVE_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
+
+  // Helper function to check if status should be hidden
+  const shouldBeHidden = (status: string | null): boolean => {
+    if (!status) return false;
+    const statusLower = status.toLowerCase();
+    return NOT_ATTENDING_STATUSES.some(notAttendingStatus => 
+      statusLower.includes(notAttendingStatus.toLowerCase())
+    );
+  };
+
+  // Helper function to check if status should be shown (unhidden)
+  const shouldBeShown = (status: string | null): boolean => {
+    if (!status) return true;
+    const statusLower = status.toLowerCase();
+    return ACTIVE_STATUSES.some(activeStatus => 
+      statusLower.includes(activeStatus.toLowerCase())
+    );
+  };
+
   useEffect(() => {
     fetchMembers();
     fetchHiddenMembers();
@@ -91,6 +113,9 @@ const Members = () => {
       
       if (!statuses.includes('newcomer')) {
         setAvailableStatuses(prev => ['newcomer', ...prev]);
+      }
+      if (!statuses.includes('inactive')) {
+        setAvailableStatuses(prev => [...prev, 'inactive']);
       }
     }
   }, [members]);
@@ -209,7 +234,8 @@ const Members = () => {
           status: 'newcomer',
           status_date: new Date().toISOString(),
           is_permanent_member: false,
-          is_hidden: false,
+          is_hidden: false, // New members are always shown
+          not_attending_reason: null,
         }])
         .select();
 
@@ -273,6 +299,18 @@ const Members = () => {
         return;
       }
 
+      // Check if status should automatically hide/show member
+      const shouldHide = shouldBeHidden(editFormData.status);
+      const shouldShow = shouldBeShown(editFormData.status);
+      
+      // Determine if member should be hidden based on status
+      const is_hidden = shouldHide || (editFormData.is_hidden && !shouldShow);
+      
+      // Set not_attending_reason if status indicates not attending
+      const not_attending_reason = shouldHide 
+        ? (editFormData.not_attending_reason || 'Member stopped attending')
+        : null;
+
       const updateData: any = {
         name: editFormData.name.trim(),
         surname: editFormData.surname.trim(),
@@ -286,8 +324,8 @@ const Members = () => {
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         is_permanent_member: editFormData.status.toLowerCase().includes('permanent'),
-        not_attending_reason: editFormData.not_attending_reason || null,
-        is_hidden: editFormData.is_hidden,
+        not_attending_reason,
+        is_hidden,
       };
 
       if (editFormData.status.toLowerCase().includes('permanent')) {
@@ -304,7 +342,7 @@ const Members = () => {
       }
 
       setEditingMember(null);
-      setSuccess('Member details updated successfully!');
+      setSuccess(`Member details updated successfully! ${shouldHide ? 'Member has been automatically hidden.' : shouldShow ? 'Member is now visible.' : ''}`);
       fetchMembers();
       fetchHiddenMembers();
       
@@ -369,7 +407,7 @@ const Members = () => {
     }
   };
 
-  const handleRestoreMember = async (memberId: string) => {
+  const handleRestoreMember = async (memberId: string, currentStatus: string | null = null) => {
     if (!confirm('Restore this member? They will appear in the main members list again.')) {
       return;
     }
@@ -378,13 +416,21 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
+      // Determine new status - if current status is not attending, change to newcomer
+      let newStatus = currentStatus || 'newcomer';
+      let not_attending_reason = null;
+      
+      if (shouldBeHidden(currentStatus)) {
+        newStatus = 'newcomer';
+      }
+      
       const { error: restoreError } = await supabase
         .from('members')
         .update({ 
           is_hidden: false,
-          status: 'newcomer',
+          status: newStatus,
           status_date: new Date().toISOString(),
-          not_attending_reason: null
+          not_attending_reason
         })
         .eq('id', memberId);
 
@@ -473,7 +519,9 @@ const Members = () => {
     
     const statusLower = status.toLowerCase();
     
-    if (statusLower.includes('newcomer')) {
+    if (shouldBeHidden(status)) {
+      return { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: status };
+    } else if (statusLower.includes('newcomer')) {
       return { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: status };
     } else if (statusLower.includes('member') && !statusLower.includes('signed') && !statusLower.includes('permanent')) {
       return { color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', text: status };
@@ -481,8 +529,6 @@ const Members = () => {
       return { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: status };
     } else if (statusLower.includes('permanent')) {
       return { color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', text: status };
-    } else if (statusLower.includes('inactive')) {
-      return { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: status };
     } else {
       return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: status };
     }
@@ -554,6 +600,8 @@ const Members = () => {
                       <option value="member">Member</option>
                       <option value="signed_member">Signed Member</option>
                       <option value="permanent">Permanent</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="stopped attending">Stopped Attending</option>
                     </>
                   )}
                 </select>
@@ -632,9 +680,10 @@ const Members = () => {
                     checked={editFormData.is_hidden}
                     onChange={(e) => setEditFormData({ ...editFormData, is_hidden: e.target.checked })}
                     className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    disabled={shouldBeHidden(editFormData.status)}
                   />
-                  <label htmlFor="is_hidden" className="text-sm text-gray-600 dark:text-gray-400">
-                    Hidden Member
+                  <label htmlFor="is_hidden" className={`text-sm ${shouldBeHidden(editFormData.status) ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    {shouldBeHidden(editFormData.status) ? 'Automatically hidden due to status' : 'Hidden Member'}
                   </label>
                 </div>
               </div>
@@ -662,9 +711,22 @@ const Members = () => {
                       <option value="signed_member">Signed Member</option>
                       <option value="permanent">Permanent</option>
                       <option value="inactive">Inactive</option>
+                      <option value="stopped attending">Stopped Attending</option>
+                      <option value="not attending">Not Attending</option>
+                      <option value="left">Left</option>
                     </>
                   )}
                 </select>
+                {shouldBeHidden(editFormData.status) && (
+                  <span className="text-xs text-red-600 dark:text-red-400">
+                    (Will auto-hide)
+                  </span>
+                )}
+                {shouldBeShown(editFormData.status) && isHidden && (
+                  <span className="text-xs text-green-600 dark:text-green-400">
+                    (Will auto-show)
+                  </span>
+                )}
               </div>
               
               <div className="flex items-center gap-3">
@@ -806,7 +868,7 @@ const Members = () => {
               {isHidden ? (
                 <>
                   <button
-                    onClick={() => handleRestoreMember(member.id)}
+                    onClick={() => handleRestoreMember(member.id, member.status)}
                     className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                   >
                     <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
