@@ -391,6 +391,7 @@ const Events = () => {
   const [showBulkAttendanceModal, setShowBulkAttendanceModal] = useState<string | null>(null);
   const [showNewcomerModal, setShowNewcomerModal] = useState<string | null>(null);
   const [showSyncModal, setShowSyncModal] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   
   const attendanceNotesRef = useRef<Record<string, string>>({});
 
@@ -663,6 +664,84 @@ const Events = () => {
     fetchMinistryGroups, 
     fetchDepartments
   ]);
+
+  // Delete Event Functionality
+  const handleDeleteEvent = async (eventId: string) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      // 1. Delete associated sermons and their files
+      const eventSermons = sermons.filter(s => s.event_id === eventId);
+      for (const sermon of eventSermons) {
+        if (sermon.video_url) {
+          await deleteSermonFile(sermon.video_url, 'video');
+        }
+        if (sermon.document_url) {
+          await deleteSermonFile(sermon.document_url, 'document');
+        }
+        
+        const { error: sermonError } = await supabase
+          .from('sermons')
+          .delete()
+          .eq('id', sermon.id);
+
+        if (sermonError) {
+          console.warn('Failed to delete sermon:', sermonError);
+        }
+      }
+
+      // 2. Delete event pamphlet if exists
+      if (event.pamphlet_url) {
+        const urlParts = event.pamphlet_url.split('/');
+        const fileName = urlParts[urlParts.length - 1];
+        const filePath = `event-pamphlets/${fileName}`;
+
+        const { error: pamphletError } = await supabase.storage
+          .from('event-pamphlets')
+          .remove([filePath]);
+
+        if (pamphletError) {
+          console.warn('Failed to delete pamphlet file:', pamphletError);
+        }
+      }
+
+      // 3. Delete event attendees (cascade should handle this, but we do it explicitly)
+      const { error: attendeesError } = await supabase
+        .from('event_attendees')
+        .delete()
+        .eq('event_id', eventId);
+
+      if (attendeesError) {
+        console.warn('Failed to delete event attendees:', attendeesError);
+      }
+
+      // 4. Delete the event itself
+      const { error: eventError } = await supabase
+        .from('events')
+        .delete()
+        .eq('id', eventId);
+
+      if (eventError) throw eventError;
+
+      // 5. Update local state
+      setEvents(prev => prev.filter(event => event.id !== eventId));
+      setSermons(prev => prev.filter(sermon => sermon.event_id !== eventId));
+      setAttendees(prev => prev.filter(attendee => attendee.event_id !== eventId));
+
+      setSuccess(`Event "${event.name}" deleted successfully!`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error: any) {
+      console.error('Error deleting event:', error);
+      setError(error.message || 'Failed to delete event. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
@@ -2493,6 +2572,87 @@ const Events = () => {
     );
   };
 
+  const DeleteConfirmModal = () => {
+    if (!showDeleteConfirm) return null;
+
+    const event = events.find(e => e.id === showDeleteConfirm);
+    if (!event) return null;
+
+    const eventAttendees = getEventAttendees(event.id);
+    const eventSermons = sermons.filter(s => s.event_id === event.id);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full">
+          <div className="p-6">
+            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/30">
+              <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white text-center mb-2">
+              Delete Event
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 text-center mb-6">
+              Are you sure you want to delete "<span className="font-semibold">{event.name}</span>"?
+            </p>
+            
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 mb-6">
+              <h4 className="font-semibold text-red-800 dark:text-red-300 mb-2">This will permanently delete:</h4>
+              <ul className="space-y-1 text-sm text-red-700 dark:text-red-400">
+                <li className="flex items-center gap-2">
+                  <X className="h-3 w-3" />
+                  Event details and information
+                </li>
+                <li className="flex items-center gap-2">
+                  <X className="h-3 w-3" />
+                  {eventAttendees.length} attendee records
+                </li>
+                <li className="flex items-center gap-2">
+                  <X className="h-3 w-3" />
+                  {eventSermons.length} sermon{eventSermons.length !== 1 ? 's' : ''} and associated files
+                </li>
+                {event.pamphlet_url && (
+                  <li className="flex items-center gap-2">
+                    <X className="h-3 w-3" />
+                    Event pamphlet file
+                  </li>
+                )}
+              </ul>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
+                className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleDeleteEvent(event.id);
+                  setShowDeleteConfirm(null);
+                }}
+                disabled={loading}
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    <span>Delete Event</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Sermon List Component
   const SermonList = () => {
     const formatDate = (dateString: string) => {
@@ -3286,6 +3446,15 @@ const Events = () => {
                         <Upload className="h-4 w-4" />
                         Sync to Cloud
                       </button>
+                      {hasAccess() && (
+                        <button
+                          onClick={() => setShowDeleteConfirm(event.id)}
+                          className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete Event
+                        </button>
+                      )}
                       <button
                         onClick={() => openAttendeeModal('present', event.id)}
                         className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
@@ -3514,6 +3683,7 @@ const Events = () => {
       <NewcomerModal />
       <AttendeeModal />
       <SyncModal />
+      <DeleteConfirmModal />
     </div>
   );
 };
