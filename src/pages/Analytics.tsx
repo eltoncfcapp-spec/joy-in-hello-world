@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, Percent, UserCheck, Clock, Award, MapPin, Mail, Phone, Home, Download, RefreshCw, Eye, ChevronRight } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, Percent, UserCheck, Clock, Award, MapPin, Mail, Phone, Home, Download, RefreshCw, Eye, EyeOff, ChevronRight } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -26,6 +26,7 @@ interface AbsentMember {
   gender: string;
   residence: string | null;
   status: string;
+  is_hidden?: boolean;
 }
 
 interface AttendanceReport {
@@ -64,6 +65,9 @@ interface GrowthMetrics {
   average_sunday_attendance: number;
   retention_rate: number;
   conversion_rate: number;
+  non_active_members: number; // New
+  non_active_rate: number; // New
+  potential_return_members: number; // New
 }
 
 interface CellGroupStats {
@@ -78,6 +82,7 @@ interface CellGroupStats {
   baptism_count: number;
   location: string;
   meeting_day: string;
+  non_active_count: number; // New
 }
 
 interface DepartmentStats {
@@ -91,6 +96,7 @@ interface DepartmentStats {
   new_members: number;
   baptism_count: number;
   purpose: string;
+  non_active_count: number; // New
 }
 
 interface InviterStats {
@@ -99,6 +105,7 @@ interface InviterStats {
   new_members_count: number;
   baptism_count: number;
   conversion_rate: number;
+  non_active_count: number; // New
 }
 
 interface GenderStats {
@@ -110,6 +117,35 @@ interface GenderStats {
   female_baptized: number;
   male_attendance_rate: number;
   female_attendance_rate: number;
+  male_non_active: number; // New
+  female_non_active: number; // New
+  non_active_rate: number; // New
+}
+
+interface NonActiveMember {
+  id: string;
+  name: string;
+  surname: string;
+  email: string | null;
+  phone: string | null;
+  last_attendance_date: string | null;
+  cell_group_name: string | null;
+  department_name: string | null;
+  member_since: string;
+  gender: string;
+  residence: string | null;
+  status: string;
+  not_attending_reason: string | null;
+  days_non_active: number;
+  potential_return_score: number;
+}
+
+interface NonActiveMetrics {
+  total: number;
+  by_reason: Record<string, number>;
+  by_gender: { male: number; female: number };
+  avg_time_non_active: number;
+  potential_return_rate: number;
 }
 
 interface FilterState {
@@ -122,6 +158,7 @@ interface FilterState {
   date_to: string;
   status: 'all' | 'newcomer' | 'signed_member' | 'not_attending';
   baptism_status: 'all' | 'baptized' | 'not_baptized';
+  member_visibility: 'all' | 'active' | 'non-active'; // New filter
 }
 
 const Analytics = () => {
@@ -148,7 +185,10 @@ const Analytics = () => {
     average_attendance_rate: 0,
     average_sunday_attendance: 0,
     retention_rate: 0,
-    conversion_rate: 0
+    conversion_rate: 0,
+    non_active_members: 0,
+    non_active_rate: 0,
+    potential_return_members: 0
   });
   const [cellGroupStats, setCellGroupStats] = useState<CellGroupStats[]>([]);
   const [departmentStats, setDepartmentStats] = useState<DepartmentStats[]>([]);
@@ -161,12 +201,23 @@ const Analytics = () => {
     male_baptized: 0,
     female_baptized: 0,
     male_attendance_rate: 0,
-    female_attendance_rate: 0
+    female_attendance_rate: 0,
+    male_non_active: 0,
+    female_non_active: 0,
+    non_active_rate: 0
+  });
+  const [nonActiveMembers, setNonActiveMembers] = useState<NonActiveMember[]>([]);
+  const [nonActiveMetrics, setNonActiveMetrics] = useState<NonActiveMetrics>({
+    total: 0,
+    by_reason: {},
+    by_gender: { male: 0, female: 0 },
+    avg_time_non_active: 0,
+    potential_return_rate: 0
   });
   const [cellGroups, setCellGroups] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments'>('cell-groups');
+  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments' | 'non-active'>('cell-groups');
   const [exporting, setExporting] = useState(false);
 
   // Default date range: last 30 days
@@ -182,7 +233,8 @@ const Analytics = () => {
     date_from: defaultDateFrom.toISOString().split('T')[0],
     date_to: new Date().toISOString().split('T')[0],
     status: 'all',
-    baptism_status: 'all'
+    baptism_status: 'all',
+    member_visibility: 'active' // Default to active members only
   });
 
   useEffect(() => {
@@ -199,13 +251,15 @@ const Analytics = () => {
         cellGroupsData,
         departmentsData,
         eventsData,
-        eventAttendeesData
+        eventAttendeesData,
+        nonActiveMembersData
       ] = await Promise.all([
         buildMembersQuery(),
         supabase.from('cell_groups').select('*'),
         supabase.from('departments').select('*'),
         buildEventsQuery(),
-        buildEventAttendeesQuery()
+        buildEventAttendeesQuery(),
+        fetchNonActiveMembers()
       ]);
 
       if (membersData.error) throw membersData.error;
@@ -219,17 +273,40 @@ const Analytics = () => {
       const allDepartments = departmentsData.data || [];
       const events = eventsData.data || [];
       const eventAttendees = eventAttendeesData.data || [];
+      const nonActiveMembers = nonActiveMembersData || [];
 
       setCellGroups(allCellGroups);
       setDepartments(allDepartments);
 
       // Calculate all metrics with real data
-      await calculateAllMetrics(members, allCellGroups, allDepartments, events, eventAttendees);
+      await calculateAllMetrics(members, allCellGroups, allDepartments, events, eventAttendees, nonActiveMembers);
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNonActiveMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select(`
+          *,
+          cell_groups!fk_cell_group(name),
+          department_members(
+            departments(id, name)
+          )
+        `)
+        .eq('is_hidden', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching non-active members:', error);
+      return [];
     }
   };
 
@@ -244,6 +321,13 @@ const Analytics = () => {
         )
       `);
 
+    // Apply member visibility filter
+    if (filters.member_visibility === 'active') {
+      query = query.eq('is_hidden', false);
+    } else if (filters.member_visibility === 'non-active') {
+      query = query.eq('is_hidden', true);
+    }
+
     // Apply gender filter
     if (filters.gender !== 'all') {
       query = query.eq('gender', filters.gender);
@@ -256,7 +340,12 @@ const Analytics = () => {
 
     // Apply status filter
     if (filters.status !== 'all') {
-      query = query.eq('status', filters.status);
+      if (filters.status === 'not_attending') {
+        // For not attending, we need to check status values that indicate not attending
+        query = query.or('status.ilike.%inactive%,status.ilike.%stopped%,status.ilike.%left%');
+      } else {
+        query = query.eq('status', filters.status);
+      }
     }
 
     return query;
@@ -298,7 +387,7 @@ const Analytics = () => {
     return query;
   };
 
-  const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[]) => {
+  const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[], nonActiveMembersList: any[]) => {
     // Calculate basic statistics with real data
     const totalMembers = members.length;
     const totalCellGroups = cellGroups.length;
@@ -337,15 +426,91 @@ const Analytics = () => {
       ? Math.round(((baptismsThisMonth - baptismsLastMonth) / baptismsLastMonth) * 100)
       : baptismsThisMonth > 0 ? 100 : 0;
 
-    // Update main stats with real data
+    // Calculate non-active metrics
+    const totalNonActive = nonActiveMembersList.length;
+    const nonActiveRate = members.length > 0 ? Math.round((totalNonActive / (members.length + totalNonActive)) * 100) : 0;
+    
+    // Calculate non-active by gender
+    const nonActiveByGender = {
+      male: nonActiveMembersList.filter(m => m.gender === 'male').length,
+      female: nonActiveMembersList.filter(m => m.gender === 'female').length
+    };
+
+    // Calculate non-active by reason
+    const nonActiveByReason: Record<string, number> = {};
+    nonActiveMembersList.forEach(member => {
+      const reason = member.not_attending_reason || 'No reason provided';
+      nonActiveByReason[reason] = (nonActiveByReason[reason] || 0) + 1;
+    });
+
+    // Calculate average time non-active
+    const now = new Date();
+    const totalDaysNonActive = nonActiveMembersList.reduce((sum, member) => {
+      const statusDate = member.status_date ? new Date(member.status_date) : new Date(member.created_at);
+      const daysDiff = Math.floor((now.getTime() - statusDate.getTime()) / (1000 * 60 * 60 * 24));
+      return sum + daysDiff;
+    }, 0);
+    const avgTimeNonActive = totalNonActive > 0 ? Math.round(totalDaysNonActive / totalNonActive) : 0;
+
+    // Calculate potential return rate (members non-active for less than 90 days)
+    const potentialReturnMembers = nonActiveMembersList.filter(member => {
+      const statusDate = member.status_date ? new Date(member.status_date) : new Date(member.created_at);
+      const daysDiff = Math.floor((now.getTime() - statusDate.getTime()) / (1000 * 60 * 60 * 24));
+      return daysDiff < 90;
+    }).length;
+    const potentialReturnRate = totalNonActive > 0 ? Math.round((potentialReturnMembers / totalNonActive) * 100) : 0;
+
+    // Prepare non-active members for display
+    const formattedNonActiveMembers: NonActiveMember[] = nonActiveMembersList.map(member => {
+      const statusDate = member.status_date ? new Date(member.status_date) : new Date(member.created_at);
+      const daysDiff = Math.floor((now.getTime() - statusDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      return {
+        id: member.id,
+        name: member.name,
+        surname: member.surname,
+        email: member.email,
+        phone: member.phone,
+        last_attendance_date: member.status_date,
+        cell_group_name: member.cell_groups?.name || null,
+        department_name: member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null,
+        member_since: member.created_at,
+        gender: member.gender || 'unknown',
+        residence: member.residence,
+        status: member.status,
+        not_attending_reason: member.not_attending_reason,
+        days_non_active: daysDiff,
+        potential_return_score: daysDiff < 90 ? 100 - Math.min(100, Math.round((daysDiff / 90) * 100)) : 0
+      };
+    });
+
+    setNonActiveMembers(formattedNonActiveMembers);
+    setNonActiveMetrics({
+      total: totalNonActive,
+      by_reason: nonActiveByReason,
+      by_gender: nonActiveByGender,
+      avg_time_non_active: avgTimeNonActive,
+      potential_return_rate: potentialReturnRate
+    });
+
+    // Update main stats with real data including non-active members
+    const totalAllMembers = members.length + totalNonActive;
     setStats([
       { 
         icon: Users, 
-        label: 'Total Members', 
+        label: 'Active Members', 
         value: totalMembers.toString(), 
         color: 'bg-blue-50 dark:bg-blue-900/20',
         description: `${members.filter(m => m.status === 'signed_member').length} signed members`,
         trend: 5.2
+      },
+      { 
+        icon: EyeOff, 
+        label: 'Non-active Members', 
+        value: totalNonActive.toString(), 
+        color: 'bg-amber-50 dark:bg-amber-900/20',
+        description: `${nonActiveRate}% of total members`,
+        trend: -2.1
       },
       { 
         icon: Users, 
@@ -382,18 +547,18 @@ const Analytics = () => {
     ]);
 
     // Calculate all detailed metrics with real data
-    await calculateGrowthMetrics(members);
-    await calculateGenderStats(members, eventAttendees);
-    await calculateInviterStats(members);
+    await calculateGrowthMetrics(members, totalNonActive, potentialReturnMembers);
+    await calculateGenderStats(members, eventAttendees, nonActiveMembersList);
+    await calculateInviterStats(members, nonActiveMembersList);
     await generateAttendanceReports(events, members, eventAttendees);
-    await calculateCellGroupStats(cellGroups, events, members, eventAttendees);
-    await calculateDepartmentStats(departments, events, members, eventAttendees);
+    await calculateCellGroupStats(cellGroups, events, members, eventAttendees, nonActiveMembersList);
+    await calculateDepartmentStats(departments, events, members, eventAttendees, nonActiveMembersList);
     await findConsecutiveAbsences(members, events, eventAttendees, cellGroups, departments);
     await findSundayServiceAbsentees(members, events, eventAttendees, cellGroups, departments);
     await findThreeTimeAbsentees(members, events, eventAttendees, cellGroups, departments);
   };
 
-  const calculateGrowthMetrics = async (members: any[]) => {
+  const calculateGrowthMetrics = async (members: any[], totalNonActive: number, potentialReturnMembers: number) => {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
@@ -457,7 +622,12 @@ const Analytics = () => {
       ? Math.round(((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100)
       : newMembersThisMonth > 0 ? 100 : 0;
 
-    setGrowthMetrics({
+    // Calculate non-active rate
+    const totalAllMembers = members.length + totalNonActive;
+    const nonActiveRate = totalAllMembers > 0 ? Math.round((totalNonActive / totalAllMembers) * 100) : 0;
+
+    setGrowthMetrics(prev => ({
+      ...prev,
       new_members_this_month: newMembersInRange,
       new_members_last_month: newMembersLastMonth,
       growth_rate: growthRate,
@@ -465,7 +635,6 @@ const Analytics = () => {
       newcomers: totalNewcomers,
       total_members: members.length,
       became_members_this_month: becameMembersInRange,
-      became_members_last_month: 0,
       baptism_this_month: baptismsThisMonth,
       baptism_last_month: baptismsLastMonth,
       baptism_growth_rate: baptismGrowthRate,
@@ -477,11 +646,14 @@ const Analytics = () => {
       average_attendance_rate: 75,
       average_sunday_attendance: 85,
       retention_rate: retentionRate,
-      conversion_rate: conversionRate
-    });
+      conversion_rate: conversionRate,
+      non_active_members: totalNonActive,
+      non_active_rate: nonActiveRate,
+      potential_return_members: potentialReturnMembers
+    }));
   };
 
-  const calculateGenderStats = async (members: any[], eventAttendees: any[]) => {
+  const calculateGenderStats = async (members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
     // Real gender data from members
     const maleMembers = members.filter(m => m.gender === 'male');
     const femaleMembers = members.filter(m => m.gender === 'female');
@@ -502,8 +674,15 @@ const Analytics = () => {
     const maleBaptized = baptizedMembers.filter(m => m.gender === 'male').length;
     const femaleBaptized = baptizedMembers.filter(m => m.gender === 'female').length;
 
+    // Calculate non-active by gender
+    const maleNonActive = nonActiveMembers.filter(m => m.gender === 'male').length;
+    const femaleNonActive = nonActiveMembers.filter(m => m.gender === 'female').length;
+
     const maleAttendanceRate = maleMembers.length > 0 ? Math.round((malePresent / maleMembers.length) * 100) : 0;
     const femaleAttendanceRate = femaleMembers.length > 0 ? Math.round((femalePresent / femaleMembers.length) * 100) : 0;
+    
+    const totalAllMembers = members.length + nonActiveMembers.length;
+    const nonActiveRate = totalAllMembers > 0 ? Math.round(((maleNonActive + femaleNonActive) / totalAllMembers) * 100) : 0;
 
     setGenderStats({
       male: maleMembers.length,
@@ -513,16 +692,22 @@ const Analytics = () => {
       male_baptized: maleBaptized,
       female_baptized: femaleBaptized,
       male_attendance_rate: maleAttendanceRate,
-      female_attendance_rate: femaleAttendanceRate
+      female_attendance_rate: femaleAttendanceRate,
+      male_non_active: maleNonActive,
+      female_non_active: femaleNonActive,
+      non_active_rate: nonActiveRate
     });
   };
 
-  const calculateInviterStats = async (members: any[]) => {
+  const calculateInviterStats = async (members: any[], nonActiveMembers: any[]) => {
+    // Combine active and non-active members for inviter stats
+    const allMembers = [...members, ...nonActiveMembers];
+    
     // Real inviter data from members table
     const inviterMap = new Map();
     
     // Get all unique inviters from members
-    const allInviters = members.filter(member => member.invited_by).map(member => member.invited_by);
+    const allInviters = allMembers.filter(member => member.invited_by).map(member => member.invited_by);
     
     allInviters.forEach(inviter => {
       if (inviter && inviter.trim() !== '') {
@@ -533,9 +718,10 @@ const Analytics = () => {
 
     const inviterStatsArray: InviterStats[] = Array.from(inviterMap.entries())
       .map(([invited_by, invite_count]) => {
-        const invitedMembers = members.filter(m => m.invited_by === invited_by);
+        const invitedMembers = allMembers.filter(m => m.invited_by === invited_by);
         const newMembersCount = invitedMembers.filter(m => m.status === 'newcomer').length;
         const baptismCount = invitedMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
+        const nonActiveCount = invitedMembers.filter(m => m.is_hidden).length;
         const conversionRate = invite_count > 0 ? Math.round((baptismCount / invite_count) * 100) : 0;
 
         return {
@@ -543,7 +729,8 @@ const Analytics = () => {
           invite_count,
           new_members_count: newMembersCount,
           baptism_count: baptismCount,
-          conversion_rate: conversionRate
+          conversion_rate: conversionRate,
+          non_active_count: nonActiveCount
         };
       })
       .sort((a, b) => b.invite_count - a.invite_count)
@@ -600,14 +787,17 @@ const Analytics = () => {
     setAttendanceReports(reports.slice(0, 10));
   };
 
-  const calculateCellGroupStats = async (cellGroups: any[], events: any[], members: any[], eventAttendees: any[]) => {
+  const calculateCellGroupStats = async (cellGroups: any[], events: any[], members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
     const stats: CellGroupStats[] = [];
 
     for (const group of cellGroups) {
-      // Real query for group members
+      // Real query for group members (active)
       const groupMembers = members.filter(member => member.cell_group_id === group.id);
+      
+      // Real query for non-active group members
+      const nonActiveGroupMembers = nonActiveMembers.filter(member => member.cell_group_id === group.id);
 
-      if (!groupMembers || groupMembers.length === 0) continue;
+      if ((!groupMembers || groupMembers.length === 0) && (!nonActiveGroupMembers || nonActiveGroupMembers.length === 0)) continue;
 
       const groupMemberIds = groupMembers.map(m => m.id);
       
@@ -639,7 +829,7 @@ const Analytics = () => {
 
       stats.push({
         group_name: group.name,
-        total_members: groupMembers.length,
+        total_members: groupMembers.length + nonActiveGroupMembers.length,
         avg_attendance: avgAttendance,
         meetings_this_month: events.length,
         leader_name: leaderName,
@@ -648,23 +838,29 @@ const Analytics = () => {
         new_members: groupMembers.filter(m => m.status === 'newcomer').length,
         baptism_count: groupBaptisms,
         location: group.location || 'Not specified',
-        meeting_day: group.meeting_day || 'Not specified'
+        meeting_day: group.meeting_day || 'Not specified',
+        non_active_count: nonActiveGroupMembers.length
       });
     }
 
     setCellGroupStats(stats.filter(group => group.total_members > 0));
   };
 
-  const calculateDepartmentStats = async (departments: any[], events: any[], members: any[], eventAttendees: any[]) => {
+  const calculateDepartmentStats = async (departments: any[], events: any[], members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
     const stats: DepartmentStats[] = [];
 
     for (const department of departments) {
-      // Get department members through department_members relationship
+      // Get department members through department_members relationship (active)
       const departmentMembers = members.filter(member => 
         member.department_members?.some((dm: any) => dm.departments.id === department.id)
       );
 
-      if (!departmentMembers || departmentMembers.length === 0) continue;
+      // Get non-active department members
+      const nonActiveDepartmentMembers = nonActiveMembers.filter(member => 
+        member.department_members?.some((dm: any) => dm.departments.id === department.id)
+      );
+
+      if ((!departmentMembers || departmentMembers.length === 0) && (!nonActiveDepartmentMembers || nonActiveDepartmentMembers.length === 0)) continue;
 
       const departmentMemberIds = departmentMembers.map(m => m.id);
       
@@ -696,7 +892,7 @@ const Analytics = () => {
 
       stats.push({
         department_name: department.name,
-        total_members: departmentMembers.length,
+        total_members: departmentMembers.length + nonActiveDepartmentMembers.length,
         avg_attendance: avgAttendance,
         meetings_this_month: events.length,
         leader_name: leaderName,
@@ -704,7 +900,8 @@ const Analytics = () => {
         previous_month_attendance: Math.max(0, avgAttendance - 10),
         new_members: departmentMembers.filter(m => m.status === 'newcomer').length,
         baptism_count: departmentBaptisms,
-        purpose: department.purpose || 'Not specified'
+        purpose: department.purpose || 'Not specified',
+        non_active_count: nonActiveDepartmentMembers.length
       });
     }
 
@@ -884,7 +1081,8 @@ const Analytics = () => {
       date_from: defaultDateFrom.toISOString().split('T')[0],
       date_to: new Date().toISOString().split('T')[0],
       status: 'all',
-      baptism_status: 'all'
+      baptism_status: 'all',
+      member_visibility: 'active'
     });
   };
 
@@ -895,7 +1093,8 @@ const Analytics = () => {
            filters.attendance_status !== 'all' || 
            filters.meeting_type !== 'all' ||
            filters.status !== 'all' ||
-           filters.baptism_status !== 'all';
+           filters.baptism_status !== 'all' ||
+           filters.member_visibility !== 'active';
   };
 
   const handlePrintAnalytics = () => {
@@ -922,6 +1121,7 @@ const Analytics = () => {
             .table th, .table td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
             .table th { background: #f3f4f6; font-weight: 600; }
             .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 11px; }
+            .non-active-alert { background: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px; margin: 15px 0; }
             @media print { 
               body { padding: 10px; }
               .stats-grid { grid-template-columns: repeat(3, 1fr); }
@@ -938,8 +1138,16 @@ const Analytics = () => {
           <h1>📊 Church Analytics Report</h1>
           <div class="header-info">
             <p><strong>Report Period:</strong> ${filters.date_from} to ${filters.date_to}</p>
+            <p><strong>Member Filter:</strong> ${filters.member_visibility === 'all' ? 'All Members' : filters.member_visibility === 'active' ? 'Active Members Only' : 'Non-active Members Only'}</p>
             <p><strong>Generated:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
           </div>
+
+          ${growthMetrics.non_active_members > 0 ? `
+          <div class="non-active-alert">
+            <p><strong>⚠️ Non-active Members Alert:</strong> ${growthMetrics.non_active_members} members (${growthMetrics.non_active_rate}% of total) are currently non-active.</p>
+            <p><strong>Potential Return:</strong> ${growthMetrics.potential_return_members} members have been non-active for less than 90 days.</p>
+          </div>
+          ` : ''}
 
           <h2>📈 Key Metrics</h2>
           <div class="stats-grid">
@@ -969,6 +1177,14 @@ const Analytics = () => {
               <div class="stat-value">${growthMetrics.baptism_this_month}</div>
               <div class="stat-label">Baptisms This Month</div>
             </div>
+            <div class="quick-stat">
+              <div class="stat-value">${genderStats.male_non_active}</div>
+              <div class="stat-label">Non-active Male</div>
+            </div>
+            <div class="quick-stat">
+              <div class="stat-value">${genderStats.female_non_active}</div>
+              <div class="stat-label">Non-active Female</div>
+            </div>
           </div>
 
           <h2>💧 Baptism Statistics</h2>
@@ -996,7 +1212,9 @@ const Analytics = () => {
             <thead>
               <tr>
                 <th>Group Name</th>
-                <th>Members</th>
+                <th>Total Members</th>
+                <th>Active Members</th>
+                <th>Non-active</th>
                 <th>Avg Attendance</th>
                 <th>Baptisms</th>
               </tr>
@@ -1006,6 +1224,8 @@ const Analytics = () => {
                 <tr>
                   <td>${group.group_name}</td>
                   <td>${group.total_members}</td>
+                  <td>${group.total_members - group.non_active_count}</td>
+                  <td>${group.non_active_count}</td>
                   <td>${group.avg_attendance}%</td>
                   <td>${group.baptism_count}</td>
                 </tr>
@@ -1018,7 +1238,9 @@ const Analytics = () => {
             <thead>
               <tr>
                 <th>Department Name</th>
-                <th>Members</th>
+                <th>Total Members</th>
+                <th>Active Members</th>
+                <th>Non-active</th>
                 <th>Avg Attendance</th>
                 <th>Baptisms</th>
               </tr>
@@ -1028,8 +1250,30 @@ const Analytics = () => {
                 <tr>
                   <td>${dept.department_name}</td>
                   <td>${dept.total_members}</td>
+                  <td>${dept.total_members - dept.non_active_count}</td>
+                  <td>${dept.non_active_count}</td>
                   <td>${dept.avg_attendance}%</td>
                   <td>${dept.baptism_count}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <h2>📊 Non-active Members Analysis</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Reason for Non-attendance</th>
+                <th>Count</th>
+                <th>Percentage</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${Object.entries(nonActiveMetrics.by_reason).map(([reason, count]) => `
+                <tr>
+                  <td>${reason}</td>
+                  <td>${count}</td>
+                  <td>${nonActiveMetrics.total > 0 ? Math.round((count / nonActiveMetrics.total) * 100) : 0}%</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1043,6 +1287,7 @@ const Analytics = () => {
                 <th>Rank</th>
                 <th>Inviter Name</th>
                 <th>Total Invited</th>
+                <th>Non-active</th>
               </tr>
             </thead>
             <tbody>
@@ -1051,6 +1296,7 @@ const Analytics = () => {
                   <td>${index + 1}</td>
                   <td>${inviter.invited_by}</td>
                   <td>${inviter.invite_count}</td>
+                  <td>${inviter.non_active_count}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1091,13 +1337,18 @@ const Analytics = () => {
       ['Male Baptized', growthMetrics.baptism_by_gender.male],
       ['Female Baptized', growthMetrics.baptism_by_gender.female],
       ['Baptism Growth Rate', `${growthMetrics.baptism_growth_rate}%`],
+      ['Non-active Members', growthMetrics.non_active_members],
+      ['Non-active Rate', `${growthMetrics.non_active_rate}%`],
+      ['Potential Return Members', growthMetrics.potential_return_members],
       [],
       // Cell Groups
       ['Cell Group Performance'],
-      ['Group Name', 'Members', 'Avg Attendance', 'Baptisms', 'Trend'],
+      ['Group Name', 'Total Members', 'Active Members', 'Non-active Members', 'Avg Attendance', 'Baptisms', 'Trend'],
       ...cellGroupStats.map(group => [
         group.group_name,
         group.total_members,
+        group.total_members - group.non_active_count,
+        group.non_active_count,
         `${group.avg_attendance}%`,
         group.baptism_count,
         group.trend
@@ -1206,6 +1457,22 @@ const Analytics = () => {
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              {/* Member Visibility Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Member Visibility
+                </label>
+                <select
+                  value={filters.member_visibility}
+                  onChange={(e) => setFilters({...filters, member_visibility: e.target.value as any})}
+                  className="w-full px-3 py-2.5 min-h-[44px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm sm:text-base"
+                >
+                  <option value="active">Active Members Only</option>
+                  <option value="non-active">Non-active Members Only</option>
+                  <option value="all">All Members</option>
+                </select>
+              </div>
+
               {/* Gender Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1323,7 +1590,8 @@ const Analytics = () => {
               <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                 <div className="text-sm text-blue-700 dark:text-blue-300">
                   Active Filters: 
-                  {filters.gender !== 'all' && ` ${filters.gender}`}
+                  {filters.member_visibility !== 'active' && ` ${filters.member_visibility} members`}
+                  {filters.gender !== 'all' && `, ${filters.gender}`}
                   {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
                   {filters.department !== 'all' && `, ${departments.find(d => d.id === filters.department)?.name || 'Selected Department'}`}
                   {filters.status !== 'all' && `, ${filters.status}`}
@@ -1334,8 +1602,42 @@ const Analytics = () => {
           </div>
         )}
 
+        {/* Non-active Members Alert */}
+        {growthMetrics.non_active_members > 0 && filters.member_visibility !== 'non-active' && (
+          <div className="mb-6 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-700/50 rounded-2xl p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+              <div className="flex items-center gap-3">
+                <EyeOff className="h-5 w-5 sm:h-6 sm:w-6 text-amber-600 dark:text-amber-400" />
+                <div>
+                  <h3 className="font-bold text-amber-900 dark:text-amber-300 text-sm sm:text-base">
+                    Non-active Members Alert
+                  </h3>
+                  <p className="text-amber-700 dark:text-amber-400 text-xs sm:text-sm">
+                    {growthMetrics.non_active_members} members ({growthMetrics.non_active_rate}% of total) are currently non-active
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="text-center px-2 sm:px-3 py-1 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+                  <div className="text-base sm:text-lg font-bold text-amber-700 dark:text-amber-300">
+                    {growthMetrics.potential_return_members}
+                  </div>
+                  <div className="text-xs text-amber-600 dark:text-amber-400">Potential Return</div>
+                </div>
+                <button
+                  onClick={() => setFilters({...filters, member_visibility: 'non-active'})}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors font-medium text-xs sm:text-sm"
+                >
+                  <EyeOff className="h-3 w-3 sm:h-4 sm:w-4" />
+                  View Details
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Main Stats Grid - Mobile Optimized */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 md:gap-6 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 sm:gap-4 md:gap-6 mb-8">
           {stats.map((stat, index) => (
             <div key={index} className={`${stat.color} rounded-2xl p-4 sm:p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
               <div className="flex items-center gap-3 sm:gap-4">
@@ -1403,7 +1705,7 @@ const Analytics = () => {
               </div>
               <div className="text-center p-3 sm:p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
                 <div className="text-lg sm:text-xl md:text-2xl font-bold text-indigo-600 dark:text-indigo-400 mb-1">
-                  {Math.round((growthMetrics.total_baptisms / growthMetrics.total_members) * 100)}%
+                  {Math.round((growthMetrics.total_baptisms / (growthMetrics.total_members + growthMetrics.non_active_members)) * 100)}%
                 </div>
                 <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Baptism Rate</div>
               </div>
@@ -1439,16 +1741,16 @@ const Analytics = () => {
             <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 sm:p-4 text-center">
                 <div className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 dark:text-blue-400">{genderStats.male}</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Male Members</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Active Male</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">
-                  {genderStats.male_present} present • {genderStats.male_baptized} baptized
+                  {genderStats.male_non_active} non-active
                 </div>
               </div>
               <div className="bg-pink-50 dark:bg-pink-900/20 rounded-xl p-3 sm:p-4 text-center">
                 <div className="text-lg sm:text-xl md:text-2xl font-bold text-pink-600 dark:text-pink-400">{genderStats.female}</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Female Members</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Active Female</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">
-                  {genderStats.female_present} present • {genderStats.female_baptized} baptized
+                  {genderStats.female_non_active} non-active
                 </div>
               </div>
               <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 sm:p-4 text-center">
@@ -1456,10 +1758,12 @@ const Analytics = () => {
                 <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">New Members</div>
                 <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
               </div>
-              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-3 sm:p-4 text-center">
-                <div className="text-lg sm:text-xl md:text-2xl font-bold text-purple-600 dark:text-purple-400">{growthMetrics.became_members_this_month}</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Became Members</div>
-                <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
+              <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-amber-600 dark:text-amber-400">{growthMetrics.non_active_members}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Non-active</div>
+                <div className="text-xs text-amber-500 dark:text-amber-500">
+                  {growthMetrics.non_active_rate}% of total
+                </div>
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4">
@@ -1494,6 +1798,9 @@ const Analytics = () => {
                       <div className="font-semibold text-gray-900 dark:text-white truncate text-sm sm:text-base">{inviter.invited_by}</div>
                       <div className="text-xs text-gray-600 dark:text-gray-400 truncate">
                         {inviter.new_members_count} new • {inviter.baptism_count} baptized
+                      </div>
+                      <div className="text-xs text-amber-600 dark:text-amber-400">
+                        {inviter.non_active_count} non-active
                       </div>
                     </div>
                   </div>
@@ -1533,7 +1840,10 @@ const Analytics = () => {
                   ></div>
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.male_present} of {genderStats.male} members • {genderStats.male_baptized} baptized
+                  {genderStats.male_present} of {genderStats.male} active • {genderStats.male_baptized} baptized
+                </div>
+                <div className="text-xs text-amber-500 dark:text-amber-500 mt-1">
+                  {genderStats.male_non_active} non-active members
                 </div>
               </div>
               <div>
@@ -1550,22 +1860,31 @@ const Analytics = () => {
                   ></div>
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.female_present} of {genderStats.female} members • {genderStats.female_baptized} baptized
+                  {genderStats.female_present} of {genderStats.female} active • {genderStats.female_baptized} baptized
+                </div>
+                <div className="text-xs text-amber-500 dark:text-amber-500 mt-1">
+                  {genderStats.female_non_active} non-active members
                 </div>
               </div>
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                <div className="grid grid-cols-3 gap-3 sm:gap-4">
                   <div className="text-center">
-                    <div className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    <div className="text-base sm:text-lg font-bold text-blue-600 dark:text-blue-400">
                       {Math.round((genderStats.male_baptized / genderStats.male) * 100) || 0}%
                     </div>
                     <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Male Baptism Rate</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-lg sm:text-xl md:text-2xl font-bold text-pink-600 dark:text-pink-400">
+                    <div className="text-base sm:text-lg font-bold text-pink-600 dark:text-pink-400">
                       {Math.round((genderStats.female_baptized / genderStats.female) * 100) || 0}%
                     </div>
                     <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Female Baptism Rate</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-base sm:text-lg font-bold text-amber-600 dark:text-amber-400">
+                      {genderStats.non_active_rate}%
+                    </div>
+                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Non-active Rate</div>
                   </div>
                 </div>
               </div>
@@ -1601,6 +1920,16 @@ const Analytics = () => {
               >
                 Departments
               </button>
+              <button
+                onClick={() => setActiveTab('non-active')}
+                className={`flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors min-h-[44px] ${
+                  activeTab === 'non-active'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Non-active Members
+              </button>
             </div>
           </div>
 
@@ -1613,7 +1942,7 @@ const Analytics = () => {
                     {getTrendIcon(group.trend)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">
-                    {group.total_members} members • {group.meetings_this_month} meetings
+                    {group.total_members} total • {group.total_members - group.non_active_count} active • {group.non_active_count} non-active
                   </div>
                   <div className="space-y-2 mb-3">
                     <div className="flex justify-between items-center">
@@ -1642,6 +1971,14 @@ const Analytics = () => {
                         {group.baptism_count}
                       </span>
                     </div>
+                    {group.non_active_count > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-amber-500 dark:text-amber-500">Non-active</span>
+                        <span className="text-xs sm:text-sm font-bold text-amber-600 dark:text-amber-400">
+                          {group.non_active_count}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-500 space-y-1">
                     <div className="flex items-center gap-1 truncate">
@@ -1660,7 +1997,7 @@ const Analytics = () => {
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === 'departments' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               {departmentStats.length > 0 ? departmentStats.map((dept, index) => (
                 <div key={index} className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
@@ -1669,7 +2006,7 @@ const Analytics = () => {
                     {getTrendIcon(dept.trend)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">
-                    {dept.total_members} members • {dept.meetings_this_month} meetings
+                    {dept.total_members} total • {dept.total_members - dept.non_active_count} active • {dept.non_active_count} non-active
                   </div>
                   <div className="space-y-2 mb-3">
                     <div className="flex justify-between items-center">
@@ -1698,6 +2035,14 @@ const Analytics = () => {
                         {dept.baptism_count}
                       </span>
                     </div>
+                    {dept.non_active_count > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-amber-500 dark:text-amber-500">Non-active</span>
+                        <span className="text-xs sm:text-sm font-bold text-amber-600 dark:text-amber-400">
+                          {dept.non_active_count}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2">
                     {dept.purpose}
@@ -1706,6 +2051,95 @@ const Analytics = () => {
               )) : (
                 <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
                   No department data available
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Non-active Members Summary */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mb-1">
+                    {nonActiveMetrics.total}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Total Non-active</div>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mb-1">
+                    {nonActiveMetrics.avg_time_non_active}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Avg Days Non-active</div>
+                </div>
+                <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-1">
+                    {nonActiveMetrics.potential_return_rate}%
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Potential Return Rate</div>
+                </div>
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
+                    {growthMetrics.potential_return_members}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Potential Return Members</div>
+                </div>
+              </div>
+
+              {/* Non-active Members List */}
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead>
+                    <tr className="text-left text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                      <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Name</th>
+                      <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Cell Group</th>
+                      <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Days Non-active</th>
+                      <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Return Potential</th>
+                      <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {nonActiveMembers.slice(0, 10).map((member, index) => (
+                      <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-900 dark:text-white">
+                          {member.name} {member.surname}
+                        </td>
+                        <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">{member.cell_group_name || 'Not assigned'}</td>
+                        <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
+                          <span className={`font-medium ${
+                            member.days_non_active < 30 ? 'text-green-600 dark:text-green-400' :
+                            member.days_non_active < 90 ? 'text-amber-600 dark:text-amber-400' :
+                            'text-red-600 dark:text-red-400'
+                          }`}>
+                            {member.days_non_active}
+                          </span>
+                        </td>
+                        <td className="px-2 sm:px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                              <div 
+                                className={`h-2 rounded-full ${
+                                  member.potential_return_score >= 70 ? 'bg-green-500' :
+                                  member.potential_return_score >= 30 ? 'bg-amber-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${member.potential_return_score}%` }}
+                              ></div>
+                            </div>
+                            <span className="text-xs sm:text-sm">{member.potential_return_score}%</span>
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm max-w-[150px] truncate" title={member.not_attending_reason || 'No reason'}>
+                          {member.not_attending_reason || 'No reason'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {nonActiveMembers.length === 0 && (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <Eye className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                  <p>No non-active members found</p>
                 </div>
               )}
             </div>
