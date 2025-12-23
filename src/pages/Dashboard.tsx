@@ -33,7 +33,8 @@ import {
   Info,
   Book,
   Download as DownloadIcon,
-  ChevronRight
+  ChevronRight,
+  EyeOff
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,6 +50,7 @@ interface Member {
   invited_by: string | null;
   created_at: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  is_hidden: boolean | null;
   admin_role?: string | null;
   permissions?: string[] | null;
   assigned_groups?: string[] | null;
@@ -124,6 +126,7 @@ interface AbsentMember {
   lastEventDate: string;
   cell_group_id?: string | null;
   status?: string | null;
+  is_hidden?: boolean | null;
 }
 
 // Permission checking utilities
@@ -158,6 +161,7 @@ const Dashboard = () => {
   const [showAllEvents, setShowAllEvents] = useState(false);
   const [showAllActivities, setShowAllActivities] = useState(false);
   const [showAllSermons, setShowAllSermons] = useState(false);
+  const [showHiddenMembers, setShowHiddenMembers] = useState(false);
 
   // Real data state
   const [stats, setStats] = useState<StatCard[]>([]);
@@ -168,14 +172,18 @@ const Dashboard = () => {
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
   const [absentCount, setAbsentCount] = useState<number>(0);
+  const [hiddenMembersCount, setHiddenMembersCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
   // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
 
-  // Filter functions
+  // Filter functions - UPDATED: Filter out hidden members by default
   const getFilteredMembers = () => {
-    return members;
+    if (showHiddenMembers) {
+      return members;
+    }
+    return members.filter(member => !member.is_hidden);
   };
 
   const getFilteredEvents = () => {
@@ -183,7 +191,10 @@ const Dashboard = () => {
   };
 
   const getFilteredAbsentMembers = () => {
-    return absentMembers;
+    if (showHiddenMembers) {
+      return absentMembers;
+    }
+    return absentMembers.filter(member => !member.is_hidden);
   };
 
   const getFilteredSermons = () => {
@@ -208,7 +219,7 @@ const Dashboard = () => {
     });
   };
 
-  // Load absent count
+  // Load absent count - UPDATED: Exclude hidden members
   const loadAbsentCount = async () => {
     try {
       const count = await getAbsentCountDirect();
@@ -221,14 +232,21 @@ const Dashboard = () => {
     }
   };
 
-  // Direct method to get absent count
+  // Direct method to get absent count - UPDATED: Exclude hidden members
   const getAbsentCountDirect = async (): Promise<number> => {
     try {
       // Try to use the RPC function first
       const { data: rpcData, error: rpcError } = await supabase.rpc('get_absent_member_count');
       
       if (!rpcError && rpcData !== null) {
-        return rpcData;
+        // Filter out hidden members from the count
+        const { data: hiddenMembers } = await supabase
+          .from('members')
+          .select('id')
+          .eq('is_hidden', true);
+        
+        const hiddenCount = hiddenMembers?.length || 0;
+        return Math.max(0, rpcData - hiddenCount);
       }
       
       // Manual approach if RPC fails
@@ -247,10 +265,12 @@ const Dashboard = () => {
         return 0;
       }
 
-      // Get all members
+      // Get all NON-HIDDEN members
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('id');
+        .select('id')
+        .eq('is_hidden', false)
+        .is('is_hidden', false); // Also handle null values
 
       if (membersError || !allMembers) {
         console.error('Error getting members:', membersError);
@@ -268,7 +288,7 @@ const Dashboard = () => {
         return 0;
       }
 
-      // Count members absent for both Sundays
+      // Count NON-HIDDEN members absent for both Sundays
       let count = 0;
       
       allMembers.forEach(member => {
@@ -296,7 +316,7 @@ const Dashboard = () => {
     }
   };
 
-  // Load absent members with details
+  // Load absent members with details - UPDATED: Exclude hidden members by default
   const loadAbsentMembers = async () => {
     try {
       // Get all Sunday Service events
@@ -316,10 +336,12 @@ const Dashboard = () => {
 
       const lastTwoSundays = sundayEvents.slice(0, 2);
       
-      // Get all members with all fields for detailed view
+      // Get all NON-HIDDEN members with all fields for detailed view
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
-        .select('*');
+        .select('*')
+        .eq('is_hidden', false)
+        .is('is_hidden', false); // Also handle null values
 
       if (membersError) throw membersError;
       if (!allMembers || allMembers.length === 0) {
@@ -335,7 +357,7 @@ const Dashboard = () => {
 
       if (attendanceError) throw attendanceError;
 
-      // Find members who were absent for both services
+      // Find NON-HIDDEN members who were absent for both services
       const absent: AbsentMember[] = [];
       
       allMembers.forEach(member => {
@@ -360,6 +382,7 @@ const Dashboard = () => {
             residence: member.residence,
             cell_group_id: member.cell_group_id,
             status: member.status,
+            is_hidden: member.is_hidden,
             consecutiveAbsences: absentCount,
             lastEventDate: lastTwoSundays[0].event_date
           });
@@ -375,23 +398,28 @@ const Dashboard = () => {
     }
   };
 
-  // Calculate stats
+  // Calculate stats - UPDATED: Exclude hidden members from counts
   const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[], currentAbsentCount: number) => {
-    const totalMembers = allMembers.length;
-    const newcomers = allMembers.filter(m => m.status === 'newcomer').length;
-    const signedMembers = allMembers.filter(m => m.status === 'signed_member').length;
+    // Filter out hidden members for stats
+    const activeMembers = allMembers.filter(m => !m.is_hidden);
+    const hiddenMembers = allMembers.filter(m => m.is_hidden);
+    
+    const totalMembers = activeMembers.length;
+    const hiddenMembersCount = hiddenMembers.length;
+    const newcomers = activeMembers.filter(m => m.status === 'newcomer').length;
+    const signedMembers = activeMembers.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     const totalSermons = allSermons.length;
     
-    const uniqueGroups = [...new Set(allMembers.map(m => m.cell_group_id).filter(Boolean))].length;
+    const uniqueGroups = [...new Set(activeMembers.map(m => m.cell_group_id).filter(Boolean))].length;
 
     const statsData: StatCard[] = [
       { 
         icon: Users, 
-        label: 'Total Members', 
+        label: 'Active Members', 
         value: totalMembers.toString(), 
-        change: `${signedMembers} signed members`, 
-        changeType: 'positive',
+        change: `${hiddenMembersCount} hidden members`, 
+        changeType: 'info',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
         action: 'viewMembers'
@@ -449,15 +477,16 @@ const Dashboard = () => {
     ];
 
     setStats(statsData);
+    setHiddenMembersCount(hiddenMembersCount);
   };
 
-  // Generate recent activities
+  // Generate recent activities - UPDATED: Only show activities for non-hidden members
   const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
-    // Add recent member joins
-    const recentMembers = allMembers.slice(0, 2);
-    recentMembers.forEach(member => {
+    // Add recent NON-HIDDEN member joins
+    const recentActiveMembers = allMembers.filter(m => !m.is_hidden).slice(0, 2);
+    recentActiveMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
         type: 'member',
@@ -524,7 +553,7 @@ const Dashboard = () => {
         eventsData,
         sermonsData
       ] = await Promise.all([
-        // Load members
+        // Load ALL members (including hidden)
         supabase.from('members').select('*').order('created_at', { ascending: false }),
         
         // Load cell groups
@@ -620,6 +649,7 @@ const Dashboard = () => {
     setShowAllEvents(false);
     setShowAllActivities(false);
     setShowAllSermons(false);
+    setShowHiddenMembers(false);
   };
 
   const openMemberDetail = (member: Member | AbsentMember) => {
@@ -634,6 +664,7 @@ const Dashboard = () => {
       invited_by: null,
       created_at: null,
       status: 'status' in member ? member.status as any : null,
+      is_hidden: 'is_hidden' in member ? member.is_hidden : null,
       admin_role: undefined,
       permissions: undefined,
       assigned_groups: undefined,
@@ -686,16 +717,28 @@ const Dashboard = () => {
     </div>
   );
 
-  // Member Detail Modal Component (UPDATED - NO EMAIL)
+  // Member Detail Modal Component (UPDATED - Shows hidden status)
   const MemberDetailModal = ({ member }: { member: Member }) => (
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-2xl">
+        <div className={`w-20 h-20 rounded-full flex items-center justify-center text-white font-semibold text-2xl ${
+          member.is_hidden 
+            ? 'bg-gradient-to-br from-gray-500 to-gray-700' 
+            : 'bg-gradient-to-br from-blue-500 to-purple-500'
+        }`}>
           {member.name.charAt(0)}{member.surname.charAt(0)}
         </div>
         <div>
           <h3 className="text-2xl font-bold text-gray-900">{member.name} {member.surname}</h3>
-          <p className="text-gray-600">{member.status ? `Status: ${member.status.replace('_', ' ')}` : 'No status'}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-gray-600">{member.status ? `Status: ${member.status.replace('_', ' ')}` : 'No status'}</p>
+            {member.is_hidden && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                <EyeOff className="h-3 w-3" />
+                Hidden Member
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1193,7 +1236,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* User Manual Section - New Section Added */}
+      {/* User Manual Section - Updated to mention hidden members */}
       <div className="mt-6 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
         <button 
           onClick={() => toggleSection('userManual')}
@@ -1221,6 +1264,10 @@ const Dashboard = () => {
                   This guide will help you navigate and use the church management dashboard effectively.
                   All users can view data, but editing permissions are restricted to pastors and administrators.
                 </p>
+                <p className="text-gray-700 dark:text-gray-300 mt-2">
+                  <strong>Note:</strong> Hidden members are excluded from all counts and statistics by default.
+                  They are considered inactive/non-active members.
+                </p>
               </div>
 
               {/* Dashboard Sections */}
@@ -1242,11 +1289,11 @@ const Dashboard = () => {
                       </li>
                       <li className="flex items-start gap-2">
                         <div className="w-1.5 h-1.5 mt-1.5 bg-blue-500 rounded-full"></div>
-                        <span>Green arrows indicate positive trends</span>
+                        <span><strong>Active Members</strong> count excludes hidden members</span>
                       </li>
                       <li className="flex items-start gap-2">
                         <div className="w-1.5 h-1.5 mt-1.5 bg-blue-500 rounded-full"></div>
-                        <span>Red arrows indicate areas needing attention</span>
+                        <span>Hidden members are shown in gray with eye-off icon</span>
                       </li>
                     </ul>
                   </div>
@@ -1270,14 +1317,14 @@ const Dashboard = () => {
                       </li>
                       <li className="flex items-start gap-2">
                         <div className="w-1.5 h-1.5 mt-1.5 bg-green-500 rounded-full"></div>
-                        <span>Use "Open All" buttons for full-screen modal view</span>
+                        <span>Hidden members are excluded by default</span>
                       </li>
                     </ul>
                   </div>
                 </div>
               </div>
 
-              {/* Key Features */}
+              {/* Key Features - Updated */}
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-3 text-lg">Key Features Guide</h4>
                 <div className="space-y-4">
@@ -1290,6 +1337,10 @@ const Dashboard = () => {
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       View all church members, their contact information, and membership status.
                       Search by name, phone number, or residence. Click on any member to see detailed information.
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+                      <strong>Note:</strong> Hidden members are excluded from counts and statistics.
+                      They can be viewed by toggling "Show Hidden Members" in the members modal.
                     </p>
                   </div>
 
@@ -1350,8 +1401,8 @@ const Dashboard = () => {
                       <h5 className="font-medium text-gray-900 dark:text-white">Attendance Tracking</h5>
                     </div>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Automatically tracks members who have been absent for 2 consecutive Sundays.
-                      Provides contact information for follow-up and shows member details for easy outreach.
+                      Automatically tracks ACTIVE members who have been absent for 2 consecutive Sundays.
+                      Hidden members are excluded from this tracking. Provides contact information for follow-up.
                     </p>
                   </div>
                 </div>
@@ -1369,7 +1420,7 @@ const Dashboard = () => {
                     <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                       <li className="flex items-center gap-2">
                         <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span>View all member information</span>
+                        <span>View active member information</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <CheckCircle className="h-4 w-4 text-green-500" />
@@ -1381,7 +1432,7 @@ const Dashboard = () => {
                       </li>
                       <li className="flex items-center gap-2">
                         <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span>See attendance statistics</span>
+                        <span>See attendance statistics (excluding hidden)</span>
                       </li>
                     </ul>
                   </div>
@@ -1393,6 +1444,10 @@ const Dashboard = () => {
                         <span>Add new members to the system</span>
                       </li>
                       <li className="flex items-center gap-2">
+                        <EyeOff className="h-4 w-4 text-gray-500" />
+                        <span>Mark members as hidden/inactive</span>
+                      </li>
+                      <li className="flex items-center gap-2">
                         <Plus className="h-4 w-4 text-blue-500" />
                         <span>Create and manage events</span>
                       </li>
@@ -1400,16 +1455,12 @@ const Dashboard = () => {
                         <FileText className="h-4 w-4 text-blue-500" />
                         <span>Upload event pamphlets</span>
                       </li>
-                      <li className="flex items-center gap-2">
-                        <Book className="h-4 w-4 text-blue-500" />
-                        <span>Add new sermons and resources</span>
-                      </li>
                     </ul>
                   </div>
                 </div>
               </div>
 
-              {/* Tips & Best Practices */}
+              {/* Tips & Best Practices - Updated */}
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700/50 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <HelpCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
@@ -1417,12 +1468,16 @@ const Dashboard = () => {
                 </div>
                 <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
                   <p className="flex items-start gap-2">
+                    <span className="font-bold">👥</span>
+                    <span><strong>Active vs Hidden:</strong> Hidden members are excluded from counts and statistics</span>
+                  </p>
+                  <p className="flex items-start gap-2">
                     <span className="font-bold">🔄</span>
                     <span><strong>Regular Refresh:</strong> Click the "Refresh" button to get the latest data</span>
                   </p>
                   <p className="flex items-start gap-2">
                     <span className="font-bold">🔍</span>
-                    <span><strong>Use Search:</strong> Quickly find members or sermons using the search functionality</span>
+                    <span><strong>Use Search:</strong> Quickly find members or sermons using search functionality</span>
                   </p>
                   <p className="flex items-start gap-2">
                     <span className="font-bold">📱</span>
@@ -1430,11 +1485,11 @@ const Dashboard = () => {
                   </p>
                   <p className="flex items-start gap-2">
                     <span className="font-bold">📞</span>
-                    <span><strong>Direct Contact:</strong> Click phone numbers to call members directly from the dashboard</span>
+                    <span><strong>Direct Contact:</strong> Click phone numbers to call members directly</span>
                   </p>
                   <p className="flex items-start gap-2">
                     <span className="font-bold">📊</span>
-                    <span><strong>Monitor Absences:</strong> Regularly check the "Absent 2 Sundays" section for follow-up</span>
+                    <span><strong>Monitor Absences:</strong> Check "Absent 2 Sundays" for follow-up (excludes hidden)</span>
                   </p>
                 </div>
               </div>
@@ -1512,12 +1567,12 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Absent Members Modal */}
+      {/* Absent Members Modal - Updated to mention hidden members */}
       {activeModal === 'viewAbsentMembers' && (
         <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
           <div className="space-y-4">
             <p className="text-gray-600 dark:text-gray-400">
-              Members who have been absent for the last 2 Sunday services
+              Active members who have been absent for the last 2 Sunday services. Hidden members are excluded from this list.
             </p>
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -1572,8 +1627,13 @@ const Dashboard = () => {
                   </div>
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">Great News!</h4>
                   <p className="text-gray-600">
-                    All members have attended at least one of the last 2 Sunday services.
+                    All active members have attended at least one of the last 2 Sunday services.
                   </p>
+                  {hiddenMembersCount > 0 && (
+                    <p className="text-sm text-gray-500 mt-2">
+                      Note: {hiddenMembersCount} hidden members are excluded from this count.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1747,13 +1807,28 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Members Modal */}
+      {/* Members Modal - Updated with hidden members toggle */}
       {activeModal === 'viewMembers' && (
         <Modal title="Members" size="max-w-4xl">
           <div className="space-y-4">
-            <p className="text-gray-600 dark:text-gray-400">
-              All church members
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <p className="text-gray-600 dark:text-gray-400">
+                {showHiddenMembers 
+                  ? 'All members (including hidden)' 
+                  : 'Active members (hidden members excluded)'}
+              </p>
+              <button
+                onClick={() => setShowHiddenMembers(!showHiddenMembers)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
+                  showHiddenMembers
+                    ? 'bg-gray-600 hover:bg-gray-700 text-white'
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
+                }`}
+              >
+                <EyeOff className="h-4 w-4" />
+                {showHiddenMembers ? 'Hide Hidden Members' : 'Show Hidden Members'}
+              </button>
+            </div>
             
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1774,13 +1849,29 @@ const Dashboard = () => {
                   (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase()))
                 )
                 .map(member => (
-                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                <div key={member.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-xl hover:bg-gray-50 transition-colors ${
+                  member.is_hidden 
+                    ? 'border-gray-300 bg-gray-100' 
+                    : 'border-gray-200 bg-white'
+                }`}>
                   <div className="flex items-center gap-4 mb-3 sm:mb-0">
-                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold ${
+                      member.is_hidden
+                        ? 'bg-gradient-to-br from-gray-500 to-gray-700'
+                        : 'bg-gradient-to-br from-blue-500 to-purple-500'
+                    }`}>
                       {member.name.charAt(0)}{member.surname.charAt(0)}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                        {member.is_hidden && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs">
+                            <EyeOff className="h-3 w-3" />
+                            Hidden
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-gray-500">{member.phone || 'No phone'}</p>
                       {member.residence && (
                         <p className="text-xs text-gray-600 mt-1">
