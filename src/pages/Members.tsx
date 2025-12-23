@@ -34,12 +34,23 @@ interface MinistryGroup {
   name: string;
 }
 
-// Based on your schema, these are the expected status values from the member_status enum
-// Make sure these match your actual database enum values
-const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
-const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
-// Combined list for validation
+// Use underscores to match enum values
+const NOT_ATTENDING_STATUSES = ['inactive', 'stopped_attending', 'not_attending', 'left'];
+const ATTENDING_STATUSES = ['newcomer', 'member', 'signed_member', 'permanent', 'active'];
 const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
+
+// Display names for better UI
+const STATUS_DISPLAY_NAMES: Record<string, string> = {
+  'newcomer': 'Newcomer',
+  'member': 'Member',
+  'signed_member': 'Signed Member',
+  'permanent': 'Permanent',
+  'active': 'Active',
+  'inactive': 'Inactive',
+  'stopped_attending': 'Stopped Attending',
+  'not_attending': 'Not Attending',
+  'left': 'Left'
+};
 
 const Members = () => {
   const [showForm, setShowForm] = useState(false);
@@ -84,24 +95,19 @@ const Members = () => {
   // Helper function to check if status means not attending
   const isNotAttendingStatus = (status: string | null): boolean => {
     if (!status) return false;
-    const statusLower = status.toLowerCase();
-    return NOT_ATTENDING_STATUSES.some(notAttendingStatus => 
-      statusLower.includes(notAttendingStatus.toLowerCase())
-    );
+    return NOT_ATTENDING_STATUSES.includes(status.toLowerCase());
   };
 
   // Helper function to check if status means attending
   const isAttendingStatus = (status: string | null): boolean => {
     if (!status) return false;
-    const statusLower = status.toLowerCase();
-    return ATTENDING_STATUSES.some(attendingStatus => 
-      statusLower.includes(attendingStatus.toLowerCase())
-    );
+    return ATTENDING_STATUSES.includes(status.toLowerCase());
   };
 
-  // Helper function to get correct is_hidden value based on status
-  const getIsHiddenFromStatus = (status: string | null): boolean => {
-    return isNotAttendingStatus(status);
+  // Helper function to get display name for status
+  const getStatusDisplayName = (status: string | null): string => {
+    if (!status) return 'No Status';
+    return STATUS_DISPLAY_NAMES[status.toLowerCase()] || status;
   };
 
   useEffect(() => {
@@ -225,7 +231,7 @@ const Members = () => {
           status: 'newcomer',
           status_date: new Date().toISOString(),
           is_permanent_member: false,
-          is_hidden: false, // New members are always shown with newcomer status
+          is_hidden: false,
           not_attending_reason: null,
         }])
         .select();
@@ -292,7 +298,7 @@ const Members = () => {
 
       // Validate status
       const status = editFormData.status.toLowerCase();
-      if (!VALID_STATUSES.some(validStatus => status.includes(validStatus.toLowerCase()))) {
+      if (!VALID_STATUSES.includes(status)) {
         setError(`Invalid status. Please use one of: ${VALID_STATUSES.join(', ')}`);
         setLoading(false);
         return;
@@ -300,7 +306,6 @@ const Members = () => {
 
       // Determine if status is not attending
       const isNotAttending = isNotAttendingStatus(editFormData.status);
-      const isAttending = isAttendingStatus(editFormData.status);
       
       // Auto-set is_hidden based on status
       const shouldBeHidden = isNotAttending;
@@ -322,12 +327,12 @@ const Members = () => {
         baptism: editFormData.baptism || null,
         status: editFormData.status,
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
-        is_permanent_member: editFormData.status.toLowerCase().includes('permanent'),
+        is_permanent_member: editFormData.status === 'permanent',
         not_attending_reason,
-        is_hidden: shouldBeHidden, // Auto-set based on status
+        is_hidden: shouldBeHidden,
       };
 
-      if (editFormData.status.toLowerCase().includes('permanent')) {
+      if (editFormData.status === 'permanent') {
         updateData.permanent_member_date = new Date().toISOString();
       }
 
@@ -346,7 +351,7 @@ const Members = () => {
       let message = 'Member details updated successfully!';
       if (isNotAttending) {
         message += ' Member has been automatically hidden due to not attending status.';
-      } else if (isAttending && editFormData.is_hidden) {
+      } else if (!isNotAttending && editFormData.is_hidden) {
         message += ' Member is now visible due to attending status.';
       }
       
@@ -487,19 +492,19 @@ const Members = () => {
     const statusLower = status.toLowerCase();
     
     if (isNotAttendingStatus(status)) {
-      return { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: status };
-    } else if (statusLower.includes('newcomer')) {
-      return { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: status };
-    } else if (statusLower.includes('member') && !statusLower.includes('signed') && !statusLower.includes('permanent')) {
-      return { color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', text: status };
-    } else if (statusLower.includes('signed')) {
-      return { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: status };
-    } else if (statusLower.includes('permanent')) {
-      return { color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', text: status };
-    } else if (statusLower.includes('active')) {
-      return { color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300', text: status };
+      return { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: getStatusDisplayName(status) };
+    } else if (statusLower === 'newcomer') {
+      return { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: getStatusDisplayName(status) };
+    } else if (statusLower === 'member') {
+      return { color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', text: getStatusDisplayName(status) };
+    } else if (statusLower === 'signed_member') {
+      return { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: getStatusDisplayName(status) };
+    } else if (statusLower === 'permanent') {
+      return { color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', text: getStatusDisplayName(status) };
+    } else if (statusLower === 'active') {
+      return { color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300', text: getStatusDisplayName(status) };
     } else {
-      return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: status };
+      return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: getStatusDisplayName(status) };
     }
   };
 
@@ -560,7 +565,7 @@ const Members = () => {
                   className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
                 >
                   {availableStatuses.map(status => (
-                    <option key={status} value={status}>{status}</option>
+                    <option key={status} value={status}>{getStatusDisplayName(status)}</option>
                   ))}
                 </select>
               </div>
@@ -640,7 +645,7 @@ const Members = () => {
                   className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {availableStatuses.map(status => (
-                    <option key={status} value={status}>{status}</option>
+                    <option key={status} value={status}>{getStatusDisplayName(status)}</option>
                   ))}
                 </select>
                 {isNotAttendingStatus(editFormData.status) && (
@@ -823,7 +828,7 @@ const Members = () => {
             <div className="space-y-2">
               {member.status_date && (
                 <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {member.status ? `${member.status} since: ` : 'Member since: '}
+                  {member.status ? `${getStatusDisplayName(member.status)} since: ` : 'Member since: '}
                   {new Date(member.status_date).toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'short',
@@ -1152,8 +1157,8 @@ const Members = () => {
                 .map(([status, count]) => (
                   <div key={status} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
                     <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{count}</div>
-                    <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={status}>
-                      {status === 'baptized' ? 'Baptized' : status}
+                    <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={getStatusDisplayName(status)}>
+                      {getStatusDisplayName(status)}
                     </div>
                   </div>
                 ))}
