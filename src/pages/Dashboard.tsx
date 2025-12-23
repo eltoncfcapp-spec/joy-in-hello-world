@@ -33,11 +33,11 @@ import {
   Info,
   Book,
   Download as DownloadIcon,
-  ChevronRight,
-  EyeOff
+  ChevronRight
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+
 
 // Types - Updated to match your database schema (NO EMAIL)
 interface Member {
