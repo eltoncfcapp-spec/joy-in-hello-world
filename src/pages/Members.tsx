@@ -74,12 +74,14 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Define statuses that should be hidden
+  // Define statuses that should be hidden (not attending)
   const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
-  const ACTIVE_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
+  
+  // Define statuses that should be shown (attending)
+  const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
 
-  // Helper function to check if status should be hidden
-  const shouldBeHidden = (status: string | null): boolean => {
+  // Helper function to check if status means not attending
+  const isNotAttendingStatus = (status: string | null): boolean => {
     if (!status) return false;
     const statusLower = status.toLowerCase();
     return NOT_ATTENDING_STATUSES.some(notAttendingStatus => 
@@ -87,13 +89,23 @@ const Members = () => {
     );
   };
 
-  // Helper function to check if status should be shown (unhidden)
-  const shouldBeShown = (status: string | null): boolean => {
-    if (!status) return true;
+  // Helper function to check if status means attending
+  const isAttendingStatus = (status: string | null): boolean => {
+    if (!status) return false;
     const statusLower = status.toLowerCase();
-    return ACTIVE_STATUSES.some(activeStatus => 
-      statusLower.includes(activeStatus.toLowerCase())
+    return ATTENDING_STATUSES.some(attendingStatus => 
+      statusLower.includes(attendingStatus.toLowerCase())
     );
+  };
+
+  // Determine if member should be hidden based on status
+  const shouldBeHidden = (status: string | null): boolean => {
+    return isNotAttendingStatus(status);
+  };
+
+  // Determine if member should be shown based on status
+  const shouldBeShown = (status: string | null): boolean => {
+    return isAttendingStatus(status);
   };
 
   useEffect(() => {
@@ -116,6 +128,18 @@ const Members = () => {
       }
       if (!statuses.includes('inactive')) {
         setAvailableStatuses(prev => [...prev, 'inactive']);
+      }
+      if (!statuses.includes('member')) {
+        setAvailableStatuses(prev => [...prev, 'member']);
+      }
+      if (!statuses.includes('signed member')) {
+        setAvailableStatuses(prev => [...prev, 'signed member']);
+      }
+      if (!statuses.includes('permanent')) {
+        setAvailableStatuses(prev => [...prev, 'permanent']);
+      }
+      if (!statuses.includes('stopped attending')) {
+        setAvailableStatuses(prev => [...prev, 'stopped attending']);
       }
     }
   }, [members]);
@@ -299,15 +323,19 @@ const Members = () => {
         return;
       }
 
-      // Check if status should automatically hide/show member
-      const shouldHide = shouldBeHidden(editFormData.status);
-      const shouldShow = shouldBeShown(editFormData.status);
+      // Check if status means not attending
+      const isNotAttending = isNotAttendingStatus(editFormData.status);
+      const isAttending = isAttendingStatus(editFormData.status);
       
       // Determine if member should be hidden based on status
-      const is_hidden = shouldHide || (editFormData.is_hidden && !shouldShow);
+      const shouldHide = isNotAttending;
+      const shouldShow = isAttending;
+      
+      // Auto-set is_hidden based on status
+      const is_hidden = shouldHide || (!shouldShow && editFormData.is_hidden);
       
       // Set not_attending_reason if status indicates not attending
-      const not_attending_reason = shouldHide 
+      const not_attending_reason = isNotAttending 
         ? (editFormData.not_attending_reason || 'Member stopped attending')
         : null;
 
@@ -325,7 +353,7 @@ const Members = () => {
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         is_permanent_member: editFormData.status.toLowerCase().includes('permanent'),
         not_attending_reason,
-        is_hidden,
+        is_hidden, // Auto-set based on status
       };
 
       if (editFormData.status.toLowerCase().includes('permanent')) {
@@ -342,7 +370,16 @@ const Members = () => {
       }
 
       setEditingMember(null);
-      setSuccess(`Member details updated successfully! ${shouldHide ? 'Member has been automatically hidden.' : shouldShow ? 'Member is now visible.' : ''}`);
+      
+      // Show appropriate success message
+      let message = 'Member details updated successfully!';
+      if (isNotAttending) {
+        message += ' Member has been automatically hidden due to not attending status.';
+      } else if (isAttending && editFormData.is_hidden) {
+        message += ' Member is now visible due to attending status.';
+      }
+      
+      setSuccess(message);
       fetchMembers();
       fetchHiddenMembers();
       
@@ -374,39 +411,6 @@ const Members = () => {
     });
   };
 
-  const handleHideMember = async (memberId: string) => {
-    if (!confirm('Are you sure you want to hide this member? They will no longer appear in the main members list.')) {
-      return;
-    }
-
-    try {
-      setError(null);
-      setSuccess(null);
-      
-      const { error: hideError } = await supabase
-        .from('members')
-        .update({ 
-          is_hidden: true,
-          status: 'inactive',
-          status_date: new Date().toISOString(),
-          not_attending_reason: 'Member stopped attending'
-        })
-        .eq('id', memberId);
-
-      if (hideError) {
-        throw hideError;
-      }
-      
-      setSuccess('Member hidden successfully. They can be restored from the hidden members section.');
-      fetchMembers();
-      fetchHiddenMembers();
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error: any) {
-      console.error('Error hiding member:', error);
-      setError(error.message || 'Failed to hide member.');
-    }
-  };
-
   const handleRestoreMember = async (memberId: string, currentStatus: string | null = null) => {
     if (!confirm('Restore this member? They will appear in the main members list again.')) {
       return;
@@ -418,9 +422,8 @@ const Members = () => {
       
       // Determine new status - if current status is not attending, change to newcomer
       let newStatus = currentStatus || 'newcomer';
-      let not_attending_reason = null;
       
-      if (shouldBeHidden(currentStatus)) {
+      if (isNotAttendingStatus(currentStatus)) {
         newStatus = 'newcomer';
       }
       
@@ -430,7 +433,7 @@ const Members = () => {
           is_hidden: false,
           status: newStatus,
           status_date: new Date().toISOString(),
-          not_attending_reason
+          not_attending_reason: null
         })
         .eq('id', memberId);
 
@@ -438,7 +441,7 @@ const Members = () => {
         throw restoreError;
       }
       
-      setSuccess('Member restored successfully!');
+      setSuccess('Member restored successfully as a newcomer!');
       fetchMembers();
       fetchHiddenMembers();
       setTimeout(() => setSuccess(null), 3000);
@@ -519,7 +522,7 @@ const Members = () => {
     
     const statusLower = status.toLowerCase();
     
-    if (shouldBeHidden(status)) {
+    if (isNotAttendingStatus(status)) {
       return { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: status };
     } else if (statusLower.includes('newcomer')) {
       return { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: status };
@@ -598,10 +601,12 @@ const Members = () => {
                     <>
                       <option value="newcomer">Newcomer</option>
                       <option value="member">Member</option>
-                      <option value="signed_member">Signed Member</option>
+                      <option value="signed member">Signed Member</option>
                       <option value="permanent">Permanent</option>
                       <option value="inactive">Inactive</option>
                       <option value="stopped attending">Stopped Attending</option>
+                      <option value="not attending">Not Attending</option>
+                      <option value="left">Left</option>
                     </>
                   )}
                 </select>
@@ -669,25 +674,6 @@ const Members = () => {
                 placeholder="Invited by"
               />
             </div>
-
-            {isHidden && (
-              <div className="flex items-center gap-3">
-                <EyeOff className="h-4 w-4 text-red-400 flex-shrink-0" />
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="is_hidden"
-                    checked={editFormData.is_hidden}
-                    onChange={(e) => setEditFormData({ ...editFormData, is_hidden: e.target.checked })}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    disabled={shouldBeHidden(editFormData.status)}
-                  />
-                  <label htmlFor="is_hidden" className={`text-sm ${shouldBeHidden(editFormData.status) ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'}`}>
-                    {shouldBeHidden(editFormData.status) ? 'Automatically hidden due to status' : 'Hidden Member'}
-                  </label>
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
@@ -708,7 +694,7 @@ const Members = () => {
                     <>
                       <option value="newcomer">Newcomer</option>
                       <option value="member">Member</option>
-                      <option value="signed_member">Signed Member</option>
+                      <option value="signed member">Signed Member</option>
                       <option value="permanent">Permanent</option>
                       <option value="inactive">Inactive</option>
                       <option value="stopped attending">Stopped Attending</option>
@@ -717,28 +703,30 @@ const Members = () => {
                     </>
                   )}
                 </select>
-                {shouldBeHidden(editFormData.status) && (
+                {isNotAttendingStatus(editFormData.status) && (
                   <span className="text-xs text-red-600 dark:text-red-400">
                     (Will auto-hide)
                   </span>
                 )}
-                {shouldBeShown(editFormData.status) && isHidden && (
+                {isAttendingStatus(editFormData.status) && (
                   <span className="text-xs text-green-600 dark:text-green-400">
                     (Will auto-show)
                   </span>
                 )}
               </div>
               
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-600 dark:text-gray-400 min-w-20">Reason:</span>
-                <input
-                  type="text"
-                  value={editFormData.not_attending_reason}
-                  onChange={(e) => setEditFormData({ ...editFormData, not_attending_reason: e.target.value })}
-                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Reason for not attending (if applicable)"
-                />
-              </div>
+              {isNotAttendingStatus(editFormData.status) && (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-600 dark:text-gray-400 min-w-20">Reason:</span>
+                  <input
+                    type="text"
+                    value={editFormData.not_attending_reason}
+                    onChange={(e) => setEditFormData({ ...editFormData, not_attending_reason: e.target.value })}
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Reason for not attending"
+                  />
+                </div>
+              )}
               
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                 <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
@@ -884,11 +872,11 @@ const Members = () => {
                 </>
               ) : (
                 <button
-                  onClick={() => handleHideMember(member.id)}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  onClick={() => handlePermanentDeleteMember(member.id)}
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                 >
-                  <EyeOff className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                  <span className="hidden sm:inline">Hide</span>
+                  <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                  <span className="hidden sm:inline">Delete</span>
                 </button>
               )}
             </div>
@@ -1163,7 +1151,7 @@ const Members = () => {
                     Hidden Members
                   </h2>
                   <p className="text-gray-600 dark:text-gray-400 mt-1">
-                    Members who are no longer attending. You can restore them when they start attending again.
+                    Members with "not attending" status are automatically hidden.
                   </p>
                 </div>
                 <div className="text-right">
@@ -1179,7 +1167,7 @@ const Members = () => {
                     {searchQuery ? 'No Hidden Members Found' : 'No Hidden Members'}
                   </h3>
                   <p className="text-gray-500 dark:text-gray-500">
-                    {searchQuery ? 'Try adjusting your search terms' : 'All members are currently active'}
+                    {searchQuery ? 'Try adjusting your search terms' : 'All members are currently attending'}
                   </p>
                 </div>
               ) : (
