@@ -34,6 +34,13 @@ interface MinistryGroup {
   name: string;
 }
 
+// Based on your schema, these are the expected status values from the member_status enum
+// Make sure these match your actual database enum values
+const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
+const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
+// Combined list for validation
+const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
+
 const Members = () => {
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
@@ -45,7 +52,7 @@ const Members = () => {
   const [editingMember, setEditingMember] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>(VALID_STATUSES);
   const [showHiddenMembers, setShowHiddenMembers] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -74,12 +81,6 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Define statuses that should be hidden (not attending)
-  const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
-  
-  // Define statuses that should be shown (attending)
-  const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
-
   // Helper function to check if status means not attending
   const isNotAttendingStatus = (status: string | null): boolean => {
     if (!status) return false;
@@ -98,14 +99,9 @@ const Members = () => {
     );
   };
 
-  // Determine if member should be hidden based on status
-  const shouldBeHidden = (status: string | null): boolean => {
+  // Helper function to get correct is_hidden value based on status
+  const getIsHiddenFromStatus = (status: string | null): boolean => {
     return isNotAttendingStatus(status);
-  };
-
-  // Determine if member should be shown based on status
-  const shouldBeShown = (status: string | null): boolean => {
-    return isAttendingStatus(status);
   };
 
   useEffect(() => {
@@ -114,35 +110,6 @@ const Members = () => {
     fetchCellGroups();
     fetchMinistryGroups();
   }, []);
-
-  useEffect(() => {
-    if (members.length > 0) {
-      const statuses = Array.from(new Set(members
-        .map(m => m.status)
-        .filter((status): status is string => status !== null && status !== '')
-      ));
-      setAvailableStatuses(statuses);
-      
-      if (!statuses.includes('newcomer')) {
-        setAvailableStatuses(prev => ['newcomer', ...prev]);
-      }
-      if (!statuses.includes('inactive')) {
-        setAvailableStatuses(prev => [...prev, 'inactive']);
-      }
-      if (!statuses.includes('member')) {
-        setAvailableStatuses(prev => [...prev, 'member']);
-      }
-      if (!statuses.includes('signed member')) {
-        setAvailableStatuses(prev => [...prev, 'signed member']);
-      }
-      if (!statuses.includes('permanent')) {
-        setAvailableStatuses(prev => [...prev, 'permanent']);
-      }
-      if (!statuses.includes('stopped attending')) {
-        setAvailableStatuses(prev => [...prev, 'stopped attending']);
-      }
-    }
-  }, [members]);
 
   const fetchMembers = async () => {
     try {
@@ -258,7 +225,7 @@ const Members = () => {
           status: 'newcomer',
           status_date: new Date().toISOString(),
           is_permanent_member: false,
-          is_hidden: false, // New members are always shown
+          is_hidden: false, // New members are always shown with newcomer status
           not_attending_reason: null,
         }])
         .select();
@@ -323,16 +290,20 @@ const Members = () => {
         return;
       }
 
-      // Check if status means not attending
+      // Validate status
+      const status = editFormData.status.toLowerCase();
+      if (!VALID_STATUSES.some(validStatus => status.includes(validStatus.toLowerCase()))) {
+        setError(`Invalid status. Please use one of: ${VALID_STATUSES.join(', ')}`);
+        setLoading(false);
+        return;
+      }
+
+      // Determine if status is not attending
       const isNotAttending = isNotAttendingStatus(editFormData.status);
       const isAttending = isAttendingStatus(editFormData.status);
       
-      // Determine if member should be hidden based on status
-      const shouldHide = isNotAttending;
-      const shouldShow = isAttending;
-      
       // Auto-set is_hidden based on status
-      const is_hidden = shouldHide || (!shouldShow && editFormData.is_hidden);
+      const shouldBeHidden = isNotAttending;
       
       // Set not_attending_reason if status indicates not attending
       const not_attending_reason = isNotAttending 
@@ -353,7 +324,7 @@ const Members = () => {
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         is_permanent_member: editFormData.status.toLowerCase().includes('permanent'),
         not_attending_reason,
-        is_hidden, // Auto-set based on status
+        is_hidden: shouldBeHidden, // Auto-set based on status
       };
 
       if (editFormData.status.toLowerCase().includes('permanent')) {
@@ -411,8 +382,8 @@ const Members = () => {
     });
   };
 
-  const handleRestoreMember = async (memberId: string, currentStatus: string | null = null) => {
-    if (!confirm('Restore this member? They will appear in the main members list again.')) {
+  const handleRestoreMember = async (memberId: string) => {
+    if (!confirm('Restore this member? They will appear in the main members list again as a newcomer.')) {
       return;
     }
 
@@ -420,18 +391,11 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
-      // Determine new status - if current status is not attending, change to newcomer
-      let newStatus = currentStatus || 'newcomer';
-      
-      if (isNotAttendingStatus(currentStatus)) {
-        newStatus = 'newcomer';
-      }
-      
       const { error: restoreError } = await supabase
         .from('members')
         .update({ 
           is_hidden: false,
-          status: newStatus,
+          status: 'newcomer',
           status_date: new Date().toISOString(),
           not_attending_reason: null
         })
@@ -532,6 +496,8 @@ const Members = () => {
       return { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: status };
     } else if (statusLower.includes('permanent')) {
       return { color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', text: status };
+    } else if (statusLower.includes('active')) {
+      return { color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300', text: status };
     } else {
       return { color: 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300', text: status };
     }
@@ -593,22 +559,9 @@ const Members = () => {
                   onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
                   className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
                 >
-                  {availableStatuses.length > 0 ? (
-                    availableStatuses.map(status => (
-                      <option key={status} value={status}>{status}</option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="newcomer">Newcomer</option>
-                      <option value="member">Member</option>
-                      <option value="signed member">Signed Member</option>
-                      <option value="permanent">Permanent</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="stopped attending">Stopped Attending</option>
-                      <option value="not attending">Not Attending</option>
-                      <option value="left">Left</option>
-                    </>
-                  )}
+                  {availableStatuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -686,22 +639,9 @@ const Members = () => {
                   onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
                   className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {availableStatuses.length > 0 ? (
-                    availableStatuses.map(status => (
-                      <option key={status} value={status}>{status}</option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="newcomer">Newcomer</option>
-                      <option value="member">Member</option>
-                      <option value="signed member">Signed Member</option>
-                      <option value="permanent">Permanent</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="stopped attending">Stopped Attending</option>
-                      <option value="not attending">Not Attending</option>
-                      <option value="left">Left</option>
-                    </>
-                  )}
+                  {availableStatuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
                 </select>
                 {isNotAttendingStatus(editFormData.status) && (
                   <span className="text-xs text-red-600 dark:text-red-400">
@@ -856,7 +796,7 @@ const Members = () => {
               {isHidden ? (
                 <>
                   <button
-                    onClick={() => handleRestoreMember(member.id, member.status)}
+                    onClick={() => handleRestoreMember(member.id)}
                     className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
                   >
                     <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
