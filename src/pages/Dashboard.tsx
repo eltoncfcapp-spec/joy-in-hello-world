@@ -29,10 +29,15 @@ import {
   Clock,
   User,
   Image as ImageIcon,
+  HelpCircle,
+  Info,
+  Book,
+  Download as DownloadIcon,
   ChevronRight
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+
 
 // Types - Updated to match your database schema (NO EMAIL)
 interface Member {
