@@ -29,10 +29,6 @@ import {
   Clock,
   User,
   Image as ImageIcon,
-  HelpCircle,
-  Info,
-  Book,
-  Download as DownloadIcon,
   ChevronRight
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
@@ -233,23 +229,6 @@ const Dashboard = () => {
   // Direct method to get absent count - UPDATED: Exclude hidden members
   const getAbsentCountDirect = async (): Promise<number> => {
     try {
-      // Try to use the RPC function first
-      const { data: rpcData, error: rpcError } = await supabase.rpc('get_absent_member_count');
-      
-      if (!rpcError && rpcData !== null) {
-        // Filter out hidden members from the count
-        const { data: hiddenMembers } = await supabase
-          .from('members')
-          .select('id')
-          .eq('is_hidden', true);
-        
-        const hiddenCount = hiddenMembers?.length || 0;
-        return Math.max(0, rpcData - hiddenCount);
-      }
-      
-      // Manual approach if RPC fails
-      console.log('RPC not available, using manual count:', rpcError);
-      
       // Get the last 2 Sunday events
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
@@ -267,8 +246,7 @@ const Dashboard = () => {
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
         .select('id')
-        .eq('is_hidden', false)
-        .is('is_hidden', false); // Also handle null values
+        .eq('is_hidden', false);
 
       if (membersError || !allMembers) {
         console.error('Error getting members:', membersError);
@@ -338,8 +316,7 @@ const Dashboard = () => {
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
         .select('*')
-        .eq('is_hidden', false)
-        .is('is_hidden', false); // Also handle null values
+        .eq('is_hidden', false);
 
       if (membersError) throw membersError;
       if (!allMembers || allMembers.length === 0) {
@@ -398,9 +375,9 @@ const Dashboard = () => {
 
   // Calculate stats - UPDATED: Exclude hidden members from counts
   const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[], currentAbsentCount: number) => {
-    // Filter out hidden members for stats
-    const activeMembers = allMembers.filter(m => !m.is_hidden);
-    const hiddenMembers = allMembers.filter(m => m.is_hidden);
+    // Filter out hidden members for stats - FIXED: properly check for true value
+    const activeMembers = allMembers.filter(m => m.is_hidden !== true);
+    const hiddenMembers = allMembers.filter(m => m.is_hidden === true);
     
     const totalMembers = activeMembers.length;
     const hiddenMembersCount = hiddenMembers.length;
@@ -483,7 +460,7 @@ const Dashboard = () => {
     const activities: Activity[] = [];
 
     // Add recent NON-HIDDEN member joins
-    const recentActiveMembers = allMembers.filter(m => !m.is_hidden).slice(0, 2);
+    const recentActiveMembers = allMembers.filter(m => m.is_hidden !== true).slice(0, 2);
     recentActiveMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
@@ -720,7 +697,7 @@ const Dashboard = () => {
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-6">
         <div className={`w-20 h-20 rounded-full flex items-center justify-center text-white font-semibold text-2xl ${
-          member.is_hidden 
+          member.is_hidden === true
             ? 'bg-gradient-to-br from-gray-500 to-gray-700' 
             : 'bg-gradient-to-br from-blue-500 to-purple-500'
         }`}>
@@ -730,7 +707,7 @@ const Dashboard = () => {
           <h3 className="text-2xl font-bold text-gray-900">{member.name} {member.surname}</h3>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-gray-600">{member.status ? `Status: ${member.status.replace('_', ' ')}` : 'No status'}</p>
-            {member.is_hidden && (
+            {member.is_hidden === true && (
               <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
                 <Eye className="h-3 w-3" />
                 Hidden Member
@@ -1576,13 +1553,13 @@ const Dashboard = () => {
                 )
                 .map(member => (
                 <div key={member.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-xl hover:bg-gray-50 transition-colors ${
-                  member.is_hidden 
+                  member.is_hidden === true
                     ? 'border-gray-300 bg-gray-100' 
                     : 'border-gray-200 bg-white'
                 }`}>
                   <div className="flex items-center gap-4 mb-3 sm:mb-0">
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold ${
-                      member.is_hidden
+                      member.is_hidden === true
                         ? 'bg-gradient-to-br from-gray-500 to-gray-700'
                         : 'bg-gradient-to-br from-blue-500 to-purple-500'
                     }`}>
@@ -1591,7 +1568,7 @@ const Dashboard = () => {
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                        {member.is_hidden && (
+                        {member.is_hidden === true && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs">
                             <Eye className="h-3 w-3" />
                             Hidden
