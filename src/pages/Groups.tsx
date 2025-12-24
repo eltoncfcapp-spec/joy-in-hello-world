@@ -2686,16 +2686,6 @@ const Groups: React.FC = () => {
         is_current_user_leader: isCurrentUserLeader
       };
     });
-
-    setGroups(groupsWithDetails);
-  } catch (error: any) {
-    console.error('Error loading groups:', error);
-    setErrorMessage('Failed to load groups: ' + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-
       setGroups(groupsWithDetails);
     } catch (error: any) {
       console.error('Error loading groups:', error);
