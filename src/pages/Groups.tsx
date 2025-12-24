@@ -65,6 +65,127 @@ interface GroupReport {
   created_at: string | null;
 }
 
+// Cell Leader Assignment Function
+export const assignCellLeader = async (leaderId: string, groupId: string) => {
+  try {
+    console.log('Assigning cell leader:', { leaderId, groupId });
+    
+    if (!leaderId || !groupId) {
+      throw new Error('Leader ID and Group ID are required');
+    }
+
+    // First, check if the leader exists
+    const { data: leaderData, error: leaderError } = await supabase
+      .from('members')
+      .select('*')
+      .eq('id', leaderId)
+      .single();
+
+    if (leaderError) {
+      console.error('Leader not found error:', leaderError);
+      throw new Error('Leader not found: ' + leaderError.message);
+    }
+
+    if (!leaderData) {
+      throw new Error('Leader not found');
+    }
+
+    // Check if the group exists
+    const { data: groupData, error: groupError } = await supabase
+      .from('cell_groups')
+      .select('*')
+      .eq('id', groupId)
+      .single();
+
+    if (groupError) {
+      console.error('Group not found error:', groupError);
+      throw new Error('Group not found: ' + groupError.message);
+    }
+
+    if (!groupData) {
+      throw new Error('Group not found');
+    }
+
+    // Check if this leader is already assigned to another group
+    const { data: existingLeaderGroup, error: existingError } = await supabase
+      .from('cell_groups')
+      .select('*')
+      .eq('leader_id', leaderId)
+      .neq('id', groupId)
+      .maybeSingle(); // Use maybeSingle instead of single to avoid throwing error if not found
+
+    if (existingError) {
+      console.error('Error checking existing leader:', existingError);
+      // Continue anyway, this is just a warning
+    }
+
+    if (existingLeaderGroup) {
+      console.warn('Leader is already assigned to another group:', existingLeaderGroup.name);
+      // Return success but with warning
+      return {
+        success: true,
+        warning: `Leader is already assigned to ${existingLeaderGroup.name}. Reassigning...`
+      };
+    }
+
+    // Remove previous leader's assignment if exists
+    if (groupData.leader_id) {
+      const { error: removeError } = await supabase
+        .from('members')
+        .update({ 
+          admin_role: 'member',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', groupData.leader_id);
+
+      if (removeError) {
+        console.error('Error removing previous leader role:', removeError);
+        // Continue anyway
+      }
+    }
+
+    // Update the group with the new leader
+    const { error: updateGroupError } = await supabase
+      .from('cell_groups')
+      .update({
+        leader_id: leaderId,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', groupId);
+
+    if (updateGroupError) {
+      console.error('Error updating group:', updateGroupError);
+      throw new Error('Failed to update group: ' + updateGroupError.message);
+    }
+
+    // Update the member's role and group assignment
+    const { error: updateMemberError } = await supabase
+      .from('members')
+      .update({ 
+        cell_group_id: groupId,
+        admin_role: 'group_leader',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', leaderId);
+
+    if (updateMemberError) {
+      console.error('Error updating member:', updateMemberError);
+      throw new Error('Failed to update member: ' + updateMemberError.message);
+    }
+
+    console.log('Leader assigned successfully');
+    return {
+      success: true,
+      message: 'Leader assigned successfully',
+      group: groupData.name,
+      leader: `${leaderData.name} ${leaderData.surname}`
+    };
+  } catch (error: any) {
+    console.error('Error in assignCellLeader:', error);
+    throw error;
+  }
+};
+
 // New Group Creation Component
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -90,8 +211,27 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   useEffect(() => {
     if (isOpen) {
       loadAvailableLeaders();
+      // Set current user as leader if they have appropriate role
+      if (userId) {
+        const setCurrentUserAsLeader = async () => {
+          const { data: userData } = await supabase
+            .from('members')
+            .select('*')
+            .eq('id', userId)
+            .single();
+          
+          if (userData && (userData.admin_role === 'group_leader' || 
+              userData.admin_role === 'deacon' || 
+              userData.admin_role === 'pastor' || 
+              userData.admin_role === 'administrator' || 
+              userData.admin_role === 'admin')) {
+            setFormData(prev => ({ ...prev, leader_id: userId }));
+          }
+        };
+        setCurrentUserAsLeader();
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, userId]);
 
   const loadAvailableLeaders = async () => {
     try {
@@ -106,6 +246,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       setAvailableLeaders(data || []);
     } catch (error: any) {
       console.error('Failed to load leaders:', error);
+      onError('Failed to load available leaders');
     }
   };
 
@@ -135,7 +276,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
         .from('cell_groups')
         .select('id')
         .ilike('name', formData.name.trim())
-        .single();
+        .maybeSingle();
 
       if (existingGroup) {
         onError('A group with this name already exists');
@@ -163,14 +304,13 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
       // If a leader was selected, update their group assignment
       if (formData.leader_id) {
-        await supabase
-          .from('members')
-          .update({ 
-            cell_group_id: data.id,
-            admin_role: 'group_leader',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', formData.leader_id);
+        try {
+          await assignCellLeader(formData.leader_id, data.id);
+        } catch (leaderError: any) {
+          console.error('Error assigning leader:', leaderError);
+          // Continue even if leader assignment fails
+          onError('Group created but leader assignment failed: ' + leaderError.message);
+        }
       }
 
       setFormData({
@@ -418,6 +558,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
       setAvailableLeaders(data || []);
     } catch (error: any) {
       console.error('Failed to load leaders:', error);
+      onError('Failed to load available leaders');
     }
   };
 
@@ -453,7 +594,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
         .select('id')
         .ilike('name', formData.name.trim())
         .neq('id', group.id)
-        .single();
+        .maybeSingle();
 
       if (existingGroup) {
         onError('Another group with this name already exists');
@@ -480,27 +621,27 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
       // Handle leader assignment changes
       const previousLeaderId = group.leader_id;
       if (previousLeaderId !== formData.leader_id) {
-        // Remove previous leader's group assignment
-        if (previousLeaderId) {
-          await supabase
+        // If leader was changed, use the assignCellLeader function
+        if (formData.leader_id) {
+          try {
+            await assignCellLeader(formData.leader_id, group.id);
+          } catch (leaderError: any) {
+            console.error('Error assigning new leader:', leaderError);
+            onError('Group updated but leader assignment failed: ' + leaderError.message);
+          }
+        } else if (previousLeaderId) {
+          // If leader was removed, update the previous leader
+          const { error: removeError } = await supabase
             .from('members')
             .update({ 
-              cell_group_id: null,
+              admin_role: 'member',
               updated_at: new Date().toISOString()
             })
             .eq('id', previousLeaderId);
-        }
-
-        // Assign new leader
-        if (formData.leader_id) {
-          await supabase
-            .from('members')
-            .update({ 
-              cell_group_id: group.id,
-              admin_role: 'group_leader',
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', formData.leader_id);
+          
+          if (removeError) {
+            console.error('Error removing previous leader role:', removeError);
+          }
         }
       }
 
@@ -714,13 +855,17 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
       
       // Remove leader assignment if exists
       if (group.leader_id) {
-        await supabase
+        const { error: removeError } = await supabase
           .from('members')
           .update({ 
-            cell_group_id: null,
+            admin_role: 'member',
             updated_at: new Date().toISOString()
           })
           .eq('id', group.leader_id);
+
+        if (removeError) {
+          console.error('Error removing leader role:', removeError);
+        }
       }
 
       // Delete the group
@@ -1574,7 +1719,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .from('members')
           .select('*')
           .eq('phone', formData.phone.trim())
-          .single();
+          .maybeSingle();
         existingMember = phoneMatch;
       }
 
@@ -1928,7 +2073,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .from('meeting_reports')
         .select('*')
         .eq('meeting_id', selectedMeeting.id)
-        .single();
+        .maybeSingle(); // Use maybeSingle to avoid throwing error if not found
 
       if (error && error.code !== 'PGRST116') throw error;
       
@@ -2698,7 +2843,7 @@ const Groups = () => {
               .from('members')
               .select('name, surname, residence, phone')
               .eq('id', group.leader_id)
-              .single();
+              .maybeSingle();
             
             leaderInfo = leaderData;
           }
@@ -2753,7 +2898,7 @@ const Groups = () => {
         .from('members')
         .select('cell_group_id')
         .eq('id', profile.id)
-        .single();
+        .maybeSingle();
       
       if (!memberData?.cell_group_id) return null;
       
@@ -2761,7 +2906,7 @@ const Groups = () => {
         .from('cell_groups')
         .select('*')
         .eq('id', memberData.cell_group_id)
-        .single();
+        .maybeSingle();
       
       return groupData;
     } catch (error) {
@@ -3465,7 +3610,7 @@ const Groups = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
@@ -3579,3 +3724,4 @@ const Groups = () => {
 };
 
 export default Groups;
+export { assignCellLeader };
