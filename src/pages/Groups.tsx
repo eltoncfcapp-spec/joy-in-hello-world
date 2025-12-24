@@ -75,6 +75,7 @@ interface CreateGroupModalProps {
 }
 
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
+  const { isAdministrator, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -124,6 +125,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
     if (!userId) {
       onError('You must be logged in to create a group');
+      return;
+    }
+
+    // Check if user has permission to create groups (only admin and pastor)
+    if (!isAdministrator && !isPastor) {
+      onError('Only administrators and pastors can create new groups');
       return;
     }
 
@@ -2858,8 +2865,9 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
-    if (!canEditGroup(group)) {
-      setError('You do not have permission to edit this group');
+    // Only allow admin and pastor to edit groups
+    if (!isAdministrator && !isPastor) {
+      setError('Only administrators and pastors can edit groups');
       return;
     }
     setSelectedGroup(group);
@@ -2867,7 +2875,8 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
-    if (!canDeleteGroup(group)) {
+    // Only allow admin and pastor to delete groups
+    if (!isAdministrator && !isPastor) {
       setError('Only administrators and pastors can delete groups');
       return;
     }
@@ -2911,17 +2920,13 @@ const Groups = () => {
   };
 
   const canEditGroup = (group: CellGroup) => {
-    if (isAdministrator || isPastor) {
-      return true; // Admins & Pastors can edit all groups
-    }
-    if (isGroupLeader) {
-      return group.leader_id === profile?.id; // Leaders can edit only their own group
-    }
-    return false; // Members cannot edit any groups
+    // Only admin and pastor can edit groups
+    return isAdministrator || isPastor;
   };
 
   const canDeleteGroup = (group: CellGroup) => {
-    return isAdministrator || isPastor; // Only admins & pastors can delete
+    // Only admin and pastor can delete groups
+    return isAdministrator || isPastor;
   };
 
   const canViewGroupDetails = (group: CellGroup) => {
@@ -3279,7 +3284,7 @@ const Groups = () => {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
             <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none">
               <div className="flex justify-between items-center mb-6 print:mb-8">
-                <h3 className="text-2xl font-bold text-gray-900 print:text-black print:text-3xl">
+                <h3 className="text-2xl font-bold text-gray-900 print:text-black">
                   Group Meeting Report
                 </h3>
                 <div className="flex gap-2 print:hidden">
