@@ -94,26 +94,11 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Helper function to clean and validate UUIDs
-  const getValidUserGroups = () => {
-    const groups = getUserGroups();
-    // Filter out invalid values and keep only valid UUIDs
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const validGroups = groups.filter(group => {
-      // Check if it's a string and matches UUID pattern or is a special value
-      if (typeof group === 'string') {
-        return group === 'all_groups' || uuidRegex.test(group);
-      }
-      return false;
-    });
-    return validGroups;
-  };
-
   // Check user permissions
   const canViewAllMembers = isAdmin() || isPastor() || isDeacon();
   const canAddNewMember = isAdmin() || isPastor() || isDeacon() || isGroupLeader();
   const canViewHidden = isAdmin() || isPastor() || isDeacon();
-  const userGroups = getValidUserGroups();
+  const userGroups = getUserGroups();
   const hasViewAllGroups = hasPermission('view_all_groups');
   const hasManageAllGroups = hasPermission('manage_all_groups');
 
@@ -256,20 +241,8 @@ const Members = () => {
         if (userGroups.includes('all_groups')) {
           // User has view_all_groups permission
         } else if (userGroups.length > 0) {
-          // Filter by user's assigned groups (only valid UUIDs)
-          const validGroups = userGroups.filter(group => 
-            group !== 'all_groups' && typeof group === 'string'
-          );
-          
-          if (validGroups.length > 0) {
-            query = query.in('cell_group_id', validGroups);
-          } else if (profile?.cell_group_id) {
-            // Filter by user's own cell group
-            query = query.eq('cell_group_id', profile.cell_group_id);
-          } else {
-            // No groups assigned, can only see themselves
-            query = query.eq('id', profile?.id);
-          }
+          // Filter by user's assigned groups
+          query = query.in('cell_group_id', userGroups);
         } else if (profile?.cell_group_id) {
           // Filter by user's own cell group
           query = query.eq('cell_group_id', profile.cell_group_id);
@@ -282,7 +255,6 @@ const Members = () => {
       const { data, error } = await query;
 
       if (error) {
-        console.error('Supabase error:', error);
         throw error;
       }
 

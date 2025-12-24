@@ -72,10 +72,9 @@ interface CreateGroupModalProps {
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   userId: string | null;
-  canCreate: boolean;
 }
 
-const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId, canCreate }) => {
+const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -89,7 +88,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   const [searchLeaderTerm, setSearchLeaderTerm] = useState('');
 
   useEffect(() => {
-    if (isOpen && canCreate) {
+    if (isOpen) {
       loadAvailableLeaders();
     }
   }, [isOpen]);
@@ -117,11 +116,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
   const createGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!canCreate) {
-      onError('You do not have permission to create groups');
-      return;
-    }
 
     if (!formData.name.trim()) {
       onError('Group name is required');
@@ -205,31 +199,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   );
 
   if (!isOpen) return null;
-
-  if (!canCreate) {
-    return (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-gray-900">Access Denied</h3>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="text-center py-8">
-            <Shield className="h-16 w-16 text-red-500 mx-auto mb-4" />
-            <h4 className="text-lg font-semibold text-gray-900 mb-2">Permission Required</h4>
-            <p className="text-gray-600">
-              You do not have permission to create groups. Only administrators, pastors, and deacons can create groups.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -392,7 +361,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
         <div className="mt-6 pt-4 border-t border-gray-200">
           <p className="text-sm text-gray-500">
-            Only administrators, pastors, and deacons can create new groups. 
+            Only administrators and pastors can create new groups. 
             The group creator will have full management permissions.
           </p>
         </div>
@@ -409,20 +378,9 @@ interface EditGroupModalProps {
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   canEdit: boolean;
-  currentUserRole?: string | null;
-  currentUserId?: string | null;
 }
 
-const EditGroupModal: React.FC<EditGroupModalProps> = ({ 
-  isOpen, 
-  group, 
-  onClose, 
-  onSuccess, 
-  onError, 
-  canEdit,
-  currentUserRole,
-  currentUserId 
-}) => {
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -468,24 +426,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // Helper function to check if user can edit specific fields
-  const canEditTimeAndName = (): boolean => {
-    if (!currentUserRole || !group) return false;
-    
-    // Only leaders, admins, and pastors can edit meeting time and name
-    const allowedRoles = ['administrator', 'admin', 'pastor', 'deacon'];
-    
-    // Check if user is the group leader
-    const isGroupLeader = group.leader_id === currentUserId;
-    
-    // Check if user has admin/pastor/deacon role OR is the group leader
-    if (allowedRoles.includes(currentUserRole) || isGroupLeader) {
-      return true;
-    }
-    
-    return false;
-  };
-
   const updateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -504,34 +444,20 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
       return;
     }
 
-    // Check if user is trying to edit restricted fields without permission
-    const changedRestrictedFields = (
-      formData.meeting_day !== group.meeting_day ||
-      formData.meeting_time !== group.meeting_time ||
-      formData.name !== group.name
-    );
-
-    if (changedRestrictedFields && !canEditTimeAndName()) {
-      onError('You do not have permission to edit meeting time, day, or group name. Only leaders, admins, and pastors can modify these fields.');
-      return;
-    }
-
     try {
       setLoading(true);
       
       // Check if group with same name already exists (excluding current group)
-      if (formData.name !== group.name) {
-        const { data: existingGroup } = await supabase
-          .from('cell_groups')
-          .select('id')
-          .ilike('name', formData.name.trim())
-          .neq('id', group.id)
-          .single();
+      const { data: existingGroup } = await supabase
+        .from('cell_groups')
+        .select('id')
+        .ilike('name', formData.name.trim())
+        .neq('id', group.id)
+        .single();
 
-        if (existingGroup) {
-          onError('Another group with this name already exists');
-          return;
-        }
+      if (existingGroup) {
+        onError('Another group with this name already exists');
+        return;
       }
 
       const updatedGroup = {
@@ -590,9 +516,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
 
   if (!isOpen || !group) return null;
 
-  const userCanEditTimeAndName = canEditTimeAndName();
-  const isReadOnly = !userCanEditTimeAndName;
-
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -606,39 +529,22 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
           </button>
         </div>
 
-        {!userCanEditTimeAndName && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-start gap-2">
-              <Shield className="h-5 w-5 text-yellow-600 mt-0.5" />
-              <p className="text-sm text-yellow-800">
-                <strong>Note:</strong> You can only edit basic information. Meeting time, day, and group name can only be modified by the group leader, admin, or pastor.
-              </p>
-            </div>
-          </div>
-        )}
-
         <form onSubmit={updateGroup} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Group Name {userCanEditTimeAndName ? '*' : '(Restricted)'}
+              Group Name *
             </label>
             <input
               type="text"
               name="name"
               value={formData.name}
               onChange={handleInputChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Enter group name"
               required
               minLength={2}
               maxLength={100}
-              disabled={isReadOnly}
             />
-            {isReadOnly && (
-              <p className="text-xs text-gray-500 mt-1">
-                Only group leader, admin, or pastor can edit the name
-              </p>
-            )}
           </div>
 
           <div>
@@ -662,14 +568,13 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Day {userCanEditTimeAndName ? '' : '(Restricted)'}
+                Meeting Day
               </label>
               <select
                 name="meeting_day"
                 value={formData.meeting_day}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                disabled={isReadOnly}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select day</option>
                 <option value="Sunday">Sunday</option>
@@ -680,15 +585,10 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
                 <option value="Friday">Friday</option>
                 <option value="Saturday">Saturday</option>
               </select>
-              {isReadOnly && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Only group leader, admin, or pastor can edit the meeting day
-                </p>
-              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Time {userCanEditTimeAndName ? '' : '(Restricted)'}
+                Meeting Time
               </label>
               <div className="relative">
                 <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -697,15 +597,9 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
                   name="meeting_time"
                   value={formData.meeting_time}
                   onChange={handleInputChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  disabled={isReadOnly}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              {isReadOnly && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Only group leader, admin, or pastor can edit the meeting time
-                </p>
-              )}
             </div>
           </div>
 
@@ -733,7 +627,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
               value={formData.leader_id}
               onChange={handleInputChange}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={!canEdit}
             >
               <option value="">No leader assigned</option>
               {availableLeaders.map((leader) => (
@@ -2601,400 +2494,1086 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
   );
 };
 
-// Main Groups Component
-const Groups: React.FC = () => {
-  const { user } = useAuth();
-  const [groups, setGroups] = useState<CellGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+// Group Management Workflow Component
+interface GroupWorkflowProps {
+  group: CellGroup;
+  meetings: GroupMeeting[];
+  members: Member[];
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}
 
-  useEffect(() => {
-    loadGroups();
-    loadCurrentUserRole();
-  }, [user]);
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
+  const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
+  const [currentStep, setCurrentStep] = useState(1);
+  const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
 
-  const loadCurrentUserRole = async () => {
-    if (!user) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from('members')
-        .select('admin_role')
-        .eq('id', user.id)
-        .single();
+  const steps = [
+    { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
+    { number: 2, title: 'Take Attendance', description: 'Record member attendance' },
+    { number: 3, title: 'Add Newcomers', description: 'Register first-time visitors' },
+    { number: 4, title: 'Create Report', description: 'Generate meeting report' }
+  ];
 
-      if (error) throw error;
-      setCurrentUserRole(data?.admin_role || null);
-    } catch (error) {
-      console.error('Failed to load user role:', error);
+  const canAccessStep = (stepNumber: number) => {
+    if (!profile) return false;
+
+    switch (stepNumber) {
+      case 1:
+        return canCreateGroupMeetings(group.id);
+      case 2:
+        return canManageGroupAttendance(group.id);
+      case 3:
+        return canAddGroupNewcomers(group.id);
+      case 4:
+        return canCreateGroupReports(group.id);
+      default:
+        return false;
     }
   };
 
-const loadGroups = async () => {
-  try {
-    setLoading(true);
-    
-    // First, get the current user's member record to check if they're a leader
-    let currentUserMemberData = null;
-    if (user) {
-      const { data: memberData } = await supabase
-        .from('members')
-        .select('id, admin_role')
-        .eq('id', user.id)
-        .single();
-      currentUserMemberData = memberData;
-    }
-    
-    // Fetch all groups - without the join that's causing the error
-    const { data: groupsData, error: groupsError } = await supabase
-      .from('cell_groups')
-      .select('*')
-      .order('name');
+  return (
+    <div className="space-y-6">
+      {/* Progress Steps */}
+      <div className="flex justify-between items-center">
+        {steps.map((step) => (
+          <div key={step.number} className="flex-1 text-center">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 transition-all duration-300 ${
+              currentStep >= step.number 
+                ? 'bg-blue-600 text-white shadow-lg' 
+                : 'bg-gray-300 text-gray-600'
+            }`}>
+              {step.number}
+            </div>
+            <div className={`text-sm font-medium ${
+              currentStep >= step.number ? 'text-blue-600' : 'text-gray-500'
+            }`}>
+              {step.title}
+            </div>
+            <div className="text-xs text-gray-400 hidden md:block">{step.description}</div>
+          </div>
+        ))}
+      </div>
 
-    if (groupsError) {
-      console.error('Groups error:', groupsError);
-      throw groupsError;
-    }
+      {/* Step Content */}
+      <div className="bg-gray-50 rounded-xl p-6 min-h-[400px]">
+        {currentStep === 1 && (
+          <GroupMeetingCreationStep
+            group={group}
+            onMeetingCreated={() => {
+              onSuccess('Group meeting created successfully!');
+              setCurrentStep(2);
+            }}
+            onError={onError}
+          />
+        )}
 
-    // Process groups one by one to avoid complex joins
-    const groupsWithDetails = await Promise.all(
-      (groupsData || []).map(async (group) => {
-        try {
-          // Get member count for this group
-          const { count: memberCount } = await supabase
+        {currentStep === 2 && (
+          <GroupAttendanceStep
+            group={group}
+            meetings={meetings}
+            selectedMeeting={selectedMeeting}
+            onMeetingSelect={setSelectedMeeting}
+            onAttendanceSaved={() => {
+              onSuccess('Group attendance saved successfully!');
+              setCurrentStep(3);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 3 && (
+          <GroupNewcomerStep
+            group={group}
+            selectedMeeting={selectedMeeting}
+            onNewcomerAdded={() => {
+              onSuccess('Newcomer added successfully!');
+              setCurrentStep(4);
+            }}
+            onError={onError}
+          />
+        )}
+
+        {currentStep === 4 && (
+          <GroupReportStep
+            group={group}
+            meetings={meetings}
+            selectedMeeting={selectedMeeting}
+            onMeetingSelect={setSelectedMeeting}
+            onReportCreated={() => {
+              onSuccess('Group report generated successfully!');
+              onClose();
+            }}
+            onError={onError}
+          />
+        )}
+      </div>
+
+      {/* Navigation Buttons */}
+      <div className="flex justify-between pt-6 border-t border-gray-200">
+        <button
+          onClick={() => setCurrentStep(prev => prev - 1)}
+          disabled={currentStep === 1}
+          className="px-6 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition-all duration-200 font-medium disabled:opacity-50"
+        >
+          Previous
+        </button>
+        
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
+          >
+            Close
+          </button>
+          <button
+            onClick={() => setCurrentStep(prev => prev + 1)}
+            disabled={currentStep === 4 || !canAccessStep(currentStep + 1)}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Main Groups Component
+const Groups = () => {
+  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor, isGroupLeader, isMember } = useAuth();
+  
+  const [groups, setGroups] = useState<CellGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false);
+  const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
+  const [showMeetingsModal, setShowMeetingsModal] = useState(false);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  const [meetings, setMeetings] = useState<GroupMeeting[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
+
+  useEffect(() => {
+    if (profile) {
+      loadGroups();
+      loadAllMembers();
+    }
+  }, [profile]);
+
+  const loadGroups = async () => {
+    try {
+      setLoading(true);
+      
+      // First, load all groups
+      const { data: groupsData, error: groupsError } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .order('name');
+
+      if (groupsError) throw groupsError;
+
+      // Get leader information for each group
+      const groupsWithDetails = await Promise.all(
+        (groupsData || []).map(async (group) => {
+          // Get member count
+          const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
-
-          // Get leader information if leader_id exists
-          let leaderName = null;
-          let leaderResidence = null;
-          let leaderPhone = null;
           
+          // Get leader information if leader_id exists
+          let leaderInfo = null;
           if (group.leader_id) {
-            try {
-              const { data: leader } = await supabase
-                .from('members')
-                .select('name, surname, residence, phone')
-                .eq('id', group.leader_id)
-                .single();
-              
-              if (leader) {
-                leaderName = `${leader.name} ${leader.surname}`;
-                leaderResidence = leader.residence;
-                leaderPhone = leader.phone;
-              }
-            } catch (leaderErr) {
-              console.warn(`Could not load leader ${group.leader_id} for group ${group.name}:`, leaderErr);
-            }
+            const { data: leaderData } = await supabase
+              .from('members')
+              .select('name, surname, residence, phone')
+              .eq('id', group.leader_id)
+              .single();
+            
+            leaderInfo = leaderData;
           }
-
+          
           // Check if current user is the leader of this group
-          const isCurrentUserLeader = currentUserMemberData && 
-                                    group.leader_id === currentUserMemberData.id;
-
+          const isCurrentUserLeader = group.leader_id === profile?.id;
+          
           return {
-            id: group.id,
-            name: group.name,
-            location: group.location,
-            meeting_day: group.meeting_day,
-            meeting_time: group.meeting_time,
-            leader_id: group.leader_id,
-            description: group.description,
-            created_at: group.created_at,
-            updated_at: group.updated_at,
-            leader_name: leaderName,
-            leader_residence: leaderResidence,
-            leader_phone: leaderPhone,
-            memberCount: memberCount || 0,
+            ...group,
+            leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
+            leader_residence: leaderInfo?.residence || null,
+            leader_phone: leaderInfo?.phone || null,
+            memberCount: count || 0,
             is_current_user_leader: isCurrentUserLeader
           };
-        } catch (error) {
-          console.error('Error processing group:', error);
-          // Return basic group info if processing fails
-          return {
-            id: group.id,
-            name: group.name,
-            location: group.location,
-            meeting_day: group.meeting_day,
-            meeting_time: group.meeting_time,
-            leader_id: group.leader_id,
-            description: group.description,
-            created_at: group.created_at,
-            updated_at: group.updated_at,
-            leader_name: null,
-            leader_residence: null,
-            leader_phone: null,
-            memberCount: 0,
-            is_current_user_leader: false
-          };
-        }
-      })
-    );
+        })
+      );
 
-    setGroups(groupsWithDetails);
-  } catch (error: any) {
-    console.error('Error loading groups:', error);
-    setErrorMessage('Failed to load groups: ' + error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-  const canCreateGroup = (): boolean => {
-    if (!currentUserRole) return false;
-    
-    const allowedRoles = ['administrator', 'admin', 'pastor', 'deacon'];
-    return allowedRoles.includes(currentUserRole);
+      // Filter groups based on user role
+      let filteredGroups = groupsWithDetails;
+      
+      if (!isAdministrator && !isPastor) {
+        if (isGroupLeader) {
+          // Group Leaders can see only their own group
+          filteredGroups = groupsWithDetails.filter(group => 
+            group.leader_id === profile?.id
+          );
+        } else if (isMember) {
+          // Members can see only their own group
+          const userGroup = await getUserGroup();
+          filteredGroups = groupsWithDetails.filter(group => 
+            group.id === userGroup?.id
+          );
+        }
+      }
+      // Administrators and Pastors can see all groups (no filtering)
+
+      setGroups(filteredGroups);
+    } catch (error: any) {
+      console.error('Error loading groups:', error);
+      setError('Failed to load groups: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const canEditGroup = (group: CellGroup): boolean => {
-    if (!user || !currentUserRole) return false;
-    
-    const allowedRoles = ['administrator', 'admin', 'pastor', 'deacon'];
-    
-    // Admins, pastors, and deacons can edit any group
-    if (allowedRoles.includes(currentUserRole)) {
-      return true;
+  const getUserGroup = async (): Promise<CellGroup | null> => {
+    try {
+      if (!profile?.id) return null;
+      
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('cell_group_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (!memberData?.cell_group_id) return null;
+      
+      const { data: groupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', memberData.cell_group_id)
+        .single();
+      
+      return groupData;
+    } catch (error) {
+      console.error('Failed to get user group:', error);
+      return null;
     }
-    
-    // Group leaders can edit their own group
-    if (group.is_current_user_leader) {
-      return true;
+  };
+
+  const loadAllMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Failed to load members:', error);
     }
-    
+  };
+
+  const loadMeetings = async (groupId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('group_id', groupId)
+        .order('meeting_date', { ascending: false });
+
+      if (error) throw error;
+      setMeetings(data || []);
+    } catch (error: any) {
+      setError('Failed to load meetings: ' + error.message);
+    }
+  };
+
+  const loadAttendanceForMeeting = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meeting_attendance')
+        .select(`
+          *,
+          members:member_id (
+            id, name, surname, residence, phone
+          )
+        `)
+        .eq('meeting_id', meetingId);
+
+      if (error) {
+        console.error('Error loading attendance:', error);
+        setError('Failed to load attendance: ' + error.message);
+        return;
+      }
+      
+      console.log('Loaded attendance records:', data); // Debug log
+      setAttendanceRecords(data || []);
+    } catch (error: any) {
+      console.error('Failed to load attendance:', error);
+      setError('Failed to load attendance: ' + error.message);
+    }
+  };
+
+  const openReportModal = async (meeting: GroupMeeting) => {
+    setSelectedMeetingForReport(meeting);
+    await loadAttendanceForMeeting(meeting.id);
+    setShowReportModal(true);
+  };
+
+  const handlePrintReport = () => {
+    window.print();
+  };
+
+  const openMeetingsModal = async (group: CellGroup) => {
+    if (!canViewGroup(group.id)) {
+      setError('You do not have permission to view this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setShowMeetingsModal(true);
+    await loadMeetings(group.id);
+  };
+
+  const openWorkflowModal = async (group: CellGroup) => {
+    if (!canManageGroup(group.id)) {
+      setError('You do not have permission to manage this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setShowWorkflowModal(true);
+    await loadMeetings(group.id);
+  };
+
+  const openEditGroupModal = (group: CellGroup) => {
+    if (!canEditGroup(group)) {
+      setError('You do not have permission to edit this group');
+      return;
+    }
+    setSelectedGroup(group);
+    setShowEditGroupModal(true);
+  };
+
+  const openDeleteGroupModal = (group: CellGroup) => {
+    if (!canDeleteGroup(group)) {
+      setError('Only administrators and pastors can delete groups');
+      return;
+    }
+    setSelectedGroup(group);
+    setShowDeleteGroupModal(true);
+  };
+
+  const closeAllModals = () => {
+    setShowCreateGroupModal(false);
+    setShowEditGroupModal(false);
+    setShowDeleteGroupModal(false);
+    setShowMeetingsModal(false);
+    setShowWorkflowModal(false);
+    setShowReportModal(false);
+    setSelectedGroup(null);
+    setSelectedMeetingForReport(null);
+    setAttendanceRecords([]);
+  };
+
+  const handleGroupCreated = () => {
+    loadGroups();
+    setSuccess('Group created successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleGroupUpdated = () => {
+    loadGroups();
+    setSuccess('Group updated successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleGroupDeleted = () => {
+    loadGroups();
+    setSuccess('Group deleted successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Permission functions
+  const canCreateGroups = () => {
+    return isAdministrator || isPastor;
+  };
+
+  const canEditGroup = (group: CellGroup) => {
+    if (isAdministrator || isPastor) {
+      return true; // Admins & Pastors can edit all groups
+    }
+    if (isGroupLeader) {
+      return group.leader_id === profile?.id; // Leaders can edit only their own group
+    }
+    return false; // Members cannot edit any groups
+  };
+
+  const canDeleteGroup = (group: CellGroup) => {
+    return isAdministrator || isPastor; // Only admins & pastors can delete
+  };
+
+  const canViewGroupDetails = (group: CellGroup) => {
+    if (isAdministrator || isPastor) {
+      return true; // Admins & Pastors can view all groups
+    }
+    if (isGroupLeader) {
+      return group.leader_id === profile?.id; // Leaders can view only their own group
+    }
+    if (isMember) {
+      // Members can view only their own group
+      // This assumes members have a cell_group_id in their profile
+      return true; // We'll filter this in loadGroups
+    }
     return false;
   };
 
-  const canDeleteGroup = (group: CellGroup): boolean => {
-    if (!user || !currentUserRole) return false;
+  const getUserRoleDisplay = () => {
+    if (!profile) return 'Guest';
     
-    // Only administrators and pastors can delete groups
-    const allowedRoles = ['administrator', 'admin', 'pastor'];
-    return allowedRoles.includes(currentUserRole);
+    const roles = getRoles();
+    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
+    if (roles.includes('pastor')) return 'Pastor';
+    if (roles.includes('deacon')) return 'Deacon';
+    if (roles.includes('group_leader')) return 'Group Leader';
+    if (roles.includes('member')) return 'Member';
+    return 'Guest';
   };
 
-  const handleCreateSuccess = (message: string) => {
-    setSuccessMessage(message);
-    loadGroups();
-  };
+  const getAttendanceStats = () => {
+    const attended = attendanceRecords.filter(r => r.status === 'present').length;
+    const absent = attendanceRecords.filter(r => r.status === 'absent').length;
+    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+    const total = attendanceRecords.length;
 
-  const handleEditSuccess = (message: string) => {
-    setSuccessMessage(message);
-    loadGroups();
+    return { attended, absent, absentWithReason, total };
   };
-
-  const handleDeleteSuccess = () => {
-    setSuccessMessage('Group deleted successfully!');
-    loadGroups();
-  };
-
-  const filteredGroups = groups.filter(group =>
-    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
-      {/* Success/Error Messages */}
-      {successMessage && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              <p className="text-green-800">{successMessage}</p>
-            </div>
-            <button onClick={() => setSuccessMessage('')} className="text-green-600 hover:text-green-800">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
+          <p className="text-lg text-gray-600">
+            {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view groups'}
+          </p>
         </div>
-      )}
 
-      {errorMessage && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-red-600" />
-              <p className="text-red-800">{errorMessage}</p>
-            </div>
-            <button onClick={() => setErrorMessage('')} className="text-red-600 hover:text-red-800">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Cell Groups</h1>
-        <p className="text-gray-600">Manage church cell groups, members, and meetings</p>
-      </div>
-
-      {/* Search and Actions Bar */}
-      <div className="bg-white rounded-2xl p-4 mb-6 shadow-sm border border-gray-200">
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="relative flex-1 w-full">
+        {/* Search and Create Group Bar */}
+        <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
+          <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
               type="text"
-              placeholder="Search groups by name, location, or leader..."
+              placeholder="Search groups..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
           
-          {canCreateGroup() && (
+          {canCreateGroups() && (
             <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors font-medium whitespace-nowrap"
+              onClick={() => setShowCreateGroupModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-green-600 text-white rounded-xl hover:from-blue-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
             >
-              <Plus className="h-4 w-4" />
-              Create Group
+              <Plus className="h-5 w-5" />
+              Create New Group
             </button>
           )}
         </div>
-      </div>
 
-      {/* Groups Grid */}
-      {loading ? (
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      ) : filteredGroups.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-2xl border border-gray-200">
-          <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-          <h3 className="text-lg font-medium text-gray-900 mb-1">No groups found</h3>
-          <p className="text-gray-600 mb-4">
-            {searchTerm ? 'Try adjusting your search terms' : 'Create your first cell group to get started'}
-          </p>
-          {canCreateGroup() && !searchTerm && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-            >
-              Create Group
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredGroups.map((group) => (
-            <div key={group.id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-              <div className="p-5">
-                <div className="flex justify-between items-start mb-4">
-                  <h3 className="text-xl font-bold text-gray-900">{group.name}</h3>
-                  <div className="flex items-center gap-1">
-                    {canEditGroup(group) && (
-                      <button
-                        onClick={() => {
-                          setSelectedGroup(group);
-                          setShowEditModal(true);
-                        }}
-                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Edit group"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
-                    )}
-                    {canDeleteGroup(group) && (
-                      <button
-                        onClick={() => {
-                          setSelectedGroup(group);
-                          setShowDeleteModal(true);
-                        }}
-                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Delete group"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="space-y-3 mb-4">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-gray-400" />
-                    <span className="text-gray-700">{group.location || 'No location specified'}</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gray-400" />
-                    <span className="text-gray-700">
-                      {group.meeting_day ? `${group.meeting_day} at ${group.meeting_time || 'TBA'}` : 'Meeting schedule not set'}
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <User className="h-4 w-4 text-gray-400" />
-                    <span className="text-gray-700">
-                      {group.leader_name || 'No leader assigned'}
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <Users className="h-4 w-4 text-gray-400" />
-                    <span className="text-gray-700">{group.memberCount || 0} members</span>
-                  </div>
-                </div>
-                
-                {group.description && (
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{group.description}</p>
+        {/* Error/Success Messages */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+                <p className="text-red-700 font-medium">{error}</p>
+              </div>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                <p className="text-green-700 font-medium">{success}</p>
+              </div>
+              <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Groups Grid */}
+        {!profile ? (
+          <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
+            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">Please Log In</h3>
+            <p className="text-gray-500 mb-6">You need to be logged in to view groups</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {loading && groups.length === 0 ? (
+              <div className="col-span-full text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-4 text-gray-600">Loading groups...</p>
+              </div>
+            ) : groups.length === 0 ? (
+              <div className="col-span-full text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
+                <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-gray-600 mb-2">
+                  {searchTerm ? 'No groups match your search' : 'No Accessible Groups'}
+                </h3>
+                <p className="text-gray-500 mb-6">
+                  {searchTerm ? 'Try a different search term' : 'You do not have access to any groups'}
+                </p>
+                {canCreateGroups() && (
+                  <button
+                    onClick={() => setShowCreateGroupModal(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mx-auto"
+                  >
+                    <Plus className="h-5 w-5" />
+                    Create Your First Group
+                  </button>
                 )}
+              </div>
+            ) : (
+              groups.filter(group => 
+                group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
+              ).map((group) => {
+                const canManage = canManageGroup(group.id);
+                const canView = canViewGroup(group.id);
+                const canEdit = canEditGroup(group);
+                const canDelete = canDeleteGroup(group);
                 
-                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    group.is_current_user_leader ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {group.is_current_user_leader ? 'Your Group' : 'Cell Group'}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    Updated {group.updated_at ? new Date(group.updated_at).toLocaleDateString() : 'N/A'}
-                  </span>
-                </div>
+                return (
+                  <div
+                    key={group.id}
+                    className="bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-start gap-4">
+                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center shadow-lg">
+                          <Users className="h-7 w-7 text-white" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">{group.name}</h3>
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {group.is_current_user_leader && (
+                              <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Your Leadership
+                              </span>
+                            )}
+                            {canManage ? (
+                              <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Can Manage
+                              </span>
+                            ) : canView ? (
+                              <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                View Only
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {(canEdit || canDelete) && (
+                        <div className="flex gap-1">
+                          {canEdit && (
+                            <button
+                              onClick={() => openEditGroupModal(group)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit Group"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => openDeleteGroupModal(group)}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Group"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 mb-4">
+                      {group.leader_name && (
+                        <div className="flex items-center gap-3 text-gray-600">
+                          <User className="h-4 w-4" />
+                          <span className="text-sm">Leader: {group.leader_name}</span>
+                        </div>
+                      )}
+                      {group.location && (
+                        <div className="flex items-center gap-3 text-gray-600">
+                          <MapPin className="h-4 w-4" />
+                          <span className="text-sm">{group.location}</span>
+                        </div>
+                      )}
+                      {(group.meeting_day || group.meeting_time) && (
+                        <div className="flex items-center gap-3 text-gray-600">
+                          <Calendar className="h-4 w-4" />
+                          <span className="text-sm">
+                            {group.meeting_day} {group.meeting_time && `at ${group.meeting_time}`}
+                          </span>
+                        </div>
+                      )}
+                      {group.description && (
+                        <p className="text-sm text-gray-600 line-clamp-2">{group.description}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                      <span className="text-sm text-gray-600">
+                        {group.memberCount || 0} member{(group.memberCount || 0) !== 1 ? 's' : ''}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => openMeetingsModal(group)}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                        >
+                          View Meetings
+                        </button>
+                        {canManage && (
+                          <button
+                            onClick={() => openWorkflowModal(group)}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                          >
+                            Manage Group
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Modals */}
+        <CreateGroupModal
+          isOpen={showCreateGroupModal}
+          onClose={() => setShowCreateGroupModal(false)}
+          onSuccess={handleGroupCreated}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          userId={profile?.id || null}
+        />
+
+        <EditGroupModal
+          isOpen={showEditGroupModal}
+          group={selectedGroup}
+          onClose={() => setShowEditGroupModal(false)}
+          onSuccess={handleGroupUpdated}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          canEdit={selectedGroup ? canEditGroup(selectedGroup) : false}
+        />
+
+        <DeleteGroupModal
+          isOpen={showDeleteGroupModal}
+          group={selectedGroup}
+          onClose={() => setShowDeleteGroupModal(false)}
+          onConfirm={handleGroupDeleted}
+          onError={(message) => {
+            setError(message);
+            setTimeout(() => setError(null), 3000);
+          }}
+          canDelete={selectedGroup ? canDeleteGroup(selectedGroup) : false}
+        />
+
+        {showMeetingsModal && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:hidden">
+            <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900">{selectedGroup.name} - Meetings</h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {meetings.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 rounded-xl">
+                    <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600">No meetings scheduled</p>
+                  </div>
+                ) : (
+                  meetings.map((meeting) => (
+                    <div key={meeting.id} className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {new Date(meeting.meeting_date).toLocaleDateString()}
+                            {meeting.meeting_time && ` at ${meeting.meeting_time}`}
+                          </div>
+                          {meeting.topic && (
+                            <div className="text-sm text-gray-600 mt-1">Topic: {meeting.topic}</div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            meeting.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            meeting.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                            'bg-blue-100 text-blue-800'
+                          }`}>
+                            {meeting.status}
+                          </span>
+                          {meeting.status === 'completed' && (
+                            <button
+                              onClick={() => openReportModal(meeting)}
+                              className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
+                            >
+                              <Printer className="h-3 w-3" />
+                              View Report
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Modals */}
-      <CreateGroupModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSuccess={handleCreateSuccess}
-        onError={setErrorMessage}
-        userId={user?.id || null}
-        canCreate={canCreateGroup()}
-      />
+        {showReportModal && selectedMeetingForReport && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
+            <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none">
+              <div className="flex justify-between items-center mb-6 print:mb-8">
+                <h3 className="text-2xl font-bold text-gray-900 print:text-black print:text-3xl">
+                  Group Meeting Report
+                </h3>
+                <div className="flex gap-2 print:hidden">
+                  <button
+                    onClick={handlePrintReport}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print Report
+                  </button>
+                  <button
+                    onClick={closeAllModals}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
 
-      <EditGroupModal
-        isOpen={showEditModal}
-        group={selectedGroup}
-        onClose={() => setShowEditModal(false)}
-        onSuccess={handleEditSuccess}
-        onError={setErrorMessage}
-        canEdit={selectedGroup ? canEditGroup(selectedGroup) : false}
-        currentUserRole={currentUserRole}
-        currentUserId={user?.id || null}
-      />
+              <div className="mb-8 pb-6 border-b-2 border-gray-300 print:border-black">
+                <div className="text-center mb-4">
+                  <h1 className="text-3xl font-bold text-gray-900 print:text-black mb-2">
+                    {selectedGroup.name}
+                  </h1>
+                  <p className="text-lg text-gray-600 print:text-black">Group Meeting Attendance Report</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <p className="text-sm text-gray-500 print:text-gray-700">Date</p>
+                    <p className="font-semibold text-gray-900 print:text-black">
+                      {new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 print:text-gray-700">Time</p>
+                    <p className="font-semibold text-gray-900 print:text-black">
+                      {selectedMeetingForReport.meeting_time || 'Not specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 print:text-gray-700">Location</p>
+                    <p className="font-semibold text-gray-900 print:text-black">
+                      {selectedMeetingForReport.location || selectedGroup.location || 'Not specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 print:text-gray-700">Topic</p>
+                    <p className="font-semibold text-gray-900 print:text-black">
+                      {selectedMeetingForReport.topic || 'Not specified'}
+                    </p>
+                  </div>
+                </div>
+              </div>
 
-      <DeleteGroupModal
-        isOpen={showDeleteModal}
-        group={selectedGroup}
-        onClose={() => setShowDeleteModal(false)}
-        onConfirm={handleDeleteSuccess}
-        onError={setErrorMessage}
-        canDelete={selectedGroup ? canDeleteGroup(selectedGroup) : false}
-      />
+              <div className="mb-8">
+                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Attendance Summary</h4>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 print:bg-blue-50 border border-blue-200 print:border-blue-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-600 print:text-blue-700 font-medium">Total Members</p>
+                        <p className="text-3xl font-bold text-blue-700 print:text-blue-900">
+                          {getAttendanceStats().total}
+                        </p>
+                      </div>
+                      <Users className="h-10 w-10 text-blue-400 print:text-blue-600" />
+                    </div>
+                  </div>
+                  <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-600 print:text-green-700 font-medium">Attended</p>
+                        <p className="text-3xl font-bold text-green-700 print:text-green-900">
+                          {getAttendanceStats().attended}
+                        </p>
+                      </div>
+                      <CheckCircle className="h-10 w-10 text-green-400 print:text-green-600" />
+                    </div>
+                    <p className="text-xs text-green-600 print:text-green-700 mt-2">
+                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%` : '0%'}
+                    </p>
+                  </div>
+                  <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-red-600 print:text-red-700 font-medium">Absent</p>
+                        <p className="text-3xl font-bold text-red-700 print:text-red-900">
+                          {getAttendanceStats().absent}
+                        </p>
+                      </div>
+                      <X className="h-10 w-10 text-red-400 print:text-red-600" />
+                    </div>
+                    <p className="text-xs text-red-600 print:text-red-700 mt-2">
+                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%` : '0%'}
+                    </p>
+                  </div>
+                  <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-yellow-600 print:text-yellow-700 font-medium">Absent w/ Reason</p>
+                        <p className="text-3xl font-bold text-yellow-700 print:text-yellow-900">
+                          {getAttendanceStats().absentWithReason}
+                        </p>
+                      </div>
+                      <AlertCircle className="h-10 w-10 text-yellow-400 print:text-yellow-600" />
+                    </div>
+                    <p className="text-xs text-yellow-600 print:text-yellow-700 mt-2">
+                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%` : '0%'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Detailed Attendance</h4>
+                {attendanceRecords.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 print:bg-gray-50 rounded-lg">
+                    <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600 print:text-gray-700">No attendance records found</p>
+                  </div>
+                ) : (
+                  <>
+                    {getAttendanceStats().attended > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-green-700 print:text-green-800 mb-3 flex items-center gap-2">
+                          <CheckCircle className="h-5 w-5" />
+                          Present ({getAttendanceStats().attended})
+                        </h5>
+                        <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'present')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                                  <span className="text-gray-900 print:text-black">
+                                    {record.members?.name} {record.members?.surname}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {getAttendanceStats().absent > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-red-700 print:text-red-800 mb-3 flex items-center gap-2">
+                          <X className="h-5 w-5" />
+                          Absent ({getAttendanceStats().absent})
+                        </h5>
+                        <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'absent')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-red-600 rounded-full"></div>
+                                  <span className="text-gray-900 print:text-black">
+                                    {record.members?.name} {record.members?.surname}
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {getAttendanceStats().absentWithReason > 0 && (
+                      <div className="mb-6">
+                        <h5 className="text-lg font-semibold text-yellow-700 print:text-yellow-800 mb-3 flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5" />
+                          Absent with Notes ({getAttendanceStats().absentWithReason})
+                        </h5>
+                        <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {attendanceRecords
+                              .filter(record => record.status === 'absent_with_reason')
+                              .map((record) => (
+                                <div key={record.id} className="flex items-start gap-2">
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="flex-1">
+                                    <span className="text-gray-900 print:text-black font-medium">
+                                      {record.members?.name} {record.members?.surname}
+                                    </span>
+                                    {record.notes && (
+                                      <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
+                                        Notes: {record.notes}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {selectedMeetingForReport.notes && (
+                <div className="mb-6">
+                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">Meeting Notes</h4>
+                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-lg p-4">
+                    <p className="text-gray-700 print:text-black whitespace-pre-wrap">
+                      {selectedMeetingForReport.notes}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
+                <p className="text-sm text-gray-600 text-center">
+                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showWorkflowModal && selectedGroup && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900">Manage {selectedGroup.name}</h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <GroupManagementWorkflow
+                group={selectedGroup}
+                meetings={meetings}
+                members={members}
+                onClose={closeAllModals}
+                onSuccess={(message) => {
+                  setSuccess(message);
+                  setTimeout(() => setSuccess(null), 3000);
+                }}
+                onError={(message) => {
+                  setError(message);
+                  setTimeout(() => setError(null), 3000);
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        @media print {
+          body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+          @page {
+            margin: 1cm;
+            size: A4;
+          }
+          .print\\:hidden {
+            display: none !important;
+          }
+          .print\\:block {
+            display: block !important;
+          }
+          .print\\:p-0 {
+            padding: 0 !important;
+          }
+          .print\\:bg-white {
+            background-color: white !important;
+          }
+          .print\\:text-black {
+            color: black !important;
+          }
+          .print\\:max-h-none {
+            max-height: none !important;
+          }
+          .print\\:rounded-none {
+            border-radius: 0 !important;
+          }
+          .print\\:shadow-none {
+            box-shadow: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };
