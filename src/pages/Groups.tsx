@@ -2747,15 +2747,6 @@ const loadGroups = async () => {
     setLoading(false);
   }
 };
-      setGroups(groupsWithDetails);
-    } catch (error: any) {
-      console.error('Error loading groups:', error);
-      setErrorMessage('Failed to load groups: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const canCreateGroup = (): boolean => {
     if (!currentUserRole) return false;
     
