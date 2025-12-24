@@ -43,6 +43,11 @@ interface Member {
   cell_group_id?: string | null;
   status?: string | null;
   admin_role?: string | null;
+  is_admin?: boolean;
+  pastor_role?: boolean;
+  deacon_role?: boolean;
+  group_leader?: boolean;
+  is_leader?: boolean;
   invited_by?: string | null;
 }
 
@@ -99,7 +104,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
+        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin,is_admin.eq.true,pastor_role.eq.true,deacon_role.eq.true,group_leader.eq.true,is_leader.eq.true')
         .order('name');
 
       if (error) throw error;
@@ -167,7 +172,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
           .from('members')
           .update({ 
             cell_group_id: data.id,
-            admin_role: 'group_leader',
+            group_leader: true,
+            is_leader: true,
             updated_at: new Date().toISOString()
           })
           .eq('id', formData.leader_id);
@@ -327,7 +333,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
                 <option value="">No leader assigned</option>
                 {filteredLeaders.map((leader) => (
                   <option key={leader.id} value={leader.id}>
-                    {leader.name} {leader.surname} ({leader.admin_role})
+                    {leader.name} {leader.surname} {getRoleDisplay(leader)}
                   </option>
                 ))}
               </select>
@@ -368,6 +374,15 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       </div>
     </div>
   );
+};
+
+// Helper function to get role display
+const getRoleDisplay = (member: Member): string => {
+  if (member.is_admin) return '(Admin)';
+  if (member.pastor_role) return '(Pastor)';
+  if (member.deacon_role) return '(Deacon)';
+  if (member.group_leader || member.is_leader) return '(Group Leader)';
+  return `(${member.admin_role || 'Member'})`;
 };
 
 // Edit Group Modal Component
@@ -411,7 +426,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
+        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin,is_admin.eq.true,pastor_role.eq.true,deacon_role.eq.true,group_leader.eq.true,is_leader.eq.true')
         .order('name');
 
       if (error) throw error;
@@ -486,6 +501,8 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .from('members')
             .update({ 
               cell_group_id: null,
+              group_leader: false,
+              is_leader: false,
               updated_at: new Date().toISOString()
             })
             .eq('id', previousLeaderId);
@@ -497,7 +514,8 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .from('members')
             .update({ 
               cell_group_id: group.id,
-              admin_role: 'group_leader',
+              group_leader: true,
+              is_leader: true,
               updated_at: new Date().toISOString()
             })
             .eq('id', formData.leader_id);
@@ -631,7 +649,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
               <option value="">No leader assigned</option>
               {availableLeaders.map((leader) => (
                 <option key={leader.id} value={leader.id}>
-                  {leader.name} {leader.surname} ({leader.admin_role})
+                  {leader.name} {leader.surname} {getRoleDisplay(leader)}
                 </option>
               ))}
             </select>
@@ -718,6 +736,8 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
           .from('members')
           .update({ 
             cell_group_id: null,
+            group_leader: false,
+            is_leader: false,
             updated_at: new Date().toISOString()
           })
           .eq('id', group.leader_id);
@@ -1373,9 +1393,9 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                             {member.name} {member.surname}
                           </div>
                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                            member.status === 'leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                            member.is_leader || member.group_leader ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                           }`}>
-                            {member.status || 'member'}
+                            {member.is_leader || member.group_leader ? 'leader' : 'member'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
@@ -1601,7 +1621,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
           residence: formData.residence.trim(),
-          status: 'newcomer' as const,
+          status: 'newcomer',
           cell_group_id: group.id,
           first_time_visit_date: new Date().toISOString(),
           invited_by: formData.invited_by || null,
@@ -2640,9 +2660,9 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
-// Main Groups Component with FIXED PERMISSIONS
+// Main Groups Component with FIXED PERMISSIONS based on your schema
 const Groups = () => {
-  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor, isGroupLeader, isDeacon, isMember } = useAuth();
+  const { profile, canViewGroup, canManageGroup, getRoles } = useAuth();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -2662,6 +2682,13 @@ const Groups = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
+
+  // Check user roles from profile data
+  const isAdministrator = profile?.is_admin || profile?.admin_role === 'administrator' || profile?.admin_role === 'admin';
+  const isPastor = profile?.pastor_role || profile?.admin_role === 'pastor';
+  const isDeacon = profile?.deacon_role || profile?.admin_role === 'deacon';
+  const isGroupLeader = profile?.group_leader || profile?.is_leader || profile?.admin_role === 'group_leader';
+  const isMember = !isAdministrator && !isPastor && !isDeacon && !isGroupLeader;
 
   useEffect(() => {
     if (profile) {
@@ -2740,31 +2767,6 @@ const Groups = () => {
       setError('Failed to load groups: ' + error.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const getUserGroup = async (): Promise<CellGroup | null> => {
-    try {
-      if (!profile?.id) return null;
-      
-      const { data: memberData } = await supabase
-        .from('members')
-        .select('cell_group_id')
-        .eq('id', profile.id)
-        .single();
-      
-      if (!memberData?.cell_group_id) return null;
-      
-      const { data: groupData } = await supabase
-        .from('cell_groups')
-        .select('*')
-        .eq('id', memberData.cell_group_id)
-        .single();
-      
-      return groupData;
-    } catch (error) {
-      console.error('Failed to get user group:', error);
-      return null;
     }
   };
 
@@ -2903,7 +2905,7 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // FIXED PERMISSION FUNCTIONS
+  // FIXED PERMISSION FUNCTIONS based on your schema
   const canCreateGroups = () => {
     return isAdministrator || isPastor; // Only Admin & Pastors can create
   };
@@ -2945,13 +2947,11 @@ const Groups = () => {
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    const roles = getRoles();
-    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
-    if (roles.includes('pastor')) return 'Pastor';
-    if (roles.includes('deacon')) return 'Deacon (View Only)';
-    if (roles.includes('group_leader')) return 'Group Leader';
-    if (roles.includes('member')) return 'Member';
-    return 'Guest';
+    if (profile.is_admin) return 'Administrator';
+    if (profile.pastor_role) return 'Pastor';
+    if (profile.deacon_role) return 'Deacon (View Only)';
+    if (profile.group_leader || profile.is_leader) return 'Group Leader';
+    return 'Member';
   };
 
   const getAttendanceStats = () => {
