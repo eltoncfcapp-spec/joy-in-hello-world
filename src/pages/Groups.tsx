@@ -3465,7 +3465,7 @@ const Groups = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
