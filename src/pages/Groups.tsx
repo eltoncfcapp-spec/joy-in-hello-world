@@ -19,7 +19,6 @@ interface CellGroup {
   leader_residence?: string | null;
   leader_phone?: string | null;
   is_current_user_leader?: boolean;
-  is_user_assigned?: boolean;
 }
 
 interface GroupMeeting {
@@ -44,13 +43,7 @@ interface Member {
   cell_group_id?: string | null;
   status?: string | null;
   admin_role?: string | null;
-  is_admin?: boolean;
-  pastor_role?: boolean;
-  deacon_role?: boolean;
-  group_leader?: boolean;
-  is_leader?: boolean;
   invited_by?: string | null;
-  assigned_groups?: string[] | null;
 }
 
 interface GroupAttendanceRecord {
@@ -106,7 +99,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin,is_admin.eq.true,pastor_role.eq.true,deacon_role.eq.true,group_leader.eq.true,is_leader.eq.true')
+        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
@@ -174,8 +167,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
           .from('members')
           .update({ 
             cell_group_id: data.id,
-            group_leader: true,
-            is_leader: true,
+            admin_role: 'group_leader',
             updated_at: new Date().toISOString()
           })
           .eq('id', formData.leader_id);
@@ -335,7 +327,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
                 <option value="">No leader assigned</option>
                 {filteredLeaders.map((leader) => (
                   <option key={leader.id} value={leader.id}>
-                    {leader.name} {leader.surname} {getRoleDisplay(leader)}
+                    {leader.name} {leader.surname} ({leader.admin_role})
                   </option>
                 ))}
               </select>
@@ -376,15 +368,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       </div>
     </div>
   );
-};
-
-// Helper function to get role display
-const getRoleDisplay = (member: Member): string => {
-  if (member.is_admin) return '(Admin)';
-  if (member.pastor_role) return '(Pastor)';
-  if (member.deacon_role) return '(Deacon)';
-  if (member.group_leader || member.is_leader) return '(Group Leader)';
-  return `(${member.admin_role || 'Member'})`;
 };
 
 // Edit Group Modal Component
@@ -428,7 +411,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin,is_admin.eq.true,pastor_role.eq.true,deacon_role.eq.true,group_leader.eq.true,is_leader.eq.true')
+        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
@@ -503,8 +486,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .from('members')
             .update({ 
               cell_group_id: null,
-              group_leader: false,
-              is_leader: false,
               updated_at: new Date().toISOString()
             })
             .eq('id', previousLeaderId);
@@ -516,8 +497,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .from('members')
             .update({ 
               cell_group_id: group.id,
-              group_leader: true,
-              is_leader: true,
+              admin_role: 'group_leader',
               updated_at: new Date().toISOString()
             })
             .eq('id', formData.leader_id);
@@ -651,7 +631,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
               <option value="">No leader assigned</option>
               {availableLeaders.map((leader) => (
                 <option key={leader.id} value={leader.id}>
-                  {leader.name} {leader.surname} {getRoleDisplay(leader)}
+                  {leader.name} {leader.surname} ({leader.admin_role})
                 </option>
               ))}
             </select>
@@ -738,8 +718,6 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
           .from('members')
           .update({ 
             cell_group_id: null,
-            group_leader: false,
-            is_leader: false,
             updated_at: new Date().toISOString()
           })
           .eq('id', group.leader_id);
@@ -1098,43 +1076,18 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
   const loadGroupMembers = async () => {
     try {
-      // Get members from cell_group_id
-      const { data: singleGroupMembers, error: singleError } = await supabase
+      const { data, error } = await supabase
         .from('members')
         .select('*')
         .eq('cell_group_id', group.id)
         .order('name');
 
-      if (singleError) throw singleError;
+      if (error) throw error;
       
-      // Get members from assigned_groups array
-      // This is a simplified approach - in production, you might want to use a better query
-      const { data: allMembers, error: allError } = await supabase
-        .from('members')
-        .select('*');
-
-      if (allError) throw allError;
-
-      // Filter members who have this group in their assigned_groups array
-      const assignedGroupMembers = (allMembers || []).filter(member => {
-        if (!member.assigned_groups) return false;
-        try {
-          const assignedGroups = JSON.parse(member.assigned_groups as string);
-          return Array.isArray(assignedGroups) && assignedGroups.includes(group.id);
-        } catch {
-          return false;
-        }
-      });
-
-      // Combine both lists, removing duplicates
-      const allGroupMembers = [...(singleGroupMembers || []), ...assignedGroupMembers];
-      const uniqueMembers = Array.from(new Map(allGroupMembers.map(m => [m.id, m])).values());
-      
-      setGroupMembers(uniqueMembers);
-      
+      setGroupMembers(data || []);
       // Initialize all members as present by default
       const initialAttendance: Record<string, 'present'> = {};
-      uniqueMembers.forEach(member => {
+      data?.forEach(member => {
         initialAttendance[member.id] = 'present';
       });
       setAttendance(initialAttendance);
@@ -1212,18 +1165,9 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         return;
       }
 
-      // Add member to assigned_groups array
-      const currentAssignedGroups = member.assigned_groups ? JSON.parse(member.assigned_groups as string) : [];
-      if (!Array.isArray(currentAssignedGroups)) currentAssignedGroups = [];
-      
-      const updatedAssignedGroups = [...currentAssignedGroups, group.id];
-      
       const { error } = await supabase
         .from('members')
-        .update({ 
-          assigned_groups: JSON.stringify(updatedAssignedGroups),
-          updated_at: new Date().toISOString()
-        })
+        .update({ cell_group_id: group.id })
         .eq('id', member.id);
 
       if (error) throw error;
@@ -1429,9 +1373,9 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                             {member.name} {member.surname}
                           </div>
                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                            member.is_leader || member.group_leader ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                            member.status === 'leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                           }`}>
-                            {member.is_leader || member.group_leader ? 'leader' : 'member'}
+                            {member.status || 'member'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
@@ -1639,33 +1583,26 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       if (existingMember) {
         // Use existing member
         memberId = existingMember.id;
-        
-        // Add to assigned_groups array
-        const currentAssignedGroups = existingMember.assigned_groups ? JSON.parse(existingMember.assigned_groups as string) : [];
-        if (!Array.isArray(currentAssignedGroups)) currentAssignedGroups = [];
-        
-        const updatedAssignedGroups = [...currentAssignedGroups, group.id];
-        
         // Update member status and group assignment
         await supabase
           .from('members')
           .update({ 
             status: 'newcomer',
-            assigned_groups: JSON.stringify(updatedAssignedGroups),
+            cell_group_id: group.id,
             invited_by: formData.invited_by || null,
             first_time_visit_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .eq('id', existingMember.id);
       } else {
-        // Create new member with assigned_groups
+        // Create new member
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
           residence: formData.residence.trim(),
-          status: 'newcomer',
-          assigned_groups: JSON.stringify([group.id]),
+          status: 'newcomer' as const,
+          cell_group_id: group.id,
           first_time_visit_date: new Date().toISOString(),
           invited_by: formData.invited_by || null,
           is_permanent_member: false,
@@ -2703,58 +2640,9 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
-// Helper function to parse assigned_groups array
-const parseAssignedGroups = (assignedGroups: any): string[] => {
-  if (!assignedGroups) return [];
-  
-  try {
-    // Handle string format like ["{}", "85c51c62-4e02-43b8-83db-89cb2e3c5923"]
-    if (typeof assignedGroups === 'string') {
-      // Try to parse as JSON array
-      try {
-        const parsed = JSON.parse(assignedGroups);
-        if (Array.isArray(parsed)) {
-          // Filter out invalid values like "{}"
-          return parsed.filter(item => 
-            typeof item === 'string' && 
-            item !== '{}' && 
-            item !== 'null' && 
-            item.length > 10 // UUIDs are typically long
-          );
-        }
-      } catch {
-        // If parsing fails, treat as a single string
-        return assignedGroups !== '{}' ? [assignedGroups] : [];
-      }
-    }
-    
-    // Handle array format
-    if (Array.isArray(assignedGroups)) {
-      return assignedGroups.filter(item => 
-        item && 
-        item !== '{}' && 
-        item !== 'null' && 
-        (typeof item === 'string' || typeof item === 'object')
-      ).map(item => {
-        // Handle objects in the array
-        if (typeof item === 'object') {
-          // Try to extract ID if it's an object
-          return item.id || item.group_id || JSON.stringify(item);
-        }
-        return item;
-      });
-    }
-    
-    return [];
-  } catch (error) {
-    console.error('Error parsing assigned_groups:', error, assignedGroups);
-    return [];
-  }
-};
-
-// Main Groups Component with FIXED PERMISSIONS based on your schema
+// Main Groups Component
 const Groups = () => {
-  const { profile, canViewGroup, canManageGroup, getRoles } = useAuth();
+  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor, isGroupLeader, isMember } = useAuth();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -2762,7 +2650,6 @@ const Groups = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [userAssignedGroups, setUserAssignedGroups] = useState<string[]>([]);
 
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [showEditGroupModal, setShowEditGroupModal] = useState(false);
@@ -2776,29 +2663,8 @@ const Groups = () => {
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
 
-  // Function to load user's assigned groups
-  const loadUserAssignedGroups = () => {
-    if (!profile) {
-      setUserAssignedGroups([]);
-      return [];
-    }
-
-    // Parse assigned_groups from profile
-    const assignedGroups = parseAssignedGroups(profile.assigned_groups);
-    
-    // Also include single group assignment from cell_group_id
-    const singleGroupId = profile.cell_group_id;
-    if (singleGroupId && !assignedGroups.includes(singleGroupId)) {
-      assignedGroups.push(singleGroupId);
-    }
-
-    setUserAssignedGroups(assignedGroups);
-    return assignedGroups;
-  };
-
   useEffect(() => {
     if (profile) {
-      loadUserAssignedGroups();
       loadGroups();
       loadAllMembers();
     }
@@ -2808,9 +2674,6 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // Load user's assigned groups
-      const assignedGroups = loadUserAssignedGroups();
-      
       // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
@@ -2819,35 +2682,14 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
-      // Get member count for each group - UPDATED to check both cell_group_id and assigned_groups
+      // Get leader information for each group
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
-          // Get member count from cell_group_id
-          const { count: singleGroupCount } = await supabase
+          // Get member count
+          const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
-          
-          // Get member count from assigned_groups array
-          // For simplicity, we'll load all members and filter in memory
-          const { data: allMembers } = await supabase
-            .from('members')
-            .select('id, assigned_groups, cell_group_id');
-          
-          // Count members assigned to this group via assigned_groups
-          const assignedGroupCount = (allMembers || []).filter(member => {
-            if (member.cell_group_id === group.id) return true;
-            
-            if (!member.assigned_groups) return false;
-            try {
-              const assignedGroups = parseAssignedGroups(member.assigned_groups);
-              return assignedGroups.includes(group.id);
-            } catch {
-              return false;
-            }
-          }).length;
-
-          const totalMemberCount = (singleGroupCount || 0) + assignedGroupCount;
           
           // Get leader information if leader_id exists
           let leaderInfo = null;
@@ -2864,40 +2706,35 @@ const Groups = () => {
           // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
-          // Check if user is assigned to this group
-          const isUserAssigned = assignedGroups?.includes(group.id) || false;
-          
           return {
             ...group,
             leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
             leader_residence: leaderInfo?.residence || null,
             leader_phone: leaderInfo?.phone || null,
-            memberCount: totalMemberCount,
-            is_current_user_leader: isCurrentUserLeader,
-            is_user_assigned: isUserAssigned
+            memberCount: count || 0,
+            is_current_user_leader: isCurrentUserLeader
           };
         })
       );
 
-      // Filter groups based on user role - UPDATED WITH assigned_groups SUPPORT
+      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
-      if (!isAdministrator && !isPastor && !isDeacon) {
+      if (!isAdministrator && !isPastor) {
         if (isGroupLeader) {
-          // Group Leaders can see groups they lead OR are assigned to
+          // Group Leaders can see only their own group
           filteredGroups = groupsWithDetails.filter(group => 
-            group.leader_id === profile?.id || 
-            assignedGroups?.includes(group.id)
+            group.leader_id === profile?.id
           );
         } else if (isMember) {
-          // Members can see groups they are assigned to
+          // Members can see only their own group
+          const userGroup = await getUserGroup();
           filteredGroups = groupsWithDetails.filter(group => 
-            assignedGroups?.includes(group.id)
+            group.id === userGroup?.id
           );
         }
       }
-      // Administrators, Pastors, and Deacons can see all groups
-      // Deacons can only view (handled in permission functions)
+      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups);
     } catch (error: any) {
@@ -2905,6 +2742,31 @@ const Groups = () => {
       setError('Failed to load groups: ' + error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getUserGroup = async (): Promise<CellGroup | null> => {
+    try {
+      if (!profile?.id) return null;
+      
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('cell_group_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (!memberData?.cell_group_id) return null;
+      
+      const { data: groupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', memberData.cell_group_id)
+        .single();
+      
+      return groupData;
+    } catch (error) {
+      console.error('Failed to get user group:', error);
+      return null;
     }
   };
 
@@ -3043,27 +2905,9 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Check user roles from profile data
-  const isAdministrator = profile?.is_admin || profile?.admin_role === 'administrator' || profile?.admin_role === 'admin';
-  const isPastor = profile?.pastor_role || profile?.admin_role === 'pastor';
-  const isDeacon = profile?.deacon_role || profile?.admin_role === 'deacon';
-  const isGroupLeader = profile?.group_leader || profile?.is_leader || profile?.admin_role === 'group_leader';
-  const isMember = !isAdministrator && !isPastor && !isDeacon && !isGroupLeader;
-
-  // Helper function to check if user has access to any groups
-  const hasGroupAccess = () => {
-    if (!profile) return false;
-    if (isAdministrator || isPastor || isDeacon) return true;
-    
-    const assignedGroups = loadUserAssignedGroups();
-    const hasAssignedGroups = assignedGroups.length > 0;
-    
-    return isGroupLeader || hasAssignedGroups;
-  };
-
-  // UPDATED PERMISSION FUNCTIONS with assigned_groups support
+  // Permission functions
   const canCreateGroups = () => {
-    return isAdministrator || isPastor; // Only Admin & Pastors can create
+    return isAdministrator || isPastor;
   };
 
   const canEditGroup = (group: CellGroup) => {
@@ -3071,12 +2915,9 @@ const Groups = () => {
       return true; // Admins & Pastors can edit all groups
     }
     if (isGroupLeader) {
-      // Leaders can edit groups they lead OR are assigned to as leaders
-      return group.leader_id === profile?.id || 
-             (group.is_user_assigned && isGroupLeader);
+      return group.leader_id === profile?.id; // Leaders can edit only their own group
     }
-    // Deacons and Members cannot edit any groups
-    return false;
+    return false; // Members cannot edit any groups
   };
 
   const canDeleteGroup = (group: CellGroup) => {
@@ -3084,32 +2925,30 @@ const Groups = () => {
   };
 
   const canViewGroupDetails = (group: CellGroup) => {
-    if (isAdministrator || isPastor || isDeacon) {
-      return true; // Admins, Pastors & Deacons can view all groups
+    if (isAdministrator || isPastor) {
+      return true; // Admins & Pastors can view all groups
     }
-    if (isGroupLeader || isMember) {
-      // Leaders and Members can view groups they are assigned to
-      return group.is_user_assigned || group.leader_id === profile?.id;
+    if (isGroupLeader) {
+      return group.leader_id === profile?.id; // Leaders can view only their own group
+    }
+    if (isMember) {
+      // Members can view only their own group
+      // This assumes members have a cell_group_id in their profile
+      return true; // We'll filter this in loadGroups
     }
     return false;
-  };
-
-  // Check if user can see action buttons (edit/delete)
-  const canSeeActionButtons = (group: CellGroup) => {
-    // Deacons can only view, so they shouldn't see action buttons
-    if (isDeacon) return false;
-    
-    return canEditGroup(group) || canDeleteGroup(group);
   };
 
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    if (profile.is_admin) return 'Administrator';
-    if (profile.pastor_role) return 'Pastor';
-    if (profile.deacon_role) return 'Deacon (View Only)';
-    if (profile.group_leader || profile.is_leader) return 'Group Leader';
-    return 'Member';
+    const roles = getRoles();
+    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
+    if (roles.includes('pastor')) return 'Pastor';
+    if (roles.includes('deacon')) return 'Deacon';
+    if (roles.includes('group_leader')) return 'Group Leader';
+    if (roles.includes('member')) return 'Member';
+    return 'Guest';
   };
 
   const getAttendanceStats = () => {
@@ -3130,33 +2969,6 @@ const Groups = () => {
           <p className="text-lg text-gray-600">
             {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view groups'}
           </p>
-          {/* Permission Info Banner */}
-          {profile && (
-            <div className="mt-4 max-w-2xl mx-auto">
-              {!hasGroupAccess() && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
-                  <p className="text-red-700 font-medium">No Group Access</p>
-                  <p className="text-red-600 text-sm">
-                    You are not assigned to any groups. Please contact your administrator.
-                  </p>
-                </div>
-              )}
-              {isDeacon && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
-                  <p className="text-yellow-700 font-medium">View Only Access</p>
-                  <p className="text-yellow-600 text-sm">Deacons can view groups but cannot create, edit, or delete them.</p>
-                </div>
-              )}
-              {userAssignedGroups.length > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
-                  <p className="text-blue-700 font-medium">Assigned to {userAssignedGroups.length} group(s)</p>
-                  <p className="text-blue-600 text-sm">
-                    You have access to groups you're assigned to {isGroupLeader ? 'and groups you lead' : ''}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Search and Create Group Bar */}
@@ -3219,15 +3031,6 @@ const Groups = () => {
             <h3 className="text-xl font-semibold text-gray-600 mb-2">Please Log In</h3>
             <p className="text-gray-500 mb-6">You need to be logged in to view groups</p>
           </div>
-        ) : !hasGroupAccess() ? (
-          // NO ACCESS: Not assigned to any groups
-          <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
-            <Shield className="h-16 w-16 text-red-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-red-600 mb-2">No Group Access</h3>
-            <p className="text-red-500 mb-6">
-              You are not assigned to any groups. Please contact your group leader or administrator.
-            </p>
-          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {loading && groups.length === 0 ? (
@@ -3242,9 +3045,7 @@ const Groups = () => {
                   {searchTerm ? 'No groups match your search' : 'No Accessible Groups'}
                 </h3>
                 <p className="text-gray-500 mb-6">
-                  {searchTerm ? 'Try a different search term' : 
-                   isGroupLeader ? 'You are not assigned as a leader of any group' :
-                   'You are not assigned to any groups'}
+                  {searchTerm ? 'Try a different search term' : 'You do not have access to any groups'}
                 </p>
                 {canCreateGroups() && (
                   <button
@@ -3266,7 +3067,6 @@ const Groups = () => {
                 const canView = canViewGroup(group.id);
                 const canEdit = canEditGroup(group);
                 const canDelete = canDeleteGroup(group);
-                const showActions = canSeeActionButtons(group);
                 
                 return (
                   <div
@@ -3287,25 +3087,13 @@ const Groups = () => {
                                 Your Leadership
                               </span>
                             )}
-                            {group.is_user_assigned && !group.is_current_user_leader && (
-                              <span className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                                <User className="h-3 w-3 mr-1" />
-                                Assigned Member
-                              </span>
-                            )}
-                            {isDeacon && (
-                              <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
-                                <Shield className="h-3 w-3 mr-1" />
-                                View Only
-                              </span>
-                            )}
-                            {canManage && !isDeacon ? (
+                            {canManage ? (
                               <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
                                 <Shield className="h-3 w-3 mr-1" />
                                 Can Manage
                               </span>
                             ) : canView ? (
-                              <span className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                              <span className="inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
                                 <Shield className="h-3 w-3 mr-1" />
                                 View Only
                               </span>
@@ -3314,7 +3102,7 @@ const Groups = () => {
                         </div>
                       </div>
                       
-                      {showActions && (
+                      {(canEdit || canDelete) && (
                         <div className="flex gap-1">
                           {canEdit && (
                             <button
@@ -3375,7 +3163,7 @@ const Groups = () => {
                         >
                           View Meetings
                         </button>
-                        {canManage && !isDeacon && ( // Deacons cannot manage groups
+                        {canManage && (
                           <button
                             onClick={() => openWorkflowModal(group)}
                             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
