@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+{ useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
-
 // Interfaces
 interface CellGroup {
   id: string;
@@ -3101,29 +3100,29 @@ const Groups = () => {
                           </div>
                         </div>
                       </div>
-                      
-                      {(canEdit || canDelete) && (
-                        <div className="flex gap-1">
-                          {canEdit && (
-                            <button
-                              onClick={() => openEditGroupModal(group)}
-                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Edit Group"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                          )}
-                          {canDelete && (
-                            <button
-                              onClick={() => openDeleteGroupModal(group)}
-                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Delete Group"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      )}
+                
+                      {(isAdministrator || isPastor) && (
+  <div className="flex gap-1">
+    {canEdit && (
+      <button
+        onClick={() => openEditGroupModal(group)}
+        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+        title="Edit Group"
+      >
+        <Edit className="h-4 w-4" />
+      </button>
+    )}
+    {canDelete && (
+      <button
+        onClick={() => openDeleteGroupModal(group)}
+        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        title="Delete Group"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    )}
+  </div>
+)}
                     </div>
 
                     <div className="space-y-3 mb-4">
