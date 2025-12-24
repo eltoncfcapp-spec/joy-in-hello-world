@@ -19,6 +19,7 @@ interface CellGroup {
   leader_residence?: string | null;
   leader_phone?: string | null;
   is_current_user_leader?: boolean;
+  is_user_assigned?: boolean;
 }
 
 interface GroupMeeting {
@@ -49,6 +50,7 @@ interface Member {
   group_leader?: boolean;
   is_leader?: boolean;
   invited_by?: string | null;
+  assigned_groups?: string[] | null;
 }
 
 interface GroupAttendanceRecord {
@@ -1096,18 +1098,43 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
   const loadGroupMembers = async () => {
     try {
-      const { data, error } = await supabase
+      // Get members from cell_group_id
+      const { data: singleGroupMembers, error: singleError } = await supabase
         .from('members')
         .select('*')
         .eq('cell_group_id', group.id)
         .order('name');
 
-      if (error) throw error;
+      if (singleError) throw singleError;
       
-      setGroupMembers(data || []);
+      // Get members from assigned_groups array
+      // This is a simplified approach - in production, you might want to use a better query
+      const { data: allMembers, error: allError } = await supabase
+        .from('members')
+        .select('*');
+
+      if (allError) throw allError;
+
+      // Filter members who have this group in their assigned_groups array
+      const assignedGroupMembers = (allMembers || []).filter(member => {
+        if (!member.assigned_groups) return false;
+        try {
+          const assignedGroups = JSON.parse(member.assigned_groups as string);
+          return Array.isArray(assignedGroups) && assignedGroups.includes(group.id);
+        } catch {
+          return false;
+        }
+      });
+
+      // Combine both lists, removing duplicates
+      const allGroupMembers = [...(singleGroupMembers || []), ...assignedGroupMembers];
+      const uniqueMembers = Array.from(new Map(allGroupMembers.map(m => [m.id, m])).values());
+      
+      setGroupMembers(uniqueMembers);
+      
       // Initialize all members as present by default
       const initialAttendance: Record<string, 'present'> = {};
-      data?.forEach(member => {
+      uniqueMembers.forEach(member => {
         initialAttendance[member.id] = 'present';
       });
       setAttendance(initialAttendance);
@@ -1185,9 +1212,18 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         return;
       }
 
+      // Add member to assigned_groups array
+      const currentAssignedGroups = member.assigned_groups ? JSON.parse(member.assigned_groups as string) : [];
+      if (!Array.isArray(currentAssignedGroups)) currentAssignedGroups = [];
+      
+      const updatedAssignedGroups = [...currentAssignedGroups, group.id];
+      
       const { error } = await supabase
         .from('members')
-        .update({ cell_group_id: group.id })
+        .update({ 
+          assigned_groups: JSON.stringify(updatedAssignedGroups),
+          updated_at: new Date().toISOString()
+        })
         .eq('id', member.id);
 
       if (error) throw error;
@@ -1603,26 +1639,33 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       if (existingMember) {
         // Use existing member
         memberId = existingMember.id;
+        
+        // Add to assigned_groups array
+        const currentAssignedGroups = existingMember.assigned_groups ? JSON.parse(existingMember.assigned_groups as string) : [];
+        if (!Array.isArray(currentAssignedGroups)) currentAssignedGroups = [];
+        
+        const updatedAssignedGroups = [...currentAssignedGroups, group.id];
+        
         // Update member status and group assignment
         await supabase
           .from('members')
           .update({ 
             status: 'newcomer',
-            cell_group_id: group.id,
+            assigned_groups: JSON.stringify(updatedAssignedGroups),
             invited_by: formData.invited_by || null,
             first_time_visit_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .eq('id', existingMember.id);
       } else {
-        // Create new member
+        // Create new member with assigned_groups
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
           phone: formData.phone.trim() || null,
           residence: formData.residence.trim(),
           status: 'newcomer',
-          cell_group_id: group.id,
+          assigned_groups: JSON.stringify([group.id]),
           first_time_visit_date: new Date().toISOString(),
           invited_by: formData.invited_by || null,
           is_permanent_member: false,
@@ -2660,6 +2703,55 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
+// Helper function to parse assigned_groups array
+const parseAssignedGroups = (assignedGroups: any): string[] => {
+  if (!assignedGroups) return [];
+  
+  try {
+    // Handle string format like ["{}", "85c51c62-4e02-43b8-83db-89cb2e3c5923"]
+    if (typeof assignedGroups === 'string') {
+      // Try to parse as JSON array
+      try {
+        const parsed = JSON.parse(assignedGroups);
+        if (Array.isArray(parsed)) {
+          // Filter out invalid values like "{}"
+          return parsed.filter(item => 
+            typeof item === 'string' && 
+            item !== '{}' && 
+            item !== 'null' && 
+            item.length > 10 // UUIDs are typically long
+          );
+        }
+      } catch {
+        // If parsing fails, treat as a single string
+        return assignedGroups !== '{}' ? [assignedGroups] : [];
+      }
+    }
+    
+    // Handle array format
+    if (Array.isArray(assignedGroups)) {
+      return assignedGroups.filter(item => 
+        item && 
+        item !== '{}' && 
+        item !== 'null' && 
+        (typeof item === 'string' || typeof item === 'object')
+      ).map(item => {
+        // Handle objects in the array
+        if (typeof item === 'object') {
+          // Try to extract ID if it's an object
+          return item.id || item.group_id || JSON.stringify(item);
+        }
+        return item;
+      });
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error parsing assigned_groups:', error, assignedGroups);
+    return [];
+  }
+};
+
 // Main Groups Component with FIXED PERMISSIONS based on your schema
 const Groups = () => {
   const { profile, canViewGroup, canManageGroup, getRoles } = useAuth();
@@ -2670,6 +2762,7 @@ const Groups = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [userAssignedGroups, setUserAssignedGroups] = useState<string[]>([]);
 
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [showEditGroupModal, setShowEditGroupModal] = useState(false);
@@ -2683,15 +2776,29 @@ const Groups = () => {
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
 
-  // Check user roles from profile data
-  const isAdministrator = profile?.is_admin || profile?.admin_role === 'administrator' || profile?.admin_role === 'admin';
-  const isPastor = profile?.pastor_role || profile?.admin_role === 'pastor';
-  const isDeacon = profile?.deacon_role || profile?.admin_role === 'deacon';
-  const isGroupLeader = profile?.group_leader || profile?.is_leader || profile?.admin_role === 'group_leader';
-  const isMember = !isAdministrator && !isPastor && !isDeacon && !isGroupLeader;
+  // Function to load user's assigned groups
+  const loadUserAssignedGroups = () => {
+    if (!profile) {
+      setUserAssignedGroups([]);
+      return [];
+    }
+
+    // Parse assigned_groups from profile
+    const assignedGroups = parseAssignedGroups(profile.assigned_groups);
+    
+    // Also include single group assignment from cell_group_id
+    const singleGroupId = profile.cell_group_id;
+    if (singleGroupId && !assignedGroups.includes(singleGroupId)) {
+      assignedGroups.push(singleGroupId);
+    }
+
+    setUserAssignedGroups(assignedGroups);
+    return assignedGroups;
+  };
 
   useEffect(() => {
     if (profile) {
+      loadUserAssignedGroups();
       loadGroups();
       loadAllMembers();
     }
@@ -2701,6 +2808,9 @@ const Groups = () => {
     try {
       setLoading(true);
       
+      // Load user's assigned groups
+      const assignedGroups = loadUserAssignedGroups();
+      
       // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
@@ -2709,14 +2819,35 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
-      // Get leader information for each group
+      // Get member count for each group - UPDATED to check both cell_group_id and assigned_groups
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
-          // Get member count
-          const { count } = await supabase
+          // Get member count from cell_group_id
+          const { count: singleGroupCount } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
+          
+          // Get member count from assigned_groups array
+          // For simplicity, we'll load all members and filter in memory
+          const { data: allMembers } = await supabase
+            .from('members')
+            .select('id, assigned_groups, cell_group_id');
+          
+          // Count members assigned to this group via assigned_groups
+          const assignedGroupCount = (allMembers || []).filter(member => {
+            if (member.cell_group_id === group.id) return true;
+            
+            if (!member.assigned_groups) return false;
+            try {
+              const assignedGroups = parseAssignedGroups(member.assigned_groups);
+              return assignedGroups.includes(group.id);
+            } catch {
+              return false;
+            }
+          }).length;
+
+          const totalMemberCount = (singleGroupCount || 0) + assignedGroupCount;
           
           // Get leader information if leader_id exists
           let leaderInfo = null;
@@ -2733,29 +2864,36 @@ const Groups = () => {
           // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
+          // Check if user is assigned to this group
+          const isUserAssigned = assignedGroups?.includes(group.id) || false;
+          
           return {
             ...group,
             leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
             leader_residence: leaderInfo?.residence || null,
             leader_phone: leaderInfo?.phone || null,
-            memberCount: count || 0,
-            is_current_user_leader: isCurrentUserLeader
+            memberCount: totalMemberCount,
+            is_current_user_leader: isCurrentUserLeader,
+            is_user_assigned: isUserAssigned
           };
         })
       );
 
-      // Filter groups based on user role - FIXED PERMISSIONS
+      // Filter groups based on user role - UPDATED WITH assigned_groups SUPPORT
       let filteredGroups = groupsWithDetails;
       
       if (!isAdministrator && !isPastor && !isDeacon) {
         if (isGroupLeader) {
-          // Group Leaders can see only their own group
+          // Group Leaders can see groups they lead OR are assigned to
           filteredGroups = groupsWithDetails.filter(group => 
-            group.leader_id === profile?.id
+            group.leader_id === profile?.id || 
+            assignedGroups?.includes(group.id)
           );
         } else if (isMember) {
-          // MEMBERS SHOULD NOT HAVE ACCESS - return empty array
-          filteredGroups = [];
+          // Members can see groups they are assigned to
+          filteredGroups = groupsWithDetails.filter(group => 
+            assignedGroups?.includes(group.id)
+          );
         }
       }
       // Administrators, Pastors, and Deacons can see all groups
@@ -2905,7 +3043,25 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // FIXED PERMISSION FUNCTIONS based on your schema
+  // Check user roles from profile data
+  const isAdministrator = profile?.is_admin || profile?.admin_role === 'administrator' || profile?.admin_role === 'admin';
+  const isPastor = profile?.pastor_role || profile?.admin_role === 'pastor';
+  const isDeacon = profile?.deacon_role || profile?.admin_role === 'deacon';
+  const isGroupLeader = profile?.group_leader || profile?.is_leader || profile?.admin_role === 'group_leader';
+  const isMember = !isAdministrator && !isPastor && !isDeacon && !isGroupLeader;
+
+  // Helper function to check if user has access to any groups
+  const hasGroupAccess = () => {
+    if (!profile) return false;
+    if (isAdministrator || isPastor || isDeacon) return true;
+    
+    const assignedGroups = loadUserAssignedGroups();
+    const hasAssignedGroups = assignedGroups.length > 0;
+    
+    return isGroupLeader || hasAssignedGroups;
+  };
+
+  // UPDATED PERMISSION FUNCTIONS with assigned_groups support
   const canCreateGroups = () => {
     return isAdministrator || isPastor; // Only Admin & Pastors can create
   };
@@ -2915,7 +3071,9 @@ const Groups = () => {
       return true; // Admins & Pastors can edit all groups
     }
     if (isGroupLeader) {
-      return group.leader_id === profile?.id; // Leaders can edit only their own group
+      // Leaders can edit groups they lead OR are assigned to as leaders
+      return group.leader_id === profile?.id || 
+             (group.is_user_assigned && isGroupLeader);
     }
     // Deacons and Members cannot edit any groups
     return false;
@@ -2929,10 +3087,10 @@ const Groups = () => {
     if (isAdministrator || isPastor || isDeacon) {
       return true; // Admins, Pastors & Deacons can view all groups
     }
-    if (isGroupLeader) {
-      return group.leader_id === profile?.id; // Leaders can view only their own group
+    if (isGroupLeader || isMember) {
+      // Leaders and Members can view groups they are assigned to
+      return group.is_user_assigned || group.leader_id === profile?.id;
     }
-    // Members cannot view any groups
     return false;
   };
 
@@ -2975,16 +3133,26 @@ const Groups = () => {
           {/* Permission Info Banner */}
           {profile && (
             <div className="mt-4 max-w-2xl mx-auto">
-              {isMember && (
+              {!hasGroupAccess() && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
-                  <p className="text-red-700 font-medium">Access Restricted</p>
-                  <p className="text-red-600 text-sm">Members cannot view groups. Please contact your group leader.</p>
+                  <p className="text-red-700 font-medium">No Group Access</p>
+                  <p className="text-red-600 text-sm">
+                    You are not assigned to any groups. Please contact your administrator.
+                  </p>
                 </div>
               )}
               {isDeacon && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
                   <p className="text-yellow-700 font-medium">View Only Access</p>
                   <p className="text-yellow-600 text-sm">Deacons can view groups but cannot create, edit, or delete them.</p>
+                </div>
+              )}
+              {userAssignedGroups.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                  <p className="text-blue-700 font-medium">Assigned to {userAssignedGroups.length} group(s)</p>
+                  <p className="text-blue-600 text-sm">
+                    You have access to groups you're assigned to {isGroupLeader ? 'and groups you lead' : ''}
+                  </p>
                 </div>
               )}
             </div>
@@ -3051,13 +3219,13 @@ const Groups = () => {
             <h3 className="text-xl font-semibold text-gray-600 mb-2">Please Log In</h3>
             <p className="text-gray-500 mb-6">You need to be logged in to view groups</p>
           </div>
-        ) : isMember ? (
-          // MEMBERS: NO ACCESS
+        ) : !hasGroupAccess() ? (
+          // NO ACCESS: Not assigned to any groups
           <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
             <Shield className="h-16 w-16 text-red-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-red-600 mb-2">Access Denied</h3>
+            <h3 className="text-xl font-semibold text-red-600 mb-2">No Group Access</h3>
             <p className="text-red-500 mb-6">
-              Members cannot access groups. Please contact your group leader or administrator.
+              You are not assigned to any groups. Please contact your group leader or administrator.
             </p>
           </div>
         ) : (
@@ -3076,7 +3244,7 @@ const Groups = () => {
                 <p className="text-gray-500 mb-6">
                   {searchTerm ? 'Try a different search term' : 
                    isGroupLeader ? 'You are not assigned as a leader of any group' :
-                   'You do not have access to any groups'}
+                   'You are not assigned to any groups'}
                 </p>
                 {canCreateGroups() && (
                   <button
@@ -3117,6 +3285,12 @@ const Groups = () => {
                               <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
                                 <Shield className="h-3 w-3 mr-1" />
                                 Your Leadership
+                              </span>
+                            )}
+                            {group.is_user_assigned && !group.is_current_user_leader && (
+                              <span className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                                <User className="h-3 w-3 mr-1" />
+                                Assigned Member
                               </span>
                             )}
                             {isDeacon && (
