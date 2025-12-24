@@ -409,9 +409,20 @@ interface EditGroupModalProps {
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   canEdit: boolean;
+  currentUserRole?: string | null;
+  currentUserId?: string | null;
 }
 
-const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ 
+  isOpen, 
+  group, 
+  onClose, 
+  onSuccess, 
+  onError, 
+  canEdit,
+  currentUserRole,
+  currentUserId 
+}) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -457,6 +468,24 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  // Helper function to check if user can edit specific fields
+  const canEditTimeAndName = (): boolean => {
+    if (!currentUserRole || !group) return false;
+    
+    // Only leaders, admins, and pastors can edit meeting time and name
+    const allowedRoles = ['administrator', 'admin', 'pastor', 'deacon'];
+    
+    // Check if user is the group leader
+    const isGroupLeader = group.leader_id === currentUserId;
+    
+    // Check if user has admin/pastor/deacon role OR is the group leader
+    if (allowedRoles.includes(currentUserRole) || isGroupLeader) {
+      return true;
+    }
+    
+    return false;
+  };
+
   const updateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -475,20 +504,34 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
       return;
     }
 
+    // Check if user is trying to edit restricted fields without permission
+    const changedRestrictedFields = (
+      formData.meeting_day !== group.meeting_day ||
+      formData.meeting_time !== group.meeting_time ||
+      formData.name !== group.name
+    );
+
+    if (changedRestrictedFields && !canEditTimeAndName()) {
+      onError('You do not have permission to edit meeting time, day, or group name. Only leaders, admins, and pastors can modify these fields.');
+      return;
+    }
+
     try {
       setLoading(true);
       
       // Check if group with same name already exists (excluding current group)
-      const { data: existingGroup } = await supabase
-        .from('cell_groups')
-        .select('id')
-        .ilike('name', formData.name.trim())
-        .neq('id', group.id)
-        .single();
+      if (formData.name !== group.name) {
+        const { data: existingGroup } = await supabase
+          .from('cell_groups')
+          .select('id')
+          .ilike('name', formData.name.trim())
+          .neq('id', group.id)
+          .single();
 
-      if (existingGroup) {
-        onError('Another group with this name already exists');
-        return;
+        if (existingGroup) {
+          onError('Another group with this name already exists');
+          return;
+        }
       }
 
       const updatedGroup = {
@@ -547,6 +590,9 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
   if (!isOpen || !group) return null;
 
+  const userCanEditTimeAndName = canEditTimeAndName();
+  const isReadOnly = !userCanEditTimeAndName;
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -560,22 +606,39 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
           </button>
         </div>
 
+        {!userCanEditTimeAndName && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <Shield className="h-5 w-5 text-yellow-600 mt-0.5" />
+              <p className="text-sm text-yellow-800">
+                <strong>Note:</strong> You can only edit basic information. Meeting time, day, and group name can only be modified by the group leader, admin, or pastor.
+              </p>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={updateGroup} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Group Name *
+              Group Name {userCanEditTimeAndName ? '*' : '(Restricted)'}
             </label>
             <input
               type="text"
               name="name"
               value={formData.name}
               onChange={handleInputChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
               placeholder="Enter group name"
               required
               minLength={2}
               maxLength={100}
+              disabled={isReadOnly}
             />
+            {isReadOnly && (
+              <p className="text-xs text-gray-500 mt-1">
+                Only group leader, admin, or pastor can edit the name
+              </p>
+            )}
           </div>
 
           <div>
@@ -599,13 +662,14 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Day
+                Meeting Day {userCanEditTimeAndName ? '' : '(Restricted)'}
               </label>
               <select
                 name="meeting_day"
                 value={formData.meeting_day}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                disabled={isReadOnly}
               >
                 <option value="">Select day</option>
                 <option value="Sunday">Sunday</option>
@@ -616,10 +680,15 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
                 <option value="Friday">Friday</option>
                 <option value="Saturday">Saturday</option>
               </select>
+              {isReadOnly && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Only group leader, admin, or pastor can edit the meeting day
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meeting Time
+                Meeting Time {userCanEditTimeAndName ? '' : '(Restricted)'}
               </label>
               <div className="relative">
                 <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -628,9 +697,15 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
                   name="meeting_time"
                   value={formData.meeting_time}
                   onChange={handleInputChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  disabled={isReadOnly}
                 />
               </div>
+              {isReadOnly && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Only group leader, admin, or pastor can edit the meeting time
+                </p>
+              )}
             </div>
           </div>
 
@@ -658,6 +733,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
               value={formData.leader_id}
               onChange={handleInputChange}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={!canEdit}
             >
               <option value="">No leader assigned</option>
               {availableLeaders.map((leader) => (
@@ -1872,6 +1948,8 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     </div>
   );
 };
+
+// Group Report Step Component
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2519,6 +2597,346 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
           </div>
         </>
       )}
+    </div>
+  );
+};
+
+// Main Groups Component
+const Groups: React.FC = () => {
+  const { user } = useAuth();
+  const [groups, setGroups] = useState<CellGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadGroups();
+    loadCurrentUserRole();
+  }, [user]);
+
+  const loadCurrentUserRole = async () => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('admin_role')
+        .eq('id', user.id)
+        .single();
+
+      if (error) throw error;
+      setCurrentUserRole(data?.admin_role || null);
+    } catch (error) {
+      console.error('Failed to load user role:', error);
+    }
+  };
+
+  const loadGroups = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch groups with leader information
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select(`
+          *,
+          leader:leader_id (
+            name,
+            surname,
+            residence,
+            phone
+          )
+        `)
+        .order('name');
+
+      if (error) throw error;
+
+      // Process groups to include leader info and member counts
+      const groupsWithDetails = await Promise.all(
+        (data || []).map(async (group: any) => {
+          // Get member count for this group
+          const { count } = await supabase
+            .from('members')
+            .select('*', { count: 'exact', head: true })
+            .eq('cell_group_id', group.id);
+
+          // Check if current user is the leader
+          const isCurrentUserLeader = user && group.leader_id === user.id;
+
+          return {
+            ...group,
+            leader_name: group.leader ? `${group.leader.name} ${group.leader.surname}` : null,
+            leader_residence: group.leader?.residence || null,
+            leader_phone: group.leader?.phone || null,
+            memberCount: count || 0,
+            is_current_user_leader: isCurrentUserLeader
+          };
+        })
+      );
+
+      setGroups(groupsWithDetails);
+    } catch (error: any) {
+      console.error('Error loading groups:', error);
+      setErrorMessage('Failed to load groups: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canCreateGroup = (): boolean => {
+    if (!currentUserRole) return false;
+    
+    const allowedRoles = ['administrator', 'admin', 'pastor', 'deacon'];
+    return allowedRoles.includes(currentUserRole);
+  };
+
+  const canEditGroup = (group: CellGroup): boolean => {
+    if (!user || !currentUserRole) return false;
+    
+    const allowedRoles = ['administrator', 'admin', 'pastor', 'deacon'];
+    
+    // Admins, pastors, and deacons can edit any group
+    if (allowedRoles.includes(currentUserRole)) {
+      return true;
+    }
+    
+    // Group leaders can edit their own group
+    if (group.is_current_user_leader) {
+      return true;
+    }
+    
+    return false;
+  };
+
+  const canDeleteGroup = (group: CellGroup): boolean => {
+    if (!user || !currentUserRole) return false;
+    
+    // Only administrators and pastors can delete groups
+    const allowedRoles = ['administrator', 'admin', 'pastor'];
+    return allowedRoles.includes(currentUserRole);
+  };
+
+  const handleCreateSuccess = (message: string) => {
+    setSuccessMessage(message);
+    loadGroups();
+  };
+
+  const handleEditSuccess = (message: string) => {
+    setSuccessMessage(message);
+    loadGroups();
+  };
+
+  const handleDeleteSuccess = () => {
+    setSuccessMessage('Group deleted successfully!');
+    loadGroups();
+  };
+
+  const filteredGroups = groups.filter(group =>
+    group.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
+      {/* Success/Error Messages */}
+      {successMessage && (
+        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              <p className="text-green-800">{successMessage}</p>
+            </div>
+            <button onClick={() => setSuccessMessage('')} className="text-green-600 hover:text-green-800">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-600" />
+              <p className="text-red-800">{errorMessage}</p>
+            </div>
+            <button onClick={() => setErrorMessage('')} className="text-red-600 hover:text-red-800">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Cell Groups</h1>
+        <p className="text-gray-600">Manage church cell groups, members, and meetings</p>
+      </div>
+
+      {/* Search and Actions Bar */}
+      <div className="bg-white rounded-2xl p-4 mb-6 shadow-sm border border-gray-200">
+        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input
+              type="text"
+              placeholder="Search groups by name, location, or leader..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          
+          {canCreateGroup() && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors font-medium whitespace-nowrap"
+            >
+              <Plus className="h-4 w-4" />
+              Create Group
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Groups Grid */}
+      {loading ? (
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      ) : filteredGroups.length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-2xl border border-gray-200">
+          <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+          <h3 className="text-lg font-medium text-gray-900 mb-1">No groups found</h3>
+          <p className="text-gray-600 mb-4">
+            {searchTerm ? 'Try adjusting your search terms' : 'Create your first cell group to get started'}
+          </p>
+          {canCreateGroup() && !searchTerm && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            >
+              Create Group
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredGroups.map((group) => (
+            <div key={group.id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+              <div className="p-5">
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">{group.name}</h3>
+                  <div className="flex items-center gap-1">
+                    {canEditGroup(group) && (
+                      <button
+                        onClick={() => {
+                          setSelectedGroup(group);
+                          setShowEditModal(true);
+                        }}
+                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Edit group"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                    )}
+                    {canDeleteGroup(group) && (
+                      <button
+                        onClick={() => {
+                          setSelectedGroup(group);
+                          setShowDeleteModal(true);
+                        }}
+                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Delete group"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="space-y-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-700">{group.location || 'No location specified'}</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-700">
+                      {group.meeting_day ? `${group.meeting_day} at ${group.meeting_time || 'TBA'}` : 'Meeting schedule not set'}
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-700">
+                      {group.leader_name || 'No leader assigned'}
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-700">{group.memberCount || 0} members</span>
+                  </div>
+                </div>
+                
+                {group.description && (
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{group.description}</p>
+                )}
+                
+                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    group.is_current_user_leader ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {group.is_current_user_leader ? 'Your Group' : 'Cell Group'}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    Updated {group.updated_at ? new Date(group.updated_at).toLocaleDateString() : 'N/A'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modals */}
+      <CreateGroupModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={handleCreateSuccess}
+        onError={setErrorMessage}
+        userId={user?.id || null}
+        canCreate={canCreateGroup()}
+      />
+
+      <EditGroupModal
+        isOpen={showEditModal}
+        group={selectedGroup}
+        onClose={() => setShowEditModal(false)}
+        onSuccess={handleEditSuccess}
+        onError={setErrorMessage}
+        canEdit={selectedGroup ? canEditGroup(selectedGroup) : false}
+        currentUserRole={currentUserRole}
+        currentUserId={user?.id || null}
+      />
+
+      <DeleteGroupModal
+        isOpen={showDeleteModal}
+        group={selectedGroup}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteSuccess}
+        onError={setErrorMessage}
+        canDelete={selectedGroup ? canDeleteGroup(selectedGroup) : false}
+      />
     </div>
   );
 };
