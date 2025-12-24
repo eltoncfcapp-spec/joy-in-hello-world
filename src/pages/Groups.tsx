@@ -2637,55 +2637,116 @@ const Groups: React.FC = () => {
     }
   };
 
- const loadGroups = async () => {
+const loadGroups = async () => {
   try {
     setLoading(true);
     
-    // First, get all members to build a lookup map
-    const { data: allMembers } = await supabase
-      .from('members')
-      .select('id, name, surname, residence, phone, cell_group_id');
+    // First, get the current user's member record to check if they're a leader
+    let currentUserMemberData = null;
+    if (user) {
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('id, admin_role')
+        .eq('id', user.id)
+        .single();
+      currentUserMemberData = memberData;
+    }
     
-    // Create a map for quick member lookup
-    const membersMap = new Map();
-    allMembers?.forEach(member => {
-      membersMap.set(member.id, member);
-    });
-    
-    // Get current user's member data
-    const currentUserMember = user ? membersMap.get(user.id) : null;
-    
-    // Fetch all groups
+    // Fetch all groups - without the join that's causing the error
     const { data: groupsData, error: groupsError } = await supabase
       .from('cell_groups')
       .select('*')
       .order('name');
 
-    if (groupsError) throw groupsError;
+    if (groupsError) {
+      console.error('Groups error:', groupsError);
+      throw groupsError;
+    }
 
-    // Process groups using the members map
-    const groupsWithDetails = (groupsData || []).map(group => {
-      // Count members in this group
-      const memberCount = allMembers?.filter(m => 
-        m.cell_group_id === group.id
-      ).length || 0;
-      
-      // Get leader info from map
-      const leader = group.leader_id ? membersMap.get(group.leader_id) : null;
-      
-      // Check if current user is the leader
-      const isCurrentUserLeader = currentUserMember && 
-                                group.leader_id === currentUserMember.id;
+    // Process groups one by one to avoid complex joins
+    const groupsWithDetails = await Promise.all(
+      (groupsData || []).map(async (group) => {
+        try {
+          // Get member count for this group
+          const { count: memberCount } = await supabase
+            .from('members')
+            .select('*', { count: 'exact', head: true })
+            .eq('cell_group_id', group.id);
 
-      return {
-        ...group,
-        leader_name: leader ? `${leader.name} ${leader.surname}` : null,
-        leader_residence: leader?.residence || null,
-        leader_phone: leader?.phone || null,
-        memberCount,
-        is_current_user_leader: isCurrentUserLeader
-      };
-    });
+          // Get leader information if leader_id exists
+          let leaderName = null;
+          let leaderResidence = null;
+          let leaderPhone = null;
+          
+          if (group.leader_id) {
+            try {
+              const { data: leader } = await supabase
+                .from('members')
+                .select('name, surname, residence, phone')
+                .eq('id', group.leader_id)
+                .single();
+              
+              if (leader) {
+                leaderName = `${leader.name} ${leader.surname}`;
+                leaderResidence = leader.residence;
+                leaderPhone = leader.phone;
+              }
+            } catch (leaderErr) {
+              console.warn(`Could not load leader ${group.leader_id} for group ${group.name}:`, leaderErr);
+            }
+          }
+
+          // Check if current user is the leader of this group
+          const isCurrentUserLeader = currentUserMemberData && 
+                                    group.leader_id === currentUserMemberData.id;
+
+          return {
+            id: group.id,
+            name: group.name,
+            location: group.location,
+            meeting_day: group.meeting_day,
+            meeting_time: group.meeting_time,
+            leader_id: group.leader_id,
+            description: group.description,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+            leader_name: leaderName,
+            leader_residence: leaderResidence,
+            leader_phone: leaderPhone,
+            memberCount: memberCount || 0,
+            is_current_user_leader: isCurrentUserLeader
+          };
+        } catch (error) {
+          console.error('Error processing group:', error);
+          // Return basic group info if processing fails
+          return {
+            id: group.id,
+            name: group.name,
+            location: group.location,
+            meeting_day: group.meeting_day,
+            meeting_time: group.meeting_time,
+            leader_id: group.leader_id,
+            description: group.description,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+            leader_name: null,
+            leader_residence: null,
+            leader_phone: null,
+            memberCount: 0,
+            is_current_user_leader: false
+          };
+        }
+      })
+    );
+
+    setGroups(groupsWithDetails);
+  } catch (error: any) {
+    console.error('Error loading groups:', error);
+    setErrorMessage('Failed to load groups: ' + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
       setGroups(groupsWithDetails);
     } catch (error: any) {
       console.error('Error loading groups:', error);
