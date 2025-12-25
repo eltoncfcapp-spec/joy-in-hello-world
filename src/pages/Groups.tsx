@@ -78,34 +78,47 @@ interface GroupReport {
   created_at: string | null;
 }
 
-// Permission helper functions
+// Permission helper functions - UPDATED
 const usePermissions = () => {
   const { profile, isAdministrator, isPastor, isGroupLeader, isMember, isDeacon } = useAuth();
   
-  const checkGroupPermission = (group: CellGroup, action: 'view' | 'edit' | 'delete' | 'manage'): boolean => {
+  const checkGroupPermission = (group: CellGroup | null, action: 'view' | 'edit' | 'delete' | 'manage' | 'create'): boolean => {
     if (!profile) return false;
     
-    // Administrators and Pastors have full permissions
-    if (isAdministrator || isPastor) {
+    // Administrators have full permissions
+    if (isAdministrator) {
       return true;
     }
     
-    // Deacons have view permissions for all groups
-    if (isDeacon && action === 'view') {
+    // Pastors have full permissions except delete (depending on church policy)
+    if (isPastor) {
+      if (action === 'delete') return false; // Pastors cannot delete groups
       return true;
     }
     
-    // Group Leaders can only manage their own group
-    if (isGroupLeader) {
-      if (group.leader_id === profile.id) {
+    // Deacons have view permissions for all groups and can manage if assigned
+    if (isDeacon) {
+      if (action === 'view') {
         return true;
+      }
+      if (action === 'manage' || action === 'edit') {
+        // Deacons can only manage/edit groups they are assigned to as leaders
+        return group?.leader_id === profile.id;
       }
       return false;
     }
     
-    // Members can only view their own group
+    // Group Leaders can only manage their own group
+    if (isGroupLeader) {
+      if (group?.leader_id === profile.id) {
+        return action === 'view' || action === 'manage' || action === 'edit';
+      }
+      return false;
+    }
+    
+    // Members can only view their own group, cannot edit, delete or manage
     if (isMember) {
-      if (group.leader_id === profile.id || profile.cell_group_id === group.id) {
+      if (group?.leader_id === profile.id || profile.cell_group_id === group?.id) {
         return action === 'view';
       }
       return false;
@@ -116,34 +129,15 @@ const usePermissions = () => {
   
   const canCreateGroup = (): boolean => {
     if (!profile) return false;
-    return isAdministrator || isPastor;
+    return isAdministrator || isPastor; // Only admin and pastor can create groups
   };
   
   const canEditGroup = (group: CellGroup): boolean => {
-    if (!profile) return false;
-    
-    // Administrators and Pastors can edit any group
-    if (isAdministrator || isPastor) {
-      return true;
-    }
-    
-    // Group Leaders can only edit their own group
-    if (isGroupLeader && group.leader_id === profile.id) {
-      return true;
-    }
-    
-    return false;
+    return checkGroupPermission(group, 'edit');
   };
   
   const canDeleteGroup = (group: CellGroup): boolean => {
-    if (!profile) return false;
-    
-    // Only Administrators and Pastors can delete groups
-    if (isAdministrator || isPastor) {
-      return true;
-    }
-    
-    return false;
+    return checkGroupPermission(group, 'delete');
   };
   
   const canViewGroup = (group: CellGroup): boolean => {
@@ -153,13 +147,49 @@ const usePermissions = () => {
   const canManageGroup = (group: CellGroup): boolean => {
     return checkGroupPermission(group, 'manage');
   };
+
+  const canCreateMeeting = (group: CellGroup): boolean => {
+    if (!profile) return false;
+    if (isAdministrator || isPastor) return true;
+    if (isGroupLeader && group.leader_id === profile.id) return true;
+    if (isDeacon && group.leader_id === profile.id) return true;
+    return false;
+  };
+
+  const canTakeAttendance = (group: CellGroup): boolean => {
+    if (!profile) return false;
+    if (isAdministrator || isPastor) return true;
+    if (isGroupLeader && group.leader_id === profile.id) return true;
+    if (isDeacon && group.leader_id === profile.id) return true;
+    return false;
+  };
+
+  const canAddNewcomer = (group: CellGroup): boolean => {
+    if (!profile) return false;
+    if (isAdministrator || isPastor) return true;
+    if (isGroupLeader && group.leader_id === profile.id) return true;
+    if (isDeacon && group.leader_id === profile.id) return true;
+    return false;
+  };
+
+  const canCreateReport = (group: CellGroup): boolean => {
+    if (!profile) return false;
+    if (isAdministrator || isPastor) return true;
+    if (isGroupLeader && group.leader_id === profile.id) return true;
+    if (isDeacon && group.leader_id === profile.id) return true;
+    return false;
+  };
   
   return {
     canCreateGroup,
     canEditGroup,
     canDeleteGroup,
     canViewGroup,
-    canManageGroup
+    canManageGroup,
+    canCreateMeeting,
+    canTakeAttendance,
+    canAddNewcomer,
+    canCreateReport
   };
 };
 
@@ -968,7 +998,12 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
 };
 
 // Group Meeting Creation Step
-const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
+const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError, canCreate }: { 
+  group: CellGroup; 
+  onMeetingCreated: () => void; 
+  onError: (message: string) => void;
+  canCreate: boolean;
+}) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -1006,6 +1041,11 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
 
   const createMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!canCreate) {
+      onError('You do not have permission to create meetings');
+      return;
+    }
 
     if (!formData.meeting_date || !formData.location) {
       onError('Please fill in all required fields');
@@ -1055,92 +1095,102 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         <p className="text-gray-600">Create a new meeting schedule for {group.name}</p>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
-        <form onSubmit={createMeeting} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {!canCreate ? (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
+          <AlertCircle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+          <h4 className="text-lg font-semibold text-yellow-800 mb-2">Permission Required</h4>
+          <p className="text-yellow-700">
+            You do not have permission to create meetings for this group.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
+          <form onSubmit={createMeeting} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Date *</label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="date"
+                    name="meeting_date"
+                    value={formData.meeting_date}
+                    onChange={handleInputChange}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Time</label>
+                <div className="relative">
+                  <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="time"
+                    name="meeting_time"
+                    value={formData.meeting_time}
+                    onChange={handleInputChange}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+            
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Date *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Location *</label>
               <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
-                  type="date"
-                  name="meeting_date"
-                  value={formData.meeting_date}
+                  type="text"
+                  name="location"
+                  value={formData.location}
                   onChange={handleInputChange}
-                  min={new Date().toISOString().split('T')[0]}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter meeting location"
                   required
                 />
               </div>
             </div>
+            
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Time</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Topic/Agenda</label>
+              <input
+                type="text"
+                name="topic"
+                value={formData.topic}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="What will be discussed in this meeting?"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
               <div className="relative">
-                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="time"
-                  name="meeting_time"
-                  value={formData.meeting_time}
+                <FileText className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <textarea
+                  name="notes"
+                  value={formData.notes}
                   onChange={handleInputChange}
+                  rows={4}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Any additional information about this meeting..."
                 />
               </div>
             </div>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Location *</label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                name="location"
-                value={formData.location}
-                onChange={handleInputChange}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter meeting location"
-                required
-              />
-            </div>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Topic/Agenda</label>
-            <input
-              type="text"
-              name="topic"
-              value={formData.topic}
-              onChange={handleInputChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="What will be discussed in this meeting?"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
-            <div className="relative">
-              <FileText className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-              <textarea
-                name="notes"
-                value={formData.notes}
-                onChange={handleInputChange}
-                rows={4}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Any additional information about this meeting..."
-              />
-            </div>
-          </div>
-          
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
-          >
-            <Save className="h-4 w-4" />
-            {loading ? 'Creating Meeting...' : 'Schedule Group Meeting'}
-          </button>
-        </form>
-      </div>
+            
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+            >
+              <Save className="h-4 w-4" />
+              {loading ? 'Creating Meeting...' : 'Schedule Group Meeting'}
+            </button>
+          </form>
+        </div>
+      )}
 
       {recentMeetings.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-2xl p-6">
@@ -1180,9 +1230,18 @@ interface GroupAttendanceStepProps {
   onMeetingSelect: (meeting: GroupMeeting) => void;
   onAttendanceSaved: () => void;
   onError: (message: string) => void;
+  canTakeAttendance: boolean;
 }
 
-const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
+const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onAttendanceSaved, 
+  onError,
+  canTakeAttendance 
+}) => {
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
@@ -1314,6 +1373,11 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         return;
       }
 
+      if (!canTakeAttendance) {
+        onError('You do not have permission to add members to this group');
+        return;
+      }
+
       // Get current assigned groups and add this group
       const currentGroups = cleanUUIDArray(member.assigned_groups || []);
       const updatedGroups = cleanUUIDArray([...currentGroups, group.id]);
@@ -1343,6 +1407,11 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   const saveAttendance = async () => {
     if (!selectedMeeting) {
       onError('Please select a group meeting first');
+      return;
+    }
+
+    if (!canTakeAttendance) {
+      onError('You do not have permission to save attendance for this group');
       return;
     }
 
@@ -1394,213 +1463,225 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         <p className="text-gray-600">Mark group members as present, absent, or absent with notes</p>
       </div>
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-3">Select Group Meeting *</label>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {meetings.filter(m => m.status === 'scheduled' || m.status === 'completed').map((meeting) => (
-            <button
-              key={meeting.id}
-              onClick={() => onMeetingSelect(meeting)}
-              className={`p-4 border rounded-xl text-left transition-all duration-200 ${
-                selectedMeeting?.id === meeting.id 
-                  ? 'border-blue-500 bg-blue-50' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="font-medium text-gray-900">
-                  {new Date(meeting.meeting_date).toLocaleDateString()}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
-                <Clock className="h-3 w-3" />
-                {meeting.meeting_time}
-              </div>
-              {meeting.topic && (
-                <p className="text-sm text-gray-600 truncate">{meeting.topic}</p>
-              )}
-              <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
-                meeting.status === 'completed' 
-                  ? 'bg-green-100 text-green-800' 
-                  : 'bg-blue-100 text-blue-800'
-              }`}>
-                {meeting.status}
-              </div>
-            </button>
-          ))}
+      {!canTakeAttendance ? (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
+          <AlertCircle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+          <h4 className="text-lg font-semibold text-yellow-800 mb-2">Permission Required</h4>
+          <p className="text-yellow-700">
+            You do not have permission to record attendance for this group.
+          </p>
         </div>
-        {meetings.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No group meetings scheduled. Please create a group meeting first.
-          </div>
-        )}
-      </div>
-
-      {selectedMeeting && (
-        <div className="space-y-6">
-          {/* Attendance Summary */}
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-green-700 font-medium">Present</p>
-                    <p className="text-2xl font-bold text-green-800">{attendanceStats.present}</p>
+      ) : (
+        <>
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-3">Select Group Meeting *</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {meetings.filter(m => m.status === 'scheduled' || m.status === 'completed').map((meeting) => (
+                <button
+                  key={meeting.id}
+                  onClick={() => onMeetingSelect(meeting)}
+                  className={`p-4 border rounded-xl text-left transition-all duration-200 ${
+                    selectedMeeting?.id === meeting.id 
+                      ? 'border-blue-500 bg-blue-50' 
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="h-4 w-4 text-gray-500" />
+                    <span className="font-medium text-gray-900">
+                      {new Date(meeting.meeting_date).toLocaleDateString()}
+                    </span>
                   </div>
-                  <CheckCircle className="h-8 w-8 text-green-500" />
-                </div>
-              </div>
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-red-700 font-medium">Absent</p>
-                    <p className="text-2xl font-bold text-red-800">{attendanceStats.absent}</p>
+                  <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                    <Clock className="h-3 w-3" />
+                    {meeting.meeting_time}
                   </div>
-                  <X className="h-8 w-8 text-red-500" />
-                </div>
-              </div>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-yellow-700 font-medium">Absent with Notes</p>
-                    <p className="text-2xl font-bold text-yellow-800">{attendanceStats.absentWithReason}</p>
+                  {meeting.topic && (
+                    <p className="text-sm text-gray-600 truncate">{meeting.topic}</p>
+                  )}
+                  <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
+                    meeting.status === 'completed' 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {meeting.status}
                   </div>
-                  <FileText className="h-8 w-8 text-yellow-500" />
-                </div>
-              </div>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-blue-700 font-medium">Total Members</p>
-                    <p className="text-2xl font-bold text-blue-800">{attendanceStats.total}</p>
-                  </div>
-                  <Users className="h-8 w-8 text-blue-500" />
-                </div>
-                {attendanceStats.total > 0 && (
-                  <div className="mt-2 text-center">
-                    <div className="text-lg font-bold text-blue-900">
-                      {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
-                    </div>
-                    <div className="text-xs text-blue-700">Attendance Rate</div>
-                  </div>
-                )}
-              </div>
+                </button>
+              ))}
             </div>
+            {meetings.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No group meetings scheduled. Please create a group meeting first.
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center justify-between">
-            <h4 className="text-lg font-semibold text-gray-900">
-              Group Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-            </h4>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">{groupMembers.length} group members</span>
-              <button
-                onClick={() => setShowAddAttendeeModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-              >
-                <UserPlus className="h-4 w-4" />
-                Add Attendee
-              </button>
-            </div>
-          </div>
-
-          {groupMembers.length === 0 ? (
-            <div className="text-center py-8 bg-gray-50 rounded-xl">
-              <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No members found in this group.</p>
-              <button
-                onClick={() => setShowAddAttendeeModal(true)}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Add Members
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {groupMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 rounded-lg bg-white">
+          {selectedMeeting && (
+            <div className="space-y-6">
+              {/* Attendance Summary */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4">
                     <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="font-medium text-gray-900">
-                            {member.name} {member.surname}
-                          </div>
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                            member.status === 'leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            {member.status || 'member'}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {member.residence} • {member.phone}
-                        </div>
+                      <div>
+                        <p className="text-sm text-green-700 font-medium">Present</p>
+                        <p className="text-2xl font-bold text-green-800">{attendanceStats.present}</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'present')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'present'
-                              ? 'bg-green-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                          Present
-                        </button>
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'absent'
-                              ? 'bg-red-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          <X className="h-4 w-4" />
-                          Absent
-                        </button>
-                        <button
-                          onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                            attendance[member.id] === 'absent_with_reason'
-                              ? 'bg-orange-600 text-white shadow-lg'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          <FileText className="h-4 w-4" />
-                          Absent with Notes
-                        </button>
-                      </div>
+                      <CheckCircle className="h-8 w-8 text-green-500" />
                     </div>
-                    {attendance[member.id] === 'absent_with_reason' && (
-                      <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Notes for Absence</label>
-                        <input
-                          type="text"
-                          value={notes[member.id] || ''}
-                          onChange={(e) => handleNotesChange(member.id, e.target.value)}
-                          placeholder="Enter notes for absence..."
-                          className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        />
+                  </div>
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-red-700 font-medium">Absent</p>
+                        <p className="text-2xl font-bold text-red-800">{attendanceStats.absent}</p>
+                      </div>
+                      <X className="h-8 w-8 text-red-500" />
+                    </div>
+                  </div>
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-yellow-700 font-medium">Absent with Notes</p>
+                        <p className="text-2xl font-bold text-yellow-800">{attendanceStats.absentWithReason}</p>
+                      </div>
+                      <FileText className="h-8 w-8 text-yellow-500" />
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-700 font-medium">Total Members</p>
+                        <p className="text-2xl font-bold text-blue-800">{attendanceStats.total}</p>
+                      </div>
+                      <Users className="h-8 w-8 text-blue-500" />
+                    </div>
+                    {attendanceStats.total > 0 && (
+                      <div className="mt-2 text-center">
+                        <div className="text-lg font-bold text-blue-900">
+                          {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
+                        </div>
+                        <div className="text-xs text-blue-700">Attendance Rate</div>
                       </div>
                     )}
                   </div>
-                ))}
+                </div>
               </div>
-              <div className="flex justify-center pt-6">
-                <button
-                  onClick={saveAttendance}
-                  disabled={loading}
-                  className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 flex items-center gap-2"
-                >
-                  {loading ? 'Saving Group Attendance...' : 'Save Group Attendance'}
-                </button>
+
+              <div className="flex items-center justify-between">
+                <h4 className="text-lg font-semibold text-gray-900">
+                  Group Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                </h4>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-600">{groupMembers.length} group members</span>
+                  <button
+                    onClick={() => setShowAddAttendeeModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Add Attendee
+                  </button>
+                </div>
               </div>
-            </>
+
+              {groupMembers.length === 0 ? (
+                <div className="text-center py-8 bg-gray-50 rounded-xl">
+                  <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                  <p className="text-gray-600">No members found in this group.</p>
+                  <button
+                    onClick={() => setShowAddAttendeeModal(true)}
+                    className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Add Members
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {groupMembers.map((member) => (
+                      <div key={member.id} className="p-4 border border-gray-200 rounded-lg bg-white">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="font-medium text-gray-900">
+                                {member.name} {member.surname}
+                              </div>
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
+                                member.status === 'leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {member.status || 'member'}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {member.residence} • {member.phone}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleAttendanceChange(member.id, 'present')}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                                attendance[member.id] === 'present'
+                                  ? 'bg-green-600 text-white shadow-lg'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                              Present
+                            </button>
+                            <button
+                              onClick={() => handleAttendanceChange(member.id, 'absent')}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                                attendance[member.id] === 'absent'
+                                  ? 'bg-red-600 text-white shadow-lg'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              <X className="h-4 w-4" />
+                              Absent
+                            </button>
+                            <button
+                              onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                                attendance[member.id] === 'absent_with_reason'
+                                  ? 'bg-orange-600 text-white shadow-lg'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              <FileText className="h-4 w-4" />
+                              Absent with Notes
+                            </button>
+                          </div>
+                        </div>
+                        {attendance[member.id] === 'absent_with_reason' && (
+                          <div className="mt-3">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Notes for Absence</label>
+                            <input
+                              type="text"
+                              value={notes[member.id] || ''}
+                              onChange={(e) => handleNotesChange(member.id, e.target.value)}
+                              placeholder="Enter notes for absence..."
+                              className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-center pt-6">
+                    <button
+                      onClick={saveAttendance}
+                      disabled={loading}
+                      className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {loading ? 'Saving Group Attendance...' : 'Save Group Attendance'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {showAddAttendeeModal && (
@@ -1667,9 +1748,16 @@ interface GroupNewcomerStepProps {
   selectedMeeting: GroupMeeting | null;
   onNewcomerAdded: () => void;
   onError: (message: string) => void;
+  canAddNewcomer: boolean;
 }
 
-const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
+const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ 
+  group, 
+  selectedMeeting, 
+  onNewcomerAdded, 
+  onError,
+  canAddNewcomer 
+}) => {
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -1714,6 +1802,11 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
 
   const addNewcomer = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!canAddNewcomer) {
+      onError('You do not have permission to add newcomers to this group');
+      return;
+    }
 
     if (!formData.name.trim() || !formData.surname.trim() || !formData.residence.trim()) {
       onError('Name, surname, and residence are required');
@@ -1824,175 +1917,187 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         <p className="text-gray-600">Register first-time visitors to the {group.name} group</p>
       </div>
 
-      {selectedMeeting && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-          <div className="flex items-center gap-3">
-            <Calendar className="h-5 w-5 text-blue-600" />
-            <div>
-              <p className="font-medium text-blue-900">
-                Recording for: {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-              </p>
-              <p className="text-sm text-blue-700">
-                {selectedMeeting.topic || 'Group Meeting'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!showForm && (
-        <div className="text-center">
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium mx-auto"
-          >
-            <UserPlus className="h-5 w-5" />
-            Add Group Newcomer
-          </button>
-          <p className="text-sm text-gray-500 mt-3">
-            Register first-time visitors who attended the group meeting
+      {!canAddNewcomer ? (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
+          <AlertCircle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+          <h4 className="text-lg font-semibold text-yellow-800 mb-2">Permission Required</h4>
+          <p className="text-yellow-700">
+            You do not have permission to add newcomers to this group.
           </p>
         </div>
-      )}
-
-      {showForm && (
-        <div className="bg-white border border-gray-200 rounded-2xl p-6">
-          <h4 className="text-lg font-semibold text-gray-900 mb-4">Newcomer Information</h4>
-          <form onSubmit={addNewcomer} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter first name"
-                    required
-                    minLength={1}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
-                <input
-                  type="text"
-                  name="surname"
-                  value={formData.surname}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="Enter last name"
-                  required
-                  minLength={1}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="tel"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter phone number"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Residence *</label>
-                <div className="relative">
-                  <Home className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    name="residence"
-                    value={formData.residence}
-                    onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter residence"
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Invited By</label>
-              <div className="space-y-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <input
-                    type="text"
-                    placeholder="Search for church member..."
-                    value={searchInviterTerm}
-                    onChange={(e) => setSearchInviterTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-                
-                <select
-                  name="invited_by"
-                  value={formData.invited_by}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="">Not specified</option>
-                  {filteredInviters.map((member) => (
-                    <option key={member.id} value={`${member.name} ${member.surname}`}>
-                      {member.name} {member.surname} ({member.residence})
-                    </option>
-                  ))}
-                </select>
-                
-                {filteredInviters.length === 0 && searchInviterTerm && (
-                  <p className="text-sm text-gray-500 text-center py-2">
-                    No church members found matching your search
+      ) : (
+        <>
+          {selectedMeeting && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+              <div className="flex items-center gap-3">
+                <Calendar className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="font-medium text-blue-900">
+                    Recording for: {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
                   </p>
-                )}
+                  <p className="text-sm text-blue-700">
+                    {selectedMeeting.topic || 'Group Meeting'}
+                  </p>
+                </div>
               </div>
             </div>
+          )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
-              <textarea
-                name="notes"
-                value={formData.notes}
-                onChange={handleInputChange}
-                rows={3}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="Any additional notes about the newcomer..."
-              />
-            </div>
-
-            <div className="flex gap-3 pt-4">
+          {!showForm && (
+            <div className="text-center">
               <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+                onClick={() => setShowForm(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium mx-auto"
               >
-                <Save className="h-4 w-4" />
-                {loading ? 'Adding Newcomer...' : 'Add to Group'}
+                <UserPlus className="h-5 w-5" />
+                Add Group Newcomer
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
-                }}
-                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-            </button>
+              <p className="text-sm text-gray-500 mt-3">
+                Register first-time visitors who attended the group meeting
+              </p>
             </div>
-          </form>
-        </div>
+          )}
+
+          {showForm && (
+            <div className="bg-white border border-gray-200 rounded-2xl p-6">
+              <h4 className="text-lg font-semibold text-gray-900 mb-4">Newcomer Information</h4>
+              <form onSubmit={addNewcomer} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        name="name"
+                        value={formData.name}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Enter first name"
+                        required
+                        minLength={1}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
+                    <input
+                      type="text"
+                      name="surname"
+                      value={formData.surname}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Enter last name"
+                      required
+                      minLength={1}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="tel"
+                        name="phone"
+                        value={formData.phone}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Enter phone number"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Residence *</label>
+                    <div className="relative">
+                      <Home className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        name="residence"
+                        value={formData.residence}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Enter residence"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Invited By</label>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                      <input
+                        type="text"
+                        placeholder="Search for church member..."
+                        value={searchInviterTerm}
+                        onChange={(e) => setSearchInviterTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                    
+                    <select
+                      name="invited_by"
+                      value={formData.invited_by}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="">Not specified</option>
+                      {filteredInviters.map((member) => (
+                        <option key={member.id} value={`${member.name} ${member.surname}`}>
+                          {member.name} {member.surname} ({member.residence})
+                        </option>
+                      ))}
+                    </select>
+                    
+                    {filteredInviters.length === 0 && searchInviterTerm && (
+                      <p className="text-sm text-gray-500 text-center py-2">
+                        No church members found matching your search
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleInputChange}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Any additional notes about the newcomer..."
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+                  >
+                    <Save className="h-4 w-4" />
+                    {loading ? 'Adding Newcomer...' : 'Add to Group'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
+                    }}
+                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </>
       )}
 
       <div className="mt-6 text-center">
@@ -2013,9 +2118,18 @@ interface GroupReportStepProps {
   onMeetingSelect: (meeting: GroupMeeting) => void;
   onReportCreated: () => void;
   onError: (message: string) => void;
+  canCreateReport: boolean;
 }
 
-const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
+const GroupReportStep: React.FC<GroupReportStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onReportCreated, 
+  onError,
+  canCreateReport 
+}) => {
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
   const [existingReport, setExistingReport] = useState<GroupReport | null>(null);
@@ -2126,6 +2240,11 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   const generateReport = async () => {
     if (!selectedMeeting) {
       onError('Please select a meeting first');
+      return;
+    }
+
+    if (!canCreateReport) {
+      onError('You do not have permission to create reports for this group');
       return;
     }
 
@@ -2363,301 +2482,313 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
         <p className="text-gray-600">Generate a comprehensive report for the {group.name} group meeting</p>
       </div>
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-3">Select Group Meeting *</label>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {meetings.filter(m => m.status === 'scheduled' || m.status === 'completed').map((meeting) => (
-            <button
-              key={meeting.id}
-              onClick={() => onMeetingSelect(meeting)}
-              className={`p-4 border rounded-xl text-left transition-all duration-200 ${
-                selectedMeeting?.id === meeting.id 
-                  ? 'border-blue-500 bg-blue-50' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="font-medium text-gray-900">
-                  {new Date(meeting.meeting_date).toLocaleDateString()}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
-                <Clock className="h-3 w-3" />
-                {meeting.meeting_time}
-              </div>
-              {meeting.topic && (
-                <p className="text-sm text-gray-600 truncate">{meeting.topic}</p>
-              )}
-              <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
-                meeting.status === 'completed' 
-                  ? 'bg-green-100 text-green-800' 
-                  : 'bg-blue-100 text-blue-800'
-              }`}>
-                {meeting.status}
-              </div>
-            </button>
-          ))}
+      {!canCreateReport ? (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
+          <AlertCircle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+          <h4 className="text-lg font-semibold text-yellow-800 mb-2">Permission Required</h4>
+          <p className="text-yellow-700">
+            You do not have permission to create reports for this group.
+          </p>
         </div>
-        {meetings.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No group meetings available for reporting.
-          </div>
-        )}
-      </div>
-
-      {selectedMeeting && (
+      ) : (
         <>
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
-            <h4 className="text-lg font-semibold text-gray-900 mb-4">Meeting Information</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="flex items-center gap-3">
-                <Calendar className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="text-sm text-gray-600">Date</p>
-                  <p className="font-medium text-gray-900">
-                    {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Clock className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="text-sm text-gray-600">Time</p>
-                  <p className="font-medium text-gray-900">
-                    {selectedMeeting.meeting_time || 'Not specified'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <MapPin className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="text-sm text-gray-600">Location</p>
-                  <p className="font-medium text-gray-900">
-                    {selectedMeeting.location || group.location || 'Not specified'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <FileText className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="text-sm text-gray-600">Topic</p>
-                  <p className="font-medium text-gray-900">
-                    {selectedMeeting.topic || 'General Group Meeting'}
-                  </p>
-                </div>
-              </div>
-            </div>
-            {selectedMeeting.status === 'cancelled' && selectedMeeting.cancellation_reason && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-red-800">Cancellation Reason</p>
-                    <p className="text-sm text-red-700">{selectedMeeting.cancellation_reason}</p>
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-3">Select Group Meeting *</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {meetings.filter(m => m.status === 'scheduled' || m.status === 'completed').map((meeting) => (
+                <button
+                  key={meeting.id}
+                  onClick={() => onMeetingSelect(meeting)}
+                  className={`p-4 border rounded-xl text-left transition-all duration-200 ${
+                    selectedMeeting?.id === meeting.id 
+                      ? 'border-blue-500 bg-blue-50' 
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="h-4 w-4 text-gray-500" />
+                    <span className="font-medium text-gray-900">
+                      {new Date(meeting.meeting_date).toLocaleDateString()}
+                    </span>
                   </div>
-                </div>
+                  <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                    <Clock className="h-3 w-3" />
+                    {meeting.meeting_time}
+                  </div>
+                  {meeting.topic && (
+                    <p className="text-sm text-gray-600 truncate">{meeting.topic}</p>
+                  )}
+                  <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-2 ${
+                    meeting.status === 'completed' 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {meeting.status}
+                  </div>
+                </button>
+              ))}
+            </div>
+            {meetings.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No group meetings available for reporting.
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1">
-              <div className="bg-white border border-gray-200 rounded-2xl p-6">
-                <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                      <span className="text-green-800">Present</span>
+          {selectedMeeting && (
+            <>
+              <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
+                <h4 className="text-lg font-semibold text-gray-900 mb-4">Meeting Information</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="flex items-center gap-3">
+                    <Calendar className="h-5 w-5 text-gray-400" />
+                    <div>
+                      <p className="text-sm text-gray-600">Date</p>
+                      <p className="font-medium text-gray-900">
+                        {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                      </p>
                     </div>
-                    <span className="text-lg font-bold text-green-800">{attendanceStats.present}</span>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <X className="h-5 w-5 text-red-600" />
-                      <span className="text-red-800">Absent</span>
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-gray-400" />
+                    <div>
+                      <p className="text-sm text-gray-600">Time</p>
+                      <p className="font-medium text-gray-900">
+                        {selectedMeeting.meeting_time || 'Not specified'}
+                      </p>
                     </div>
-                    <span className="text-lg font-bold text-red-800">{attendanceStats.absent}</span>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5 text-yellow-600" />
-                      <span className="text-yellow-800">Absent with Notes</span>
+                  <div className="flex items-center gap-3">
+                    <MapPin className="h-5 w-5 text-gray-400" />
+                    <div>
+                      <p className="text-sm text-gray-600">Location</p>
+                      <p className="font-medium text-gray-900">
+                        {selectedMeeting.location || group.location || 'Not specified'}
+                      </p>
                     </div>
-                    <span className="text-lg font-bold text-yellow-800">{attendanceStats.absentWithReason}</span>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-blue-600" />
-                      <span className="text-blue-800">Total</span>
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-gray-400" />
+                    <div>
+                      <p className="text-sm text-gray-600">Topic</p>
+                      <p className="font-medium text-gray-900">
+                        {selectedMeeting.topic || 'General Group Meeting'}
+                      </p>
                     </div>
-                    <span className="text-lg font-bold text-blue-800">{attendanceStats.total}</span>
                   </div>
                 </div>
-
-                {attendanceStats.total > 0 && (
-                  <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-gray-900">
-                        {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
+                {selectedMeeting.status === 'cancelled' && selectedMeeting.cancellation_reason && (
+                  <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-red-800">Cancellation Reason</p>
+                        <p className="text-sm text-red-700">{selectedMeeting.cancellation_reason}</p>
                       </div>
-                      <div className="text-sm text-gray-600">Attendance Rate</div>
                     </div>
                   </div>
                 )}
-
-                <div className="flex gap-2 mt-4 print:hidden">
-                  <button
-                    onClick={downloadReport}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download
-                  </button>
-                  <button
-                    onClick={handlePrint}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <Printer className="h-4 w-4" />
-                    Print
-                  </button>
-                </div>
               </div>
 
-              {attendance.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-4">
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Details</h4>
-                  <div className="space-y-3 max-h-80 overflow-y-auto">
-                    {attendance.map((record) => (
-                      <div key={record.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900">
-                            {record.members?.name} {record.members?.surname}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-1">
+                  <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="text-green-800">Present</span>
+                        </div>
+                        <span className="text-lg font-bold text-green-800">{attendanceStats.present}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <X className="h-5 w-5 text-red-600" />
+                          <span className="text-red-800">Absent</span>
+                        </div>
+                        <span className="text-lg font-bold text-red-800">{attendanceStats.absent}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5 text-yellow-600" />
+                          <span className="text-yellow-800">Absent with Notes</span>
+                        </div>
+                        <span className="text-lg font-bold text-yellow-800">{attendanceStats.absentWithReason}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <Users className="h-5 w-5 text-blue-600" />
+                          <span className="text-blue-800">Total</span>
+                        </div>
+                        <span className="text-lg font-bold text-blue-800">{attendanceStats.total}</span>
+                      </div>
+                    </div>
+
+                    {attendanceStats.total > 0 && (
+                      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-gray-900">
+                            {Math.round((attendanceStats.present / attendanceStats.total) * 100)}%
                           </div>
-                          <div className="text-sm text-gray-600">{record.members?.residence}</div>
-                          <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
-                            record.status === 'present' ? 'bg-green-100 text-green-800' :
-                            record.status === 'absent' ? 'bg-red-100 text-red-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {(record.status || 'unknown').replace('_', ' ')}
-                          </div>
-                          {record.notes && (
-                            <p className="text-sm text-gray-600 mt-1">Notes: {record.notes}</p>
-                          )}
+                          <div className="text-sm text-gray-600">Attendance Rate</div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                    )}
 
-            <div className="lg:col-span-2">
-              <div className="bg-white border border-gray-200 rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-lg font-semibold text-gray-900">Group Meeting Report</h4>
-                  {existingReport && (
-                    <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                      Report Exists
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report *</label>
-                    <textarea
-                      name="report_text"
-                      value={reportData.report_text}
-                      onChange={handleReportChange}
-                      rows={4}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Detailed report of what was discussed and accomplished..."
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Decisions Made</label>
-                    <textarea
-                      name="decisions_made"
-                      value={reportData.decisions_made}
-                      onChange={handleReportChange}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Important decisions, approvals, or resolutions..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items</label>
-                    <textarea
-                      name="action_items"
-                      value={reportData.action_items}
-                      onChange={handleReportChange}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Tasks assigned, follow-ups, or next steps..."
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Next Meeting Date</label>
-                      <input
-                        type="date"
-                        name="next_meeting_date"
-                        value={reportData.next_meeting_date}
-                        onChange={handleReportChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                    <div className="flex gap-2 mt-4 print:hidden">
+                      <button
+                        onClick={downloadReport}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download
+                      </button>
+                      <button
+                        onClick={handlePrint}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        <Printer className="h-4 w-4" />
+                        Print
+                      </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
-                    <textarea
-                      name="additional_notes"
-                      value={reportData.additional_notes}
-                      onChange={handleReportChange}
-                      rows={2}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Any other relevant information..."
-                    />
-                  </div>
+                  {attendance.length > 0 && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-4">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Details</h4>
+                      <div className="space-y-3 max-h-80 overflow-y-auto">
+                        {attendance.map((record) => (
+                          <div key={record.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">
+                                {record.members?.name} {record.members?.surname}
+                              </div>
+                              <div className="text-sm text-gray-600">{record.members?.residence}</div>
+                              <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
+                                record.status === 'present' ? 'bg-green-100 text-green-800' :
+                                record.status === 'absent' ? 'bg-red-100 text-red-800' :
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {(record.status || 'unknown').replace('_', ' ')}
+                              </div>
+                              {record.notes && (
+                                <p className="text-sm text-gray-600 mt-1">Notes: {record.notes}</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex gap-3 pt-6">
-                  <button
-                    onClick={generateReport}
-                    disabled={loading || !selectedMeeting || !reportData.report_text.trim()}
-                    className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium flex items-center justify-center gap-2"
-                  >
-                    <FileDown className="h-4 w-4" />
-                    {loading ? 'Generating Report...' : existingReport ? 'Update Group Report' : 'Generate Group Report'}
-                  </button>
+                <div className="lg:col-span-2">
+                  <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-semibold text-gray-900">Group Meeting Report</h4>
+                      {existingReport && (
+                        <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                          Report Exists
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report *</label>
+                        <textarea
+                          name="report_text"
+                          value={reportData.report_text}
+                          onChange={handleReportChange}
+                          rows={4}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Detailed report of what was discussed and accomplished..."
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Decisions Made</label>
+                        <textarea
+                          name="decisions_made"
+                          value={reportData.decisions_made}
+                          onChange={handleReportChange}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Important decisions, approvals, or resolutions..."
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Action Items</label>
+                        <textarea
+                          name="action_items"
+                          value={reportData.action_items}
+                          onChange={handleReportChange}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Tasks assigned, follow-ups, or next steps..."
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Next Meeting Date</label>
+                          <input
+                            type="date"
+                            name="next_meeting_date"
+                            value={reportData.next_meeting_date}
+                            onChange={handleReportChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
+                        <textarea
+                          name="additional_notes"
+                          value={reportData.additional_notes}
+                          onChange={handleReportChange}
+                          rows={2}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Any other relevant information..."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3 pt-6">
+                      <button
+                        onClick={generateReport}
+                        disabled={loading || !selectedMeeting || !reportData.report_text.trim()}
+                        className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        {loading ? 'Generating Report...' : existingReport ? 'Update Group Report' : 'Generate Group Report'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {selectedMeeting.notes && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-4">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Meeting Notes</h4>
+                      <div className="bg-gray-50 rounded-lg p-4">
+                        <p className="text-gray-700 whitespace-pre-wrap">{selectedMeeting.notes}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-
-              {selectedMeeting.notes && (
-                <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-4">
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Meeting Notes</h4>
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">{selectedMeeting.notes}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+            </>
+          )}
         </>
       )}
     </div>
   );
 };
 
-// Group Management Workflow Component
+// Group Management Workflow Component - FIXED with proper permissions
 interface GroupWorkflowProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2672,55 +2803,111 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
 
+  // Use the permissions hook
+  const { 
+    canCreateMeeting, 
+    canTakeAttendance, 
+    canAddNewcomer, 
+    canCreateReport,
+    canManageGroup 
+  } = usePermissions();
+
   const steps = [
-    { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
-    { number: 2, title: 'Take Attendance', description: 'Record member attendance' },
-    { number: 3, title: 'Add Newcomers', description: 'Register first-time visitors' },
-    { number: 4, title: 'Create Report', description: 'Generate meeting report' }
+    { 
+      number: 1, 
+      title: 'Schedule Meeting', 
+      description: 'Create a new meeting schedule',
+      requiredPermission: canCreateMeeting(group)
+    },
+    { 
+      number: 2, 
+      title: 'Take Attendance', 
+      description: 'Record member attendance',
+      requiredPermission: canTakeAttendance(group)
+    },
+    { 
+      number: 3, 
+      title: 'Add Newcomers', 
+      description: 'Register first-time visitors',
+      requiredPermission: canAddNewcomer(group)
+    },
+    { 
+      number: 4, 
+      title: 'Create Report', 
+      description: 'Generate meeting report',
+      requiredPermission: canCreateReport(group)
+    }
   ];
 
+  // Check if user can access any step
+  const canAccessAnyStep = steps.some(step => step.requiredPermission);
+
+  // Check if user can access a specific step
   const canAccessStep = (stepNumber: number) => {
-    if (!profile) return false;
-
-    // Group leaders can access all steps for their own group
-    if (group.leader_id === profile.id) {
-      return true;
-    }
-
-    // Administrators and pastors can access all steps for any group
-    const { isAdministrator, isPastor } = useAuth();
-    if (isAdministrator || isPastor) {
-      return true;
-    }
-
-    // Deacons can view but not manage
-    const { isDeacon } = useAuth();
-    if (isDeacon) {
-      return stepNumber === 1 || stepNumber === 4; // Deacons can only view meetings and reports
-    }
-
-    return false;
+    const step = steps.find(s => s.number === stepNumber);
+    return step ? step.requiredPermission : false;
   };
+
+  if (!profile) {
+    return (
+      <div className="text-center py-8">
+        <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold text-gray-900 mb-2">Not Logged In</h3>
+        <p className="text-gray-600">You need to be logged in to manage groups.</p>
+      </div>
+    );
+  }
+
+  if (!canManageGroup(group) && !canAccessAnyStep) {
+    return (
+      <div className="text-center py-8">
+        <Shield className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold text-gray-900 mb-2">Permission Denied</h3>
+        <p className="text-gray-600">You do not have permission to manage this group.</p>
+        <button
+          onClick={onClose}
+          className="mt-4 px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+        >
+          Close
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Progress Steps */}
       <div className="flex justify-between items-center">
         {steps.map((step) => (
-          <div key={step.number} className="flex-1 text-center">
+          <div key={step.number} className="flex-1 text-center relative">
+            {/* Connection line */}
+            {step.number > 1 && (
+              <div className={`absolute left-0 right-0 top-4 h-0.5 -z-10 ${
+                currentStep >= step.number ? 'bg-blue-600' : 'bg-gray-300'
+              }`}></div>
+            )}
             <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 transition-all duration-300 ${
-              currentStep >= step.number 
+              currentStep >= step.number && step.requiredPermission
                 ? 'bg-blue-600 text-white shadow-lg' 
-                : 'bg-gray-300 text-gray-600'
+                : step.requiredPermission
+                ? 'bg-blue-100 text-blue-600'
+                : 'bg-gray-100 text-gray-400'
             }`}>
               {step.number}
             </div>
             <div className={`text-sm font-medium ${
-              currentStep >= step.number ? 'text-blue-600' : 'text-gray-500'
+              currentStep >= step.number && step.requiredPermission 
+                ? 'text-blue-600' 
+                : step.requiredPermission
+                ? 'text-blue-500'
+                : 'text-gray-400'
             }`}>
               {step.title}
             </div>
             <div className="text-xs text-gray-400 hidden md:block">{step.description}</div>
+            {!step.requiredPermission && (
+              <div className="text-xs text-red-500 mt-1">No Permission</div>
+            )}
           </div>
         ))}
       </div>
@@ -2735,6 +2922,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
               setCurrentStep(2);
             }}
             onError={onError}
+            canCreate={canCreateMeeting(group)}
           />
         )}
 
@@ -2749,6 +2937,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
               setCurrentStep(3);
             }}
             onError={onError}
+            canTakeAttendance={canTakeAttendance(group)}
           />
         )}
 
@@ -2761,6 +2950,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
               setCurrentStep(4);
             }}
             onError={onError}
+            canAddNewcomer={canAddNewcomer(group)}
           />
         )}
 
@@ -2775,6 +2965,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
               onClose();
             }}
             onError={onError}
+            canCreateReport={canCreateReport(group)}
           />
         )}
       </div>
@@ -2811,8 +3002,14 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
 
 // Main Groups Component
 const Groups = () => {
-  const { profile, getRoles, isAdministrator, isPastor, isGroupLeader, isMember, isDeacon } = useAuth();
-  const { canCreateGroup, canEditGroup, canDeleteGroup, canViewGroup, canManageGroup } = usePermissions();
+  const { profile, getRoles } = useAuth();
+  const { 
+    canCreateGroup, 
+    canEditGroup, 
+    canDeleteGroup, 
+    canViewGroup, 
+    canManageGroup 
+  } = usePermissions();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -2889,6 +3086,8 @@ const Groups = () => {
 
       // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
+      
+      const { isAdministrator, isPastor, isGroupLeader, isMember, isDeacon } = useAuth();
       
       if (!isAdministrator && !isPastor) {
         if (isGroupLeader) {
