@@ -3,6 +3,20 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
 
+// UUID Validation Helper
+const cleanUUIDArray = (ids: string[]): string[] => {
+  if (!Array.isArray(ids)) return [];
+  
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  
+  return ids.filter(id => {
+    // Remove any empty objects, null, undefined, or invalid strings
+    if (!id || typeof id !== 'string') return false;
+    if (id === '{}' || id === 'null' || id === 'undefined') return false;
+    return uuidPattern.test(id.trim());
+  });
+};
+
 interface Member {
   id: string;
   name: string;
@@ -196,7 +210,7 @@ const cloudService = {
       if (error) throw error;
       return (data || []) as any;
     } catch (error) {
-      console.error('Error fetching members:', error);
+      console.error('❌ Error fetching members:', error);
       throw error;
     }
   },
@@ -224,24 +238,51 @@ const cloudService = {
 
       return [...cellGroups, ...departments];
     } catch (error) {
-      console.error('Error fetching groups:', error);
+      console.error('❌ Error fetching groups:', error);
       throw error;
     }
   },
 
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
+      // ✅ Clean arrays before sending to database
+      const cleanedUpdates = {
+        ...updates,
+        assigned_groups: updates.assigned_groups 
+          ? cleanUUIDArray(updates.assigned_groups) 
+          : updates.assigned_groups,
+        assigned_departments: updates.assigned_departments 
+          ? cleanUUIDArray(updates.assigned_departments) 
+          : updates.assigned_departments
+      };
+
+      console.log('🔧 Updating member in database:', {
+        memberId,
+        originalUpdates: updates,
+        cleanedUpdates: cleanedUpdates
+      });
+
       const { data, error } = await supabase
         .from('members')
-        .update(updates as any)
+        .update(cleanedUpdates as any)
         .eq('id', memberId)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Database update error:', error);
+        throw error;
+      }
+
+      console.log('✅ Database update successful:', {
+        memberId: data.id,
+        assigned_groups: data.assigned_groups,
+        assigned_departments: data.assigned_departments
+      });
+
       return data as any;
     } catch (error) {
-      console.error('Error updating member:', error);
+      console.error('❌ Error updating member:', error);
       throw error;
     }
   },
@@ -258,7 +299,7 @@ const cloudService = {
       
       return { username, pin };
     } catch (error) {
-      console.error('Error generating credentials:', error);
+      console.error('❌ Error generating credentials:', error);
       throw error;
     }
   },
@@ -274,7 +315,7 @@ const cloudService = {
       if (error || !data) return null;
       return data.name;
     } catch (error) {
-      console.error('Error fetching cell group name:', error);
+      console.error('❌ Error fetching cell group name:', error);
       return null;
     }
   },
@@ -309,7 +350,7 @@ const cloudService = {
       }
       return data as any;
     } catch (error) {
-      console.error('Error fetching system config:', error);
+      console.error('❌ Error fetching system config:', error);
       return {
         global_settings: {
           timezone: 'UTC',
@@ -341,7 +382,7 @@ const cloudService = {
       if (error) throw error;
       return data as any;
     } catch (error) {
-      console.error('Error updating system config:', error);
+      console.error('❌ Error updating system config:', error);
       throw error;
     }
   },
@@ -384,7 +425,7 @@ const cloudService = {
       }
       return data as any;
     } catch (error) {
-      console.error('Error fetching security settings:', error);
+      console.error('❌ Error fetching security settings:', error);
       return {
         password_policy: {
           min_length: 8,
@@ -424,7 +465,7 @@ const cloudService = {
       if (error) throw error;
       return data as any;
     } catch (error) {
-      console.error('Error updating security settings:', error);
+      console.error('❌ Error updating security settings:', error);
       throw error;
     }
   },
@@ -440,7 +481,7 @@ const cloudService = {
       if (error) return [];
       return (data || []) as any;
     } catch (error) {
-      console.error('Error fetching audit logs:', error);
+      console.error('❌ Error fetching audit logs:', error);
       return [];
     }
   },
@@ -456,7 +497,7 @@ const cloudService = {
       const csvContent = convertToCSV(data || []);
       return new Blob([csvContent], { type: 'text/csv' });
     } catch (error) {
-      console.error('Error exporting data:', error);
+      console.error('❌ Error exporting data:', error);
       throw error;
     }
   },
@@ -666,7 +707,7 @@ const cloudService = {
               const errorMsg = rowError instanceof Error ? rowError.message : 'Unknown error';
               errorMessages.push(`Row ${i}: ${errorMsg}`);
               errors++;
-              console.error('Error processing row:', rowError);
+              console.error('❌ Error processing row:', rowError);
             }
           }
 
@@ -696,7 +737,7 @@ const cloudService = {
         throw error;
       }
     } catch (error) {
-      console.error('Error running backup:', error);
+      console.error('❌ Error running backup:', error);
       throw error;
     }
   },
@@ -723,7 +764,7 @@ const cloudService = {
         active_users: 0
       };
     } catch (error) {
-      console.error('Error fetching system stats:', error);
+      console.error('❌ Error fetching system stats:', error);
       return {
         total_members: 0,
         total_groups: 0,
@@ -758,7 +799,7 @@ const cloudService = {
         usage_percentage: usagePercentage
       };
     } catch (error) {
-      console.error('Error calculating storage info:', error);
+      console.error('❌ Error calculating storage info:', error);
       return {
         total_storage: 100 * 1024 * 1024,
         used_storage: 0,
@@ -783,7 +824,7 @@ const cloudService = {
 
       return { deleted: count || 0 };
     } catch (error) {
-      console.error('Error cleaning up old data:', error);
+      console.error('❌ Error cleaning up old data:', error);
       throw error;
     }
   }
@@ -959,6 +1000,9 @@ const Admin = () => {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    
+    console.log('🔄 Loading data...');
+    
     try {
       const [membersData, groupsData, systemData, securityData, statsData] = await Promise.all([
         cloudService.getMembers(),
@@ -968,6 +1012,44 @@ const Admin = () => {
         cloudService.getSystemStats()
       ]);
       
+      console.log('✅ Data loaded successfully:', {
+        membersCount: membersData.length,
+        groupsCount: groupsData.length,
+        cellGroups: groupsData.filter(g => g.type === 'cell_group').length,
+        departments: groupsData.filter(g => g.type === 'department').length,
+        stats: statsData
+      });
+
+      // ✅ Log any members with invalid assigned_groups
+      const membersWithInvalidGroups = membersData.filter(m => 
+        m.assigned_groups && m.assigned_groups.some(g => !g || g === '{}' || typeof g !== 'string')
+      );
+      
+      if (membersWithInvalidGroups.length > 0) {
+        console.warn('⚠️ Found members with invalid assigned_groups:', 
+          membersWithInvalidGroups.map(m => ({
+            id: m.id,
+            name: `${m.name} ${m.surname}`,
+            assigned_groups: m.assigned_groups
+          }))
+        );
+      }
+
+      // ✅ Log any members with invalid assigned_departments
+      const membersWithInvalidDepts = membersData.filter(m => 
+        m.assigned_departments && m.assigned_departments.some(d => !d || d === '{}' || typeof d !== 'string')
+      );
+      
+      if (membersWithInvalidDepts.length > 0) {
+        console.warn('⚠️ Found members with invalid assigned_departments:', 
+          membersWithInvalidDepts.map(m => ({
+            id: m.id,
+            name: `${m.name} ${m.surname}`,
+            assigned_departments: m.assigned_departments
+          }))
+        );
+      }
+      
       setMembers(membersData);
       setGroups(groupsData);
       setSystemConfig(systemData);
@@ -975,8 +1057,11 @@ const Admin = () => {
       setSystemStats(statsData);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
+      console.error('❌ Error loading data:', {
+        error: err,
+        message: errorMessage
+      });
       setError(errorMessage);
-      console.error('Error loading data:', err);
     } finally {
       setLoading(false);
       setInitialLoad(false);
@@ -1107,19 +1192,50 @@ const Admin = () => {
     setError(null);
 
     if (user) {
+      console.log('👤 Opening user modal:', {
+        userId: user.id,
+        userName: `${user.name} ${user.surname}`,
+        currentRoles: getRolesFromMember(user),
+        assignedGroups: user.assigned_groups,
+        assignedDepartments: user.assigned_departments,
+        permissions: user.permissions
+      });
+
       setSelectedUser(user);
       const userRoles = getRolesFromMember(user);
+      
+      // ✅ Clean arrays when loading user data
+      const cleanedGroups = cleanUUIDArray(user.assigned_groups || []);
+      const cleanedDepartments = cleanUUIDArray(user.assigned_departments || []);
+      
+      if (cleanedGroups.length !== (user.assigned_groups || []).length) {
+        console.warn('⚠️ Cleaned invalid groups:', {
+          original: user.assigned_groups,
+          cleaned: cleanedGroups,
+          removed: (user.assigned_groups || []).filter(g => !cleanedGroups.includes(g))
+        });
+      }
+      
+      if (cleanedDepartments.length !== (user.assigned_departments || []).length) {
+        console.warn('⚠️ Cleaned invalid departments:', {
+          original: user.assigned_departments,
+          cleaned: cleanedDepartments,
+          removed: (user.assigned_departments || []).filter(d => !cleanedDepartments.includes(d))
+        });
+      }
+
       setUserFormData({
         roles: userRoles,
         permissions: user.permissions || [],
-        assigned_groups: user.assigned_groups || [],
-        assigned_departments: user.assigned_departments || [],
+        assigned_groups: cleanedGroups, // ✅ Use cleaned arrays
+        assigned_departments: cleanedDepartments, // ✅ Use cleaned arrays
         can_add_members: user.can_add_members || false,
         can_edit_members: user.can_edit_members || false,
         can_view_own_data: user.can_view_own_data || false,
         login_username: user.login_username || '',
         login_pin: user.login_pin || ''
       });
+      
       setShowCredentials(false);
       setGeneratedCredentials(null);
     }
@@ -1205,7 +1321,7 @@ const Admin = () => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to import data';
       setError(`Import failed: ${errorMessage}. Please check your CSV format and field mappings.`);
-      console.error('Import error:', err);
+      console.error('❌ Import error:', err);
     } finally {
       setLoading(false);
       setImportProgress(null);
@@ -1313,7 +1429,7 @@ const Admin = () => {
         }
       } catch (error) {
         setError('Failed to parse CSV file. Please make sure it is a valid CSV format.');
-        console.error('CSV parsing error:', error);
+        console.error('❌ CSV parsing error:', error);
       }
     };
     
@@ -1386,7 +1502,7 @@ const Admin = () => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate credentials';
       setError(errorMessage);
-      console.error('Error generating credentials:', err);
+      console.error('❌ Error generating credentials:', err);
     } finally {
       setLoading(false);
     }
@@ -1442,16 +1558,38 @@ const Admin = () => {
     try {
       const roleUpdates = setRolesToMember(userFormData.roles);
 
+      // ✅ Clean UUID arrays before saving
+      const cleanedAssignedGroups = cleanUUIDArray(userFormData.assigned_groups);
+      const cleanedAssignedDepartments = cleanUUIDArray(userFormData.assigned_departments);
+
+      console.log('📝 Updating user:', {
+        userId: selectedUser.id,
+        userName: `${selectedUser.name} ${selectedUser.surname}`,
+        roles: userFormData.roles,
+        originalAssignedGroups: userFormData.assigned_groups,
+        cleanedAssignedGroups: cleanedAssignedGroups,
+        originalAssignedDepartments: userFormData.assigned_departments,
+        cleanedAssignedDepartments: cleanedAssignedDepartments,
+        permissions: userFormData.permissions,
+        roleUpdates: roleUpdates
+      });
+
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
         ...roleUpdates,
         permissions: userFormData.permissions,
-        assigned_groups: userFormData.assigned_groups,
-        assigned_departments: userFormData.assigned_departments,
+        assigned_groups: cleanedAssignedGroups, // ✅ Use cleaned arrays
+        assigned_departments: cleanedAssignedDepartments, // ✅ Use cleaned arrays
         can_add_members: userFormData.can_add_members,
         can_edit_members: userFormData.can_edit_members,
         can_view_own_data: userFormData.can_view_own_data,
-        login_username: userFormData.login_username,
-        login_pin: userFormData.login_pin
+        login_username: userFormData.login_username || null,
+        login_pin: userFormData.login_pin || null
+      });
+
+      console.log('✅ User updated successfully:', {
+        userId: updatedMember.id,
+        assignedGroups: updatedMember.assigned_groups,
+        assignedDepartments: updatedMember.assigned_departments
       });
 
       setMembers(prev => prev.map(m => 
@@ -1462,8 +1600,12 @@ const Admin = () => {
       closeModal();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update user';
+      console.error('❌ Error updating user:', {
+        error: err,
+        message: errorMessage,
+        userId: selectedUser.id
+      });
       setError(errorMessage);
-      console.error('Error updating user:', err);
     } finally {
       setLoading(false);
     }
@@ -1479,21 +1621,61 @@ const Admin = () => {
   };
 
   const handleGroupToggle = (groupId: string) => {
-    setUserFormData(prev => ({
-      ...prev,
-      assigned_groups: prev.assigned_groups.includes(groupId)
+    console.log('🔄 Toggling group:', {
+      groupId,
+      currentGroups: userFormData.assigned_groups,
+      isSelected: userFormData.assigned_groups.includes(groupId)
+    });
+
+    setUserFormData(prev => {
+      const newGroups = prev.assigned_groups.includes(groupId)
         ? prev.assigned_groups.filter(g => g !== groupId)
-        : [...prev.assigned_groups, groupId]
-    }));
+        : [...prev.assigned_groups, groupId];
+      
+      // ✅ Clean the array immediately
+      const cleanedGroups = cleanUUIDArray(newGroups);
+      
+      console.log('✅ Groups updated:', {
+        before: prev.assigned_groups,
+        after: cleanedGroups,
+        added: !prev.assigned_groups.includes(groupId),
+        groupId
+      });
+
+      return {
+        ...prev,
+        assigned_groups: cleanedGroups
+      };
+    });
   };
 
   const handleDepartmentToggle = (deptId: string) => {
-    setUserFormData(prev => ({
-      ...prev,
-      assigned_departments: prev.assigned_departments.includes(deptId)
+    console.log('🔄 Toggling department:', {
+      deptId,
+      currentDepartments: userFormData.assigned_departments,
+      isSelected: userFormData.assigned_departments.includes(deptId)
+    });
+
+    setUserFormData(prev => {
+      const newDepartments = prev.assigned_departments.includes(deptId)
         ? prev.assigned_departments.filter(d => d !== deptId)
-        : [...prev.assigned_departments, deptId]
-    }));
+        : [...prev.assigned_departments, deptId];
+      
+      // ✅ Clean the array immediately
+      const cleanedDepartments = cleanUUIDArray(newDepartments);
+      
+      console.log('✅ Departments updated:', {
+        before: prev.assigned_departments,
+        after: cleanedDepartments,
+        added: !prev.assigned_departments.includes(deptId),
+        deptId
+      });
+
+      return {
+        ...prev,
+        assigned_departments: cleanedDepartments
+      };
+    });
   };
 
   const handleRoleToggle = (roleValue: string) => {
