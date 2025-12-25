@@ -65,6 +65,91 @@ interface GroupReport {
   created_at: string | null;
 }
 
+// Permission helper functions
+const usePermissions = () => {
+  const { profile, isAdministrator, isPastor, isGroupLeader, isMember, isDeacon } = useAuth();
+  
+  const checkGroupPermission = (group: CellGroup, action: 'view' | 'edit' | 'delete' | 'manage'): boolean => {
+    if (!profile) return false;
+    
+    // Administrators and Pastors have full permissions
+    if (isAdministrator || isPastor) {
+      return true;
+    }
+    
+    // Deacons have view permissions for all groups
+    if (isDeacon && action === 'view') {
+      return true;
+    }
+    
+    // Group Leaders can only manage their own group
+    if (isGroupLeader) {
+      if (group.leader_id === profile.id) {
+        return true;
+      }
+      return false;
+    }
+    
+    // Members can only view their own group
+    if (isMember) {
+      if (group.leader_id === profile.id || profile.cell_group_id === group.id) {
+        return action === 'view';
+      }
+      return false;
+    }
+    
+    return false;
+  };
+  
+  const canCreateGroup = (): boolean => {
+    if (!profile) return false;
+    return isAdministrator || isPastor;
+  };
+  
+  const canEditGroup = (group: CellGroup): boolean => {
+    if (!profile) return false;
+    
+    // Administrators and Pastors can edit any group
+    if (isAdministrator || isPastor) {
+      return true;
+    }
+    
+    // Group Leaders can only edit their own group
+    if (isGroupLeader && group.leader_id === profile.id) {
+      return true;
+    }
+    
+    return false;
+  };
+  
+  const canDeleteGroup = (group: CellGroup): boolean => {
+    if (!profile) return false;
+    
+    // Only Administrators and Pastors can delete groups
+    if (isAdministrator || isPastor) {
+      return true;
+    }
+    
+    return false;
+  };
+  
+  const canViewGroup = (group: CellGroup): boolean => {
+    return checkGroupPermission(group, 'view');
+  };
+  
+  const canManageGroup = (group: CellGroup): boolean => {
+    return checkGroupPermission(group, 'manage');
+  };
+  
+  return {
+    canCreateGroup,
+    canEditGroup,
+    canDeleteGroup,
+    canViewGroup,
+    canManageGroup
+  };
+};
+
 // New Group Creation Component
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -2512,7 +2597,7 @@ interface GroupWorkflowProps {
 }
 
 const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
-  const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
+  const { profile } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
 
@@ -2526,18 +2611,24 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   const canAccessStep = (stepNumber: number) => {
     if (!profile) return false;
 
-    switch (stepNumber) {
-      case 1:
-        return canCreateGroupMeetings(group.id);
-      case 2:
-        return canManageGroupAttendance(group.id);
-      case 3:
-        return canAddGroupNewcomers(group.id);
-      case 4:
-        return canCreateGroupReports(group.id);
-      default:
-        return false;
+    // Group leaders can access all steps for their own group
+    if (group.leader_id === profile.id) {
+      return true;
     }
+
+    // Administrators and pastors can access all steps for any group
+    const { isAdministrator, isPastor } = useAuth();
+    if (isAdministrator || isPastor) {
+      return true;
+    }
+
+    // Deacons can view but not manage
+    const { isDeacon } = useAuth();
+    if (isDeacon) {
+      return stepNumber === 1 || stepNumber === 4; // Deacons can only view meetings and reports
+    }
+
+    return false;
   };
 
   return (
@@ -2649,7 +2740,8 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
 
 // Main Groups Component
 const Groups = () => {
-  const { profile, canViewGroup, canManageGroup, getRoles, isAdministrator, isPastor, isGroupLeader, isMember } = useAuth();
+  const { profile, getRoles, isAdministrator, isPastor, isGroupLeader, isMember, isDeacon } = useAuth();
+  const { canCreateGroup, canEditGroup, canDeleteGroup, canViewGroup, canManageGroup } = usePermissions();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -2734,11 +2826,18 @@ const Groups = () => {
             group.leader_id === profile?.id
           );
         } else if (isMember) {
-          // Members can see only their own group
-          const userGroup = await getUserGroup();
-          filteredGroups = groupsWithDetails.filter(group => 
-            group.id === userGroup?.id
-          );
+          // Members can see only groups they belong to
+          filteredGroups = groupsWithDetails.filter(group => {
+            // Check if user is in this group
+            const userGroupId = profile.cell_group_id;
+            return group.id === userGroupId || group.leader_id === profile.id;
+          });
+        } else if (isDeacon) {
+          // Deacons can view all groups
+          filteredGroups = groupsWithDetails;
+        } else {
+          // Other roles (if any) can't see any groups
+          filteredGroups = [];
         }
       }
       // Administrators and Pastors can see all groups (no filtering)
@@ -2749,31 +2848,6 @@ const Groups = () => {
       setError('Failed to load groups: ' + error.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const getUserGroup = async (): Promise<CellGroup | null> => {
-    try {
-      if (!profile?.id) return null;
-      
-      const { data: memberData } = await supabase
-        .from('members')
-        .select('cell_group_id')
-        .eq('id', profile.id)
-        .single();
-      
-      if (!memberData?.cell_group_id) return null;
-      
-      const { data: groupData } = await supabase
-        .from('cell_groups')
-        .select('*')
-        .eq('id', memberData.cell_group_id)
-        .single();
-      
-      return groupData;
-    } catch (error) {
-      console.error('Failed to get user group:', error);
-      return null;
     }
   };
 
@@ -2843,7 +2917,7 @@ const Groups = () => {
   };
 
   const openMeetingsModal = async (group: CellGroup) => {
-    if (!canViewGroup(group.id)) {
+    if (!canViewGroup(group)) {
       setError('You do not have permission to view this group');
       return;
     }
@@ -2854,7 +2928,7 @@ const Groups = () => {
   };
 
   const openWorkflowModal = async (group: CellGroup) => {
-    if (!canManageGroup(group.id)) {
+    if (!canManageGroup(group)) {
       setError('You do not have permission to manage this group');
       return;
     }
@@ -2865,9 +2939,8 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to edit groups
-    if (!isAdministrator && !isPastor) {
-      setError('Only administrators and pastors can edit groups');
+    if (!canEditGroup(group)) {
+      setError('You do not have permission to edit this group');
       return;
     }
     setSelectedGroup(group);
@@ -2875,9 +2948,8 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to delete groups
-    if (!isAdministrator && !isPastor) {
-      setError('Only administrators and pastors can delete groups');
+    if (!canDeleteGroup(group)) {
+      setError('You do not have permission to delete this group');
       return;
     }
     setSelectedGroup(group);
@@ -2912,36 +2984,6 @@ const Groups = () => {
     loadGroups();
     setSuccess('Group deleted successfully!');
     setTimeout(() => setSuccess(null), 3000);
-  };
-
-  // Permission functions
-  const canCreateGroups = () => {
-    return isAdministrator || isPastor;
-  };
-
-  const canEditGroup = (group: CellGroup) => {
-    // Only admin and pastor can edit groups
-    return isAdministrator || isPastor;
-  };
-
-  const canDeleteGroup = (group: CellGroup) => {
-    // Only admin and pastor can delete groups
-    return isAdministrator || isPastor;
-  };
-
-  const canViewGroupDetails = (group: CellGroup) => {
-    if (isAdministrator || isPastor) {
-      return true; // Admins & Pastors can view all groups
-    }
-    if (isGroupLeader) {
-      return group.leader_id === profile?.id; // Leaders can view only their own group
-    }
-    if (isMember) {
-      // Members can view only their own group
-      // This assumes members have a cell_group_id in their profile
-      return true; // We'll filter this in loadGroups
-    }
-    return false;
   };
 
   const getUserRoleDisplay = () => {
@@ -2989,7 +3031,7 @@ const Groups = () => {
             />
           </div>
           
-          {canCreateGroups() && (
+          {canCreateGroup() && (
             <button
               onClick={() => setShowCreateGroupModal(true)}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-green-600 text-white rounded-xl hover:from-blue-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
@@ -3052,7 +3094,7 @@ const Groups = () => {
                 <p className="text-gray-500 mb-6">
                   {searchTerm ? 'Try a different search term' : 'You do not have access to any groups'}
                 </p>
-                {canCreateGroups() && (
+                {canCreateGroup() && (
                   <button
                     onClick={() => setShowCreateGroupModal(true)}
                     className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mx-auto"
@@ -3068,8 +3110,8 @@ const Groups = () => {
                 group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
               ).map((group) => {
-                const canManage = canManageGroup(group.id);
-                const canView = canViewGroup(group.id);
+                const canManage = canManageGroup(group);
+                const canView = canViewGroup(group);
                 const canEdit = canEditGroup(group);
                 const canDelete = canDeleteGroup(group);
                 
@@ -3164,7 +3206,8 @@ const Groups = () => {
                       <div className="flex gap-2">
                         <button
                           onClick={() => openMeetingsModal(group)}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                          disabled={!canView}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           View Meetings
                         </button>
@@ -3470,7 +3513,7 @@ const Groups = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
