@@ -1,4 +1,4 @@
-import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2 } from 'lucide-react';
+import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2, Clock, Activity } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -15,6 +15,50 @@ const cleanUUIDArray = (ids: string[]): string[] => {
     if (id === '{}' || id === 'null' || id === 'undefined') return false;
     return uuidPattern.test(id.trim());
   });
+};
+
+// Audit logging helper
+const logAuditEvent = async (
+  action: string,
+  resource: string,
+  details: any,
+  userId?: string,
+  userIp?: string,
+  userAgent?: string
+) => {
+  try {
+    console.log('📝 Audit Log:', { action, resource, details, userId });
+    
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: userId,
+        action,
+        resource,
+        details,
+        ip_address: userIp || '127.0.0.1',
+        user_agent: userAgent || navigator.userAgent,
+        created_at: new Date().toISOString()
+      });
+
+    if (error) {
+      console.error('❌ Failed to log audit event:', error);
+    }
+  } catch (error) {
+    console.error('❌ Error logging audit event:', error);
+  }
+};
+
+// Get client IP address (simplified)
+const getClientIp = async (): Promise<string> => {
+  try {
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+    return data.ip;
+  } catch (error) {
+    console.error('❌ Failed to get IP:', error);
+    return '127.0.0.1';
+  }
 };
 
 interface Member {
@@ -115,6 +159,8 @@ interface AuditLog {
   ip_address: string;
   user_agent: string;
   created_at: string;
+  user_name?: string;
+  user_surname?: string;
 }
 
 interface StorageInfo {
@@ -202,12 +248,18 @@ const setRolesToMember = (roles: string[]): Partial<Member> => {
 const cloudService = {
   async getMembers(): Promise<Member[]> {
     try {
+      console.log('🔍 Fetching members...');
       const { data, error } = await supabase
         .from('members')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error fetching members:', error);
+        throw error;
+      }
+      
+      console.log(`✅ Found ${data?.length || 0} members`);
       return (data || []) as any;
     } catch (error) {
       console.error('❌ Error fetching members:', error);
@@ -217,6 +269,7 @@ const cloudService = {
 
   async getGroups(): Promise<Group[]> {
     try {
+      console.log('🔍 Fetching groups...');
       const [cellGroupsData, departmentsData] = await Promise.all([
         supabase.from('cell_groups').select('id, name, description').order('name'),
         supabase.from('departments').select('id, name, description').order('name')
@@ -236,6 +289,7 @@ const cloudService = {
         type: 'department'
       }));
 
+      console.log(`✅ Found ${cellGroups.length} cell groups and ${departments.length} departments`);
       return [...cellGroups, ...departments];
     } catch (error) {
       console.error('❌ Error fetching groups:', error);
@@ -289,6 +343,7 @@ const cloudService = {
 
   async generateCredentials(memberId: string): Promise<{ username: string; pin: string }> {
     try {
+      console.log(`🔑 Generating credentials for member: ${memberId}`);
       const username = `user${Date.now()}`;
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       
@@ -297,6 +352,7 @@ const cloudService = {
         login_pin: pin
       });
       
+      console.log(`✅ Credentials generated: ${username}`);
       return { username, pin };
     } catch (error) {
       console.error('❌ Error generating credentials:', error);
@@ -306,6 +362,7 @@ const cloudService = {
 
   async getCellGroupNameById(groupId: string): Promise<string | null> {
     try {
+      console.log(`🔍 Getting cell group name for ID: ${groupId}`);
       const { data, error } = await supabase
         .from('cell_groups')
         .select('name')
@@ -322,13 +379,14 @@ const cloudService = {
 
   async getSystemConfig(): Promise<SystemConfig> {
     try {
+      console.log('🔍 Fetching system config...');
       const { data, error } = await supabase
         .from('system_config' as any)
         .select('*')
         .single();
 
       if (error || !data) {
-        // Return default system config if table doesn't exist
+        console.log('⚠️ Using default system config');
         const defaultConfig: SystemConfig = {
           global_settings: {
             timezone: 'UTC',
@@ -373,6 +431,7 @@ const cloudService = {
 
   async updateSystemConfig(config: SystemConfig): Promise<SystemConfig> {
     try {
+      console.log('⚙️ Updating system config...');
       const { data, error } = await supabase
         .from('system_config' as any)
         .upsert(config)
@@ -380,6 +439,15 @@ const cloudService = {
         .single();
 
       if (error) throw error;
+      
+      // Log audit event
+      await logAuditEvent(
+        'UPDATE',
+        'system_config',
+        { configId: data?.id || 'new', changes: config },
+        (window as any).currentUserId
+      );
+      
       return data as any;
     } catch (error) {
       console.error('❌ Error updating system config:', error);
@@ -389,13 +457,14 @@ const cloudService = {
 
   async getSecuritySettings(): Promise<SecuritySettings> {
     try {
+      console.log('🔍 Fetching security settings...');
       const { data, error } = await supabase
         .from('security_settings' as any)
         .select('*')
         .single();
 
       if (error || !data) {
-        // Return default security settings if table doesn't exist
+        console.log('⚠️ Using default security settings');
         const defaultSettings: SecuritySettings = {
           password_policy: {
             min_length: 8,
@@ -456,6 +525,7 @@ const cloudService = {
 
   async updateSecuritySettings(settings: SecuritySettings): Promise<SecuritySettings> {
     try {
+      console.log('⚙️ Updating security settings...');
       const { data, error } = await supabase
         .from('security_settings' as any)
         .upsert(settings)
@@ -463,6 +533,15 @@ const cloudService = {
         .single();
 
       if (error) throw error;
+      
+      // Log audit event
+      await logAuditEvent(
+        'UPDATE',
+        'security_settings',
+        { settingsId: data?.id || 'new', changes: settings },
+        (window as any).currentUserId
+      );
+      
       return data as any;
     } catch (error) {
       console.error('❌ Error updating security settings:', error);
@@ -472,14 +551,49 @@ const cloudService = {
 
   async getAuditLogs(): Promise<AuditLog[]> {
     try {
-      const { data, error } = await supabase
+      console.log('🔍 Fetching audit logs...');
+      // First get audit logs
+      const { data: logsData, error } = await supabase
         .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(100);
 
-      if (error) return [];
-      return (data || []) as any;
+      if (error) {
+        console.error('❌ Error fetching audit logs:', error);
+        return [];
+      }
+
+      const logs = (logsData || []) as AuditLog[];
+      
+      // Get user names for each log
+      const logsWithUserNames = await Promise.all(
+        logs.map(async (log) => {
+          if (log.user_id) {
+            try {
+              const { data: userData } = await supabase
+                .from('members')
+                .select('name, surname')
+                .eq('id', log.user_id)
+                .single();
+
+              if (userData) {
+                return {
+                  ...log,
+                  user_name: userData.name,
+                  user_surname: userData.surname
+                };
+              }
+            } catch (userError) {
+              console.warn(`⚠️ Could not fetch user for log ${log.id}:`, userError);
+            }
+          }
+          return log;
+        })
+      );
+
+      console.log(`✅ Found ${logsWithUserNames.length} audit logs`);
+      return logsWithUserNames;
     } catch (error) {
       console.error('❌ Error fetching audit logs:', error);
       return [];
@@ -488,6 +602,7 @@ const cloudService = {
 
   async exportData(_format: string, _includeSensitive: boolean): Promise<Blob> {
     try {
+      console.log('📤 Exporting data...');
       const { data, error } = await supabase
         .from('members')
         .select('*');
@@ -495,6 +610,15 @@ const cloudService = {
       if (error) throw error;
 
       const csvContent = convertToCSV(data || []);
+      
+      // Log audit event
+      await logAuditEvent(
+        'EXPORT',
+        'members',
+        { format: _format, includeSensitive: _includeSensitive, recordCount: data?.length || 0 },
+        (window as any).currentUserId
+      );
+      
       return new Blob([csvContent], { type: 'text/csv' });
     } catch (error) {
       console.error('❌ Error exporting data:', error);
@@ -533,6 +657,8 @@ const cloudService = {
           const errorMessages: string[] = [];
           let success = 0;
           let errors = 0;
+
+          console.log(`📥 Importing ${rows.length - 1} rows from CSV...`);
 
           for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
@@ -676,6 +802,7 @@ const cloudService = {
 
               if (existingMemberId) {
                 // Update existing member
+                console.log(`🔄 Updating existing member: ${memberData.name} ${memberData.surname}`);
                 const { error: updateError } = await supabase
                   .from('members')
                   .update(memberData)
@@ -689,6 +816,7 @@ const cloudService = {
                 }
               } else if (options.createMissing) {
                 // Create new member
+                console.log(`➕ Creating new member: ${memberData.name} ${memberData.surname}`);
                 const { error: insertError } = await supabase
                   .from('members')
                   .insert(memberData);
@@ -711,6 +839,22 @@ const cloudService = {
             }
           }
 
+          // Log audit event for import
+          if (success > 0) {
+            await logAuditEvent(
+              'IMPORT',
+              'members',
+              { 
+                fileName: file.name, 
+                fileSize: file.size, 
+                successCount: success, 
+                errorCount: errors,
+                options: options 
+              },
+              (window as any).currentUserId
+            );
+          }
+
           resolve({ success, errors, errorMessages });
         } catch (error) {
           reject(error);
@@ -724,6 +868,7 @@ const cloudService = {
 
   async runBackup(): Promise<void> {
     try {
+      console.log('💾 Running backup...');
       const { error } = await supabase
         .from('backups' as any)
         .insert({
@@ -736,6 +881,15 @@ const cloudService = {
       if (error && !error.message.includes('does not exist')) {
         throw error;
       }
+      
+      // Log audit event
+      await logAuditEvent(
+        'BACKUP',
+        'system',
+        { type: 'manual', timestamp: new Date().toISOString() },
+        (window as any).currentUserId
+      );
+      
     } catch (error) {
       console.error('❌ Error running backup:', error);
       throw error;
@@ -744,14 +898,22 @@ const cloudService = {
 
   async getSystemStats(): Promise<any> {
     try {
+      console.log('📊 Getting system stats...');
       const [
         membersCount,
         groupsCount,
-        storageInfo
+        storageInfo,
+        auditLogsCount,
+        activeSessions
       ] = await Promise.all([
         supabase.from('members').select('*', { count: 'exact', head: true }),
         supabase.from('cell_groups').select('*', { count: 'exact', head: true }),
-        this.getStorageInfo()
+        this.getStorageInfo(),
+        supabase.from('audit_logs').select('*', { count: 'exact', head: true }),
+        supabase.from('audit_logs')
+          .select('user_id')
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .then(res => new Set(res.data?.map(log => log.user_id) || []).size)
       ]);
 
       return {
@@ -761,7 +923,9 @@ const cloudService = {
         storage_used: storageInfo.used_storage,
         storage_total: storageInfo.total_storage,
         storage_percentage: storageInfo.usage_percentage,
-        active_users: 0
+        audit_logs_count: auditLogsCount.count || 0,
+        active_users_last_24h: activeSessions || 0,
+        last_updated: new Date().toISOString()
       };
     } catch (error) {
       console.error('❌ Error fetching system stats:', error);
@@ -772,7 +936,9 @@ const cloudService = {
         storage_used: 0,
         storage_total: 0,
         storage_percentage: 0,
-        active_users: 0
+        audit_logs_count: 0,
+        active_users_last_24h: 0,
+        last_updated: new Date().toISOString()
       };
     }
   },
@@ -811,6 +977,7 @@ const cloudService = {
 
   async cleanupOldData(): Promise<{ deleted: number }> {
     try {
+      console.log('🧹 Cleaning up old data...');
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
@@ -821,6 +988,16 @@ const cloudService = {
         .lt('updated_at', oneYearAgo.toISOString() as any);
 
       if (error) throw error;
+
+      // Log audit event
+      if (count && count > 0) {
+        await logAuditEvent(
+          'CLEANUP',
+          'members',
+          { deletedCount: count, cutoffDate: oneYearAgo.toISOString() },
+          (window as any).currentUserId
+        );
+      }
 
       return { deleted: count || 0 };
     } catch (error) {
@@ -913,6 +1090,8 @@ const Admin = () => {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [showImportMapping, setShowImportMapping] = useState(false);
   const [importProgress, setImportProgress] = useState<{current: number; total: number} | null>(null);
+  const [auditLogFilter, setAuditLogFilter] = useState<string>('all'); // 'all', 'today', 'week', 'month'
+  const [searchAuditTerm, setSearchAuditTerm] = useState('');
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -935,6 +1114,13 @@ const Admin = () => {
     login_username: '',
     login_pin: ''
   });
+
+  // Set current user ID for audit logging
+  useEffect(() => {
+    if (profile?.id) {
+      (window as any).currentUserId = profile.id;
+    }
+  }, [profile]);
 
   // Modified admin sections - Removed Notifications, Communications, System Configuration
   const adminSections = [
@@ -1055,6 +1241,16 @@ const Admin = () => {
       setSystemConfig(systemData);
       setSecuritySettings(securityData);
       setSystemStats(statsData);
+      
+      // Log audit event for admin access
+      if (profile) {
+        await logAuditEvent(
+          'ACCESS',
+          'admin_panel',
+          { action: 'loaded_data', itemsLoaded: membersData.length },
+          profile.id
+        );
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
       console.error('❌ Error loading data:', {
@@ -1191,6 +1387,14 @@ const Admin = () => {
     setActiveModal(modalType);
     setError(null);
 
+    // Log modal access
+    await logAuditEvent(
+      'VIEW',
+      'modal',
+      { modalType, userId: user?.id || 'none' },
+      profile.id
+    );
+
     if (user) {
       console.log('👤 Opening user modal:', {
         userId: user.id,
@@ -1278,6 +1482,7 @@ const Admin = () => {
     try {
       await cloudService.updateSecuritySettings(securitySettings);
       setError(null);
+      alert('Security settings updated successfully!');
     } catch (err) {
       setError('Failed to update security settings');
     } finally {
@@ -1297,6 +1502,7 @@ const Admin = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      alert('Data exported successfully!');
     } catch (err) {
       setError('Failed to export data');
     } finally {
@@ -1498,6 +1704,14 @@ const Admin = () => {
       setGeneratedCredentials(credentials);
       setShowCredentials(true);
       
+      // Log audit event
+      await logAuditEvent(
+        'GENERATE_CREDENTIALS',
+        'member',
+        { memberId: selectedUser.id, memberName: `${selectedUser.name} ${selectedUser.surname}` },
+        profile!.id
+      );
+      
       await loadData();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate credentials';
@@ -1591,6 +1805,23 @@ const Admin = () => {
         assignedGroups: updatedMember.assigned_groups,
         assignedDepartments: updatedMember.assigned_departments
       });
+
+      // Log audit event
+      await logAuditEvent(
+        'UPDATE',
+        'member',
+        { 
+          memberId: selectedUser.id, 
+          memberName: `${selectedUser.name} ${selectedUser.surname}`,
+          changes: {
+            roles: userFormData.roles,
+            permissions: userFormData.permissions,
+            assigned_groups: cleanedAssignedGroups,
+            assigned_departments: cleanedAssignedDepartments
+          }
+        },
+        profile.id
+      );
 
       setMembers(prev => prev.map(m => 
         m.id === selectedUser.id ? updatedMember : m
@@ -1796,6 +2027,46 @@ const Admin = () => {
   const filteredMembers = getFilteredMembers();
   const cellGroups = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
+
+  // Filter audit logs
+  const getFilteredAuditLogs = () => {
+    let filtered = auditLogs;
+
+    // Apply time filter
+    const now = new Date();
+    switch (auditLogFilter) {
+      case 'today':
+        filtered = filtered.filter(log => {
+          const logDate = new Date(log.created_at);
+          return logDate.toDateString() === now.toDateString();
+        });
+        break;
+      case 'week':
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        filtered = filtered.filter(log => new Date(log.created_at) >= weekAgo);
+        break;
+      case 'month':
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        filtered = filtered.filter(log => new Date(log.created_at) >= monthAgo);
+        break;
+    }
+
+    // Apply search filter
+    if (searchAuditTerm) {
+      const searchLower = searchAuditTerm.toLowerCase();
+      filtered = filtered.filter(log =>
+        log.action.toLowerCase().includes(searchLower) ||
+        log.resource.toLowerCase().includes(searchLower) ||
+        log.user_name?.toLowerCase().includes(searchLower) ||
+        log.user_surname?.toLowerCase().includes(searchLower) ||
+        JSON.stringify(log.details).toLowerCase().includes(searchLower)
+      );
+    }
+
+    return filtered;
+  };
+
+  const filteredAuditLogs = getFilteredAuditLogs();
 
   // Modal Components
   const DataManagementModal = () => (
@@ -2103,66 +2374,253 @@ const Admin = () => {
   );
 
   const SecurityModal = () => (
-    <Modal title="Security Settings" onClose={closeModal}>
-      <div className="space-y-6">
+    <Modal title="Security Settings" onClose={closeModal} size="max-w-6xl">
+      <div className="space-y-8">
+        {/* Password Policy Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Password Policy</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Minimum Length</label>
-              <input 
-                type="number" 
-                value={securitySettings?.password_policy.min_length || 8}
-                onChange={(e) => setSecuritySettings(prev => prev ? {
-                  ...prev,
-                  password_policy: {...prev.password_policy, min_length: parseInt(e.target.value)}
-                } : null)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg" 
-              />
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Password Policy
+          </h3>
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Minimum Length</label>
+                <input 
+                  type="number" 
+                  min="4"
+                  max="32"
+                  value={securitySettings?.password_policy.min_length || 8}
+                  onChange={(e) => setSecuritySettings(prev => prev ? {
+                    ...prev,
+                    password_policy: {...prev.password_policy, min_length: parseInt(e.target.value)}
+                  } : null)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                />
+                <p className="text-xs text-gray-500 mt-1">Minimum password length (4-32 characters)</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password Expiry (Days)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  max="365"
+                  value={securitySettings?.password_policy.expiry_days || 90}
+                  onChange={(e) => setSecuritySettings(prev => prev ? {
+                    ...prev,
+                    password_policy: {...prev.password_policy, expiry_days: parseInt(e.target.value)}
+                  } : null)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                />
+                <p className="text-xs text-gray-500 mt-1">Days until password expires (1-365)</p>
+              </div>
             </div>
-            <div className="space-y-2">
-              {[
-                { key: 'require_uppercase', label: 'Require uppercase letters' },
-                { key: 'require_lowercase', label: 'Require lowercase letters' },
-                { key: 'require_numbers', label: 'Require numbers' },
-                { key: 'require_special_chars', label: 'Require special characters' }
-              ].map((req) => (
-                <label key={req.key} className="flex items-center">
-                  <input 
-                    type="checkbox" 
-                    checked={(securitySettings?.password_policy as any)?.[req.key] || false}
-                    onChange={(e) => setSecuritySettings(prev => prev ? {
-                      ...prev,
-                      password_policy: {...prev.password_policy, [req.key]: e.target.checked}
-                    } : null)}
-                    className="mr-2" 
-                  />
-                  <span className="text-sm text-gray-700">{req.label}</span>
-                </label>
-              ))}
+            
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium text-gray-700">Password Requirements</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[
+                  { key: 'require_uppercase', label: 'Require uppercase letters', icon: 'A' },
+                  { key: 'require_lowercase', label: 'Require lowercase letters', icon: 'a' },
+                  { key: 'require_numbers', label: 'Require numbers', icon: '123' },
+                  { key: 'require_special_chars', label: 'Require special characters', icon: '#$@' }
+                ].map((req) => (
+                  <label key={req.key} className="flex items-center gap-3 p-3 bg-white rounded-lg border cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input 
+                      type="checkbox" 
+                      checked={(securitySettings?.password_policy as any)?.[req.key] || false}
+                      onChange={(e) => setSecuritySettings(prev => prev ? {
+                        ...prev,
+                        password_policy: {...prev.password_policy, [req.key]: e.target.checked}
+                      } : null)}
+                      className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500" 
+                    />
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center text-blue-700 font-bold">
+                        {req.icon}
+                      </div>
+                      <span className="text-sm text-gray-700">{req.label}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
+        {/* Audit Logs Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Audit Logs</h3>
-          <div className="space-y-2 max-h-60 overflow-y-auto">
-            {auditLogs.map((log) => (
-              <div key={log.id} className="flex items-center justify-between p-3 bg-white rounded-lg border">
-                <div>
-                  <div className="font-medium">{log.action}</div>
-                  <div className="text-sm text-gray-600">{log.resource}</div>
-                </div>
-                <div className="text-sm text-gray-500">
-                  {new Date(log.created_at).toLocaleDateString()}
-                </div>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Audit Logs
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  const logs = await cloudService.getAuditLogs();
+                  setAuditLogs(logs);
+                  setLoading(false);
+                }}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+          </div>
+          
+          <div className="space-y-4">
+            {/* Filters */}
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search audit logs..."
+                  value={searchAuditTerm}
+                  onChange={(e) => setSearchAuditTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
               </div>
-            ))}
-            {auditLogs.length === 0 && (
-              <div className="text-center py-4 text-gray-500">
-                No audit logs found
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAuditLogFilter('all')}
+                  className={`px-3 py-2 text-sm rounded-lg ${auditLogFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setAuditLogFilter('today')}
+                  className={`px-3 py-2 text-sm rounded-lg ${auditLogFilter === 'today' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => setAuditLogFilter('week')}
+                  className={`px-3 py-2 text-sm rounded-lg ${auditLogFilter === 'week' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                >
+                  This Week
+                </button>
+                <button
+                  onClick={() => setAuditLogFilter('month')}
+                  className={`px-3 py-2 text-sm rounded-lg ${auditLogFilter === 'month' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                >
+                  This Month
+                </button>
               </div>
-            )}
+            </div>
+
+            {/* Audit Logs Table */}
+            <div className="bg-white rounded-lg border overflow-hidden">
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading audit logs...</p>
+                </div>
+              ) : filteredAuditLogs.length === 0 ? (
+                <div className="text-center py-8">
+                  <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600">No audit logs found</p>
+                  {searchAuditTerm && (
+                    <p className="text-sm text-gray-500 mt-2">Try changing your search criteria</p>
+                  )}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredAuditLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <div>{new Date(log.created_at).toLocaleDateString()}</div>
+                            <div className="text-xs">{new Date(log.created_at).toLocaleTimeString()}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {log.user_name && log.user_surname 
+                                ? `${log.user_name} ${log.user_surname}`
+                                : log.user_id || 'System'}
+                            </div>
+                            {log.user_id && (
+                              <div className="text-xs text-gray-500">ID: {log.user_id.substring(0, 8)}...</div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              log.action === 'CREATE' ? 'bg-green-100 text-green-800' :
+                              log.action === 'UPDATE' ? 'bg-blue-100 text-blue-800' :
+                              log.action === 'DELETE' ? 'bg-red-100 text-red-800' :
+                              log.action === 'LOGIN' ? 'bg-purple-100 text-purple-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {log.resource}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {log.ip_address}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-gray-900 max-w-xs truncate">
+                              {JSON.stringify(log.details)}
+                            </div>
+                            <button
+                              onClick={() => {
+                                alert(JSON.stringify(log.details, null, 2));
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-800 mt-1"
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-lg border text-center">
+                <div className="text-2xl font-bold text-blue-600">{filteredAuditLogs.length}</div>
+                <div className="text-xs text-gray-600">Filtered Logs</div>
+              </div>
+              <div className="bg-white p-4 rounded-lg border text-center">
+                <div className="text-2xl font-bold text-green-600">
+                  {filteredAuditLogs.filter(l => l.action === 'CREATE' || l.action === 'UPDATE').length}
+                </div>
+                <div className="text-xs text-gray-600">Create/Update</div>
+              </div>
+              <div className="bg-white p-4 rounded-lg border text-center">
+                <div className="text-2xl font-bold text-purple-600">
+                  {filteredAuditLogs.filter(l => l.action === 'LOGIN').length}
+                </div>
+                <div className="text-xs text-gray-600">Logins</div>
+              </div>
+              <div className="bg-white p-4 rounded-lg border text-center">
+                <div className="text-2xl font-bold text-red-600">
+                  {filteredAuditLogs.filter(l => l.action === 'DELETE').length}
+                </div>
+                <div className="text-xs text-gray-600">Deletes</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2170,7 +2628,7 @@ const Admin = () => {
           <button 
             onClick={handleUpdateSecuritySettings}
             disabled={loading}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
           >
             {loading ? 'Saving...' : 'Save Security Settings'}
           </button>
@@ -2890,6 +3348,22 @@ const Admin = () => {
                       {members.filter(m => m.login_username).length}
                     </span>
                   </div>
+                  {systemStats?.audit_logs_count && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600">Audit Logs</span>
+                      <span className="text-gray-900 font-semibold">
+                        {systemStats.audit_logs_count}
+                      </span>
+                    </div>
+                  )}
+                  {systemStats?.active_users_last_24h && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600">Active Users (24h)</span>
+                      <span className="text-gray-900 font-semibold">
+                        {systemStats.active_users_last_24h}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
