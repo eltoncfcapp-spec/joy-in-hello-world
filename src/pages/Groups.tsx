@@ -3714,10 +3714,6 @@ const Groups = () => {
           }}
           userId={profile?.id || null}
         />
-        </div>
-    </div>
-  );
-};
         <EditGroupModal
           isOpen={showEditGroupModal}
           group={selectedGroup}
@@ -4101,6 +4097,8 @@ const Groups = () => {
         }
       `}</style>
     </div>
+      </div>
+    </div>        
   );
 };
 
