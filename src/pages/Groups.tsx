@@ -3,6 +3,18 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
 
+// Helper function to clean UUID arrays
+const cleanUUIDArray = (ids: (string | null)[]): string[] => {
+  if (!ids || !Array.isArray(ids)) return [];
+  
+  return ids.filter(id => {
+    if (!id || typeof id !== 'string') return false;
+    // UUID regex pattern
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidPattern.test(id.trim());
+  });
+};
+
 // Interfaces
 interface CellGroup {
   id: string;
@@ -44,6 +56,7 @@ interface Member {
   status?: string | null;
   admin_role?: string | null;
   invited_by?: string | null;
+  assigned_groups?: string[] | null;
 }
 
 interface GroupAttendanceRecord {
@@ -253,13 +266,24 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
       if (error) throw error;
 
-      // If a leader was selected, update their group assignment
+      // If a leader was selected, update their group assignment with clean assigned_groups
       if (formData.leader_id) {
+        // Get current assigned groups for the leader
+        const { data: leaderData } = await supabase
+          .from('members')
+          .select('assigned_groups')
+          .eq('id', formData.leader_id)
+          .single();
+        
+        const currentGroups = cleanUUIDArray(leaderData?.assigned_groups || []);
+        const updatedGroups = cleanUUIDArray([...currentGroups, data.id]);
+        
         await supabase
           .from('members')
           .update({ 
             cell_group_id: data.id,
             admin_role: 'group_leader',
+            assigned_groups: updatedGroups, // Store clean UUID array
             updated_at: new Date().toISOString()
           })
           .eq('id', formData.leader_id);
@@ -569,27 +593,49 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
       if (error) throw error;
 
-      // Handle leader assignment changes
+      // Handle leader assignment changes with proper assigned_groups handling
       const previousLeaderId = group.leader_id;
       if (previousLeaderId !== formData.leader_id) {
         // Remove previous leader's group assignment
         if (previousLeaderId) {
+          // Get current assigned groups and remove this group
+          const { data: previousLeaderData } = await supabase
+            .from('members')
+            .select('assigned_groups')
+            .eq('id', previousLeaderId)
+            .single();
+          
+          const currentGroups = cleanUUIDArray(previousLeaderData?.assigned_groups || []);
+          const updatedGroups = cleanUUIDArray(currentGroups.filter(id => id !== group.id));
+          
           await supabase
             .from('members')
             .update({ 
               cell_group_id: null,
+              assigned_groups: updatedGroups,
               updated_at: new Date().toISOString()
             })
             .eq('id', previousLeaderId);
         }
 
-        // Assign new leader
+        // Assign new leader with clean assigned_groups
         if (formData.leader_id) {
+          // Get current assigned groups for the new leader
+          const { data: newLeaderData } = await supabase
+            .from('members')
+            .select('assigned_groups')
+            .eq('id', formData.leader_id)
+            .single();
+          
+          const currentGroups = cleanUUIDArray(newLeaderData?.assigned_groups || []);
+          const updatedGroups = cleanUUIDArray([...currentGroups, group.id]);
+          
           await supabase
             .from('members')
             .update({ 
               cell_group_id: group.id,
               admin_role: 'group_leader',
+              assigned_groups: updatedGroups, // Store clean UUID array
               updated_at: new Date().toISOString()
             })
             .eq('id', formData.leader_id);
@@ -804,12 +850,23 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
     try {
       setLoading(true);
       
-      // Remove leader assignment if exists
+      // Remove leader assignment if exists with proper assigned_groups cleanup
       if (group.leader_id) {
+        // Get current assigned groups and remove this group
+        const { data: leaderData } = await supabase
+          .from('members')
+          .select('assigned_groups')
+          .eq('id', group.leader_id)
+          .single();
+        
+        const currentGroups = cleanUUIDArray(leaderData?.assigned_groups || []);
+        const updatedGroups = cleanUUIDArray(currentGroups.filter(id => id !== group.id));
+        
         await supabase
           .from('members')
           .update({ 
             cell_group_id: null,
+            assigned_groups: updatedGroups,
             updated_at: new Date().toISOString()
           })
           .eq('id', group.leader_id);
@@ -1257,9 +1314,16 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         return;
       }
 
+      // Get current assigned groups and add this group
+      const currentGroups = cleanUUIDArray(member.assigned_groups || []);
+      const updatedGroups = cleanUUIDArray([...currentGroups, group.id]);
+      
       const { error } = await supabase
         .from('members')
-        .update({ cell_group_id: group.id })
+        .update({ 
+          cell_group_id: group.id,
+          assigned_groups: updatedGroups // Store clean UUID array
+        })
         .eq('id', member.id);
 
       if (error) throw error;
@@ -1675,19 +1739,25 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       if (existingMember) {
         // Use existing member
         memberId = existingMember.id;
-        // Update member status and group assignment
+        
+        // Get current assigned groups and add this group
+        const currentGroups = cleanUUIDArray(existingMember.assigned_groups || []);
+        const updatedGroups = cleanUUIDArray([...currentGroups, group.id]);
+        
+        // Update member status and group assignment with clean assigned_groups
         await supabase
           .from('members')
           .update({ 
             status: 'newcomer',
             cell_group_id: group.id,
+            assigned_groups: updatedGroups, // Store clean UUID array
             invited_by: formData.invited_by || null,
             first_time_visit_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .eq('id', existingMember.id);
       } else {
-        // Create new member
+        // Create new member with clean assigned_groups
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
@@ -1695,6 +1765,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           residence: formData.residence.trim(),
           status: 'newcomer' as const,
           cell_group_id: group.id,
+          assigned_groups: [group.id], // Start with clean array containing only this group
           first_time_visit_date: new Date().toISOString(),
           invited_by: formData.invited_by || null,
           is_permanent_member: false,
@@ -1918,7 +1989,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Cancel
-              </button>
+            </button>
             </div>
           </form>
         </div>
@@ -3513,7 +3584,7 @@ const Groups = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
