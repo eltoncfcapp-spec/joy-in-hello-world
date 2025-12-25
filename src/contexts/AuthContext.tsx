@@ -17,8 +17,8 @@ interface UserProfile {
   login_username: string | null;
   login_pin: string | null;
   permissions: string[];
-  assigned_groups: string[];
-  assigned_departments: string[];
+  assigned_groups: string[];  // Array of group IDs like ["17804c57-e14e-47b4-a7f9-a5fbda5c78fe"]
+  assigned_departments: string[]; // Array of department IDs
   can_add_members: boolean;
   can_edit_members: boolean;
   can_view_own_data: boolean;
@@ -69,6 +69,8 @@ interface AuthContextType {
   isGroupLeader: () => boolean;
   isDepartmentLeader: () => boolean;
   getRoles: () => string[];
+  isUserAssignedToGroup: (groupId: string) => boolean;
+  isUserAssignedToDepartment: (departmentId: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -91,9 +93,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Helper to check if user is assigned to a group
+  const isUserAssignedToGroup = (groupId: string): boolean => {
+    if (!profile || !profile.assigned_groups) return false;
+    return profile.assigned_groups.includes(groupId);
+  };
+
+  // Helper to check if user is assigned to a department
+  const isUserAssignedToDepartment = (departmentId: string): boolean => {
+    if (!profile || !profile.assigned_departments) return false;
+    return profile.assigned_departments.includes(departmentId);
+  };
+
   // Helper methods for role checking
   const isAdmin = (): boolean => {
-    return profile ? (profile.admin_role === 'admin' || profile.pastor_role === true) : false;
+    return profile ? (profile.admin_role === 'admin' || profile.admin_role === 'administrator') : false;
   };
 
   const isPastor = (): boolean => {
@@ -131,7 +145,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return roles;
   };
 
-  // Enhanced permission check function
+  // Enhanced permission check function with array-based assignments
   const hasPermission = (permission: Permission, departmentId?: string, groupId?: string): boolean => {
     if (!profile) return false;
 
@@ -150,25 +164,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       case 'view_own_group':
         if (groupId) {
-          return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+          const isAssigned = isUserAssignedToGroup(groupId);
+          const isCellGroup = profile.cell_group_id === groupId;
+          return isAssigned || isCellGroup || isGroupLeader() || isDeacon();
         }
         return isGroupLeader() || isDeacon();
       
       case 'view_own_department':
         if (departmentId) {
-          return profile.assigned_departments.includes(departmentId);
+          return isUserAssignedToDepartment(departmentId) || isDeacon();
         }
         return isDepartmentLeader() || isDeacon();
       
       case 'manage_own_group':
         if (groupId) {
-          return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+          const isAssigned = isUserAssignedToGroup(groupId);
+          const isCellGroup = profile.cell_group_id === groupId;
+          return (isGroupLeader() && (isAssigned || isCellGroup)) || 
+                 (isDeacon() && isAssigned);
         }
         return isGroupLeader();
       
       case 'manage_own_department':
         if (departmentId) {
-          return profile.assigned_departments.includes(departmentId);
+          return isDepartmentLeader() && isUserAssignedToDepartment(departmentId);
         }
         return isDepartmentLeader();
       
@@ -181,11 +200,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       case 'create_reports':
         // Department leaders can only do these in their assigned departments
         if (departmentId && isDepartmentLeader()) {
-          return profile.assigned_departments.includes(departmentId);
+          return isUserAssignedToDepartment(departmentId);
         }
         // Group leaders can only do these in their assigned groups
         if (groupId && isGroupLeader()) {
-          return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+          const isAssigned = isUserAssignedToGroup(groupId);
+          const isCellGroup = profile.cell_group_id === groupId;
+          return isAssigned || isCellGroup;
+        }
+        // Deacons can do these in their assigned groups
+        if (groupId && isDeacon()) {
+          return isUserAssignedToGroup(groupId);
         }
         return isAdmin() || isPastor() || isDepartmentLeader() || isGroupLeader();
       
@@ -197,141 +222,186 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Check if user can view a specific group
   const canViewGroup = (groupId: string): boolean => {
     if (!profile) return false;
-    if (hasPermission('view_all_groups')) return true;
-    if (hasPermission('view_own_group')) {
-      const isAssigned = profile.assigned_groups.includes(groupId);
-      const isCellGroup = profile.cell_group_id === groupId;
-      return isAssigned || isCellGroup;
-    }
+    if (isAdmin() || isPastor()) return true;
+    
+    const isAssigned = isUserAssignedToGroup(groupId);
+    const isCellGroup = profile.cell_group_id === groupId;
+    
+    // Everyone can view their own cell group
+    if (isCellGroup) return true;
+    
+    // Deacons can view all groups
+    if (isDeacon()) return true;
+    
+    // Group leaders can view groups they're assigned to
+    if (isGroupLeader() && isAssigned) return true;
+    
     return false;
   };
 
   // Check if user can view a specific department
   const canViewDepartment = (departmentId: string): boolean => {
     if (!profile) return false;
-    if (hasPermission('view_all_departments')) return true;
+    if (isAdmin() || isPastor()) return true;
     if (isDeacon()) return true;
-    if (hasPermission('view_own_department')) {
-      const isAssigned = profile.assigned_departments.includes(departmentId);
-      return isAssigned;
-    }
-    return false;
+    
+    return isUserAssignedToDepartment(departmentId) || isDepartmentLeader();
   };
 
   // Check if user can manage a specific group
   const canManageGroup = (groupId: string): boolean => {
     if (!profile) return false;
-    if (hasPermission('manage_all_groups')) return true;
-    if (hasPermission('manage_own_group')) {
-      const isAssigned = profile.assigned_groups.includes(groupId);
-      const isCellGroup = profile.cell_group_id === groupId;
-      return isAssigned || isCellGroup;
+    if (isAdmin() || isPastor()) return true;
+    
+    const isAssigned = isUserAssignedToGroup(groupId);
+    const isCellGroup = profile.cell_group_id === groupId;
+    
+    // Group leaders can manage groups they're assigned to or their cell group
+    if (isGroupLeader() && (isAssigned || isCellGroup)) {
+      return true;
     }
+    
+    // Deacons can manage groups they're assigned to
+    if (isDeacon() && isAssigned) {
+      return true;
+    }
+    
     return false;
   };
 
   // Check if user can manage a specific department
   const canManageDepartment = (departmentId: string): boolean => {
     if (!profile) return false;
-    if (hasPermission('manage_all_departments')) return true;
-    if (hasPermission('manage_own_department')) {
-      const isAssigned = profile.assigned_departments.includes(departmentId);
-      return isAssigned;
-    }
-    return false;
+    if (isAdmin() || isPastor()) return true;
+    
+    return isDepartmentLeader() && isUserAssignedToDepartment(departmentId);
   };
 
   // Enhanced department-specific permission checks
   const canCreateDepartmentMeetings = (departmentId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isDepartmentLeader()) {
-      return profile.assigned_departments.includes(departmentId);
-    }
-    return false;
+    return isDepartmentLeader() && isUserAssignedToDepartment(departmentId);
   };
 
   const canManageDepartmentAttendance = (departmentId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isDepartmentLeader()) {
-      return profile.assigned_departments.includes(departmentId);
-    }
-    return false;
+    return isDepartmentLeader() && isUserAssignedToDepartment(departmentId);
   };
 
   const canAddDepartmentNewcomers = (departmentId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isDepartmentLeader()) {
-      return profile.assigned_departments.includes(departmentId);
-    }
-    return false;
+    return isDepartmentLeader() && isUserAssignedToDepartment(departmentId);
   };
 
   const canCreateDepartmentReports = (departmentId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isDepartmentLeader()) {
-      return profile.assigned_departments.includes(departmentId);
-    }
-    return false;
+    return isDepartmentLeader() && isUserAssignedToDepartment(departmentId);
   };
 
   // Group-specific permission checks
   const canCreateGroupMeetings = (groupId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isGroupLeader()) {
-      return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+    
+    const isAssigned = isUserAssignedToGroup(groupId);
+    const isCellGroup = profile.cell_group_id === groupId;
+    
+    if (isGroupLeader() && (isAssigned || isCellGroup)) {
+      return true;
     }
+    
+    if (isDeacon() && isAssigned) {
+      return true;
+    }
+    
     return false;
   };
 
   const canManageGroupAttendance = (groupId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isGroupLeader()) {
-      return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+    
+    const isAssigned = isUserAssignedToGroup(groupId);
+    const isCellGroup = profile.cell_group_id === groupId;
+    
+    if (isGroupLeader() && (isAssigned || isCellGroup)) {
+      return true;
     }
+    
+    if (isDeacon() && isAssigned) {
+      return true;
+    }
+    
     return false;
   };
 
   const canAddGroupNewcomers = (groupId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isGroupLeader()) {
-      return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+    
+    const isAssigned = isUserAssignedToGroup(groupId);
+    const isCellGroup = profile.cell_group_id === groupId;
+    
+    if (isGroupLeader() && (isAssigned || isCellGroup)) {
+      return true;
     }
+    
+    if (isDeacon() && isAssigned) {
+      return true;
+    }
+    
     return false;
   };
 
   const canCreateGroupReports = (groupId: string): boolean => {
     if (!profile) return false;
     if (isAdmin() || isPastor()) return true;
-    if (isGroupLeader()) {
-      return profile.assigned_groups.includes(groupId) || profile.cell_group_id === groupId;
+    
+    const isAssigned = isUserAssignedToGroup(groupId);
+    const isCellGroup = profile.cell_group_id === groupId;
+    
+    if (isGroupLeader() && (isAssigned || isCellGroup)) {
+      return true;
     }
+    
+    if (isDeacon() && isAssigned) {
+      return true;
+    }
+    
     return false;
   };
 
   // Get user's accessible groups
   const getUserGroups = (): string[] => {
     if (!profile) return [];
-    if (hasPermission('view_all_groups')) return ['all_groups'];
-    const groups = [...profile.assigned_groups];
+    if (isAdmin() || isPastor()) return ['all_groups'];
+    
+    const groups: string[] = [];
+    
+    // Add assigned groups
+    if (profile.assigned_groups) {
+      groups.push(...profile.assigned_groups);
+    }
+    
+    // Add cell group if not already in the list
     if (profile.cell_group_id && !groups.includes(profile.cell_group_id)) {
       groups.push(profile.cell_group_id);
     }
+    
     return groups;
   };
 
   // Get user's accessible departments
   const getUserDepartments = (): string[] => {
     if (!profile) return [];
-    if (hasPermission('view_all_departments')) return ['all_departments'];
+    if (isAdmin() || isPastor()) return ['all_departments'];
     if (isDeacon()) return ['all_departments'];
-    return [...profile.assigned_departments];
+    
+    return profile.assigned_departments || [];
   };
 
   // Check for existing session and set up auth listener
@@ -428,6 +498,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       if (memberData) {
+        // Ensure arrays are properly initialized
+        const assigned_groups = Array.isArray(memberData.assigned_groups) 
+          ? memberData.assigned_groups.filter((id: any) => id && typeof id === 'string')
+          : [];
+        
+        const assigned_departments = Array.isArray(memberData.assigned_departments)
+          ? memberData.assigned_departments.filter((id: any) => id && typeof id === 'string')
+          : [];
+        
+        const permissions = Array.isArray(memberData.permissions)
+          ? memberData.permissions
+          : [];
+
         const userProfile: UserProfile = {
           id: userId,
           name: memberData.name || null,
@@ -442,9 +525,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           department_leader: memberData.department_leader || false,
           login_username: memberData.login_username || null,
           login_pin: memberData.login_pin || null,
-          permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-          assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
-          assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+          permissions: permissions,
+          assigned_groups: assigned_groups,
+          assigned_departments: assigned_departments,
           can_add_members: Boolean(memberData.can_add_members),
           can_edit_members: Boolean(memberData.can_edit_members),
           can_view_own_data: Boolean(memberData.can_view_own_data)
@@ -503,6 +586,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         provider_refresh_token: null
       } as Session;
 
+      // Ensure arrays are properly initialized
+      const assigned_groups = Array.isArray(memberData.assigned_groups) 
+        ? memberData.assigned_groups.filter((id: any) => id && typeof id === 'string')
+        : [];
+      
+      const assigned_departments = Array.isArray(memberData.assigned_departments)
+        ? memberData.assigned_departments.filter((id: any) => id && typeof id === 'string')
+        : [];
+      
+      const permissions = Array.isArray(memberData.permissions)
+        ? memberData.permissions
+        : [];
+
       const userProfile: UserProfile = {
         id: memberData.id,
         name: memberData.name || null,
@@ -517,9 +613,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         department_leader: memberData.department_leader || false,
         login_username: memberData.login_username || null,
         login_pin: memberData.login_pin || null,
-        permissions: Array.isArray(memberData.permissions) ? memberData.permissions : [],
-        assigned_groups: Array.isArray(memberData.assigned_groups) ? memberData.assigned_groups : [],
-        assigned_departments: Array.isArray(memberData.assigned_departments) ? memberData.assigned_departments : [],
+        permissions: permissions,
+        assigned_groups: assigned_groups,
+        assigned_departments: assigned_departments,
         can_add_members: Boolean(memberData.can_add_members),
         can_edit_members: Boolean(memberData.can_edit_members),
         can_view_own_data: Boolean(memberData.can_view_own_data)
@@ -630,7 +726,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isDeacon,
     isGroupLeader,
     isDepartmentLeader,
-    getRoles
+    getRoles,
+    isUserAssignedToGroup,
+    isUserAssignedToDepartment
   };
 
   return (
