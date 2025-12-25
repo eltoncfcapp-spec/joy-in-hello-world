@@ -2689,7 +2689,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
-// Main Groups Component
+// Main Groups Component /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 const Groups = () => {
   const { 
     profile, 
@@ -3058,6 +3058,448 @@ const Groups = () => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+// Main Groups Component - FIXED VERSION
+const Groups = () => {
+  const { 
+    profile, 
+    canViewGroup, 
+    canManageGroup, 
+    getRoles, 
+    isAdmin, 
+    isPastor,
+    isDeacon,
+    isGroupLeader,
+    isDepartmentLeader
+  } = useAuth();
+  
+  const [groups, setGroups] = useState<CellGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false);
+  const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
+  const [showMeetingsModal, setShowMeetingsModal] = useState(false);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  const [meetings, setMeetings] = useState<GroupMeeting[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
+
+  // Get user's current group ID from profile
+  const userGroupId = profile?.cell_group_id || null;
+
+  // Safely get user roles and check permissions
+  const userRoles = getRoles ? getRoles() : [];
+  const isUserAdmin = isAdmin ? isAdmin() : false;
+  const isUserPastor = isPastor ? isPastor() : false;
+  const isUserDeacon = isDeacon ? isDeacon() : false;
+  const isUserGroupLeader = isGroupLeader ? isGroupLeader() : false;
+  const isUserDepartmentLeader = isDepartmentLeader ? isDepartmentLeader() : false;
+  
+  // Determine if user is a regular member (not admin, pastor, deacon, or group leader)
+  const isUserMember = !isUserAdmin && !isUserPastor && !isUserDeacon && !isUserGroupLeader && !isUserDepartmentLeader && profile?.admin_role === 'member';
+
+  useEffect(() => {
+    if (profile) {
+      loadGroups();
+      loadAllMembers();
+    }
+  }, [profile]);
+
+  const loadGroups = async () => {
+    try {
+      setLoading(true);
+      
+      // First, load all groups
+      const { data: groupsData, error: groupsError } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .order('name');
+
+      if (groupsError) throw groupsError;
+
+      // Get leader information for each group
+      const groupsWithDetails = await Promise.all(
+        (groupsData || []).map(async (group) => {
+          // Get member count
+          const { count } = await supabase
+            .from('members')
+            .select('*', { count: 'exact', head: true })
+            .eq('cell_group_id', group.id);
+          
+          // Get leader information if leader_id exists
+          let leaderInfo = null;
+          if (group.leader_id) {
+            const { data: leaderData } = await supabase
+              .from('members')
+              .select('name, surname, residence, phone')
+              .eq('id', group.leader_id)
+              .single();
+            
+            leaderInfo = leaderData;
+          }
+          
+          // Check if current user is the leader of this group
+          const isCurrentUserLeader = group.leader_id === profile?.id;
+          
+          return {
+            ...group,
+            leader_name: leaderInfo ? `${leaderInfo.name} ${leaderInfo.surname}` : null,
+            leader_residence: leaderInfo?.residence || null,
+            leader_phone: leaderInfo?.phone || null,
+            memberCount: count || 0,
+            is_current_user_leader: isCurrentUserLeader
+          };
+        })
+      );
+
+      // Filter groups based on user role - FIXED LOGIC
+      let filteredGroups = groupsWithDetails;
+      
+      console.log('User Role Debug:', {
+        userId: profile?.id,
+        userGroupId: userGroupId,
+        isUserAdmin,
+        isUserPastor,
+        isUserDeacon,
+        isUserGroupLeader,
+        isUserMember,
+        adminRole: profile?.admin_role,
+        allGroupsCount: groupsWithDetails.length
+      });
+
+      if (!isUserAdmin && !isUserPastor) {
+        if (isUserGroupLeader) {
+          // Group Leaders can see only groups they lead
+          filteredGroups = groupsWithDetails.filter(group => {
+            const isLeader = group.leader_id === profile?.id;
+            console.log(`Group ${group.name}: leader_id=${group.leader_id}, user_id=${profile?.id}, isLeader=${isLeader}`);
+            return isLeader;
+          });
+          console.log('Group Leader filtered groups:', filteredGroups.map(g => g.name));
+        } else if (isUserMember) {
+          // Members can see only their own assigned group
+          if (userGroupId) {
+            filteredGroups = groupsWithDetails.filter(group => group.id === userGroupId);
+          } else {
+            filteredGroups = []; // Member has no group assigned
+          }
+        } else if (isUserDeacon || isUserDepartmentLeader) {
+          // Deacons and Department Leaders can see all groups
+          filteredGroups = groupsWithDetails;
+        } else {
+          // No role - no access
+          filteredGroups = [];
+        }
+      }
+      // Administrators and Pastors can see all groups (no filtering)
+
+      setGroups(filteredGroups);
+    } catch (error: any) {
+      console.error('Error loading groups:', error);
+      setError('Failed to load groups: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getUserGroup = async (): Promise<CellGroup | null> => {
+    try {
+      if (!profile?.id) return null;
+      
+      // First check if user is a leader of any group
+      const { data: leaderGroup } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('leader_id', profile.id)
+        .single();
+      
+      if (leaderGroup) return leaderGroup;
+      
+      // If not a leader, check assigned group
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('cell_group_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (!memberData?.cell_group_id) return null;
+      
+      const { data: groupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', memberData.cell_group_id)
+        .single();
+      
+      return groupData;
+    } catch (error) {
+      console.error('Failed to get user group:', error);
+      return null;
+    }
+  };
+
+  const loadAllMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setMembers(data || []);
+    } catch (error: any) {
+      console.error('Failed to load members:', error);
+    }
+  };
+
+  const loadMeetings = async (groupId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('group_id', groupId)
+        .order('meeting_date', { ascending: false });
+
+      if (error) throw error;
+      setMeetings(data || []);
+    } catch (error: any) {
+      setError('Failed to load meetings: ' + error.message);
+    }
+  };
+
+  const loadAttendanceForMeeting = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meeting_attendance')
+        .select(`
+          *,
+          members:member_id (
+            id, name, surname, residence, phone
+          )
+        `)
+        .eq('meeting_id', meetingId);
+
+      if (error) {
+        console.error('Error loading attendance:', error);
+        setError('Failed to load attendance: ' + error.message);
+        return;
+      }
+      
+      console.log('Loaded attendance records:', data);
+      setAttendanceRecords(data || []);
+    } catch (error: any) {
+      console.error('Failed to load attendance:', error);
+      setError('Failed to load attendance: ' + error.message);
+    }
+  };
+
+  const openReportModal = async (meeting: GroupMeeting) => {
+    setSelectedMeetingForReport(meeting);
+    await loadAttendanceForMeeting(meeting.id);
+    setShowReportModal(true);
+  };
+
+  const handlePrintReport = () => {
+    window.print();
+  };
+
+  const openMeetingsModal = async (group: CellGroup) => {
+    if (!canViewGroup(group.id)) {
+      setError('You do not have permission to view this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setShowMeetingsModal(true);
+    await loadMeetings(group.id);
+  };
+
+  const openWorkflowModal = async (group: CellGroup) => {
+    // Check if user can manage this specific group
+    const canManage = canManageGroup ? canManageGroup(group.id) : false;
+    
+    if (!canManage) {
+      setError('You do not have permission to manage this group');
+      return;
+    }
+
+    setSelectedGroup(group);
+    setShowWorkflowModal(true);
+    await loadMeetings(group.id);
+  };
+
+  const openEditGroupModal = (group: CellGroup) => {
+    // Only allow admin and pastor to edit groups
+    if (!isUserAdmin && !isUserPastor) {
+      setError('Only administrators and pastors can edit groups');
+      return;
+    }
+    setSelectedGroup(group);
+    setShowEditGroupModal(true);
+  };
+
+  const openDeleteGroupModal = (group: CellGroup) => {
+    // Only allow admin and pastor to delete groups
+    if (!isUserAdmin && !isUserPastor) {
+      setError('Only administrators and pastors can delete groups');
+      return;
+    }
+    setSelectedGroup(group);
+    setShowDeleteGroupModal(true);
+  };
+
+  const closeAllModals = () => {
+    setShowCreateGroupModal(false);
+    setShowEditGroupModal(false);
+    setShowDeleteGroupModal(false);
+    setShowMeetingsModal(false);
+    setShowWorkflowModal(false);
+    setShowReportModal(false);
+    setSelectedGroup(null);
+    setSelectedMeetingForReport(null);
+    setAttendanceRecords([]);
+  };
+
+  const handleGroupCreated = () => {
+    loadGroups();
+    setSuccess('Group created successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleGroupUpdated = () => {
+    loadGroups();
+    setSuccess('Group updated successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleGroupDeleted = () => {
+    loadGroups();
+    setSuccess('Group deleted successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Permission functions - FIXED VERSION
+  const canCreateGroups = () => {
+    return isUserAdmin || isUserPastor;
+  };
+
+  const canEditGroup = (group: CellGroup) => {
+    // Only admin and pastor can edit groups
+    return isUserAdmin || isUserPastor;
+  };
+
+  const canDeleteGroup = (group: CellGroup) => {
+    // Only admin and pastor can delete groups
+    return isUserAdmin || isUserPastor;
+  };
+
+  const canViewGroupDetails = (group: CellGroup) => {
+    if (isUserAdmin || isUserPastor) {
+      return true; // Admins & Pastors can view all groups
+    }
+    if (isUserGroupLeader) {
+      return group.leader_id === profile?.id; // Leaders can view only their own group
+    }
+    if (isUserMember) {
+      // Members can view only their own assigned group
+      return group.id === userGroupId;
+    }
+    if (isUserDeacon || isUserDepartmentLeader) {
+      return true; // Deacons and Department Leaders can view all
+    }
+    return false;
+  };
+
+  const getUserRoleDisplay = () => {
+    if (!profile) return 'Guest';
+    
+    if (isUserAdmin) return 'Administrator';
+    if (isUserPastor) return 'Pastor';
+    if (isUserDeacon) return 'Deacon';
+    if (isUserDepartmentLeader) return 'Department Leader';
+    if (isUserGroupLeader) return 'Group Leader';
+    if (isUserMember) return 'Member';
+    return 'Guest';
+  };
+
+  // FIXED: Check if user can manage a specific group
+  const checkCanManageGroup = (groupId: string) => {
+    if (isUserAdmin || isUserPastor) {
+      return true; // Admins & Pastors can manage all groups
+    }
+    
+    // For group leaders, check if they lead this specific group
+    if (isUserGroupLeader) {
+      // Find the group in the current list
+      const group = groups.find(g => g.id === groupId);
+      return group?.leader_id === profile?.id;
+    }
+    
+    return false;
+  };
+
+  // FIXED: Check if user can view a specific group
+  const checkCanViewGroup = (groupId: string) => {
+    if (isUserAdmin || isUserPastor || isUserDeacon || isUserDepartmentLeader) {
+      return true; // Admins, Pastors, Deacons & Department Leaders can view all
+    }
+    
+    // For group leaders, check if they lead this specific group
+    if (isUserGroupLeader) {
+      const group = groups.find(g => g.id === groupId);
+      return group?.leader_id === profile?.id;
+    }
+    
+    // For members, check if this is their assigned group
+    if (isUserMember) {
+      return groupId === userGroupId;
+    }
+    
+    return false;
+  };
+
+  const getAttendanceStats = () => {
+    const attended = attendanceRecords.filter(r => r.status === 'present').length;
+    const absent = attendanceRecords.filter(r => r.status === 'absent').length;
+    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+    const total = attendanceRecords.length;
+
+    return { attended, absent, absentWithReason, total };
+  };
+
+  // Render the main component
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header with Debug Info (optional) */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
+          <p className="text-lg text-gray-600">
+            {profile ? `Logged in as ${getUserRoleDisplay()} (ID: ${profile?.id})` : 'Please log in to view groups'}
+          </p>
+          {profile && isUserGroupLeader && (
+            <p className="text-sm text-blue-600 mt-2">
+              You are a Group Leader. You can only see and manage groups you lead.
+            </p>
+          )}
+        </div>
+
+        {/* Search and Create Group Bar */}
+        <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input
+              type="text"
+              placeholder="Search groups..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
           
@@ -3122,7 +3564,10 @@ const Groups = () => {
                   {searchTerm ? 'No groups match your search' : 'No Accessible Groups'}
                 </h3>
                 <p className="text-gray-500 mb-6">
-                  {searchTerm ? 'Try a different search term' : isUserMember && !searchTerm ? 'You are not assigned to any group' : 'You do not have access to any groups'}
+                  {searchTerm ? 'Try a different search term' : 
+                   isUserGroupLeader ? 'You are not assigned as a leader of any group' :
+                   isUserMember ? 'You are not assigned to any group' :
+                   'You do not have access to any groups'}
                 </p>
                 {canCreateGroups() && (
                   <button
@@ -3140,8 +3585,9 @@ const Groups = () => {
                 group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
               ).map((group) => {
-                const canManage = canManageGroup(group.id);
-                const canView = canViewGroup(group.id);
+                // FIXED: Use the corrected permission check functions
+                const canManage = checkCanManageGroup(group.id);
+                const canView = checkCanViewGroup(group.id);
                 const canEdit = canEditGroup(group);
                 const canDelete = canDeleteGroup(group);
                 
@@ -3257,7 +3703,7 @@ const Groups = () => {
             )}
           </div>
         )}
-
+////////////////////////////////////////////////////////////////////////////////
         {/* Modals */}
         <CreateGroupModal
           isOpen={showCreateGroupModal}
