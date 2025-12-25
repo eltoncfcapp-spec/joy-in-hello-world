@@ -2688,8 +2688,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
     </div>
   );
 };
-
-// Main Groups Component /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Main Groups Component 
 const Groups = () => {
   const { 
     profile, 
@@ -3715,7 +3714,10 @@ const Groups = () => {
           }}
           userId={profile?.id || null}
         />
-
+        </div>
+    </div>
+  );
+};
         <EditGroupModal
           isOpen={showEditGroupModal}
           group={selectedGroup}
