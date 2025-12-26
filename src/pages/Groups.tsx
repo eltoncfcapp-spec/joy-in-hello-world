@@ -1,6 +1,7 @@
- import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+// Remove the import for useAuditLog since we'll implement it directly here
 import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
 
 // Interfaces (unchanged)
@@ -64,6 +65,72 @@ interface GroupReport {
   next_meeting_date: string | null;
   created_at: string | null;
 }
+
+// ADDED: Simple audit log hook implementation
+const useAuditLog = () => {
+  const logEvent = async (
+    action: string,
+    entityType: string,
+    metadata: any,
+    tableName: string,
+    entityId: string
+  ) => {
+    try {
+      // Get current user from localStorage or session
+      const userData = localStorage.getItem('user');
+      const user = userData ? JSON.parse(userData) : null;
+      
+      const auditLog = {
+        action,
+        entity_type: entityType,
+        entity_id: entityId,
+        table_name: tableName,
+        metadata: JSON.stringify(metadata),
+        user_id: user?.id || 'anonymous',
+        user_email: user?.email || 'unknown',
+        ip_address: 'browser', // In a real app, you'd get this from the request
+        user_agent: navigator.userAgent,
+        created_at: new Date().toISOString(),
+      };
+
+      // Try to insert into audit_logs table if it exists
+      const { error } = await supabase
+        .from('audit_logs')
+        .insert([auditLog]);
+
+      if (error) {
+        // If audit_logs table doesn't exist, log to console instead
+        console.log('AUDIT LOG:', {
+          timestamp: new Date().toISOString(),
+          ...auditLog,
+          error: 'audit_logs table might not exist'
+        });
+      }
+      
+      // Always log to console for debugging
+      console.log('Audit Event:', {
+        action,
+        entityType,
+        entityId,
+        metadata,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('Failed to log audit event:', error);
+      // Don't fail the main operation if audit logging fails
+      console.log('Audit Event (fallback):', {
+        action,
+        entityType,
+        entityId,
+        metadata,
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+
+  return { logEvent };
+};
 
 // New Group Creation Component (with audit logging)
 interface CreateGroupModalProps {
@@ -239,7 +306,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
         </div>
 
         <form onSubmit={createGroup} className="space-y-4">
-          {/* Form fields remain the same */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Group Name *
@@ -609,7 +675,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
         </div>
 
         <form onSubmit={updateGroup} className="space-y-4">
-          {/* Form fields remain the same */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Group Name *
@@ -1046,7 +1111,6 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
 
   return (
     <div className="space-y-6">
-      {/* Component JSX remains the same */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Schedule Group Meeting</h3>
         <p className="text-gray-600">Create a new meeting schedule for {group.name}</p>
@@ -1462,7 +1526,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Component JSX remains the same */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Record Group Attendance</h3>
         <p className="text-gray-600">Mark group members as present, absent, or absent with notes</p>
@@ -1923,7 +1986,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Component JSX remains the same */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Add Group Newcomer</h3>
         <p className="text-gray-600">Register first-time visitors to the {group.name} group</p>
@@ -2516,7 +2578,6 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
 
   return (
     <div className="space-y-6">
-      {/* Component JSX remains the same (truncated for brevity) */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Create Group Report</h3>
         <p className="text-gray-600">Generate a comprehensive report for the {group.name} group meeting</p>
