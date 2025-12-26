@@ -40,6 +40,7 @@ interface Member {
   surname: string;
   residence: string | null;
   phone: string | null;
+  email?: string | null;
   cell_group_id?: string | null;
   status?: string | null;
   admin_role?: string | null;
@@ -2734,17 +2735,85 @@ const Groups = () => {
   // Determine if user is a regular member (not admin, pastor, deacon, or group leader)
   const isUserMember = !isUserAdmin && !isUserPastor && !isUserDeacon && !isUserGroupLeader && !isUserDepartmentLeader && profile?.admin_role === 'member';
 
+  // Store current user's member ID
+  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
+
   useEffect(() => {
     if (profile) {
-      loadGroups();
-      loadAllMembers();
+      getCurrentMemberId();
     }
   }, [profile]);
 
+  const getCurrentMemberId = async () => {
+    if (!profile) return;
+    
+    try {
+      console.log('Debug Info - Getting current member ID:', {
+        profileId: profile?.id,
+        profileEmail: profile?.email,
+        profileAdminRole: profile?.admin_role,
+        profileCellGroupId: profile?.cell_group_id
+      });
+
+      // First try to find member by email (most reliable)
+      if (profile.email) {
+        const { data: memberByEmail, error: emailError } = await supabase
+          .from('members')
+          .select('id')
+          .eq('email', profile.email)
+          .single();
+
+        if (!emailError && memberByEmail) {
+          console.log('Found member by email:', memberByEmail);
+          setCurrentMemberId(memberByEmail.id);
+          return;
+        }
+      }
+
+      // If email not found or doesn't match, try to find by auth ID
+      const { data: memberById, error: idError } = await supabase
+        .from('members')
+        .select('id')
+        .eq('id', profile.id)
+        .single();
+
+      if (!idError && memberById) {
+        console.log('Found member by ID:', memberById);
+        setCurrentMemberId(memberById.id);
+      } else {
+        console.error('Could not find member record for user:', profile.id);
+        setCurrentMemberId(profile.id); // Fallback to auth ID
+      }
+    } catch (error) {
+      console.error('Error getting current member ID:', error);
+      setCurrentMemberId(profile.id); // Fallback to auth ID
+    }
+  };
+
+  useEffect(() => {
+    if (profile && currentMemberId) {
+      loadGroups();
+      loadAllMembers();
+    }
+  }, [profile, currentMemberId]);
+
   const loadGroups = async () => {
     try {
+      if (!profile || !currentMemberId) return;
+      
       setLoading(true);
       
+      console.log('Debug Info - Loading groups with:', {
+        currentMemberId,
+        userGroupId,
+        isUserAdmin,
+        isUserPastor,
+        isUserDeacon,
+        isUserGroupLeader,
+        isUserMember,
+        adminRole: profile?.admin_role,
+      });
+
       // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
@@ -2775,7 +2844,7 @@ const Groups = () => {
           }
           
           // Check if current user is the leader of this group
-          const isCurrentUserLeader = group.leader_id === profile?.id;
+          const isCurrentUserLeader = group.leader_id === currentMemberId;
           
           return {
             ...group,
@@ -2791,42 +2860,35 @@ const Groups = () => {
       // Filter groups based on user role - FIXED LOGIC
       let filteredGroups = groupsWithDetails;
       
-      console.log('User Role Debug:', {
-        userId: profile?.id,
-        userGroupId: userGroupId,
-        isUserAdmin,
-        isUserPastor,
-        isUserDeacon,
-        isUserGroupLeader,
-        isUserMember,
-        adminRole: profile?.admin_role,
-        allGroupsCount: groupsWithDetails.length
-      });
-
       if (isUserAdmin || isUserPastor) {
         // Administrators and Pastors can see all groups (no filtering)
         filteredGroups = groupsWithDetails;
+        console.log('Admin/Pastor - showing all groups:', filteredGroups.length);
       } else if (isUserGroupLeader) {
         // Group Leaders can see only groups they lead
         filteredGroups = groupsWithDetails.filter(group => {
-          const isLeader = group.leader_id === profile?.id;
-          console.log(`Group ${group.name}: leader_id=${group.leader_id}, user_id=${profile?.id}, isLeader=${isLeader}`);
+          const isLeader = group.leader_id === currentMemberId;
+          console.log(`Group ${group.name}: leader_id=${group.leader_id}, currentMemberId=${currentMemberId}, isLeader=${isLeader}`);
           return isLeader;
         });
-        console.log('Group Leader filtered groups:', filteredGroups.map(g => g.name));
+        console.log('Group Leader filtered groups:', filteredGroups.map(g => ({ name: g.name, leader_id: g.leader_id })));
       } else if (isUserMember) {
         // Members can see only their own assigned group
         if (userGroupId) {
           filteredGroups = groupsWithDetails.filter(group => group.id === userGroupId);
+          console.log('Member filtered groups:', filteredGroups.map(g => g.name));
         } else {
           filteredGroups = []; // Member has no group assigned
+          console.log('Member has no group assigned');
         }
       } else if (isUserDeacon || isUserDepartmentLeader) {
         // Deacons and Department Leaders can see all groups
         filteredGroups = groupsWithDetails;
+        console.log('Deacon/Department Leader - showing all groups:', filteredGroups.length);
       } else {
         // No role - no access
         filteredGroups = [];
+        console.log('No role - no access to groups');
       }
 
       setGroups(filteredGroups);
@@ -2998,7 +3060,7 @@ const Groups = () => {
       return true; // Admins & Pastors can view all groups
     }
     if (isUserGroupLeader) {
-      return group.leader_id === profile?.id; // Leaders can view only their own group
+      return group.leader_id === currentMemberId; // Leaders can view only their own group
     }
     if (isUserMember) {
       // Members can view only their own assigned group
@@ -3032,7 +3094,7 @@ const Groups = () => {
     if (isUserGroupLeader) {
       // Find the group in the current list
       const group = groups.find(g => g.id === groupId);
-      return group?.leader_id === profile?.id;
+      return group?.leader_id === currentMemberId;
     }
     
     return false;
@@ -3047,7 +3109,7 @@ const Groups = () => {
     // For group leaders, check if they lead this specific group
     if (isUserGroupLeader) {
       const group = groups.find(g => g.id === groupId);
-      return group?.leader_id === profile?.id;
+      return group?.leader_id === currentMemberId;
     }
     
     // For members, check if this is their assigned group
@@ -3075,7 +3137,7 @@ const Groups = () => {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
           <p className="text-lg text-gray-600">
-            {profile ? `Logged in as ${getUserRoleDisplay()} (ID: ${profile?.id})` : 'Please log in to view groups'}
+            {profile ? `Logged in as ${getUserRoleDisplay()} (Member ID: ${currentMemberId || 'Loading...'})` : 'Please log in to view groups'}
           </p>
           {profile && isUserGroupLeader && (
             <p className="text-sm text-blue-600 mt-2">
@@ -3144,6 +3206,12 @@ const Groups = () => {
             <h3 className="text-xl font-semibold text-gray-600 mb-2">Please Log In</h3>
             <p className="text-gray-500 mb-6">You need to be logged in to view groups</p>
           </div>
+        ) : !currentMemberId ? (
+          <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">Loading Your Profile</h3>
+            <p className="text-gray-500">Please wait while we load your information...</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {loading && groups.length === 0 ? (
@@ -3159,7 +3227,7 @@ const Groups = () => {
                 </h3>
                 <p className="text-gray-500 mb-6">
                   {searchTerm ? 'Try a different search term' : 
-                   isUserGroupLeader ? 'You are not assigned as a leader of any group' :
+                   isUserGroupLeader ? `You are not assigned as a leader of any group (Your member ID: ${currentMemberId})` :
                    isUserMember ? 'You are not assigned to any group' :
                    'You do not have access to any groups'}
                 </p>
