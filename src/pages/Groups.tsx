@@ -40,7 +40,6 @@ interface Member {
   surname: string;
   residence: string | null;
   phone: string | null;
-  email?: string | null;
   cell_group_id?: string | null;
   status?: string | null;
   admin_role?: string | null;
@@ -66,14 +65,16 @@ interface GroupReport {
   created_at: string | null;
 }
 
-// Create Group Modal
-const CreateGroupModal: React.FC<{
+// New Group Creation Component
+interface CreateGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   userId: string | null;
-}> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
+}
+
+const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
   const { profile, isAdmin, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -84,27 +85,28 @@ const CreateGroupModal: React.FC<{
     description: '',
     leader_id: '',
   });
-  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
-  const [searchLeaderTerm, setSearchLeaderTerm] = useState('');
+  const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
+  const [searchMemberTerm, setSearchMemberTerm] = useState('');
 
   useEffect(() => {
     if (isOpen) {
-      loadAvailableLeaders();
+      loadAllMembers();
     }
   }, [isOpen]);
 
-  const loadAvailableLeaders = async () => {
+  const loadAllMembers = async () => {
     try {
+      // Get ALL members, not just those with leadership roles
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
-      setAvailableLeaders(data || []);
+      setAvailableMembers(data || []);
     } catch (error: any) {
-      console.error('Failed to load leaders:', error);
+      console.error('Failed to load members:', error);
+      onError('Failed to load church members');
     }
   };
 
@@ -127,10 +129,7 @@ const CreateGroupModal: React.FC<{
     }
 
     // Check if user has permission to create groups (only admin and pastor)
-    const isUserAdmin = isAdmin ? isAdmin() : false;
-    const isUserPastor = isPastor ? isPastor() : false;
-    
-    if (!isUserAdmin && !isUserPastor) {
+    if (!isAdmin() && !isPastor()) {
       onError('Only administrators and pastors can create new groups');
       return;
     }
@@ -169,7 +168,7 @@ const CreateGroupModal: React.FC<{
 
       if (error) throw error;
 
-      // If a leader was selected, update their group assignment
+      // If a leader was selected, update their group assignment and role
       if (formData.leader_id) {
         await supabase
           .from('members')
@@ -200,10 +199,11 @@ const CreateGroupModal: React.FC<{
     }
   };
 
-  const filteredLeaders = availableLeaders.filter(leader =>
-    leader.name.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
-    leader.surname.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
-    leader.residence?.toLowerCase().includes(searchLeaderTerm.toLowerCase())
+  const filteredMembers = availableMembers.filter(member =>
+    member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
+    member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
+    member.residence?.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
+    member.admin_role?.toLowerCase().includes(searchMemberTerm.toLowerCase())
   );
 
   if (!isOpen) return null;
@@ -319,9 +319,9 @@ const CreateGroupModal: React.FC<{
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <input
                   type="text"
-                  placeholder="Search for leaders..."
-                  value={searchLeaderTerm}
-                  onChange={(e) => setSearchLeaderTerm(e.target.value)}
+                  placeholder="Search for church members..."
+                  value={searchMemberTerm}
+                  onChange={(e) => setSearchMemberTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -333,19 +333,24 @@ const CreateGroupModal: React.FC<{
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">No leader assigned</option>
-                {filteredLeaders.map((leader) => (
-                  <option key={leader.id} value={leader.id}>
-                    {leader.name} {leader.surname} ({leader.admin_role})
+                {filteredMembers.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} {member.surname} 
+                    {member.admin_role ? ` (${member.admin_role})` : ''}
+                    {member.cell_group_id ? ' - Already in a group' : ''}
                   </option>
                 ))}
               </select>
               
-              {filteredLeaders.length === 0 && searchLeaderTerm && (
+              {filteredMembers.length === 0 && searchMemberTerm && (
                 <p className="text-sm text-gray-500 text-center py-2">
-                  No leaders found matching your search
+                  No members found matching your search
                 </p>
               )}
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              You can select any church member to be the group leader. They will be assigned the "group_leader" role.
+            </p>
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -378,15 +383,17 @@ const CreateGroupModal: React.FC<{
   );
 };
 
-// Edit Group Modal
-const EditGroupModal: React.FC<{
+// Edit Group Modal Component
+interface EditGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   canEdit: boolean;
-}> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
+}
+
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -396,7 +403,8 @@ const EditGroupModal: React.FC<{
     description: '',
     leader_id: '',
   });
-  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
+  const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
+  const [previousLeaderId, setPreviousLeaderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && group) {
@@ -408,22 +416,23 @@ const EditGroupModal: React.FC<{
         description: group.description || '',
         leader_id: group.leader_id || '',
       });
-      loadAvailableLeaders();
+      setPreviousLeaderId(group.leader_id);
+      loadAllMembers();
     }
   }, [isOpen, group]);
 
-  const loadAvailableLeaders = async () => {
+  const loadAllMembers = async () => {
     try {
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.group_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
-      setAvailableLeaders(data || []);
+      setAvailableMembers(data || []);
     } catch (error: any) {
-      console.error('Failed to load leaders:', error);
+      console.error('Failed to load members:', error);
+      onError('Failed to load church members');
     }
   };
 
@@ -484,14 +493,27 @@ const EditGroupModal: React.FC<{
       if (error) throw error;
 
       // Handle leader assignment changes
-      const previousLeaderId = group.leader_id;
       if (previousLeaderId !== formData.leader_id) {
-        // Remove previous leader's group assignment
+        // Remove previous leader's group assignment and revert role
         if (previousLeaderId) {
+          // Get previous leader's current role
+          const { data: previousLeader } = await supabase
+            .from('members')
+            .select('admin_role')
+            .eq('id', previousLeaderId)
+            .single();
+          
+          // Revert to 'member' role if they were a group leader
+          let newRole = previousLeader?.admin_role || 'member';
+          if (newRole === 'group_leader') {
+            newRole = 'member';
+          }
+          
           await supabase
             .from('members')
             .update({ 
               cell_group_id: null,
+              admin_role: newRole,
               updated_at: new Date().toISOString()
             })
             .eq('id', previousLeaderId);
@@ -499,6 +521,18 @@ const EditGroupModal: React.FC<{
 
         // Assign new leader
         if (formData.leader_id) {
+          // Check if new leader is already in another group
+          const { data: newLeader } = await supabase
+            .from('members')
+            .select('cell_group_id')
+            .eq('id', formData.leader_id)
+            .single();
+          
+          if (newLeader?.cell_group_id && newLeader.cell_group_id !== group.id) {
+            onError('Selected member is already assigned to another group');
+            return;
+          }
+          
           await supabase
             .from('members')
             .update({ 
@@ -635,12 +669,21 @@ const EditGroupModal: React.FC<{
               className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">No leader assigned</option>
-              {availableLeaders.map((leader) => (
-                <option key={leader.id} value={leader.id}>
-                  {leader.name} {leader.surname} ({leader.admin_role})
+              {availableMembers.map((member) => (
+                <option 
+                  key={member.id} 
+                  value={member.id}
+                  disabled={member.cell_group_id && member.cell_group_id !== group.id}
+                >
+                  {member.name} {member.surname} 
+                  {member.admin_role ? ` (${member.admin_role})` : ''}
+                  {member.cell_group_id && member.cell_group_id !== group.id ? ' - Already in another group' : ''}
                 </option>
               ))}
             </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Selecting a new leader will automatically remove the previous leader's group assignment.
+            </p>
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -666,15 +709,17 @@ const EditGroupModal: React.FC<{
   );
 };
 
-// Delete Group Modal
-const DeleteGroupModal: React.FC<{
+// Delete Group Confirmation Modal
+interface DeleteGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
   onClose: () => void;
   onConfirm: () => void;
   onError: (message: string) => void;
   canDelete: boolean;
-}> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
+}
+
+const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
 
@@ -718,10 +763,24 @@ const DeleteGroupModal: React.FC<{
       
       // Remove leader assignment if exists
       if (group.leader_id) {
+        // Get leader's current role
+        const { data: leader } = await supabase
+          .from('members')
+          .select('admin_role')
+          .eq('id', group.leader_id)
+          .single();
+        
+        // Revert to 'member' role if they were a group leader
+        let newRole = leader?.admin_role || 'member';
+        if (newRole === 'group_leader') {
+          newRole = 'member';
+        }
+        
         await supabase
           .from('members')
           .update({ 
             cell_group_id: null,
+            admin_role: newRole,
             updated_at: new Date().toISOString()
           })
           .eq('id', group.leader_id);
@@ -822,12 +881,8 @@ const DeleteGroupModal: React.FC<{
   );
 };
 
-// Group Meeting Creation Step Component
-const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { 
-  group: CellGroup; 
-  onMeetingCreated: () => void; 
-  onError: (message: string) => void; 
-}) => {
+// Group Meeting Creation Step
+const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
   const { canCreateGroupMeetings } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -1397,9 +1452,9 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                             {member.name} {member.surname}
                           </div>
                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                            member.status === 'leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                            member.admin_role === 'group_leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                           }`}>
-                            {member.status || 'member'}
+                            {member.admin_role || 'member'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
@@ -1952,7 +2007,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         return;
       }
       
-      console.log('Loaded attendance data:', data);
+      console.log('Loaded attendance data:', data); // Debug log
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2696,10 +2751,9 @@ const Groups = () => {
     canManageGroup, 
     getRoles, 
     isAdmin, 
-    isPastor,
-    isDeacon,
-    isGroupLeader,
-    isDepartmentLeader
+    isPastor, 
+    isGroupLeader, 
+    isMember 
   } = useAuth();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
@@ -2721,99 +2775,17 @@ const Groups = () => {
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
 
-  // Get user's current group ID from profile
-  const userGroupId = profile?.cell_group_id || null;
-
-  // Safely get user roles and check permissions
-  const userRoles = getRoles ? getRoles() : [];
-  const isUserAdmin = isAdmin ? isAdmin() : false;
-  const isUserPastor = isPastor ? isPastor() : false;
-  const isUserDeacon = isDeacon ? isDeacon() : false;
-  const isUserGroupLeader = isGroupLeader ? isGroupLeader() : false;
-  const isUserDepartmentLeader = isDepartmentLeader ? isDepartmentLeader() : false;
-  
-  // Determine if user is a regular member (not admin, pastor, deacon, or group leader)
-  const isUserMember = !isUserAdmin && !isUserPastor && !isUserDeacon && !isUserGroupLeader && !isUserDepartmentLeader && profile?.admin_role === 'member';
-
-  // Store current user's member ID
-  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
-
   useEffect(() => {
     if (profile) {
-      getCurrentMemberId();
-    }
-  }, [profile]);
-
-  const getCurrentMemberId = async () => {
-    if (!profile) return;
-    
-    try {
-      console.log('Debug Info - Getting current member ID:', {
-        profileId: profile?.id,
-        profileEmail: profile?.email,
-        profileAdminRole: profile?.admin_role,
-        profileCellGroupId: profile?.cell_group_id
-      });
-
-      // First try to find member by email (most reliable)
-      if (profile.email) {
-        const { data: memberByEmail, error: emailError } = await supabase
-          .from('members')
-          .select('id')
-          .eq('email', profile.email)
-          .single();
-
-        if (!emailError && memberByEmail) {
-          console.log('Found member by email:', memberByEmail);
-          setCurrentMemberId(memberByEmail.id);
-          return;
-        }
-      }
-
-      // If email not found or doesn't match, try to find by auth ID
-      const { data: memberById, error: idError } = await supabase
-        .from('members')
-        .select('id')
-        .eq('id', profile.id)
-        .single();
-
-      if (!idError && memberById) {
-        console.log('Found member by ID:', memberById);
-        setCurrentMemberId(memberById.id);
-      } else {
-        console.error('Could not find member record for user:', profile.id);
-        setCurrentMemberId(profile.id); // Fallback to auth ID
-      }
-    } catch (error) {
-      console.error('Error getting current member ID:', error);
-      setCurrentMemberId(profile.id); // Fallback to auth ID
-    }
-  };
-
-  useEffect(() => {
-    if (profile && currentMemberId) {
       loadGroups();
       loadAllMembers();
     }
-  }, [profile, currentMemberId]);
+  }, [profile]);
 
   const loadGroups = async () => {
     try {
-      if (!profile || !currentMemberId) return;
-      
       setLoading(true);
       
-      console.log('Debug Info - Loading groups with:', {
-        currentMemberId,
-        userGroupId,
-        isUserAdmin,
-        isUserPastor,
-        isUserDeacon,
-        isUserGroupLeader,
-        isUserMember,
-        adminRole: profile?.admin_role,
-      });
-
       // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
@@ -2844,7 +2816,7 @@ const Groups = () => {
           }
           
           // Check if current user is the leader of this group
-          const isCurrentUserLeader = group.leader_id === currentMemberId;
+          const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
             ...group,
@@ -2857,46 +2829,59 @@ const Groups = () => {
         })
       );
 
-      // Filter groups based on user role - FIXED LOGIC
+      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
-      if (isUserAdmin || isUserPastor) {
-        // Administrators and Pastors can see all groups (no filtering)
-        filteredGroups = groupsWithDetails;
-        console.log('Admin/Pastor - showing all groups:', filteredGroups.length);
-      } else if (isUserGroupLeader) {
-        // Group Leaders can see only groups they lead
-        filteredGroups = groupsWithDetails.filter(group => {
-          const isLeader = group.leader_id === currentMemberId;
-          console.log(`Group ${group.name}: leader_id=${group.leader_id}, currentMemberId=${currentMemberId}, isLeader=${isLeader}`);
-          return isLeader;
-        });
-        console.log('Group Leader filtered groups:', filteredGroups.map(g => ({ name: g.name, leader_id: g.leader_id })));
-      } else if (isUserMember) {
-        // Members can see only their own assigned group
-        if (userGroupId) {
-          filteredGroups = groupsWithDetails.filter(group => group.id === userGroupId);
-          console.log('Member filtered groups:', filteredGroups.map(g => g.name));
+      if (!isAdmin() && !isPastor()) {
+        if (isGroupLeader()) {
+          // Group Leaders can see only their own group
+          filteredGroups = groupsWithDetails.filter(group => 
+            group.leader_id === profile?.id
+          );
+        } else if (isMember()) {
+          // Members can see only their own group
+          const userGroup = await getUserGroup();
+          filteredGroups = groupsWithDetails.filter(group => 
+            group.id === userGroup?.id
+          );
         } else {
-          filteredGroups = []; // Member has no group assigned
-          console.log('Member has no group assigned');
+          // No role - no access
+          filteredGroups = [];
         }
-      } else if (isUserDeacon || isUserDepartmentLeader) {
-        // Deacons and Department Leaders can see all groups
-        filteredGroups = groupsWithDetails;
-        console.log('Deacon/Department Leader - showing all groups:', filteredGroups.length);
-      } else {
-        // No role - no access
-        filteredGroups = [];
-        console.log('No role - no access to groups');
       }
+      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups);
     } catch (error: any) {
       console.error('Error loading groups:', error);
-      setError('Failed to load groups: ' + (error.message || 'Unknown error'));
+      setError('Failed to load groups: ' + error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getUserGroup = async (): Promise<CellGroup | null> => {
+    try {
+      if (!profile?.id) return null;
+      
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('cell_group_id')
+        .eq('id', profile.id)
+        .single();
+      
+      if (!memberData?.cell_group_id) return null;
+      
+      const { data: groupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', memberData.cell_group_id)
+        .single();
+      
+      return groupData;
+    } catch (error) {
+      console.error('Failed to get user group:', error);
+      return null;
     }
   };
 
@@ -2947,7 +2932,7 @@ const Groups = () => {
         return;
       }
       
-      console.log('Loaded attendance records:', data);
+      console.log('Loaded attendance records:', data); // Debug log
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -2977,10 +2962,7 @@ const Groups = () => {
   };
 
   const openWorkflowModal = async (group: CellGroup) => {
-    // Check if user can manage this specific group
-    const canManage = canManageGroup ? canManageGroup(group.id) : false;
-    
-    if (!canManage) {
+    if (!canManageGroup(group.id)) {
       setError('You do not have permission to manage this group');
       return;
     }
@@ -2992,7 +2974,7 @@ const Groups = () => {
 
   const openEditGroupModal = (group: CellGroup) => {
     // Only allow admin and pastor to edit groups
-    if (!isUserAdmin && !isUserPastor) {
+    if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can edit groups');
       return;
     }
@@ -3002,7 +2984,7 @@ const Groups = () => {
 
   const openDeleteGroupModal = (group: CellGroup) => {
     // Only allow admin and pastor to delete groups
-    if (!isUserAdmin && !isUserPastor) {
+    if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete groups');
       return;
     }
@@ -3040,34 +3022,32 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Permission functions - FIXED VERSION
+  // Permission functions
   const canCreateGroups = () => {
-    return isUserAdmin || isUserPastor;
+    return isAdmin() || isPastor();
   };
 
   const canEditGroup = (group: CellGroup) => {
     // Only admin and pastor can edit groups
-    return isUserAdmin || isUserPastor;
+    return isAdmin() || isPastor();
   };
 
   const canDeleteGroup = (group: CellGroup) => {
     // Only admin and pastor can delete groups
-    return isUserAdmin || isUserPastor;
+    return isAdmin() || isPastor();
   };
 
   const canViewGroupDetails = (group: CellGroup) => {
-    if (isUserAdmin || isUserPastor) {
+    if (isAdmin() || isPastor()) {
       return true; // Admins & Pastors can view all groups
     }
-    if (isUserGroupLeader) {
-      return group.leader_id === currentMemberId; // Leaders can view only their own group
+    if (isGroupLeader()) {
+      return group.leader_id === profile?.id; // Leaders can view only their own group
     }
-    if (isUserMember) {
-      // Members can view only their own assigned group
-      return group.id === userGroupId;
-    }
-    if (isUserDeacon || isUserDepartmentLeader) {
-      return true; // Deacons and Department Leaders can view all
+    if (isMember()) {
+      // Members can view only their own group
+      // This assumes members have a cell_group_id in their profile
+      return true; // We'll filter this in loadGroups
     }
     return false;
   };
@@ -3075,49 +3055,13 @@ const Groups = () => {
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    if (isUserAdmin) return 'Administrator';
-    if (isUserPastor) return 'Pastor';
-    if (isUserDeacon) return 'Deacon';
-    if (isUserDepartmentLeader) return 'Department Leader';
-    if (isUserGroupLeader) return 'Group Leader';
-    if (isUserMember) return 'Member';
+    const roles = getRoles();
+    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
+    if (roles.includes('pastor')) return 'Pastor';
+    if (roles.includes('deacon')) return 'Deacon';
+    if (roles.includes('group_leader')) return 'Group Leader';
+    if (roles.includes('member')) return 'Member';
     return 'Guest';
-  };
-
-  // FIXED: Check if user can manage a specific group
-  const checkCanManageGroup = (groupId: string) => {
-    if (isUserAdmin || isUserPastor) {
-      return true; // Admins & Pastors can manage all groups
-    }
-    
-    // For group leaders, check if they lead this specific group
-    if (isUserGroupLeader) {
-      // Find the group in the current list
-      const group = groups.find(g => g.id === groupId);
-      return group?.leader_id === currentMemberId;
-    }
-    
-    return false;
-  };
-
-  // FIXED: Check if user can view a specific group
-  const checkCanViewGroup = (groupId: string) => {
-    if (isUserAdmin || isUserPastor || isUserDeacon || isUserDepartmentLeader) {
-      return true; // Admins, Pastors, Deacons & Department Leaders can view all
-    }
-    
-    // For group leaders, check if they lead this specific group
-    if (isUserGroupLeader) {
-      const group = groups.find(g => g.id === groupId);
-      return group?.leader_id === currentMemberId;
-    }
-    
-    // For members, check if this is their assigned group
-    if (isUserMember) {
-      return groupId === userGroupId;
-    }
-    
-    return false;
   };
 
   const getAttendanceStats = () => {
@@ -3129,21 +3073,15 @@ const Groups = () => {
     return { attended, absent, absentWithReason, total };
   };
 
-  // Render the main component
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header with Debug Info (optional) */}
+        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
           <p className="text-lg text-gray-600">
-            {profile ? `Logged in as ${getUserRoleDisplay()} (Member ID: ${currentMemberId || 'Loading...'})` : 'Please log in to view groups'}
+            {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view groups'}
           </p>
-          {profile && isUserGroupLeader && (
-            <p className="text-sm text-blue-600 mt-2">
-              You are a Group Leader. You can only see and manage groups you lead.
-            </p>
-          )}
         </div>
 
         {/* Search and Create Group Bar */}
@@ -3206,12 +3144,6 @@ const Groups = () => {
             <h3 className="text-xl font-semibold text-gray-600 mb-2">Please Log In</h3>
             <p className="text-gray-500 mb-6">You need to be logged in to view groups</p>
           </div>
-        ) : !currentMemberId ? (
-          <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">Loading Your Profile</h3>
-            <p className="text-gray-500">Please wait while we load your information...</p>
-          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {loading && groups.length === 0 ? (
@@ -3226,10 +3158,7 @@ const Groups = () => {
                   {searchTerm ? 'No groups match your search' : 'No Accessible Groups'}
                 </h3>
                 <p className="text-gray-500 mb-6">
-                  {searchTerm ? 'Try a different search term' : 
-                   isUserGroupLeader ? `You are not assigned as a leader of any group (Your member ID: ${currentMemberId})` :
-                   isUserMember ? 'You are not assigned to any group' :
-                   'You do not have access to any groups'}
+                  {searchTerm ? 'Try a different search term' : 'You do not have access to any groups'}
                 </p>
                 {canCreateGroups() && (
                   <button
@@ -3247,9 +3176,8 @@ const Groups = () => {
                 group.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 group.leader_name?.toLowerCase().includes(searchTerm.toLowerCase())
               ).map((group) => {
-                // FIXED: Use the corrected permission check functions
-                const canManage = checkCanManageGroup(group.id);
-                const canView = checkCanViewGroup(group.id);
+                const canManage = canManageGroup(group.id);
+                const canView = canViewGroup(group.id);
                 const canEdit = canEditGroup(group);
                 const canDelete = canDeleteGroup(group);
                 
@@ -3377,6 +3305,7 @@ const Groups = () => {
           }}
           userId={profile?.id || null}
         />
+
         <EditGroupModal
           isOpen={showEditGroupModal}
           group={selectedGroup}
