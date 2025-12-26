@@ -50,7 +50,7 @@ interface GroupAttendanceRecord {
   id: string;
   meeting_id: string | null;
   member_id: string | null;
-  status: 'present' | 'absent' | 'absent_with_reason' | string | null;
+  status: 'present' | 'absent' | 'excused' | string | null;
   notes?: string | null;
   members?: Member | null;
 }
