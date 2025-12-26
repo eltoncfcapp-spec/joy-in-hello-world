@@ -1294,12 +1294,20 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         .from('meeting_attendance')
         .insert(attendanceRecords);
 
-      if (insertError) throw insertError;
-      
-      // IMPORTANT: Reload the attendance data after saving
-      await loadExistingAttendance();
-      onAttendanceSaved();
-      onError('Attendance saved successfully!');
+if (insertError) throw insertError;
+
+// Update the meeting status to completed
+await supabase
+  .from('meetings')
+  .update({ status: 'completed' })
+  .eq('id', selectedMeeting.id);
+
+// Reload attendance data after saving to ensure state is synced
+await loadExistingAttendance();
+
+// Call the success callback AFTER the reload completes
+onAttendanceSaved();
+onError('Attendance saved successfully!');
     } catch (error: any) {
       onError('Failed to save group attendance: ' + error.message);
     } finally {
