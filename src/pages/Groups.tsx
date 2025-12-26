@@ -1118,6 +1118,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
     absentWithReason: 0,
     total: 0
   });
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   useEffect(() => {
     loadGroupMembers();
@@ -1156,12 +1157,15 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       if (error) throw error;
       
       setGroupMembers(data || []);
-      // Initialize all members as present by default
-      const initialAttendance: Record<string, 'present'> = {};
-      data?.forEach(member => {
-        initialAttendance[member.id] = 'present';
-      });
-      setAttendance(initialAttendance);
+      
+      // Only initialize as present if we don't have existing attendance loaded
+      if (!initialLoadComplete) {
+        const initialAttendance: Record<string, 'present'> = {};
+        data?.forEach(member => {
+          initialAttendance[member.id] = 'present';
+        });
+        setAttendance(initialAttendance);
+      }
     } catch (error: any) {
       onError('Failed to load group members: ' + error.message);
     }
@@ -1206,6 +1210,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       
       setAttendance(existingAttendance);
       setNotes(existingNotes);
+      setInitialLoadComplete(true);
     } catch (error: any) {
       console.error('Failed to load existing attendance:', error);
     }
@@ -1276,6 +1281,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
+      // First, delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('meeting_attendance')
         .delete()
@@ -1283,13 +1289,14 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (deleteError) throw deleteError;
 
+      // Then insert new attendance records
       const { error: insertError } = await supabase
         .from('meeting_attendance')
         .insert(attendanceRecords);
 
       if (insertError) throw insertError;
       
-      // Reload attendance data after saving
+      // IMPORTANT: Reload the attendance data after saving
       await loadExistingAttendance();
       onAttendanceSaved();
       onError('Attendance saved successfully!');
