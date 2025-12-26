@@ -17,27 +17,35 @@ const cleanUUIDArray = (ids: string[]): string[] => {
   });
 };
 
-// Audit logging helper
+// Audit logging helper ////////////////////////////////////////////////////////
 const logAuditEvent = async (
   action: string,
   resource: string,
   details: any,
   userId?: string,
   userIp?: string,
-  userAgent?: string
+  userAgent?: string,
+  tableName?: string,  // ✅ ADD THIS
+  recordId?: string     // ✅ ADD THIS
 ) => {
   try {
     console.log('📝 Audit Log:', { action, resource, details, userId });
     
+    // ✅ Map your custom actions to allowed database actions
+    const allowedActions = ['INSERT', 'UPDATE', 'DELETE'];
+    const mappedAction = allowedActions.includes(action) ? action : 'UPDATE';
+    
     const { error } = await supabase
       .from('audit_logs')
       .insert({
-        user_id: userId,
-        action,
+        user_id: userId || null,
+        action: mappedAction,  // ✅ Use mapped action
         resource,
-        details,
+        details: details || {}, // ✅ Ensure details is not null
         ip_address: userIp || '127.0.0.1',
         user_agent: userAgent || navigator.userAgent,
+        table_name: tableName || resource, // ✅ ADD THIS - use resource as fallback
+        record_id: recordId || '00000000-0000-0000-0000-000000000000', // ✅ ADD THIS - use dummy UUID as fallback
         created_at: new Date().toISOString()
       });
 
@@ -48,7 +56,7 @@ const logAuditEvent = async (
     console.error('❌ Error logging audit event:', error);
   }
 };
-
+/////////////////////////////////////////////////////
 // Get client IP address (simplified)
 const getClientIp = async (): Promise<string> => {
   try {
@@ -442,11 +450,15 @@ const cloudService = {
       
       // Log audit event
       await logAuditEvent(
-        'UPDATE',
-        'system_config',
-        { configId: data?.id || 'new', changes: config },
-        (window as any).currentUserId
-      );
+  'UPDATE',
+  'system_config',
+  { configId: data?.id || 'new', changes: config },
+  (window as any).currentUserId,
+  await getClientIp(),
+  navigator.userAgent,
+  'system_config', // table_name
+  data?.id || '00000000-0000-0000-0000-000000000000' // record_id
+);
       
       return data as any;
     } catch (error) {
