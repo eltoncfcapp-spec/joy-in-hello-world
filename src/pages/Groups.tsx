@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+import { useAuditLog } from '../hooks/useAuditLog'; // ADDED: Import audit log hook
 import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
 
-// Interfaces
+// Interfaces (unchanged)
 interface CellGroup {
   id: string;
   name: string;
@@ -65,7 +66,7 @@ interface GroupReport {
   created_at: string | null;
 }
 
-// New Group Creation Component
+// New Group Creation Component (with audit logging)
 interface CreateGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -76,6 +77,7 @@ interface CreateGroupModalProps {
 
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
   const { profile, isAdmin, isPastor } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -96,7 +98,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
   const loadAllMembers = async () => {
     try {
-      // Get ALL members, not just those with leadership roles
       const { data, error } = await supabase
         .from('members')
         .select('*')
@@ -128,7 +129,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       return;
     }
 
-    // Check if user has permission to create groups (only admin and pastor)
     if (!isAdmin() && !isPastor()) {
       onError('Only administrators and pastors can create new groups');
       return;
@@ -137,7 +137,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
     try {
       setLoading(true);
       
-      // Check if group with same name already exists
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -168,7 +167,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
       if (error) throw error;
 
-      // If a leader was selected, update their group assignment and role
       if (formData.leader_id) {
         await supabase
           .from('members')
@@ -178,6 +176,26 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
             updated_at: new Date().toISOString()
           })
           .eq('id', formData.leader_id);
+      }
+
+      // ADDED: Audit logging for group creation
+      if (data) {
+        await logEvent(
+          'CREATE',
+          'cell_group',
+          {
+            groupId: data.id,
+            groupName: data.name,
+            leaderId: data.leader_id,
+            location: data.location,
+            meetingDay: data.meeting_day,
+            meetingTime: data.meeting_time,
+            createdBy: userId,
+            timestamp: new Date().toISOString()
+          },
+          'cell_groups',
+          data.id
+        );
       }
 
       setFormData({
@@ -222,6 +240,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
         </div>
 
         <form onSubmit={createGroup} className="space-y-4">
+          {/* Form fields remain the same */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Group Name *
@@ -383,7 +402,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   );
 };
 
-// Edit Group Modal Component
+// Edit Group Modal Component (with audit logging)
 interface EditGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
@@ -394,6 +413,8 @@ interface EditGroupModalProps {
 }
 
 const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
+  const { profile } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -462,7 +483,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
     try {
       setLoading(true);
       
-      // Check if group with same name already exists (excluding current group)
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -494,16 +514,13 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
       // Handle leader assignment changes
       if (previousLeaderId !== formData.leader_id) {
-        // Remove previous leader's group assignment and revert role
         if (previousLeaderId) {
-          // Get previous leader's current role
           const { data: previousLeader } = await supabase
             .from('members')
             .select('admin_role')
             .eq('id', previousLeaderId)
             .single();
           
-          // Revert to 'member' role if they were a group leader
           let newRole = previousLeader?.admin_role || 'member';
           if (newRole === 'group_leader') {
             newRole = 'member';
@@ -519,9 +536,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .eq('id', previousLeaderId);
         }
 
-        // Assign new leader
         if (formData.leader_id) {
-          // Check if new leader is already in another group
           const { data: newLeader } = await supabase
             .from('members')
             .select('cell_group_id')
@@ -543,6 +558,31 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .eq('id', formData.leader_id);
         }
       }
+
+      // ADDED: Audit logging for group update
+      await logEvent(
+        'UPDATE',
+        'cell_group',
+        {
+          groupId: group.id,
+          groupName: formData.name.trim(),
+          previousName: group.name,
+          changes: {
+            name: formData.name.trim() !== group.name,
+            location: formData.location.trim() !== (group.location || ''),
+            meeting_day: formData.meeting_day !== group.meeting_day,
+            meeting_time: formData.meeting_time !== group.meeting_time,
+            leader_id: formData.leader_id !== group.leader_id,
+            description: formData.description.trim() !== (group.description || '')
+          },
+          newLeaderId: formData.leader_id,
+          previousLeaderId: group.leader_id,
+          updatedBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'cell_groups',
+        group.id
+      );
 
       onSuccess('Group updated successfully!');
       onClose();
@@ -570,6 +610,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
         </div>
 
         <form onSubmit={updateGroup} className="space-y-4">
+          {/* Form fields remain the same */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Group Name *
@@ -709,7 +750,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
   );
 };
 
-// Delete Group Confirmation Modal
+// Delete Group Confirmation Modal (with audit logging)
 interface DeleteGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
@@ -720,6 +761,8 @@ interface DeleteGroupModalProps {
 }
 
 const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
+  const { profile } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
 
@@ -761,16 +804,13 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
     try {
       setLoading(true);
       
-      // Remove leader assignment if exists
       if (group.leader_id) {
-        // Get leader's current role
         const { data: leader } = await supabase
           .from('members')
           .select('admin_role')
           .eq('id', group.leader_id)
           .single();
         
-        // Revert to 'member' role if they were a group leader
         let newRole = leader?.admin_role || 'member';
         if (newRole === 'group_leader') {
           newRole = 'member';
@@ -786,13 +826,30 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
           .eq('id', group.leader_id);
       }
 
-      // Delete the group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
         .eq('id', group.id);
 
       if (error) throw error;
+
+      // ADDED: Audit logging for group deletion
+      await logEvent(
+        'DELETE',
+        'cell_group',
+        {
+          groupId: group.id,
+          groupName: group.name,
+          leaderId: group.leader_id,
+          location: group.location,
+          meetingDay: group.meeting_day,
+          meetingTime: group.meeting_time,
+          deletedBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'cell_groups',
+        group.id
+      );
 
       onConfirm();
     } catch (error: any) {
@@ -881,9 +938,10 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
   );
 };
 
-// Group Meeting Creation Step
+// Group Meeting Creation Step (with audit logging)
 const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
-  const { canCreateGroupMeetings } = useAuth();
+  const { profile, canCreateGroupMeetings } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -927,7 +985,6 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
       return;
     }
 
-    // Check permission
     if (!canCreateGroupMeetings(group.id)) {
       onError('You do not have permission to create meetings for this group');
       return;
@@ -945,13 +1002,32 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         status: 'scheduled'
       };
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('meetings')
         .insert([newMeeting])
         .select()
         .single();
 
       if (error) throw error;
+
+      // ADDED: Audit logging for meeting creation
+      await logEvent(
+        'CREATE',
+        'group_meeting',
+        {
+          meetingId: data.id,
+          groupId: group.id,
+          groupName: group.name,
+          meetingDate: data.meeting_date,
+          meetingTime: data.meeting_time,
+          location: data.location,
+          topic: data.topic,
+          createdBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'meetings',
+        data.id
+      );
 
       setFormData({
         meeting_date: '',
@@ -971,6 +1047,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
 
   return (
     <div className="space-y-6">
+      {/* Component JSX remains the same */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Schedule Group Meeting</h3>
         <p className="text-gray-600">Create a new meeting schedule for {group.name}</p>
@@ -1093,7 +1170,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
   );
 };
 
-// Group Attendance Step Component
+// Group Attendance Step Component (with audit logging)
 interface GroupAttendanceStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -1103,8 +1180,16 @@ interface GroupAttendanceStepProps {
   onError: (message: string) => void;
 }
 
-const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
-  const { canManageGroupAttendance } = useAuth();
+const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onAttendanceSaved, 
+  onError 
+}) => {
+  const { profile, canManageGroupAttendance } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
@@ -1132,7 +1217,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   }, [selectedMeeting]);
 
   useEffect(() => {
-    // Update stats whenever attendance changes
     const presentCount = Object.values(attendance).filter(status => status === 'present').length;
     const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
     const absentWithReasonCount = Object.values(attendance).filter(status => status === 'absent_with_reason').length;
@@ -1158,7 +1242,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       
       setGroupMembers(data || []);
       
-      // Only initialize as present if we don't have existing attendance loaded
       if (!initialLoadComplete) {
         const initialAttendance: Record<string, 'present'> = {};
         data?.forEach(member => {
@@ -1248,6 +1331,23 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (error) throw error;
       
+      // ADDED: Audit logging for member addition to group
+      await logEvent(
+        'UPDATE',
+        'member_group_assignment',
+        {
+          memberId: member.id,
+          memberName: `${member.name} ${member.surname}`,
+          groupId: group.id,
+          groupName: group.name,
+          action: 'added_to_group',
+          addedBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'members',
+        member.id
+      );
+      
       await loadGroupMembers();
       setShowAddAttendeeModal(false);
       setSearchMemberTerm('');
@@ -1266,7 +1366,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       return;
     }
 
-    // Check permission
     if (!canManageGroupAttendance(group.id)) {
       onError('You do not have permission to manage attendance for this group');
       return;
@@ -1281,7 +1380,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
-      // First, delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('meeting_attendance')
         .delete()
@@ -1289,25 +1387,65 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (deleteError) throw deleteError;
 
-      // Then insert new attendance records
       const { error: insertError } = await supabase
         .from('meeting_attendance')
         .insert(attendanceRecords);
 
-if (insertError) throw insertError;
+      if (insertError) throw insertError;
 
-// Update the meeting status to completed
-await supabase
-  .from('meetings')
-  .update({ status: 'completed' })
-  .eq('id', selectedMeeting.id);
+      await supabase
+        .from('meetings')
+        .update({ status: 'completed' })
+        .eq('id', selectedMeeting.id);
 
-// Reload attendance data after saving to ensure state is synced
-await loadExistingAttendance();
+      // ADDED: Audit logging for attendance
+      const presentCount = attendanceRecords.filter(r => r.status === 'present').length;
+      const absentCount = attendanceRecords.filter(r => r.status === 'absent').length;
+      const absentWithReasonCount = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
+      
+      await logEvent(
+        'ATTENDANCE_UPDATE',
+        'group_attendance',
+        {
+          groupId: group.id,
+          groupName: group.name,
+          meetingId: selectedMeeting.id,
+          meetingDate: selectedMeeting.meeting_date,
+          attendanceStats: {
+            total: attendanceRecords.length,
+            present: presentCount,
+            absent: absentCount,
+            absentWithReason: absentWithReasonCount,
+            attendanceRate: Math.round((presentCount / attendanceRecords.length) * 100)
+          },
+          updatedBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'meeting_attendance',
+        selectedMeeting.id
+      );
 
-// Call the success callback AFTER the reload completes
-onAttendanceSaved();
-onError('Attendance saved successfully!');
+      // Log individual attendance records
+      for (const record of attendanceRecords) {
+        await logEvent(
+          'ATTENDANCE_RECORD',
+          'member_attendance',
+          {
+            memberId: record.member_id,
+            meetingId: selectedMeeting.id,
+            status: record.status,
+            notes: record.notes,
+            recordedBy: profile?.id,
+            timestamp: new Date().toISOString()
+          },
+          'members',
+          record.member_id
+        );
+      }
+
+      await loadExistingAttendance();
+      onAttendanceSaved();
+      onError('Attendance saved successfully!');
     } catch (error: any) {
       onError('Failed to save group attendance: ' + error.message);
     } finally {
@@ -1325,6 +1463,7 @@ onError('Attendance saved successfully!');
 
   return (
     <div className="space-y-6">
+      {/* Component JSX remains the same */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Record Group Attendance</h3>
         <p className="text-gray-600">Mark group members as present, absent, or absent with notes</p>
@@ -1603,7 +1742,7 @@ onError('Attendance saved successfully!');
   );
 };
 
-// Group Newcomer Step Component
+// Group Newcomer Step Component (with audit logging)
 interface GroupNewcomerStepProps {
   group: CellGroup;
   selectedMeeting: GroupMeeting | null;
@@ -1611,8 +1750,14 @@ interface GroupNewcomerStepProps {
   onError: (message: string) => void;
 }
 
-const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
-  const { canAddGroupNewcomers } = useAuth();
+const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ 
+  group, 
+  selectedMeeting, 
+  onNewcomerAdded, 
+  onError 
+}) => {
+  const { profile, canAddGroupNewcomers } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -1663,7 +1808,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       return;
     }
 
-    // Check permission
     if (!canAddGroupNewcomers(group.id)) {
       onError('You do not have permission to add newcomers to this group');
       return;
@@ -1672,7 +1816,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     try {
       setLoading(true);
       
-      // Check if member already exists with same phone
       let existingMember = null;
       if (formData.phone.trim()) {
         const { data: phoneMatch } = await supabase
@@ -1686,9 +1829,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       let memberId;
       
       if (existingMember) {
-        // Use existing member
         memberId = existingMember.id;
-        // Update member status and group assignment
         await supabase
           .from('members')
           .update({ 
@@ -1700,7 +1841,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           })
           .eq('id', existingMember.id);
       } else {
-        // Create new member
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
@@ -1734,7 +1874,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         memberId = memberData.id;
       }
 
-      // Record attendance for selected meeting
       if (selectedMeeting) {
         const { error: attendanceError } = await supabase
           .from('meeting_attendance')
@@ -1746,6 +1885,30 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           }]);
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
+
+      // ADDED: Audit logging for newcomer addition
+      await logEvent(
+        existingMember ? 'UPDATE' : 'CREATE',
+        'group_newcomer',
+        {
+          memberId: memberId,
+          memberName: `${formData.name.trim()} ${formData.surname.trim()}`,
+          groupId: group.id,
+          groupName: group.name,
+          meetingId: selectedMeeting?.id,
+          meetingDate: selectedMeeting?.meeting_date,
+          status: 'newcomer',
+          invitedBy: formData.invited_by,
+          residence: formData.residence.trim(),
+          phone: formData.phone.trim(),
+          notes: formData.notes,
+          isExistingMember: !!existingMember,
+          addedBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'members',
+        memberId
+      );
 
       setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
       setShowForm(false);
@@ -1761,6 +1924,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
 
   return (
     <div className="space-y-6">
+      {/* Component JSX remains the same */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Add Group Newcomer</h3>
         <p className="text-gray-600">Register first-time visitors to the {group.name} group</p>
@@ -1951,7 +2115,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   );
 };
 
-// Group Report Step Component
+// Group Report Step Component (with audit logging)
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -1961,8 +2125,16 @@ interface GroupReportStepProps {
   onError: (message: string) => void;
 }
 
-const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
-  const { canCreateGroupReports } = useAuth();
+const GroupReportStep: React.FC<GroupReportStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onReportCreated, 
+  onError 
+}) => {
+  const { profile, canCreateGroupReports } = useAuth();
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
   const [existingReport, setExistingReport] = useState<GroupReport | null>(null);
@@ -1988,7 +2160,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   }, [selectedMeeting]);
 
   useEffect(() => {
-    // Update stats whenever attendance changes
     const presentCount = attendance.filter(a => a.status === 'present').length;
     const absentCount = attendance.filter(a => a.status === 'absent').length;
     const absentWithReasonCount = attendance.filter(a => a.status === 'absent_with_reason').length;
@@ -2022,7 +2193,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         return;
       }
       
-      console.log('Loaded attendance data:', data); // Debug log
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2076,7 +2246,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       return;
     }
 
-    // Check permission
     if (!canCreateGroupReports(group.id)) {
       onError('You do not have permission to create reports for this group');
       return;
@@ -2093,17 +2262,23 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       };
 
       let error;
+      let reportId;
+      
       if (existingReport) {
         const { error: updateError } = await supabase
           .from('meeting_reports')
           .update(reportPayload)
           .eq('id', existingReport.id);
         error = updateError;
+        reportId = existingReport.id;
       } else {
-        const { error: insertError } = await supabase
+        const { data: newReport, error: insertError } = await supabase
           .from('meeting_reports')
-          .insert([reportPayload]);
+          .insert([reportPayload])
+          .select()
+          .single();
         error = insertError;
+        reportId = newReport?.id;
       }
 
       if (error) throw error;
@@ -2112,6 +2287,35 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .from('meetings')
         .update({ status: 'completed' })
         .eq('id', selectedMeeting.id);
+
+      // ADDED: Audit logging for report generation
+      await logEvent(
+        existingReport ? 'UPDATE' : 'CREATE',
+        'group_report',
+        {
+          reportId: reportId,
+          meetingId: selectedMeeting.id,
+          meetingDate: selectedMeeting.meeting_date,
+          groupId: group.id,
+          groupName: group.name,
+          reportType: 'meeting_report',
+          attendanceStats: {
+            total: attendanceStats.total,
+            present: attendanceStats.present,
+            absent: attendanceStats.absent,
+            absentWithReason: attendanceStats.absentWithReason,
+            attendanceRate: attendanceStats.total > 0 ? 
+              Math.round((attendanceStats.present / attendanceStats.total) * 100) : 0
+          },
+          hasDecisions: !!reportData.decisions_made,
+          hasActionItems: !!reportData.action_items,
+          nextMeetingDate: reportData.next_meeting_date,
+          createdBy: profile?.id,
+          timestamp: new Date().toISOString()
+        },
+        'meeting_reports',
+        reportId
+      );
 
       onReportCreated();
     } catch (error: any) {
@@ -2122,6 +2326,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   };
 
   const handlePrint = () => {
+    // Print function remains the same
     const stats = attendanceStats;
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -2250,6 +2455,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   };
 
   const downloadReport = () => {
+    // Download function remains the same
     const stats = attendanceStats;
     const reportContent = `
 GROUP MEETING REPORT
@@ -2311,6 +2517,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
 
   return (
     <div className="space-y-6">
+      {/* Component JSX remains the same (truncated for brevity) */}
       <div>
         <h3 className="text-xl font-bold text-gray-900 mb-2">Create Group Report</h3>
         <p className="text-gray-600">Generate a comprehensive report for the {group.name} group meeting</p>
@@ -2612,7 +2819,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
   );
 };
 
-// Group Management Workflow Component
+// Group Management Workflow Component (unchanged)
 interface GroupWorkflowProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2758,7 +2965,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
-// Main Groups Component
+// Main Groups Component (with audit log hook initialized)
 const Groups = () => {
   const { 
     profile, 
@@ -2770,6 +2977,8 @@ const Groups = () => {
     isGroupLeader, 
     isMember 
   } = useAuth();
+  
+  const { logEvent } = useAuditLog(); // ADDED: Initialize audit log
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -2801,7 +3010,6 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -2809,16 +3017,13 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
-      // Get leader information for each group
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
-          // Get member count
           const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
-          // Get leader information if leader_id exists
           let leaderInfo = null;
           if (group.leader_id) {
             const { data: leaderData } = await supabase
@@ -2830,7 +3035,6 @@ const Groups = () => {
             leaderInfo = leaderData;
           }
           
-          // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
@@ -2844,27 +3048,22 @@ const Groups = () => {
         })
       );
 
-      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
       if (!isAdmin() && !isPastor()) {
         if (isGroupLeader()) {
-          // Group Leaders can see only their own group
           filteredGroups = groupsWithDetails.filter(group => 
             group.leader_id === profile?.id
           );
         } else if (isMember()) {
-          // Members can see only their own group
           const userGroup = await getUserGroup();
           filteredGroups = groupsWithDetails.filter(group => 
             group.id === userGroup?.id
           );
         } else {
-          // No role - no access
           filteredGroups = [];
         }
       }
-      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups);
     } catch (error: any) {
@@ -2947,7 +3146,6 @@ const Groups = () => {
         return;
       }
       
-      console.log('Loaded attendance records:', data); // Debug log
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -2988,7 +3186,6 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to edit groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can edit groups');
       return;
@@ -2998,7 +3195,6 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to delete groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete groups');
       return;
@@ -3037,32 +3233,27 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Permission functions
   const canCreateGroups = () => {
     return isAdmin() || isPastor();
   };
 
   const canEditGroup = (group: CellGroup) => {
-    // Only admin and pastor can edit groups
     return isAdmin() || isPastor();
   };
 
   const canDeleteGroup = (group: CellGroup) => {
-    // Only admin and pastor can delete groups
     return isAdmin() || isPastor();
   };
 
   const canViewGroupDetails = (group: CellGroup) => {
     if (isAdmin() || isPastor()) {
-      return true; // Admins & Pastors can view all groups
+      return true;
     }
     if (isGroupLeader()) {
-      return group.leader_id === profile?.id; // Leaders can view only their own group
+      return group.leader_id === profile?.id;
     }
     if (isMember()) {
-      // Members can view only their own group
-      // This assumes members have a cell_group_id in their profile
-      return true; // We'll filter this in loadGroups
+      return true;
     }
     return false;
   };
