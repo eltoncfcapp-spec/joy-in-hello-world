@@ -17,46 +17,6 @@ const cleanUUIDArray = (ids: string[]): string[] => {
   });
 };
 
-// Audit logging helper ////////////////////////////////////////////////////////
-const logAuditEvent = async (
-  action: string,
-  resource: string,
-  details: any,
-  userId?: string,
-  userIp?: string,
-  userAgent?: string,
-  tableName?: string,  // ✅ ADD THIS
-  recordId?: string     // ✅ ADD THIS
-) => {
-  try {
-    console.log('📝 Audit Log:', { action, resource, details, userId });
-    
-    // ✅ Map your custom actions to allowed database actions
-    const allowedActions = ['INSERT', 'UPDATE', 'DELETE'];
-    const mappedAction = allowedActions.includes(action) ? action : 'UPDATE';
-    
-    const { error } = await supabase
-      .from('audit_logs')
-      .insert({
-        user_id: userId || null,
-        action: mappedAction,  // ✅ Use mapped action
-        resource,
-        details: details || {}, // ✅ Ensure details is not null
-        ip_address: userIp || '127.0.0.1',
-        user_agent: userAgent || navigator.userAgent,
-        table_name: tableName || resource, // ✅ ADD THIS - use resource as fallback
-        record_id: recordId || '00000000-0000-0000-0000-000000000000', // ✅ ADD THIS - use dummy UUID as fallback
-        created_at: new Date().toISOString()
-      });
-
-    if (error) {
-      console.error('❌ Failed to log audit event:', error);
-    }
-  } catch (error) {
-    console.error('❌ Error logging audit event:', error);
-  }
-};
-/////////////////////////////////////////////////////
 // Get client IP address (simplified)
 const getClientIp = async (): Promise<string> => {
   try {
@@ -68,6 +28,59 @@ const getClientIp = async (): Promise<string> => {
     return '127.0.0.1';
   }
 };
+
+// Enhanced Audit logging helper ////////////////////////////////////////////////////////
+const logAuditEvent = async (
+  action: string,
+  resource: string,
+  details: any,
+  userId?: string,
+  userIp?: string,
+  userAgent?: string,
+  tableName?: string,
+  recordId?: string,
+  userName?: string,
+  userSurname?: string
+) => {
+  try {
+    console.log('📝 Audit Log:', { 
+      action, 
+      resource, 
+      details, 
+      userId, 
+      userName: `${userName || ''} ${userSurname || ''}`.trim() 
+    });
+    
+    // Map your custom actions to allowed database actions
+    const allowedActions = ['INSERT', 'UPDATE', 'DELETE', 'SELECT', 'LOGIN', 'LOGOUT', 'EXPORT', 'IMPORT', 'BACKUP', 'CLEANUP', 'GENERATE_CREDENTIALS', 'ACCESS', 'VIEW'];
+    const mappedAction = allowedActions.includes(action) ? action : 'UPDATE';
+    
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert({
+        user_id: userId || null,
+        action: mappedAction,
+        resource,
+        details: details || {},
+        ip_address: userIp || '127.0.0.1',
+        user_agent: userAgent || navigator.userAgent,
+        table_name: tableName || resource,
+        record_id: recordId || '00000000-0000-0000-0000-000000000000',
+        user_name: userName || null,
+        user_surname: userSurname || null,
+        created_at: new Date().toISOString()
+      });
+
+    if (error) {
+      console.error('❌ Failed to log audit event:', error);
+    } else {
+      console.log('✅ Audit event logged successfully');
+    }
+  } catch (error) {
+    console.error('❌ Error logging audit event:', error);
+  }
+};
+/////////////////////////////////////////////////////
 
 interface Member {
   id: string;
@@ -169,6 +182,8 @@ interface AuditLog {
   created_at: string;
   user_name?: string;
   user_surname?: string;
+  table_name?: string;
+  record_id?: string;
 }
 
 interface StorageInfo {
@@ -448,22 +463,44 @@ const cloudService = {
 
       if (error) throw error;
       
-      // Log audit event
+      // Get user info for audit log
+      const currentUserId = (window as any).currentUserId;
+      const currentUser = await this.getMemberById(currentUserId);
+      
+      // Log audit event with user info
       await logAuditEvent(
-  'UPDATE',
-  'system_config',
-  { configId: data?.id || 'new', changes: config },
-  (window as any).currentUserId,
-  await getClientIp(),
-  navigator.userAgent,
-  'system_config', // table_name
-  data?.id || '00000000-0000-0000-0000-000000000000' // record_id
-);
+        'UPDATE',
+        'system_config',
+        { configId: data?.id || 'new', changes: config },
+        currentUserId,
+        await getClientIp(),
+        navigator.userAgent,
+        'system_config',
+        data?.id || '00000000-0000-0000-0000-000000000000',
+        currentUser?.name,
+        currentUser?.surname
+      );
       
       return data as any;
     } catch (error) {
       console.error('❌ Error updating system config:', error);
       throw error;
+    }
+  },
+
+  async getMemberById(memberId: string): Promise<Member | null> {
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', memberId)
+        .single();
+
+      if (error) return null;
+      return data as any;
+    } catch (error) {
+      console.error('❌ Error fetching member by ID:', error);
+      return null;
     }
   },
 
@@ -546,12 +583,22 @@ const cloudService = {
 
       if (error) throw error;
       
-      // Log audit event
+      // Get user info for audit log
+      const currentUserId = (window as any).currentUserId;
+      const currentUser = await this.getMemberById(currentUserId);
+      
+      // Log audit event with user info
       await logAuditEvent(
         'UPDATE',
         'security_settings',
         { settingsId: data?.id || 'new', changes: settings },
-        (window as any).currentUserId
+        currentUserId,
+        await getClientIp(),
+        navigator.userAgent,
+        'security_settings',
+        data?.id || '00000000-0000-0000-0000-000000000000',
+        currentUser?.name,
+        currentUser?.surname
       );
       
       return data as any;
@@ -569,7 +616,7 @@ const cloudService = {
         .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(1000); // Increased limit to see more logs
 
       if (error) {
         console.error('❌ Error fetching audit logs:', error);
@@ -578,9 +625,15 @@ const cloudService = {
 
       const logs = (logsData || []) as AuditLog[];
       
-      // Get user names for each log
+      // Get user names for each log (if not already populated)
       const logsWithUserNames = await Promise.all(
         logs.map(async (log) => {
+          // If user_name and user_surname are already populated, use them
+          if (log.user_name && log.user_surname) {
+            return log;
+          }
+          
+          // Otherwise fetch from members table
           if (log.user_id) {
             try {
               const { data: userData } = await supabase
@@ -623,12 +676,22 @@ const cloudService = {
 
       const csvContent = convertToCSV(data || []);
       
-      // Log audit event
+      // Get user info for audit log
+      const currentUserId = (window as any).currentUserId;
+      const currentUser = await this.getMemberById(currentUserId);
+      
+      // Log audit event with user info
       await logAuditEvent(
         'EXPORT',
         'members',
         { format: _format, includeSensitive: _includeSensitive, recordCount: data?.length || 0 },
-        (window as any).currentUserId
+        currentUserId,
+        await getClientIp(),
+        navigator.userAgent,
+        'members',
+        'export_batch',
+        currentUser?.name,
+        currentUser?.surname
       );
       
       return new Blob([csvContent], { type: 'text/csv' });
@@ -851,7 +914,11 @@ const cloudService = {
             }
           }
 
-          // Log audit event for import
+          // Get user info for audit log
+          const currentUserId = (window as any).currentUserId;
+          const currentUser = await this.getMemberById(currentUserId);
+          
+          // Log audit event for import with user info
           if (success > 0) {
             await logAuditEvent(
               'IMPORT',
@@ -863,7 +930,13 @@ const cloudService = {
                 errorCount: errors,
                 options: options 
               },
-              (window as any).currentUserId
+              currentUserId,
+              await getClientIp(),
+              navigator.userAgent,
+              'members',
+              'import_batch',
+              currentUser?.name,
+              currentUser?.surname
             );
           }
 
@@ -894,12 +967,22 @@ const cloudService = {
         throw error;
       }
       
-      // Log audit event
+      // Get user info for audit log
+      const currentUserId = (window as any).currentUserId;
+      const currentUser = await this.getMemberById(currentUserId);
+      
+      // Log audit event with user info
       await logAuditEvent(
         'BACKUP',
         'system',
         { type: 'manual', timestamp: new Date().toISOString() },
-        (window as any).currentUserId
+        currentUserId,
+        await getClientIp(),
+        navigator.userAgent,
+        'backups',
+        'backup_record',
+        currentUser?.name,
+        currentUser?.surname
       );
       
     } catch (error) {
@@ -1001,13 +1084,23 @@ const cloudService = {
 
       if (error) throw error;
 
-      // Log audit event
+      // Get user info for audit log
+      const currentUserId = (window as any).currentUserId;
+      const currentUser = await this.getMemberById(currentUserId);
+      
+      // Log audit event with user info
       if (count && count > 0) {
         await logAuditEvent(
           'CLEANUP',
           'members',
           { deletedCount: count, cutoffDate: oneYearAgo.toISOString() },
-          (window as any).currentUserId
+          currentUserId,
+          await getClientIp(),
+          navigator.userAgent,
+          'members',
+          'cleanup_batch',
+          currentUser?.name,
+          currentUser?.surname
         );
       }
 
@@ -1104,6 +1197,7 @@ const Admin = () => {
   const [importProgress, setImportProgress] = useState<{current: number; total: number} | null>(null);
   const [auditLogFilter, setAuditLogFilter] = useState<string>('all'); // 'all', 'today', 'week', 'month'
   const [searchAuditTerm, setSearchAuditTerm] = useState('');
+  const [selectedAuditLog, setSelectedAuditLog] = useState<AuditLog | null>(null);
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -1260,7 +1354,13 @@ const Admin = () => {
           'ACCESS',
           'admin_panel',
           { action: 'loaded_data', itemsLoaded: membersData.length },
-          profile.id
+          profile.id,
+          await getClientIp(),
+          navigator.userAgent,
+          'admin_panel',
+          'load_operation',
+          profile.name,
+          profile.surname
         );
       }
     } catch (err) {
@@ -1404,7 +1504,13 @@ const Admin = () => {
       'VIEW',
       'modal',
       { modalType, userId: user?.id || 'none' },
-      profile.id
+      profile.id,
+      await getClientIp(),
+      navigator.userAgent,
+      'admin_modal',
+      modalType,
+      profile.name,
+      profile.surname
     );
 
     if (user) {
@@ -1485,6 +1591,7 @@ const Admin = () => {
     setCsvHeaders([]);
     setShowImportMapping(false);
     setImportProgress(null);
+    setSelectedAuditLog(null);
   };
 
   const handleUpdateSecuritySettings = async () => {
@@ -1716,12 +1823,22 @@ const Admin = () => {
       setGeneratedCredentials(credentials);
       setShowCredentials(true);
       
-      // Log audit event
+      // Log audit event with user info
       await logAuditEvent(
         'GENERATE_CREDENTIALS',
         'member',
-        { memberId: selectedUser.id, memberName: `${selectedUser.name} ${selectedUser.surname}` },
-        profile!.id
+        { 
+          memberId: selectedUser.id, 
+          memberName: `${selectedUser.name} ${selectedUser.surname}`,
+          username: credentials.username 
+        },
+        profile!.id,
+        await getClientIp(),
+        navigator.userAgent,
+        'members',
+        selectedUser.id,
+        profile!.name,
+        profile!.surname
       );
       
       await loadData();
@@ -1818,7 +1935,7 @@ const Admin = () => {
         assignedDepartments: updatedMember.assigned_departments
       });
 
-      // Log audit event
+      // Log audit event with user info
       await logAuditEvent(
         'UPDATE',
         'member',
@@ -1829,10 +1946,20 @@ const Admin = () => {
             roles: userFormData.roles,
             permissions: userFormData.permissions,
             assigned_groups: cleanedAssignedGroups,
-            assigned_departments: cleanedAssignedDepartments
+            assigned_departments: cleanedAssignedDepartments,
+            can_add_members: userFormData.can_add_members,
+            can_edit_members: userFormData.can_edit_members,
+            can_view_own_data: userFormData.can_view_own_data,
+            login_username: userFormData.login_username ? 'updated' : 'unchanged'
           }
         },
-        profile.id
+        profile.id,
+        await getClientIp(),
+        navigator.userAgent,
+        'members',
+        selectedUser.id,
+        profile.name,
+        profile.surname
       );
 
       setMembers(prev => prev.map(m => 
@@ -2071,7 +2198,9 @@ const Admin = () => {
         log.resource.toLowerCase().includes(searchLower) ||
         log.user_name?.toLowerCase().includes(searchLower) ||
         log.user_surname?.toLowerCase().includes(searchLower) ||
-        JSON.stringify(log.details).toLowerCase().includes(searchLower)
+        log.table_name?.toLowerCase().includes(searchLower) ||
+        JSON.stringify(log.details).toLowerCase().includes(searchLower) ||
+        log.ip_address?.toLowerCase().includes(searchLower)
       );
     }
 
@@ -2386,7 +2515,7 @@ const Admin = () => {
   );
 
   const SecurityModal = () => (
-    <Modal title="Security Settings" onClose={closeModal} size="max-w-6xl">
+    <Modal title="Security Settings" onClose={closeModal} size="max-w-7xl">
       <div className="space-y-8">
         {/* Password Policy Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
@@ -2465,7 +2594,7 @@ const Admin = () => {
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <Activity className="h-5 w-5" />
-              Audit Logs
+              Audit Logs - All User Activities
             </h3>
             <div className="flex gap-2">
               <button
@@ -2491,7 +2620,7 @@ const Admin = () => {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search audit logs..."
+                  placeholder="Search by user, action, resource, IP..."
                   value={searchAuditTerm}
                   onChange={(e) => setSearchAuditTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -2502,7 +2631,7 @@ const Admin = () => {
                   onClick={() => setAuditLogFilter('all')}
                   className={`px-3 py-2 text-sm rounded-lg ${auditLogFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                 >
-                  All
+                  All Time
                 </button>
                 <button
                   onClick={() => setAuditLogFilter('today')}
@@ -2545,55 +2674,65 @@ const Admin = () => {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Table</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredAuditLogs.map((log) => (
-                        <tr key={log.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <div>{new Date(log.created_at).toLocaleDateString()}</div>
-                            <div className="text-xs">{new Date(log.created_at).toLocaleTimeString()}</div>
+                        <tr key={log.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedAuditLog(log)}>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{new Date(log.created_at).toLocaleDateString()}</div>
+                            <div className="text-xs text-gray-500">{new Date(log.created_at).toLocaleTimeString()}</div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-4 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">
                               {log.user_name && log.user_surname 
                                 ? `${log.user_name} ${log.user_surname}`
-                                : log.user_id || 'System'}
+                                : log.user_id 
+                                ? `User ID: ${log.user_id.substring(0, 8)}...`
+                                : 'System'}
                             </div>
                             {log.user_id && (
                               <div className="text-xs text-gray-500">ID: {log.user_id.substring(0, 8)}...</div>
                             )}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-4 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                              log.action === 'CREATE' ? 'bg-green-100 text-green-800' :
+                              log.action === 'CREATE' || log.action === 'INSERT' ? 'bg-green-100 text-green-800' :
                               log.action === 'UPDATE' ? 'bg-blue-100 text-blue-800' :
                               log.action === 'DELETE' ? 'bg-red-100 text-red-800' :
                               log.action === 'LOGIN' ? 'bg-purple-100 text-purple-800' :
+                              log.action === 'EXPORT' ? 'bg-yellow-100 text-yellow-800' :
+                              log.action === 'IMPORT' ? 'bg-indigo-100 text-indigo-800' :
+                              log.action === 'GENERATE_CREDENTIALS' ? 'bg-pink-100 text-pink-800' :
                               'bg-gray-100 text-gray-800'
                             }`}>
                               {log.action}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
                             {log.resource}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {log.table_name || 'N/A'}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                             {log.ip_address}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-4 py-4">
                             <div className="text-sm text-gray-900 max-w-xs truncate">
                               {JSON.stringify(log.details)}
                             </div>
                             <button
-                              onClick={() => {
-                                alert(JSON.stringify(log.details, null, 2));
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAuditLog(log);
                               }}
                               className="text-xs text-blue-600 hover:text-blue-800 mt-1"
                             >
@@ -2616,21 +2755,69 @@ const Admin = () => {
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
                 <div className="text-2xl font-bold text-green-600">
-                  {filteredAuditLogs.filter(l => l.action === 'CREATE' || l.action === 'UPDATE').length}
+                  {filteredAuditLogs.filter(l => l.action === 'CREATE' || l.action === 'INSERT' || l.action === 'UPDATE').length}
                 </div>
                 <div className="text-xs text-gray-600">Create/Update</div>
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
                 <div className="text-2xl font-bold text-purple-600">
-                  {filteredAuditLogs.filter(l => l.action === 'LOGIN').length}
+                  {filteredAuditLogs.filter(l => l.action === 'LOGIN' || l.action === 'ACCESS' || l.action === 'VIEW').length}
                 </div>
-                <div className="text-xs text-gray-600">Logins</div>
+                <div className="text-xs text-gray-600">Access/View</div>
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
                 <div className="text-2xl font-bold text-red-600">
-                  {filteredAuditLogs.filter(l => l.action === 'DELETE').length}
+                  {filteredAuditLogs.filter(l => l.action === 'DELETE' || l.action === 'CLEANUP').length}
                 </div>
                 <div className="text-xs text-gray-600">Deletes</div>
+              </div>
+            </div>
+
+            {/* User Activity Summary */}
+            <div className="bg-white p-6 rounded-lg border">
+              <h4 className="text-lg font-semibold mb-4">User Activity Summary</h4>
+              <div className="space-y-4">
+                {(() => {
+                  const userActivities: Record<string, { count: number; user: string }> = {};
+                  
+                  filteredAuditLogs.forEach(log => {
+                    const userKey = log.user_id || 'system';
+                    const userName = log.user_name && log.user_surname 
+                      ? `${log.user_name} ${log.user_surname}` 
+                      : log.user_id 
+                      ? `User ${log.user_id.substring(0, 8)}...`
+                      : 'System';
+                    
+                    if (!userActivities[userKey]) {
+                      userActivities[userKey] = { count: 0, user: userName };
+                    }
+                    userActivities[userKey].count++;
+                  });
+
+                  return Object.entries(userActivities)
+                    .sort(([,a], [,b]) => b.count - a.count)
+                    .map(([userId, { count, user }]) => (
+                      <div key={userId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold">
+                            {user.charAt(0)}
+                          </div>
+                          <span className="font-medium text-gray-900">{user}</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="text-sm text-gray-600">{count} activities</span>
+                          <button
+                            onClick={() => {
+                              setSearchAuditTerm(user.split(' ')[0] || user);
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            Filter
+                          </button>
+                        </div>
+                      </div>
+                    ));
+                })()}
               </div>
             </div>
           </div>
@@ -2651,6 +2838,129 @@ const Admin = () => {
       </div>
     </Modal>
   );
+
+  const AuditLogDetailModal = () => {
+    if (!selectedAuditLog) return null;
+    
+    return (
+      <Modal title="Audit Log Details" onClose={() => setSelectedAuditLog(null)} size="max-w-2xl">
+        <div className="space-y-6">
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-gray-900 mb-2">Basic Information</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-gray-600">Timestamp</p>
+                <p className="font-medium">
+                  {new Date(selectedAuditLog.created_at).toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Action</p>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  selectedAuditLog.action === 'CREATE' || selectedAuditLog.action === 'INSERT' ? 'bg-green-100 text-green-800' :
+                  selectedAuditLog.action === 'UPDATE' ? 'bg-blue-100 text-blue-800' :
+                  selectedAuditLog.action === 'DELETE' ? 'bg-red-100 text-red-800' :
+                  selectedAuditLog.action === 'LOGIN' ? 'bg-purple-100 text-purple-800' :
+                  'bg-gray-100 text-gray-800'
+                }`}>
+                  {selectedAuditLog.action}
+                </span>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Resource</p>
+                <p className="font-medium">{selectedAuditLog.resource}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Table</p>
+                <p className="font-medium">{selectedAuditLog.table_name || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-gray-900 mb-2">User Information</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-gray-600">User</p>
+                <p className="font-medium">
+                  {selectedAuditLog.user_name && selectedAuditLog.user_surname 
+                    ? `${selectedAuditLog.user_name} ${selectedAuditLog.user_surname}`
+                    : selectedAuditLog.user_id 
+                    ? `User ID: ${selectedAuditLog.user_id}`
+                    : 'System'}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">User ID</p>
+                <p className="font-medium text-sm font-mono">{selectedAuditLog.user_id || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-gray-900 mb-2">Technical Details</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-gray-600">IP Address</p>
+                <p className="font-medium font-mono">{selectedAuditLog.ip_address}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">User Agent</p>
+                <p className="font-medium text-sm">{selectedAuditLog.user_agent}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Record ID</p>
+                <p className="font-medium text-sm font-mono">{selectedAuditLog.record_id || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-gray-900 mb-2">Activity Details</h4>
+            <div className="bg-white p-4 rounded border">
+              <pre className="text-sm text-gray-800 whitespace-pre-wrap">
+                {JSON.stringify(selectedAuditLog.details, null, 2)}
+              </pre>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                const logText = `
+Audit Log Details:
+Timestamp: ${new Date(selectedAuditLog.created_at).toLocaleString()}
+Action: ${selectedAuditLog.action}
+Resource: ${selectedAuditLog.resource}
+Table: ${selectedAuditLog.table_name || 'N/A'}
+User: ${selectedAuditLog.user_name && selectedAuditLog.user_surname 
+  ? `${selectedAuditLog.user_name} ${selectedAuditLog.user_surname}` 
+  : selectedAuditLog.user_id || 'System'}
+User ID: ${selectedAuditLog.user_id || 'N/A'}
+IP Address: ${selectedAuditLog.ip_address}
+Record ID: ${selectedAuditLog.record_id || 'N/A'}
+
+Details:
+${JSON.stringify(selectedAuditLog.details, null, 2)}
+                `;
+                navigator.clipboard.writeText(logText);
+                alert('Audit log details copied to clipboard!');
+              }}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Copy Details
+            </button>
+            <button
+              onClick={() => setSelectedAuditLog(null)}
+              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  };
 
   const UsersModal = () => (
     <Modal title="User Management" onClose={closeModal}>
@@ -2986,7 +3296,7 @@ const Admin = () => {
             <AlertCircle className="h-8 w-8 text-red-600" />
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-          <p className="text-gray-600 mb-4">
+              <p className="text-gray-600 mb-4">
             You don't have permission to access the admin panel. Please contact an administrator.
           </p>
         </div>
@@ -3387,6 +3697,7 @@ const Admin = () => {
         {activeModal === 'security' && <SecurityModal />}
         {activeModal === 'users' && <UsersModal />}
         {activeModal === 'userDetails' && <UserDetailsModal />}
+        {selectedAuditLog && <AuditLogDetailModal />}
 
       </div>
     </div>
