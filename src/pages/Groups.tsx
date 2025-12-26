@@ -1,13 +1,7 @@
-// Groups.tsx - Complete Component with Audit Logging
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  Users, Database, MapPin, Calendar, User, Search, X, Shield, 
-  AlertCircle, CheckCircle, Printer, Clock, FileText, Save, 
-  UserPlus, Home, Phone, Download, FileDown, Plus, Settings, 
-  Trash2, Edit 
-} from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -71,255 +65,7 @@ interface GroupReport {
   created_at: string | null;
 }
 
-// ============================================
-// AUDIT LOG HOOK - Complete Implementation
-// ============================================
-interface AuditLog {
-  id?: string;
-  action: string;
-  entity_type: string;
-  entity_id: string;
-  table_name: string;
-  metadata: Record<string, any>;
-  user_id: string | null;
-  user_email: string | null;
-  ip_address: string;
-  user_agent: string;
-  created_at?: string;
-}
-
-const useAuditLog = () => {
-  const [isAuditLogAvailable, setIsAuditLogAvailable] = useState<boolean>(true);
-  const [lastError, setLastError] = useState<string | null>(null);
-
-  useEffect(() => {
-    checkAuditLogTable();
-  }, []);
-
-  const checkAuditLogTable = async () => {
-    try {
-      const { error } = await supabase
-        .from('audit_logs')
-        .select('id')
-        .limit(1);
-
-      if (error) {
-        if (error.code === '42P01') {
-          console.warn('audit_logs table not found. Audit logging will use console fallback.');
-          setIsAuditLogAvailable(false);
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to check audit_logs table:', error);
-      setIsAuditLogAvailable(false);
-    }
-  };
-
-  const getCurrentUser = () => {
-    try {
-      const userData = localStorage.getItem('user');
-      const user = userData ? JSON.parse(userData) : null;
-      return {
-        id: user?.id || null,
-        email: user?.email || null
-      };
-    } catch (error) {
-      console.error('Failed to get current user:', error);
-      return { id: null, email: null };
-    }
-  };
-
-  const getClientInfo = () => {
-    return {
-      ip_address: 'browser',
-      user_agent: navigator.userAgent || 'unknown',
-      screen_resolution: `${window.screen.width}x${window.screen.height}`,
-      language: navigator.language || 'unknown',
-      platform: navigator.platform || 'unknown'
-    };
-  };
-
-  const logEvent = async (
-    action: string,
-    entityType: string,
-    metadata: any,
-    tableName: string,
-    entityId: string
-  ): Promise<void> => {
-    try {
-      setLastError(null);
-      
-      const user = getCurrentUser();
-      const clientInfo = getClientInfo();
-
-      const enhancedMetadata = {
-        ...(typeof metadata === 'object' ? metadata : { data: metadata }),
-        client_info: {
-          screen_resolution: clientInfo.screen_resolution,
-          language: clientInfo.language,
-          platform: clientInfo.platform,
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      const auditLog: AuditLog = {
-        action,
-        entity_type: entityType,
-        entity_id: entityId,
-        table_name: tableName,
-        metadata: JSON.stringify(enhancedMetadata),
-        user_id: user.id,
-        user_email: user.email,
-        ip_address: clientInfo.ip_address,
-        user_agent: clientInfo.user_agent,
-        created_at: new Date().toISOString()
-      };
-
-      if (isAuditLogAvailable) {
-        const { error } = await supabase
-          .from('audit_logs')
-          .insert([auditLog]);
-
-        if (error) {
-          throw error;
-        }
-      } else {
-        console.group('🔍 AUDIT LOG (Fallback - Table Not Available)');
-        console.log('Action:', action);
-        console.log('Entity Type:', entityType);
-        console.log('Entity ID:', entityId);
-        console.log('Table:', tableName);
-        console.log('User:', user);
-        console.log('Metadata:', enhancedMetadata);
-        console.log('Client Info:', clientInfo);
-        console.log('Timestamp:', auditLog.created_at);
-        console.groupEnd();
-      }
-
-      console.log(`📝 Audit: ${action} on ${entityType} (ID: ${entityId}) by ${user.email || 'anonymous'}`);
-
-    } catch (error: any) {
-      console.error('❌ Failed to log audit event:', error);
-      setLastError(error.message || 'Unknown error occurred');
-      
-      const user = getCurrentUser();
-      console.log('📋 Audit Event (Error Fallback):', {
-        action,
-        entityType,
-        entityId,
-        tableName,
-        userId: user.id,
-        userEmail: user.email,
-        metadata,
-        timestamp: new Date().toISOString(),
-        error: error.message
-      });
-    }
-  };
-
-  const getAuditLogs = async (options: {
-    entityType?: string;
-    entityId?: string;
-    userId?: string;
-    startDate?: Date;
-    endDate?: Date;
-    limit?: number;
-    page?: number;
-  } = {}): Promise<AuditLog[]> => {
-    try {
-      const {
-        entityType,
-        entityId,
-        userId,
-        startDate,
-        endDate,
-        limit = 50,
-        page = 1
-      } = options;
-
-      let query = supabase
-        .from('audit_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range((page - 1) * limit, page * limit - 1);
-
-      if (entityType) {
-        query = query.eq('entity_type', entityType);
-      }
-
-      if (entityId) {
-        query = query.eq('entity_id', entityId);
-      }
-
-      if (userId) {
-        query = query.eq('user_id', userId);
-      }
-
-      if (startDate) {
-        query = query.gte('created_at', startDate.toISOString());
-      }
-
-      if (endDate) {
-        query = query.lte('created_at', endDate.toISOString());
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        throw error;
-      }
-
-      return (data || []).map(log => ({
-        ...log,
-        metadata: typeof log.metadata === 'string' ? JSON.parse(log.metadata) : log.metadata
-      }));
-
-    } catch (error) {
-      console.error('Failed to fetch audit logs:', error);
-      return [];
-    }
-  };
-
-  const clearLogs = async (olderThanDays: number = 90): Promise<number> => {
-    try {
-      if (!isAuditLogAvailable) {
-        console.warn('Audit logs table not available for cleanup');
-        return 0;
-      }
-
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
-
-      const { count, error } = await supabase
-        .from('audit_logs')
-        .delete({ count: 'exact' })
-        .lt('created_at', cutoffDate.toISOString());
-
-      if (error) {
-        throw error;
-      }
-
-      console.log(`🧹 Cleared ${count} audit logs older than ${olderThanDays} days`);
-      return count || 0;
-
-    } catch (error) {
-      console.error('Failed to clear audit logs:', error);
-      return 0;
-    }
-  };
-
-  return {
-    logEvent,
-    getAuditLogs,
-    clearLogs,
-    isAuditLogAvailable,
-    lastError
-  };
-};
-
-// ============================================
-// CREATE GROUP MODAL
-// ============================================
+// New Group Creation Component
 interface CreateGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -330,7 +76,6 @@ interface CreateGroupModalProps {
 
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
   const { profile, isAdmin, isPastor } = useAuth();
-  const { logEvent } = useAuditLog();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -351,6 +96,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
   const loadAllMembers = async () => {
     try {
+      // Get ALL members, not just those with leadership roles
       const { data, error } = await supabase
         .from('members')
         .select('*')
@@ -382,6 +128,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       return;
     }
 
+    // Check if user has permission to create groups (only admin and pastor)
     if (!isAdmin() && !isPastor()) {
       onError('Only administrators and pastors can create new groups');
       return;
@@ -390,6 +137,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
     try {
       setLoading(true);
       
+      // Check if group with same name already exists
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -420,6 +168,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
       if (error) throw error;
 
+      // If a leader was selected, update their group assignment and role
       if (formData.leader_id) {
         await supabase
           .from('members')
@@ -429,26 +178,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
             updated_at: new Date().toISOString()
           })
           .eq('id', formData.leader_id);
-      }
-
-      // AUDIT LOGGING
-      if (data) {
-        await logEvent(
-          'CREATE',
-          'cell_group',
-          {
-            groupId: data.id,
-            groupName: data.name,
-            leaderId: data.leader_id,
-            location: data.location,
-            meetingDay: data.meeting_day,
-            meetingTime: data.meeting_time,
-            createdBy: userId,
-            timestamp: new Date().toISOString()
-          },
-          'cell_groups',
-          data.id
-        );
       }
 
       setFormData({
@@ -654,9 +383,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   );
 };
 
-// ============================================
-// EDIT GROUP MODAL
-// ============================================
+// Edit Group Modal Component
 interface EditGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
@@ -667,8 +394,6 @@ interface EditGroupModalProps {
 }
 
 const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
-  const { profile } = useAuth();
-  const { logEvent } = useAuditLog();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -737,6 +462,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
     try {
       setLoading(true);
       
+      // Check if group with same name already exists (excluding current group)
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -768,13 +494,16 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
       // Handle leader assignment changes
       if (previousLeaderId !== formData.leader_id) {
+        // Remove previous leader's group assignment and revert role
         if (previousLeaderId) {
+          // Get previous leader's current role
           const { data: previousLeader } = await supabase
             .from('members')
             .select('admin_role')
             .eq('id', previousLeaderId)
             .single();
           
+          // Revert to 'member' role if they were a group leader
           let newRole = previousLeader?.admin_role || 'member';
           if (newRole === 'group_leader') {
             newRole = 'member';
@@ -790,7 +519,9 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .eq('id', previousLeaderId);
         }
 
+        // Assign new leader
         if (formData.leader_id) {
+          // Check if new leader is already in another group
           const { data: newLeader } = await supabase
             .from('members')
             .select('cell_group_id')
@@ -812,31 +543,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .eq('id', formData.leader_id);
         }
       }
-
-      // AUDIT LOGGING
-      await logEvent(
-        'UPDATE',
-        'cell_group',
-        {
-          groupId: group.id,
-          groupName: formData.name.trim(),
-          previousName: group.name,
-          changes: {
-            name: formData.name.trim() !== group.name,
-            location: formData.location.trim() !== (group.location || ''),
-            meeting_day: formData.meeting_day !== group.meeting_day,
-            meeting_time: formData.meeting_time !== group.meeting_time,
-            leader_id: formData.leader_id !== group.leader_id,
-            description: formData.description.trim() !== (group.description || '')
-          },
-          newLeaderId: formData.leader_id,
-          previousLeaderId: group.leader_id,
-          updatedBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'cell_groups',
-        group.id
-      );
 
       onSuccess('Group updated successfully!');
       onClose();
@@ -1003,9 +709,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
   );
 };
 
-// ============================================
-// DELETE GROUP MODAL
-// ============================================
+// Delete Group Confirmation Modal
 interface DeleteGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
@@ -1016,8 +720,6 @@ interface DeleteGroupModalProps {
 }
 
 const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
-  const { profile } = useAuth();
-  const { logEvent } = useAuditLog();
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
 
@@ -1059,13 +761,16 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
     try {
       setLoading(true);
       
+      // Remove leader assignment if exists
       if (group.leader_id) {
+        // Get leader's current role
         const { data: leader } = await supabase
           .from('members')
           .select('admin_role')
           .eq('id', group.leader_id)
           .single();
         
+        // Revert to 'member' role if they were a group leader
         let newRole = leader?.admin_role || 'member';
         if (newRole === 'group_leader') {
           newRole = 'member';
@@ -1081,25 +786,7 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
           .eq('id', group.leader_id);
       }
 
-      // AUDIT LOGGING (BEFORE deletion to preserve group info)
-      await logEvent(
-        'DELETE',
-        'cell_group',
-        {
-          groupId: group.id,
-          groupName: group.name,
-          leaderId: group.leader_id,
-          location: group.location,
-          meetingDay: group.meeting_day,
-          meetingTime: group.meeting_time,
-          memberCount,
-          deletedBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'cell_groups',
-        group.id
-      );
-
+      // Delete the group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -1194,12 +881,9 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
   );
 };
 
-// ============================================
-// GROUP MEETING CREATION STEP
-// ============================================
+// Group Meeting Creation Step
 const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
-  const { profile, canCreateGroupMeetings } = useAuth();
-  const { logEvent } = useAuditLog();
+  const { canCreateGroupMeetings } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -1243,6 +927,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
       return;
     }
 
+    // Check permission
     if (!canCreateGroupMeetings(group.id)) {
       onError('You do not have permission to create meetings for this group');
       return;
@@ -1260,32 +945,13 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         status: 'scheduled'
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('meetings')
         .insert([newMeeting])
         .select()
         .single();
 
       if (error) throw error;
-
-      // AUDIT LOGGING
-      await logEvent(
-        'CREATE',
-        'group_meeting',
-        {
-          meetingId: data.id,
-          groupId: group.id,
-          groupName: group.name,
-          meetingDate: data.meeting_date,
-          meetingTime: data.meeting_time,
-          location: data.location,
-          topic: data.topic,
-          createdBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'meetings',
-        data.id
-      );
 
       setFormData({
         meeting_date: '',
@@ -1427,9 +1093,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
   );
 };
 
-// ============================================
-// GROUP ATTENDANCE STEP
-// ============================================
+// Group Attendance Step Component
 interface GroupAttendanceStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -1439,16 +1103,8 @@ interface GroupAttendanceStepProps {
   onError: (message: string) => void;
 }
 
-const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ 
-  group, 
-  meetings, 
-  selectedMeeting, 
-  onMeetingSelect, 
-  onAttendanceSaved, 
-  onError 
-}) => {
-  const { profile, canManageGroupAttendance } = useAuth();
-  const { logEvent } = useAuditLog();
+const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
+  const { canManageGroupAttendance } = useAuth();
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
@@ -1476,6 +1132,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
   }, [selectedMeeting]);
 
   useEffect(() => {
+    // Update stats whenever attendance changes
     const presentCount = Object.values(attendance).filter(status => status === 'present').length;
     const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
     const absentWithReasonCount = Object.values(attendance).filter(status => status === 'absent_with_reason').length;
@@ -1501,6 +1158,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
       
       setGroupMembers(data || []);
       
+      // Only initialize as present if we don't have existing attendance loaded
       if (!initialLoadComplete) {
         const initialAttendance: Record<string, 'present'> = {};
         data?.forEach(member => {
@@ -1590,23 +1248,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       if (error) throw error;
       
-      // AUDIT LOGGING
-      await logEvent(
-        'UPDATE',
-        'member_group_assignment',
-        {
-          memberId: member.id,
-          memberName: `${member.name} ${member.surname}`,
-          groupId: group.id,
-          groupName: group.name,
-          action: 'added_to_group',
-          addedBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'members',
-        member.id
-      );
-      
       await loadGroupMembers();
       setShowAddAttendeeModal(false);
       setSearchMemberTerm('');
@@ -1625,6 +1266,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canManageGroupAttendance(group.id)) {
       onError('You do not have permission to manage attendance for this group');
       return;
@@ -1639,6 +1281,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
+      // First, delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('meeting_attendance')
         .delete()
@@ -1646,65 +1289,25 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       if (deleteError) throw deleteError;
 
+      // Then insert new attendance records
       const { error: insertError } = await supabase
         .from('meeting_attendance')
         .insert(attendanceRecords);
 
-      if (insertError) throw insertError;
+if (insertError) throw insertError;
 
-      await supabase
-        .from('meetings')
-        .update({ status: 'completed' })
-        .eq('id', selectedMeeting.id);
+// Update the meeting status to completed
+await supabase
+  .from('meetings')
+  .update({ status: 'completed' })
+  .eq('id', selectedMeeting.id);
 
-      // AUDIT LOGGING
-      const presentCount = attendanceRecords.filter(r => r.status === 'present').length;
-      const absentCount = attendanceRecords.filter(r => r.status === 'absent').length;
-      const absentWithReasonCount = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
-      
-      await logEvent(
-        'ATTENDANCE_UPDATE',
-        'group_attendance',
-        {
-          groupId: group.id,
-          groupName: group.name,
-          meetingId: selectedMeeting.id,
-          meetingDate: selectedMeeting.meeting_date,
-          attendanceStats: {
-            total: attendanceRecords.length,
-            present: presentCount,
-            absent: absentCount,
-            absentWithReason: absentWithReasonCount,
-            attendanceRate: Math.round((presentCount / attendanceRecords.length) * 100)
-          },
-          updatedBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'meeting_attendance',
-        selectedMeeting.id
-      );
+// Reload attendance data after saving to ensure state is synced
+await loadExistingAttendance();
 
-      // Log individual attendance records
-      for (const record of attendanceRecords) {
-        await logEvent(
-          'ATTENDANCE_RECORD',
-          'member_attendance',
-          {
-            memberId: record.member_id,
-            meetingId: selectedMeeting.id,
-            status: record.status,
-            notes: record.notes,
-            recordedBy: profile?.id,
-            timestamp: new Date().toISOString()
-          },
-          'members',
-          record.member_id
-        );
-      }
-
-      await loadExistingAttendance();
-      onAttendanceSaved();
-      onError('Attendance saved successfully!');
+// Call the success callback AFTER the reload completes
+onAttendanceSaved();
+onError('Attendance saved successfully!');
     } catch (error: any) {
       onError('Failed to save group attendance: ' + error.message);
     } finally {
@@ -1772,6 +1375,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       {selectedMeeting && (
         <div className="space-y-6">
+          {/* Attendance Summary */}
           <div className="bg-white border border-gray-200 rounded-2xl p-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1999,9 +1603,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
   );
 };
 
-// ============================================
-// GROUP NEWCOMER STEP
-// ============================================
+// Group Newcomer Step Component
 interface GroupNewcomerStepProps {
   group: CellGroup;
   selectedMeeting: GroupMeeting | null;
@@ -2009,14 +1611,8 @@ interface GroupNewcomerStepProps {
   onError: (message: string) => void;
 }
 
-const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ 
-  group, 
-  selectedMeeting, 
-  onNewcomerAdded, 
-  onError 
-}) => {
-  const { profile, canAddGroupNewcomers } = useAuth();
-  const { logEvent } = useAuditLog();
+const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
+  const { canAddGroupNewcomers } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -2067,6 +1663,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canAddGroupNewcomers(group.id)) {
       onError('You do not have permission to add newcomers to this group');
       return;
@@ -2075,6 +1672,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
     try {
       setLoading(true);
       
+      // Check if member already exists with same phone
       let existingMember = null;
       if (formData.phone.trim()) {
         const { data: phoneMatch } = await supabase
@@ -2088,7 +1686,9 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
       let memberId;
       
       if (existingMember) {
+        // Use existing member
         memberId = existingMember.id;
+        // Update member status and group assignment
         await supabase
           .from('members')
           .update({ 
@@ -2100,6 +1700,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
           })
           .eq('id', existingMember.id);
       } else {
+        // Create new member
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
@@ -2133,6 +1734,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
         memberId = memberData.id;
       }
 
+      // Record attendance for selected meeting
       if (selectedMeeting) {
         const { error: attendanceError } = await supabase
           .from('meeting_attendance')
@@ -2144,30 +1746,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
           }]);
         if (attendanceError) console.error('Failed to record attendance:', attendanceError);
       }
-
-      // AUDIT LOGGING
-      await logEvent(
-        existingMember ? 'UPDATE' : 'CREATE',
-        'group_newcomer',
-        {
-          memberId: memberId,
-          memberName: `${formData.name.trim()} ${formData.surname.trim()}`,
-          groupId: group.id,
-          groupName: group.name,
-          meetingId: selectedMeeting?.id,
-          meetingDate: selectedMeeting?.meeting_date,
-          status: 'newcomer',
-          invitedBy: formData.invited_by,
-          residence: formData.residence.trim(),
-          phone: formData.phone.trim(),
-          notes: formData.notes,
-          isExistingMember: !!existingMember,
-          addedBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'members',
-        memberId
-      );
 
       setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
       setShowForm(false);
@@ -2373,9 +1951,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
   );
 };
 
-// ============================================
-// GROUP REPORT STEP
-// ============================================
+// Group Report Step Component
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2385,16 +1961,8 @@ interface GroupReportStepProps {
   onError: (message: string) => void;
 }
 
-const GroupReportStep: React.FC<GroupReportStepProps> = ({ 
-  group, 
-  meetings, 
-  selectedMeeting, 
-  onMeetingSelect, 
-  onReportCreated, 
-  onError 
-}) => {
-  const { profile, canCreateGroupReports } = useAuth();
-  const { logEvent } = useAuditLog();
+const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
+  const { canCreateGroupReports } = useAuth();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
   const [existingReport, setExistingReport] = useState<GroupReport | null>(null);
@@ -2420,6 +1988,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
   }, [selectedMeeting]);
 
   useEffect(() => {
+    // Update stats whenever attendance changes
     const presentCount = attendance.filter(a => a.status === 'present').length;
     const absentCount = attendance.filter(a => a.status === 'absent').length;
     const absentWithReasonCount = attendance.filter(a => a.status === 'absent_with_reason').length;
@@ -2453,6 +2022,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
         return;
       }
       
+      console.log('Loaded attendance data:', data); // Debug log
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2506,6 +2076,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canCreateGroupReports(group.id)) {
       onError('You do not have permission to create reports for this group');
       return;
@@ -2522,23 +2093,17 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
       };
 
       let error;
-      let reportId;
-      
       if (existingReport) {
         const { error: updateError } = await supabase
           .from('meeting_reports')
           .update(reportPayload)
           .eq('id', existingReport.id);
         error = updateError;
-        reportId = existingReport.id;
       } else {
-        const { data: newReport, error: insertError } = await supabase
+        const { error: insertError } = await supabase
           .from('meeting_reports')
-          .insert([reportPayload])
-          .select()
-          .single();
+          .insert([reportPayload]);
         error = insertError;
-        reportId = newReport?.id;
       }
 
       if (error) throw error;
@@ -2547,35 +2112,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
         .from('meetings')
         .update({ status: 'completed' })
         .eq('id', selectedMeeting.id);
-
-      // AUDIT LOGGING
-      await logEvent(
-        existingReport ? 'UPDATE' : 'CREATE',
-        'group_report',
-        {
-          reportId: reportId,
-          meetingId: selectedMeeting.id,
-          meetingDate: selectedMeeting.meeting_date,
-          groupId: group.id,
-          groupName: group.name,
-          reportType: 'meeting_report',
-          attendanceStats: {
-            total: attendanceStats.total,
-            present: attendanceStats.present,
-            absent: attendanceStats.absent,
-            absentWithReason: attendanceStats.absentWithReason,
-            attendanceRate: attendanceStats.total > 0 ? 
-              Math.round((attendanceStats.present / attendanceStats.total) * 100) : 0
-          },
-          hasDecisions: !!reportData.decisions_made,
-          hasActionItems: !!reportData.action_items,
-          nextMeetingDate: reportData.next_meeting_date,
-          createdBy: profile?.id,
-          timestamp: new Date().toISOString()
-        },
-        'meeting_reports',
-        reportId
-      );
 
       onReportCreated();
     } catch (error: any) {
@@ -3076,9 +2612,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
   );
 };
 
-// ============================================
-// GROUP MANAGEMENT WORKFLOW
-// ============================================
+// Group Management Workflow Component
 interface GroupWorkflowProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -3119,6 +2653,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
 
   return (
     <div className="space-y-6">
+      {/* Progress Steps */}
       <div className="flex justify-between items-center">
         {steps.map((step) => (
           <div key={step.number} className="flex-1 text-center">
@@ -3139,6 +2674,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
         ))}
       </div>
 
+      {/* Step Content */}
       <div className="bg-gray-50 rounded-xl p-6 min-h-[400px]">
         {currentStep === 1 && (
           <GroupMeetingCreationStep
@@ -3192,6 +2728,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
         )}
       </div>
 
+      {/* Navigation Buttons */}
       <div className="flex justify-between pt-6 border-t border-gray-200">
         <button
           onClick={() => setCurrentStep(prev => prev - 1)}
@@ -3221,268 +2758,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
-// ============================================
-// AUDIT LOG DASHBOARD COMPONENT
-// ============================================
-const AuditLogDashboard: React.FC = () => {
-  const { getAuditLogs, clearLogs, isAuditLogAvailable, lastError } = useAuditLog();
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [filters, setFilters] = useState({
-    entityType: '',
-    userId: '',
-    startDate: '',
-    endDate: '',
-    page: 1,
-    limit: 50
-  });
-  const [totalLogs, setTotalLogs] = useState(0);
-
-  useEffect(() => {
-    fetchLogs();
-  }, [filters]);
-
-  const fetchLogs = async () => {
-    try {
-      setLoading(true);
-      const logs = await getAuditLogs({
-        entityType: filters.entityType || undefined,
-        userId: filters.userId || undefined,
-        startDate: filters.startDate ? new Date(filters.startDate) : undefined,
-        endDate: filters.endDate ? new Date(filters.endDate) : undefined,
-        page: filters.page,
-        limit: filters.limit
-      });
-      setLogs(logs);
-    } catch (error) {
-      console.error('Failed to fetch logs:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClearLogs = async () => {
-    if (window.confirm('Are you sure you want to clear logs older than 90 days?')) {
-      const cleared = await clearLogs(90);
-      alert(`Cleared ${cleared} logs`);
-      fetchLogs();
-    }
-  };
-
-  const getActionColor = (action: string) => {
-    switch (action.toLowerCase()) {
-      case 'create':
-        return 'bg-green-100 text-green-800';
-      case 'update':
-        return 'bg-blue-100 text-blue-800';
-      case 'delete':
-        return 'bg-red-100 text-red-800';
-      case 'read':
-      case 'view':
-        return 'bg-gray-100 text-gray-800';
-      case 'login':
-      case 'logout':
-        return 'bg-purple-100 text-purple-800';
-      default:
-        return 'bg-yellow-100 text-yellow-800';
-    }
-  };
-
-  if (!isAuditLogAvailable) {
-    return (
-      <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <div className="flex items-center">
-          <AlertCircle className="h-5 w-5 text-yellow-600 mr-2" />
-          <h3 className="text-lg font-medium text-yellow-800">Audit Logs Not Available</h3>
-        </div>
-        <p className="mt-2 text-sm text-yellow-700">
-          The audit_logs table is not set up in the database. Logs are being written to console instead.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Audit Logs</h2>
-            <p className="text-gray-600">Track all system activities and changes</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={fetchLogs}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Refresh
-            </button>
-            <button
-              onClick={handleClearLogs}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
-              Clear Old Logs
-            </button>
-          </div>
-        </div>
-
-        {lastError && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-red-700">{lastError}</p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Entity Type
-            </label>
-            <select
-              value={filters.entityType}
-              onChange={(e) => setFilters({...filters, entityType: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-            >
-              <option value="">All Types</option>
-              <option value="cell_group">Groups</option>
-              <option value="group_meeting">Meetings</option>
-              <option value="member">Members</option>
-              <option value="attendance">Attendance</option>
-              <option value="report">Reports</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              User ID
-            </label>
-            <input
-              type="text"
-              value={filters.userId}
-              onChange={(e) => setFilters({...filters, userId: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              placeholder="Filter by user..."
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              From Date
-            </label>
-            <input
-              type="date"
-              value={filters.startDate}
-              onChange={(e) => setFilters({...filters, startDate: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              To Date
-            </label>
-            <input
-              type="date"
-              value={filters.endDate}
-              onChange={(e) => setFilters({...filters, endDate: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Time
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Action
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Entity
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  User
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Details
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-                  </td>
-                </tr>
-              ) : logs.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                    No audit logs found
-                  </td>
-                </tr>
-              ) : (
-                logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(log.created_at!).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getActionColor(log.action)}`}>
-                        {log.action}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {log.entity_type} ({log.entity_id.substring(0, 8)}...)
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {log.user_email || 'Anonymous'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <button
-                        onClick={() => {
-                          alert(JSON.stringify(log.metadata, null, 2));
-                        }}
-                        className="text-blue-600 hover:text-blue-900"
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex justify-between items-center mt-4">
-          <div className="text-sm text-gray-700">
-            Showing {logs.length} logs
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFilters({...filters, page: Math.max(1, filters.page - 1)})}
-              disabled={filters.page === 1}
-              className="px-3 py-1 border border-gray-300 rounded disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span className="px-3 py-1">Page {filters.page}</span>
-            <button
-              onClick={() => setFilters({...filters, page: filters.page + 1})}
-              className="px-3 py-1 border border-gray-300 rounded"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ============================================
-// MAIN GROUPS COMPONENT
-// ============================================
+// Main Groups Component
 const Groups = () => {
   const { 
     profile, 
@@ -3494,8 +2770,6 @@ const Groups = () => {
     isGroupLeader, 
     isMember 
   } = useAuth();
-  
-  const { logEvent } = useAuditLog();
   
   const [groups, setGroups] = useState<CellGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CellGroup | null>(null);
@@ -3510,7 +2784,6 @@ const Groups = () => {
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [showAuditLogDashboard, setShowAuditLogDashboard] = useState(false);
 
   const [meetings, setMeetings] = useState<GroupMeeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -3528,6 +2801,7 @@ const Groups = () => {
     try {
       setLoading(true);
       
+      // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -3535,13 +2809,16 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
+      // Get leader information for each group
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
+          // Get member count
           const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
+          // Get leader information if leader_id exists
           let leaderInfo = null;
           if (group.leader_id) {
             const { data: leaderData } = await supabase
@@ -3553,6 +2830,7 @@ const Groups = () => {
             leaderInfo = leaderData;
           }
           
+          // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
@@ -3566,22 +2844,27 @@ const Groups = () => {
         })
       );
 
+      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
       if (!isAdmin() && !isPastor()) {
         if (isGroupLeader()) {
+          // Group Leaders can see only their own group
           filteredGroups = groupsWithDetails.filter(group => 
             group.leader_id === profile?.id
           );
         } else if (isMember()) {
+          // Members can see only their own group
           const userGroup = await getUserGroup();
           filteredGroups = groupsWithDetails.filter(group => 
             group.id === userGroup?.id
           );
         } else {
+          // No role - no access
           filteredGroups = [];
         }
       }
+      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups);
     } catch (error: any) {
@@ -3664,6 +2947,7 @@ const Groups = () => {
         return;
       }
       
+      console.log('Loaded attendance records:', data); // Debug log
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -3704,6 +2988,7 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
+    // Only allow admin and pastor to edit groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can edit groups');
       return;
@@ -3713,6 +2998,7 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
+    // Only allow admin and pastor to delete groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete groups');
       return;
@@ -3728,7 +3014,6 @@ const Groups = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
-    setShowAuditLogDashboard(false);
     setSelectedGroup(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
@@ -3752,27 +3037,32 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
+  // Permission functions
   const canCreateGroups = () => {
     return isAdmin() || isPastor();
   };
 
   const canEditGroup = (group: CellGroup) => {
+    // Only admin and pastor can edit groups
     return isAdmin() || isPastor();
   };
 
   const canDeleteGroup = (group: CellGroup) => {
+    // Only admin and pastor can delete groups
     return isAdmin() || isPastor();
   };
 
   const canViewGroupDetails = (group: CellGroup) => {
     if (isAdmin() || isPastor()) {
-      return true;
+      return true; // Admins & Pastors can view all groups
     }
     if (isGroupLeader()) {
-      return group.leader_id === profile?.id;
+      return group.leader_id === profile?.id; // Leaders can view only their own group
     }
     if (isMember()) {
-      return true;
+      // Members can view only their own group
+      // This assumes members have a cell_group_id in their profile
+      return true; // We'll filter this in loadGroups
     }
     return false;
   };
@@ -3801,6 +3091,7 @@ const Groups = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
           <p className="text-lg text-gray-600">
@@ -3808,6 +3099,7 @@ const Groups = () => {
           </p>
         </div>
 
+        {/* Search and Create Group Bar */}
         <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
@@ -3820,29 +3112,18 @@ const Groups = () => {
             />
           </div>
           
-          <div className="flex gap-2">
-            {canCreateGroups() && (
-              <button
-                onClick={() => setShowCreateGroupModal(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-green-600 text-white rounded-xl hover:from-blue-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
-              >
-                <Plus className="h-5 w-5" />
-                Create New Group
-              </button>
-            )}
-            
-            {(isAdmin() || isPastor()) && (
-              <button
-                onClick={() => setShowAuditLogDashboard(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-gray-800 text-white rounded-xl hover:bg-gray-900 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
-              >
-                <Database className="h-5 w-5" />
-                Audit Logs
-              </button>
-            )}
-          </div>
+          {canCreateGroups() && (
+            <button
+              onClick={() => setShowCreateGroupModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-green-600 text-white rounded-xl hover:from-blue-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
+            >
+              <Plus className="h-5 w-5" />
+              Create New Group
+            </button>
+          )}
         </div>
 
+        {/* Error/Success Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
@@ -3871,6 +3152,7 @@ const Groups = () => {
           </div>
         )}
 
+        {/* Groups Grid */}
         {!profile ? (
           <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
             <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -4027,6 +3309,7 @@ const Groups = () => {
           </div>
         )}
 
+        {/* Modals */}
         <CreateGroupModal
           isOpen={showCreateGroupModal}
           onClose={() => setShowCreateGroupModal(false)}
@@ -4379,23 +3662,6 @@ const Groups = () => {
                   setTimeout(() => setError(null), 3000);
                 }}
               />
-            </div>
-          </div>
-        )}
-
-        {showAuditLogDashboard && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900">Audit Log Dashboard</h3>
-                <button
-                  onClick={closeAllModals}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <AuditLogDashboard />
             </div>
           </div>
         )}
