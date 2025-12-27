@@ -1,4 +1,4 @@
-import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2, Clock, Activity, BarChart3, Filter, Calendar, User, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2, Clock, Activity } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -17,34 +17,27 @@ const cleanUUIDArray = (ids: string[]): string[] => {
   });
 };
 
-// Audit logging helper ////////////////////////////////////////////////////////
+// Audit logging helper
 const logAuditEvent = async (
   action: string,
   resource: string,
   details: any,
   userId?: string,
   userIp?: string,
-  userAgent?: string,
-  tableName?: string,
-  recordId?: string
+  userAgent?: string
 ) => {
   try {
     console.log('📝 Audit Log:', { action, resource, details, userId });
     
-    const allowedActions = ['INSERT', 'UPDATE', 'DELETE'];
-    const mappedAction = allowedActions.includes(action) ? action : 'UPDATE';
-    
     const { error } = await supabase
       .from('audit_logs')
       .insert({
-        user_id: userId || null,
-        action: mappedAction,
+        user_id: userId,
+        action,
         resource,
-        details: details || {},
+        details,
         ip_address: userIp || '127.0.0.1',
         user_agent: userAgent || navigator.userAgent,
-        table_name: tableName || resource,
-        record_id: recordId || '00000000-0000-0000-0000-000000000000',
         created_at: new Date().toISOString()
       });
 
@@ -54,172 +47,6 @@ const logAuditEvent = async (
   } catch (error) {
     console.error('❌ Error logging audit event:', error);
   }
-};
-/////////////////////////////////////////////////////
-
-// New PostgreSQL-based audit log hook
-interface AuditLog {
-  id: string;
-  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE';
-  entity_type: string;
-  entity_id: string;
-  table_name: string;
-  metadata: {
-    action: string;
-    table: string;
-    timestamp: string;
-    old_data: any;
-    new_data: any;
-    changes: Record<string, { old: any; new: any }>;
-  };
-  user_id: string | null;
-  user_email: string | null;
-  ip_address: string;
-  user_agent: string;
-  created_at: string;
-}
-
-interface AuditLogQueryOptions {
-  limit?: number;
-  offset?: number;
-  action?: string;
-  entityType?: string;
-  tableName?: string;
-  userEmail?: string;
-  startDate?: Date;
-  endDate?: Date;
-  entityId?: string;
-}
-
-const usePostgresAuditLog = () => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const getAuditLogs = async (options: AuditLogQueryOptions = {}): Promise<AuditLog[]> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const {
-        limit = 100,
-        offset = 0,
-        action,
-        entityType,
-        tableName,
-        userEmail,
-        startDate,
-        endDate,
-        entityId
-      } = options;
-
-      const { data, error: queryError } = await supabase
-        .rpc('get_audit_logs', {
-          p_limit: limit,
-          p_offset: offset,
-          p_action: action || null,
-          p_entity_type: entityType || null,
-          p_table_name: tableName || null,
-          p_user_email: userEmail || null,
-          p_start_date: startDate ? startDate.toISOString() : null,
-          p_end_date: endDate ? endDate.toISOString() : null,
-          p_entity_id: entityId || null
-        });
-
-      if (queryError) {
-        throw queryError;
-      }
-
-      return data || [];
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch audit logs');
-      console.error('Error fetching audit logs:', err);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getAuditStatistics = async (days: number = 30): Promise<any> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: queryError } = await supabase
-        .rpc('get_audit_statistics', {
-          p_days: days
-        });
-
-      if (queryError) {
-        throw queryError;
-      }
-
-      return data || [];
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch audit statistics');
-      console.error('Error fetching audit statistics:', err);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const searchAuditLogs = async (searchText: string, limit: number = 100): Promise<AuditLog[]> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: queryError } = await supabase
-        .rpc('search_audit_logs', {
-          p_search_text: searchText,
-          p_limit: limit
-        });
-
-      if (queryError) {
-        throw queryError;
-      }
-
-      return data || [];
-    } catch (err: any) {
-      setError(err.message || 'Failed to search audit logs');
-      console.error('Error searching audit logs:', err);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const cleanupOldLogs = async (retentionDays: number = 365): Promise<number> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: queryError } = await supabase
-        .rpc('cleanup_old_audit_logs', {
-          p_retention_days: retentionDays
-        });
-
-      if (queryError) {
-        throw queryError;
-      }
-
-      return data || 0;
-    } catch (err: any) {
-      setError(err.message || 'Failed to cleanup old logs');
-      console.error('Error cleaning up old logs:', err);
-      return 0;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return {
-    getAuditLogs,
-    getAuditStatistics,
-    searchAuditLogs,
-    cleanupOldLogs,
-    loading,
-    error
-  };
 };
 
 // Get client IP address (simplified)
@@ -323,7 +150,7 @@ interface SecuritySettings {
   };
 }
 
-interface OldAuditLog {
+interface AuditLog {
   id: string;
   user_id: string;
   action: string;
@@ -472,6 +299,7 @@ const cloudService = {
 
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
+      // ✅ Clean arrays before sending to database
       const cleanedUpdates = {
         ...updates,
         assigned_groups: updates.assigned_groups 
@@ -612,15 +440,12 @@ const cloudService = {
 
       if (error) throw error;
       
+      // Log audit event
       await logAuditEvent(
         'UPDATE',
         'system_config',
         { configId: data?.id || 'new', changes: config },
-        (window as any).currentUserId,
-        await getClientIp(),
-        navigator.userAgent,
-        'system_config',
-        data?.id || '00000000-0000-0000-0000-000000000000'
+        (window as any).currentUserId
       );
       
       return data as any;
@@ -709,6 +534,7 @@ const cloudService = {
 
       if (error) throw error;
       
+      // Log audit event
       await logAuditEvent(
         'UPDATE',
         'security_settings',
@@ -723,9 +549,10 @@ const cloudService = {
     }
   },
 
-  async getOldAuditLogs(): Promise<OldAuditLog[]> {
+  async getAuditLogs(): Promise<AuditLog[]> {
     try {
-      console.log('🔍 Fetching old audit logs...');
+      console.log('🔍 Fetching audit logs...');
+      // First get audit logs
       const { data: logsData, error } = await supabase
         .from('audit_logs')
         .select('*')
@@ -737,8 +564,9 @@ const cloudService = {
         return [];
       }
 
-      const logs = (logsData || []) as OldAuditLog[];
+      const logs = (logsData || []) as AuditLog[];
       
+      // Get user names for each log
       const logsWithUserNames = await Promise.all(
         logs.map(async (log) => {
           if (log.user_id) {
@@ -783,6 +611,7 @@ const cloudService = {
 
       const csvContent = convertToCSV(data || []);
       
+      // Log audit event
       await logAuditEvent(
         'EXPORT',
         'members',
@@ -819,6 +648,7 @@ const cloudService = {
           const headerRow = rows[0];
           const headers = headerRow.split(',').map(col => col.replace(/^"|"$/g, '').trim());
           
+          // Validate that we have headers
           if (headers.length === 0 || headers.every(h => !h.trim())) {
             reject(new Error('CSV file has no valid headers. Please check your file format.'));
             return;
@@ -837,6 +667,7 @@ const cloudService = {
             const columns = row.split(',').map(col => col.replace(/^"|"$/g, '').trim());
             
             try {
+              // Map CSV columns to database fields
               const memberData: any = {
                 status: 'newcomer',
                 created_at: new Date().toISOString(),
@@ -860,6 +691,7 @@ const cloudService = {
                 admin_role: 'member'
               };
               
+              // Process each mapped field
               for (const csvHeader of headers) {
                 const dbField = fieldMapping[csvHeader];
                 if (dbField) {
@@ -867,6 +699,7 @@ const cloudService = {
                   if (columnIndex >= 0 && columnIndex < columns.length) {
                     const value = columns[columnIndex];
                     
+                    // Skip empty values for non-required fields
                     if (!value && !['surname', 'name'].includes(dbField)) {
                       continue;
                     }
@@ -885,6 +718,7 @@ const cloudService = {
                         memberData.phone = value.trim();
                         break;
                       case 'cell_group':
+                        // Find cell group by name
                         const cellGroup = cellGroups.find(g => 
                           g.type === 'cell_group' && 
                           g.name.toLowerCase() === value.toLowerCase().trim()
@@ -936,6 +770,7 @@ const cloudService = {
                 }
               }
 
+              // Validate required fields
               if (!memberData.name || !memberData.surname || !memberData.residence) {
                 const missingFields = [];
                 if (!memberData.name) missingFields.push('name');
@@ -945,6 +780,7 @@ const cloudService = {
                 throw new Error(`Missing required fields: ${missingFields.join(', ')}. These fields are required in the database.`);
               }
 
+              // Check if member exists (by name, surname, and phone if available)
               let existingMemberId: string | null = null;
               if (options.updateExisting) {
                 const query = supabase
@@ -965,6 +801,7 @@ const cloudService = {
               }
 
               if (existingMemberId) {
+                // Update existing member
                 console.log(`🔄 Updating existing member: ${memberData.name} ${memberData.surname}`);
                 const { error: updateError } = await supabase
                   .from('members')
@@ -978,6 +815,7 @@ const cloudService = {
                   errors++;
                 }
               } else if (options.createMissing) {
+                // Create new member
                 console.log(`➕ Creating new member: ${memberData.name} ${memberData.surname}`);
                 const { error: insertError } = await supabase
                   .from('members')
@@ -1001,6 +839,7 @@ const cloudService = {
             }
           }
 
+          // Log audit event for import
           if (success > 0) {
             await logAuditEvent(
               'IMPORT',
@@ -1043,6 +882,7 @@ const cloudService = {
         throw error;
       }
       
+      // Log audit event
       await logAuditEvent(
         'BACKUP',
         'system',
@@ -1149,6 +989,7 @@ const cloudService = {
 
       if (error) throw error;
 
+      // Log audit event
       if (count && count > 0) {
         await logAuditEvent(
           'CLEANUP',
@@ -1219,359 +1060,6 @@ const Modal = ({ children, title, onClose, size = 'max-w-4xl' }: {
   </div>
 );
 
-// New PostgreSQL Audit Log Dashboard Component
-const PostgresAuditLogDashboard = () => {
-  const { getAuditLogs, getAuditStatistics, searchAuditLogs, cleanupOldLogs, loading, error } = usePostgresAuditLog();
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [statistics, setStatistics] = useState<any[]>([]);
-  const [filters, setFilters] = useState({
-    action: '',
-    entityType: '',
-    tableName: '',
-    userEmail: '',
-    startDate: '',
-    endDate: '',
-    searchText: '',
-    page: 1,
-    limit: 50
-  });
-  const [totalCount, setTotalCount] = useState(0);
-  const [showFilters, setShowFilters] = useState(false);
-
-  useEffect(() => {
-    fetchLogs();
-    fetchStatistics();
-  }, [filters.page, filters.limit]);
-
-  const fetchLogs = async () => {
-    if (filters.searchText) {
-      const results = await searchAuditLogs(filters.searchText, filters.limit);
-      setLogs(results);
-      setTotalCount(results.length);
-    } else {
-      const results = await getAuditLogs({
-        limit: filters.limit,
-        offset: (filters.page - 1) * filters.limit,
-        action: filters.action || undefined,
-        entityType: filters.entityType || undefined,
-        tableName: filters.tableName || undefined,
-        userEmail: filters.userEmail || undefined,
-        startDate: filters.startDate ? new Date(filters.startDate) : undefined,
-        endDate: filters.endDate ? new Date(filters.endDate) : undefined
-      });
-      setLogs(results);
-      if (results.length > 0) {
-        setTotalCount((results[0] as any).total_count || 0);
-      }
-    }
-  };
-
-  const fetchStatistics = async () => {
-    const stats = await getAuditStatistics(30);
-    setStatistics(stats);
-  };
-
-  const handleCleanup = async () => {
-    if (window.confirm('Are you sure you want to clean up logs older than 365 days?')) {
-      const deleted = await cleanupOldLogs(365);
-      alert(`Cleaned up ${deleted} old logs`);
-      fetchLogs();
-      fetchStatistics();
-    }
-  };
-
-  const handleExport = () => {
-    const csvContent = [
-      ['ID', 'Action', 'Entity Type', 'Entity ID', 'Table', 'User Email', 'Timestamp', 'IP Address'].join(','),
-      ...logs.map(log => [
-        log.id,
-        log.action,
-        log.entity_type,
-        log.entity_id,
-        log.table_name,
-        log.user_email || 'Anonymous',
-        new Date(log.created_at).toLocaleString(),
-        log.ip_address
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `audit-logs-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case 'INSERT': return 'bg-green-100 text-green-800';
-      case 'UPDATE': return 'bg-blue-100 text-blue-800';
-      case 'DELETE': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">PostgreSQL Audit Logs</h2>
-            <p className="text-gray-600">Track all database activities automatically</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              <Filter className="h-4 w-4" />
-              Filters
-            </button>
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              <Download className="h-4 w-4" />
-              Export
-            </button>
-            <button
-              onClick={handleCleanup}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-            >
-              <Trash2 className="h-4 w-4" />
-              Cleanup
-            </button>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-red-600" />
-              <p className="text-red-700">{error}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Search */}
-        <div className="mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-            <input
-              type="text"
-              placeholder="Search audit logs..."
-              value={filters.searchText}
-              onChange={(e) => setFilters({...filters, searchText: e.target.value})}
-              onKeyPress={(e) => e.key === 'Enter' && fetchLogs()}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg"
-            />
-          </div>
-        </div>
-
-        {/* Filters */}
-        {showFilters && (
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
-              <select
-                value={filters.action}
-                onChange={(e) => setFilters({...filters, action: e.target.value})}
-                className="w-full px-3 py-2 border border-gray-300 rounded"
-              >
-                <option value="">All Actions</option>
-                <option value="INSERT">Insert</option>
-                <option value="UPDATE">Update</option>
-                <option value="DELETE">Delete</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Entity Type</label>
-              <select
-                value={filters.entityType}
-                onChange={(e) => setFilters({...filters, entityType: e.target.value})}
-                className="w-full px-3 py-2 border border-gray-300 rounded"
-              >
-                <option value="">All Types</option>
-                <option value="cell_group">Cell Group</option>
-                <option value="member">Member</option>
-                <option value="meeting">Meeting</option>
-                <option value="attendance">Attendance</option>
-                <option value="report">Report</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">User Email</label>
-              <input
-                type="text"
-                value={filters.userEmail}
-                onChange={(e) => setFilters({...filters, userEmail: e.target.value})}
-                className="w-full px-3 py-2 border border-gray-300 rounded"
-                placeholder="Filter by user..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
-              <input
-                type="date"
-                value={filters.startDate}
-                onChange={(e) => setFilters({...filters, startDate: e.target.value})}
-                className="w-full px-3 py-2 border border-gray-300 rounded"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
-              <input
-                type="date"
-                value={filters.endDate}
-                onChange={(e) => setFilters({...filters, endDate: e.target.value})}
-                className="w-full px-3 py-2 border border-gray-300 rounded"
-              />
-            </div>
-            <div className="md:col-span-3 lg:col-span-5 flex justify-end gap-2">
-              <button
-                onClick={fetchLogs}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Apply Filters
-              </button>
-              <button
-                onClick={() => setFilters({
-                  action: '',
-                  entityType: '',
-                  tableName: '',
-                  userEmail: '',
-                  startDate: '',
-                  endDate: '',
-                  searchText: '',
-                  page: 1,
-                  limit: 50
-                })}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Clear Filters
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Statistics */}
-        {statistics.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <BarChart3 className="h-5 w-5" />
-              Last 30 Days Activity
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {statistics.slice(0, 4).map((stat, index) => (
-                <div key={index} className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600">{new Date(stat.period).toLocaleDateString()}</div>
-                  <div className="text-2xl font-bold text-gray-900">{stat.total_actions}</div>
-                  <div className="text-sm text-gray-500">
-                    {stat.insert_count} inserts, {stat.update_count} updates, {stat.delete_count} deletes
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1">{stat.unique_users} unique users</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Logs Table */}
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Entity</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-                  </td>
-                </tr>
-              ) : logs.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                    No audit logs found
-                  </td>
-                </tr>
-              ) : (
-                logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(log.created_at).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getActionColor(log.action)}`}>
-                        {log.action}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <div className="font-medium">{log.entity_type}</div>
-                      <div className="text-gray-500 text-xs">{log.table_name}</div>
-                      <div className="text-gray-400 text-xs truncate max-w-xs">{log.entity_id}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <div>{log.user_email || 'Anonymous'}</div>
-                      <div className="text-gray-500 text-xs">{log.ip_address}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <button
-                        onClick={() => {
-                          alert(JSON.stringify(log.metadata, null, 2));
-                        }}
-                        className="text-blue-600 hover:text-blue-900 text-xs"
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className="flex justify-between items-center mt-4">
-          <div className="text-sm text-gray-700">
-            Showing {(filters.page - 1) * filters.limit + 1} to {Math.min(filters.page * filters.limit, totalCount)} of {totalCount} logs
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFilters({...filters, page: Math.max(1, filters.page - 1)})}
-              disabled={filters.page === 1}
-              className="flex items-center gap-1 px-3 py-1 border border-gray-300 rounded disabled:opacity-50"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Previous
-            </button>
-            <span className="px-3 py-1">Page {filters.page}</span>
-            <button
-              onClick={() => setFilters({...filters, page: filters.page + 1})}
-              disabled={filters.page * filters.limit >= totalCount}
-              className="flex items-center gap-1 px-3 py-1 border border-gray-300 rounded disabled:opacity-50"
-            >
-              Next
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const Admin = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -1587,9 +1075,10 @@ const Admin = () => {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
+  // State for administrative sections
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null);
-  const [auditLogs, setAuditLogs] = useState<OldAuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importOptions, setImportOptions] = useState({
@@ -1601,7 +1090,7 @@ const Admin = () => {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [showImportMapping, setShowImportMapping] = useState(false);
   const [importProgress, setImportProgress] = useState<{current: number; total: number} | null>(null);
-  const [auditLogFilter, setAuditLogFilter] = useState<string>('all');
+  const [auditLogFilter, setAuditLogFilter] = useState<string>('all'); // 'all', 'today', 'week', 'month'
   const [searchAuditTerm, setSearchAuditTerm] = useState('');
 
   const [userFormData, setUserFormData] = useState<{
@@ -1626,12 +1115,14 @@ const Admin = () => {
     login_pin: ''
   });
 
+  // Set current user ID for audit logging
   useEffect(() => {
     if (profile?.id) {
       (window as any).currentUserId = profile.id;
     }
   }, [profile]);
 
+  // Modified admin sections - Removed Notifications, Communications, System Configuration
   const adminSections = [
     {
       icon: Users,
@@ -1678,6 +1169,7 @@ const Admin = () => {
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
 
+  // Database fields for import mapping - updated to match actual table structure
   const databaseFields = [
     { value: 'surname', label: 'Surname', required: true, description: 'Last name of the member (Required)' },
     { value: 'name', label: 'Name', required: true, description: 'First name of the member (Required)' },
@@ -1714,6 +1206,7 @@ const Admin = () => {
         stats: statsData
       });
 
+      // ✅ Log any members with invalid assigned_groups
       const membersWithInvalidGroups = membersData.filter(m => 
         m.assigned_groups && m.assigned_groups.some(g => !g || g === '{}' || typeof g !== 'string')
       );
@@ -1728,6 +1221,7 @@ const Admin = () => {
         );
       }
 
+      // ✅ Log any members with invalid assigned_departments
       const membersWithInvalidDepts = membersData.filter(m => 
         m.assigned_departments && m.assigned_departments.some(d => !d || d === '{}' || typeof d !== 'string')
       );
@@ -1748,6 +1242,7 @@ const Admin = () => {
       setSecuritySettings(securityData);
       setSystemStats(statsData);
       
+      // Log audit event for admin access
       if (profile) {
         await logAuditEvent(
           'ACCESS',
@@ -1892,6 +1387,7 @@ const Admin = () => {
     setActiveModal(modalType);
     setError(null);
 
+    // Log modal access
     await logAuditEvent(
       'VIEW',
       'modal',
@@ -1912,6 +1408,7 @@ const Admin = () => {
       setSelectedUser(user);
       const userRoles = getRolesFromMember(user);
       
+      // ✅ Clean arrays when loading user data
       const cleanedGroups = cleanUUIDArray(user.assigned_groups || []);
       const cleanedDepartments = cleanUUIDArray(user.assigned_departments || []);
       
@@ -1934,8 +1431,8 @@ const Admin = () => {
       setUserFormData({
         roles: userRoles,
         permissions: user.permissions || [],
-        assigned_groups: cleanedGroups,
-        assigned_departments: cleanedDepartments,
+        assigned_groups: cleanedGroups, // ✅ Use cleaned arrays
+        assigned_departments: cleanedDepartments, // ✅ Use cleaned arrays
         can_add_members: user.can_add_members || false,
         can_edit_members: user.can_edit_members || false,
         can_view_own_data: user.can_view_own_data || false,
@@ -1948,7 +1445,7 @@ const Admin = () => {
     }
 
     if (modalType === 'security') {
-      const logs = await cloudService.getOldAuditLogs();
+      const logs = await cloudService.getAuditLogs();
       setAuditLogs(logs);
     }
   };
@@ -2055,6 +1552,7 @@ const Admin = () => {
   };
 
   const handleFileUpload = (file: File) => {
+    // Reset previous state
     setImportFile(null);
     setImportResults(null);
     setImportFieldMapping({});
@@ -2062,11 +1560,13 @@ const Admin = () => {
     setShowImportMapping(false);
     setError(null);
 
+    // Validate file type
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setError('Please upload a CSV file. Only .csv files are supported.');
       return;
     }
 
+    // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       setError('File is too large. Maximum size is 10MB.');
       return;
@@ -2086,6 +1586,7 @@ const Admin = () => {
 
         const headers = rows[0].split(',').map(col => col.replace(/^"|"$/g, '').trim());
         
+        // Validate headers
         if (headers.length === 0 || headers.every(h => !h.trim())) {
           setError('CSV file has no valid headers. Please check your file format.');
           return;
@@ -2095,6 +1596,7 @@ const Admin = () => {
         setImportFile(file);
         setShowImportMapping(true);
         
+        // Auto-map common headers
         const autoMapping: ImportFieldMapping = {};
         headers.forEach(header => {
           const headerLower = header.toLowerCase();
@@ -2124,6 +1626,7 @@ const Admin = () => {
         
         setImportFieldMapping(autoMapping);
         
+        // Show warning if required fields aren't auto-mapped
         const requiredFields = ['surname', 'name', 'residence'];
         const missingRequired = requiredFields.filter(field => !Object.values(autoMapping).includes(field));
         
@@ -2201,6 +1704,7 @@ const Admin = () => {
       setGeneratedCredentials(credentials);
       setShowCredentials(true);
       
+      // Log audit event
       await logAuditEvent(
         'GENERATE_CREDENTIALS',
         'member',
@@ -2268,6 +1772,7 @@ const Admin = () => {
     try {
       const roleUpdates = setRolesToMember(userFormData.roles);
 
+      // ✅ Clean UUID arrays before saving
       const cleanedAssignedGroups = cleanUUIDArray(userFormData.assigned_groups);
       const cleanedAssignedDepartments = cleanUUIDArray(userFormData.assigned_departments);
 
@@ -2286,8 +1791,8 @@ const Admin = () => {
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
         ...roleUpdates,
         permissions: userFormData.permissions,
-        assigned_groups: cleanedAssignedGroups,
-        assigned_departments: cleanedAssignedDepartments,
+        assigned_groups: cleanedAssignedGroups, // ✅ Use cleaned arrays
+        assigned_departments: cleanedAssignedDepartments, // ✅ Use cleaned arrays
         can_add_members: userFormData.can_add_members,
         can_edit_members: userFormData.can_edit_members,
         can_view_own_data: userFormData.can_view_own_data,
@@ -2301,6 +1806,7 @@ const Admin = () => {
         assignedDepartments: updatedMember.assigned_departments
       });
 
+      // Log audit event
       await logAuditEvent(
         'UPDATE',
         'member',
@@ -2357,6 +1863,7 @@ const Admin = () => {
         ? prev.assigned_groups.filter(g => g !== groupId)
         : [...prev.assigned_groups, groupId];
       
+      // ✅ Clean the array immediately
       const cleanedGroups = cleanUUIDArray(newGroups);
       
       console.log('✅ Groups updated:', {
@@ -2385,6 +1892,7 @@ const Admin = () => {
         ? prev.assigned_departments.filter(d => d !== deptId)
         : [...prev.assigned_departments, deptId];
       
+      // ✅ Clean the array immediately
       const cleanedDepartments = cleanUUIDArray(newDepartments);
       
       console.log('✅ Departments updated:', {
@@ -2520,9 +2028,11 @@ const Admin = () => {
   const cellGroups = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
 
+  // Filter audit logs
   const getFilteredAuditLogs = () => {
     let filtered = auditLogs;
 
+    // Apply time filter
     const now = new Date();
     switch (auditLogFilter) {
       case 'today':
@@ -2541,6 +2051,7 @@ const Admin = () => {
         break;
     }
 
+    // Apply search filter
     if (searchAuditTerm) {
       const searchLower = searchAuditTerm.toLowerCase();
       filtered = filtered.filter(log =>
@@ -2557,9 +2068,11 @@ const Admin = () => {
 
   const filteredAuditLogs = getFilteredAuditLogs();
 
+  // Modal Components
   const DataManagementModal = () => (
     <Modal title="Data Management" onClose={closeModal} size="max-w-6xl">
       <div className="space-y-6">
+        {/* Storage Information */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Storage Information</h3>
           {systemStats && (
@@ -2602,6 +2115,7 @@ const Admin = () => {
           )}
         </div>
 
+        {/* Export Data */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Export Data</h3>
           <div className="space-y-4">
@@ -2622,6 +2136,7 @@ const Admin = () => {
           </div>
         </div>
 
+        {/* Import Data Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Import Data</h3>
           
@@ -2837,6 +2352,7 @@ const Admin = () => {
           )}
         </div>
 
+        {/* Data Cleanup */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4">Data Cleanup</h3>
           <div className="space-y-4">
@@ -2858,8 +2374,9 @@ const Admin = () => {
   );
 
   const SecurityModal = () => (
-    <Modal title="Security Settings" onClose={closeModal} size="max-w-7xl">
+    <Modal title="Security Settings" onClose={closeModal} size="max-w-6xl">
       <div className="space-y-8">
+        {/* Password Policy Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Shield className="h-5 w-5" />
@@ -2931,28 +2448,18 @@ const Admin = () => {
           </div>
         </div>
 
-        {/* New PostgreSQL Audit Log Dashboard */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            PostgreSQL Database Audit Logs
-          </h3>
-          <p className="text-gray-600 mb-6">Track all database activities automatically with PostgreSQL trigger-based audit logging</p>
-          <PostgresAuditLogDashboard />
-        </div>
-
-        {/* Old Audit Logs Section (kept for backward compatibility) */}
+        {/* Audit Logs Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-semibold flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Legacy Audit Logs (Manual)
+              <Activity className="h-5 w-5" />
+              Audit Logs
             </h3>
             <div className="flex gap-2">
               <button
                 onClick={async () => {
                   setLoading(true);
-                  const logs = await cloudService.getOldAuditLogs();
+                  const logs = await cloudService.getAuditLogs();
                   setAuditLogs(logs);
                   setLoading(false);
                 }}
@@ -2966,12 +2473,13 @@ const Admin = () => {
           </div>
           
           <div className="space-y-4">
+            {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search legacy audit logs..."
+                  placeholder="Search audit logs..."
                   value={searchAuditTerm}
                   onChange={(e) => setSearchAuditTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -3005,6 +2513,7 @@ const Admin = () => {
               </div>
             </div>
 
+            {/* Audit Logs Table */}
             <div className="bg-white rounded-lg border overflow-hidden">
               {loading ? (
                 <div className="text-center py-8">
@@ -3014,7 +2523,7 @@ const Admin = () => {
               ) : filteredAuditLogs.length === 0 ? (
                 <div className="text-center py-8">
                   <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600">No legacy audit logs found</p>
+                  <p className="text-gray-600">No audit logs found</p>
                   {searchAuditTerm && (
                     <p className="text-sm text-gray-500 mt-2">Try changing your search criteria</p>
                   )}
@@ -3087,10 +2596,11 @@ const Admin = () => {
               )}
             </div>
 
+            {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-white p-4 rounded-lg border text-center">
                 <div className="text-2xl font-bold text-blue-600">{filteredAuditLogs.length}</div>
-                <div className="text-xs text-gray-600">Legacy Logs</div>
+                <div className="text-xs text-gray-600">Filtered Logs</div>
               </div>
               <div className="bg-white p-4 rounded-lg border text-center">
                 <div className="text-2xl font-bold text-green-600">
@@ -3217,6 +2727,7 @@ const Admin = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* User Roles Section */}
           <div className="space-y-4">
             <label className="block text-sm font-medium text-gray-700">
               User Roles
@@ -3474,6 +2985,7 @@ const Admin = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
+        {/* Header Section */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -3547,6 +3059,7 @@ const Admin = () => {
           </div>
         )}
 
+        {/* Modified Admin Sections Grid - Only 3 sections */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
             if (!profile) return null;
@@ -3613,6 +3126,7 @@ const Admin = () => {
           })}
         </div>
 
+        {/* User Management Section */}
         {profile && (() => {
           const currentUser: Member = {
             id: profile.id,
@@ -3752,6 +3266,7 @@ const Admin = () => {
           );
         })()}
 
+        {/* Stats Section */}
         {profile && (() => {
           const currentUser: Member = {
             id: profile.id,
@@ -3855,6 +3370,7 @@ const Admin = () => {
           );
         })()}
 
+        {/* Render Modals */}
         {activeModal === 'data-management' && <DataManagementModal />}
         {activeModal === 'security' && <SecurityModal />}
         {activeModal === 'users' && <UsersModal />}
