@@ -6,7 +6,6 @@ interface UserProfile {
   id: string;
   name: string | null;
   surname: string | null;
-  email: string | null;
   phone: string | null;
   cell_group_id: string | null;
   admin_role: string;
@@ -515,7 +514,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           id: userId,
           name: memberData.name || null,
           surname: memberData.surname || null,
-          email: memberData.email || null,
           phone: memberData.phone || null,
           cell_group_id: memberData.cell_group_id || null,
           admin_role: memberData.admin_role || 'member',
@@ -562,7 +560,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Create a mock session and user for username/PIN login
       const mockUser: SupabaseUser = {
         id: memberData.id,
-        email: memberData.email,
         phone: memberData.phone,
         created_at: memberData.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -603,7 +600,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         id: memberData.id,
         name: memberData.name || null,
         surname: memberData.surname || null,
-        email: memberData.email || null,
         phone: memberData.phone || null,
         cell_group_id: memberData.cell_group_id || null,
         admin_role: memberData.admin_role || 'member',
