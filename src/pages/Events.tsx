@@ -509,26 +509,26 @@ const Events = () => {
       setError(null);
       
       const { data, error } = await supabase
-        .from('members')
-        .select(`
-          id,
-          name,
-          surname,
-          login_username,
-          phone,
-          cell_group_id,
-          ministry_group_id,
-          status,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name),
-          department_members (
-            departments (
-              id,
-              name
-            )
-          )
-        `)
-        .order('name');
+  .from('members')
+  .select(`
+    id,
+    name,
+    surname,
+    login_username,
+    phone,
+    cell_group_id,
+    ministry_group_id,
+    status,
+    cell_groups!fk_cell_group(name),
+    ministry_groups!members_ministry_group_id_fkey(name),
+    department_members (
+      departments (
+        id,
+        name
+      )
+    )
+  `) 
+      .order('name');
 
       if (error) throw error;
       setMembers(data || []);
