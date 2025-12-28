@@ -117,12 +117,12 @@ const Members = () => {
       setError(null);
       
       const { data, error } = await supabase
-        .from('members')
-        .select(`
-          *,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
-        `)
+  .from('members')
+  .select(`
+    *,
+    cell_groups!fk_cell_group(name),
+    ministry_groups!members_ministry_group_id_fkey(name)
+  `)
         .eq('is_hidden', false)
         .order('created_at', { ascending: false });
 
