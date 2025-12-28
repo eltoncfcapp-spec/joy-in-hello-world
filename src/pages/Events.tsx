@@ -520,7 +520,7 @@ const Events = () => {
     ministry_group_id,
     status,
     cell_groups!fk_cell_group(name),
-    ministry_groups!fk_member_ministry_group(name),  // ← Explicitly specify FK
+    ministry_groups!fk_member_ministry_group(name),
     department_members (
       departments (
         id,
