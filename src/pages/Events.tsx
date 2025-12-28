@@ -509,26 +509,26 @@ const Events = () => {
       setError(null);
       
       const { data, error } = await supabase
-  .from('members')
-  .select(`
-    id,
-    name,
-    surname,
-    login_username,
-    phone,
-    cell_group_id,
-    ministry_group_id,
-    status,
-    cell_groups!fk_cell_group(name),
-    ministry_groups!members_ministry_group_id_fkey(name),
-    department_members (
-      departments (
-        id,
-        name
-      )
-    )
-  `) 
-      .order('name');
+        .from('members')
+        .select(`
+          id,
+          name,
+          surname,
+          login_username,
+          phone,
+          cell_group_id,
+          ministry_group_id,
+          status,
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name),
+          department_members (
+            departments (
+              id,
+              name
+            )
+          )
+        `)
+        .order('name');
 
       if (error) throw error;
       setMembers(data || []);
@@ -579,59 +579,69 @@ const Events = () => {
       console.error('Error fetching departments:', error);
     }
   }, []);
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  // Fixed fetchEventAttendees function
   const fetchEventAttendees = useCallback(async (eventId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('event_attendees')
-      .select(`
-        *,
-        members!event_attendees_members_id_fkey (  // Updated to match new constraint name
-          id,
-          name,
-          surname,
-          login_username,
-          phone,
-          status,
-          cell_group_id,
-          ministry_group_id,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name),
-          department_members (
-            departments (
-              id,
-              name
+    try {
+      const { data, error } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey (
+            id,
+            name,
+            surname,
+            login_username,
+            phone,
+            status,
+            cell_group_id,
+            ministry_group_id,
+            cell_groups!fk_cell_group(name),
+            ministry_groups(name),
+            department_members (
+              departments (
+                id,
+                name
+              )
             )
+          ),
+          invited_by_member:members!event_attendees_invited_by_id_fkey (
+            id,
+            name,
+            surname
           )
-        ),
-        invited_by_member:members!event_attendees_invited_by_id_fkey (
-          id,
-          name,
-          surname
-        )
-      `)
-      .eq('event_id', eventId)
-      .order('attended_at', { ascending: false });
+        `)
+        .eq('event_id', eventId)
+        .order('attended_at', { ascending: false });
 
-    if (error) throw error;
+      if (error) {
+        console.error('Error fetching attendees:', error);
+        throw error;
+      }
 
-    const attendeesWithDefaults = (data || []).map((attendee: any) => ({
-      ...attendee,
-      attendance_status: attendee.attendance_status || 'present'
-    }));
+      if (data) {
+        const attendeesWithDefaults = data.map((attendee: any) => ({
+          ...attendee,
+          attendance_status: attendee.attendance_status || 'present'
+        }));
 
-    setAttendees(prev => {
-      const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-      return [...filtered, ...attendeesWithDefaults];
-    });
-    
-    return attendeesWithDefaults;
-  } catch (error: any) {
-    console.error('Error fetching attendees:', error);
-    return [];
-  }
-}, []);
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        setAttendees(prev => {
+          // Remove existing attendees for this event
+          const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+          // Add new attendees
+          return [...filtered, ...attendeesWithDefaults];
+        });
+        
+        return attendeesWithDefaults;
+      }
+      
+      return [];
+    } catch (error: any) {
+      console.error('Error fetching attendees:', error);
+      return [];
+    }
+  }, []);
+
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
@@ -748,12 +758,14 @@ const Events = () => {
       setLoading(true);
       setError(null);
 
-      const { data: existingRecord } = await supabase
+      // First, check if the record exists
+      const { data: existingRecord, error: fetchError } = await supabase
         .from('event_attendees')
         .select('id')
         .eq('event_id', eventId)
-        .eq('members_id', memberId)
-        .single();
+        .eq('members_id', memberId);
+
+      if (fetchError) throw fetchError;
 
       const attendanceData: any = {
         event_id: eventId,
@@ -766,13 +778,15 @@ const Events = () => {
       };
 
       let error;
-      if (existingRecord) {
+      if (existingRecord && existingRecord.length > 0) {
+        // Update existing record
         const { error: updateError } = await supabase
           .from('event_attendees')
           .update(attendanceData)
-          .eq('id', existingRecord.id);
+          .eq('id', existingRecord[0].id);
         error = updateError;
       } else {
+        // Insert new record
         const { error: insertError } = await supabase
           .from('event_attendees')
           .insert([attendanceData]);
@@ -781,6 +795,7 @@ const Events = () => {
 
       if (error) throw error;
 
+      // Refresh attendees for this event
       await fetchEventAttendees(eventId);
       return true;
     } catch (error: any) {
