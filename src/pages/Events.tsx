@@ -579,59 +579,59 @@ const Events = () => {
       console.error('Error fetching departments:', error);
     }
   }, []);
-
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   const fetchEventAttendees = useCallback(async (eventId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey (
-            id,
-            name,
-            surname,
-            login_username,
-            phone,
-            status,
-            cell_group_id,
-            ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
-            department_members (
-              departments (
-                id,
-                name
-              )
+  try {
+    const { data, error } = await supabase
+      .from('event_attendees')
+      .select(`
+        *,
+        members!event_attendees_members_id_fkey (  // Updated to match new constraint name
+          id,
+          name,
+          surname,
+          login_username,
+          phone,
+          status,
+          cell_group_id,
+          ministry_group_id,
+          cell_groups!fk_cell_group(name),
+          ministry_groups(name),
+          department_members (
+            departments (
+              id,
+              name
             )
-          ),
-          invited_by_member:members!event_attendees_invited_by_id_fkey (
-            id,
-            name,
-            surname
           )
-        `)
-        .eq('event_id', eventId)
-        .order('attended_at', { ascending: false });
+        ),
+        invited_by_member:members!event_attendees_invited_by_id_fkey (
+          id,
+          name,
+          surname
+        )
+      `)
+      .eq('event_id', eventId)
+      .order('attended_at', { ascending: false });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      const attendeesWithDefaults = (data || []).map((attendee: any) => ({
-        ...attendee,
-        attendance_status: attendee.attendance_status || 'present'
-      }));
+    const attendeesWithDefaults = (data || []).map((attendee: any) => ({
+      ...attendee,
+      attendance_status: attendee.attendance_status || 'present'
+    }));
 
-      setAttendees(prev => {
-        const filtered = prev.filter(attendee => attendee.event_id !== eventId);
-        return [...filtered, ...attendeesWithDefaults];
-      });
-      
-      return attendeesWithDefaults;
-    } catch (error: any) {
-      console.error('Error fetching attendees:', error);
-      return [];
-    }
-  }, []);
-
+    setAttendees(prev => {
+      const filtered = prev.filter(attendee => attendee.event_id !== eventId);
+      return [...filtered, ...attendeesWithDefaults];
+    });
+    
+    return attendeesWithDefaults;
+  } catch (error: any) {
+    console.error('Error fetching attendees:', error);
+    return [];
+  }
+}, []);
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
