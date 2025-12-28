@@ -73,7 +73,6 @@ interface AuditLog {
     changes: Record<string, { old: any; new: any }>;
   };
   user_id: string | null;
-  user_email: string | null;
   ip_address: string;
   user_agent: string;
   created_at: string;
@@ -85,7 +84,6 @@ interface AuditLogQueryOptions {
   action?: string;
   entityType?: string;
   tableName?: string;
-  userEmail?: string;
   startDate?: Date;
   endDate?: Date;
   entityId?: string;
@@ -106,7 +104,6 @@ const usePostgresAuditLog = () => {
         action,
         entityType,
         tableName,
-        userEmail,
         startDate,
         endDate,
         entityId
@@ -119,7 +116,6 @@ const usePostgresAuditLog = () => {
           p_action: action || null,
           p_entity_type: entityType || null,
           p_table_name: tableName || null,
-          p_user_email: userEmail || null,
           p_start_date: startDate ? startDate.toISOString() : null,
           p_end_date: endDate ? endDate.toISOString() : null,
           p_entity_id: entityId || null
@@ -1228,7 +1224,6 @@ const PostgresAuditLogDashboard = () => {
     action: '',
     entityType: '',
     tableName: '',
-    userEmail: '',
     startDate: '',
     endDate: '',
     searchText: '',
@@ -1255,7 +1250,6 @@ const PostgresAuditLogDashboard = () => {
         action: filters.action || undefined,
         entityType: filters.entityType || undefined,
         tableName: filters.tableName || undefined,
-        userEmail: filters.userEmail || undefined,
         startDate: filters.startDate ? new Date(filters.startDate) : undefined,
         endDate: filters.endDate ? new Date(filters.endDate) : undefined
       });
@@ -1282,14 +1276,13 @@ const PostgresAuditLogDashboard = () => {
 
   const handleExport = () => {
     const csvContent = [
-      ['ID', 'Action', 'Entity Type', 'Entity ID', 'Table', 'User Email', 'Timestamp', 'IP Address'].join(','),
+      ['ID', 'Action', 'Entity Type', 'Entity ID', 'Table','Timestamp', 'IP Address'].join(','),
       ...logs.map(log => [
         log.id,
         log.action,
         log.entity_type,
         log.entity_id,
         log.table_name,
-        log.user_email || 'Anonymous',
         new Date(log.created_at).toLocaleString(),
         log.ip_address
       ].join(','))
@@ -1404,11 +1397,9 @@ const PostgresAuditLogDashboard = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">User Email</label>
               <input
                 type="text"
-                value={filters.userEmail}
-                onChange={(e) => setFilters({...filters, userEmail: e.target.value})}
+                onChange={(e) => setFilters({...filters, userEmail:})}
                 className="w-full px-3 py-2 border border-gray-300 rounded"
                 placeholder="Filter by user..."
               />
@@ -1443,7 +1434,6 @@ const PostgresAuditLogDashboard = () => {
                   action: '',
                   entityType: '',
                   tableName: '',
-                  userEmail: '',
                   startDate: '',
                   endDate: '',
                   searchText: '',
