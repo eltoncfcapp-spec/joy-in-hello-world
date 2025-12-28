@@ -120,12 +120,13 @@ const Members = () => {
   .from('members')
   .select(`
     *,
-    cell_groups!fk_cell_group(name),
+    member_cell_groups!inner (
+      cell_groups (name)
+    ),
     ministry_groups!members_ministry_group_id_fkey(name)
   `)
-        .eq('is_hidden', false)
-        .order('created_at', { ascending: false });
-
+  .eq('is_hidden', false)
+  .order('created_at', { ascending: false });
       if (error) {
         throw error;
       }
