@@ -519,8 +519,12 @@ const Events = () => {
           cell_group_id,
           ministry_group_id,
           status,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name),
+          cell_groups (
+            name
+          ),
+          ministry_groups (
+            name
+          ),
           department_members (
             departments (
               id,
@@ -531,7 +535,16 @@ const Events = () => {
         .order('name');
 
       if (error) throw error;
-      setMembers(data || []);
+      
+      // Transform the data to match the Member interface
+      const transformedData = (data || []).map((member: any) => ({
+        ...member,
+        cell_groups: member.cell_groups?.[0] || null,
+        ministry_groups: member.ministry_groups?.[0] || null,
+        department_members: member.department_members || []
+      }));
+      
+      setMembers(transformedData);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
@@ -580,7 +593,6 @@ const Events = () => {
     }
   }, []);
 
-  // Fixed fetchEventAttendees function
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
       const { data, error } = await supabase
@@ -596,8 +608,12 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
+            cell_groups (
+              name
+            ),
+            ministry_groups (
+              name
+            ),
             department_members (
               departments (
                 id,
@@ -620,10 +636,21 @@ const Events = () => {
       }
 
       if (data) {
-        const attendeesWithDefaults = data.map((attendee: any) => ({
-          ...attendee,
-          attendance_status: attendee.attendance_status || 'present'
-        }));
+        const attendeesWithDefaults = data.map((attendee: any) => {
+          // Transform the member data to match the Member interface
+          const transformedMember = attendee.members ? {
+            ...attendee.members,
+            cell_groups: attendee.members.cell_groups?.[0] || null,
+            ministry_groups: attendee.members.ministry_groups?.[0] || null,
+            department_members: attendee.members.department_members || []
+          } : null;
+
+          return {
+            ...attendee,
+            members: transformedMember,
+            attendance_status: attendee.attendance_status || 'present'
+          };
+        });
 
         setAttendees(prev => {
           // Remove existing attendees for this event
@@ -1624,8 +1651,12 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
+            cell_groups (
+              name
+            ),
+            ministry_groups (
+              name
+            ),
             department_members (
               departments (
                 id,
@@ -1643,7 +1674,18 @@ const Events = () => {
 
       if (error) throw error;
 
-      setAttendees(prev => [...prev, data]);
+      // Transform the data to match the interface
+      const transformedData = {
+        ...data,
+        members: data.members ? {
+          ...data.members,
+          cell_groups: data.members.cell_groups?.[0] || null,
+          ministry_groups: data.members.ministry_groups?.[0] || null,
+          department_members: data.members.department_members || []
+        } : null
+      };
+
+      setAttendees(prev => [...prev, transformedData]);
       await fetchEventAttendees(eventId);
 
       resetAttendeeForm();
@@ -1878,8 +1920,12 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
+            cell_groups (
+              name
+            ),
+            ministry_groups (
+              name
+            ),
             department_members (
               departments (
                 id,
@@ -1897,12 +1943,23 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
+      // Transform the data
       if (newAttendee) {
-        setAttendees(prev => [...prev, newAttendee]);
+        const transformedAttendee = {
+          ...newAttendee,
+          members: newAttendee.members ? {
+            ...newAttendee.members,
+            cell_groups: newAttendee.members.cell_groups?.[0] || null,
+            ministry_groups: newAttendee.members.ministry_groups?.[0] || null,
+            department_members: newAttendee.members.department_members || []
+          } : null
+        };
+        setAttendees(prev => [...prev, transformedAttendee]);
       }
+      
       await fetchEventAttendees(eventId);
-
       await fetchMembers();
+      
       closeNewcomerModal();
       setSuccess('Newcomer added successfully!');
       setTimeout(() => setSuccess(null), 3000);
