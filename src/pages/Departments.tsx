@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit, Settings } from 'lucide-react';
 
 // Interfaces
 interface Department {
@@ -45,11 +45,6 @@ interface Member {
   status?: string | null;
   admin_role?: string | null;
   invited_by?: string | null;
-  is_admin?: boolean;
-  pastor_role?: boolean;
-  deacon_role?: boolean;
-  department_leader?: boolean;
-  group_leader?: boolean;
 }
 
 interface DepartmentAttendanceRecord {
@@ -81,6 +76,7 @@ interface CreateDepartmentModalProps {
 }
 
 const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
+  const { profile, isAdmin, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -90,27 +86,28 @@ const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, o
     description: '',
     leader_id: '',
   });
-  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
-  const [searchLeaderTerm, setSearchLeaderTerm] = useState('');
+  const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
+  const [searchMemberTerm, setSearchMemberTerm] = useState('');
 
   useEffect(() => {
     if (isOpen) {
-      loadAvailableLeaders();
+      loadAllMembers();
     }
   }, [isOpen]);
 
-  const loadAvailableLeaders = async () => {
+  const loadAllMembers = async () => {
     try {
+      // Get ALL members, not just those with leadership roles
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.department_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
-      setAvailableLeaders(data || []);
+      setAvailableMembers(data || []);
     } catch (error: any) {
-      console.error('Failed to load leaders:', error);
+      console.error('Failed to load members:', error);
+      onError('Failed to load church members');
     }
   };
 
@@ -129,6 +126,12 @@ const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, o
 
     if (!userId) {
       onError('You must be logged in to create a department');
+      return;
+    }
+
+    // Check if user has permission to create departments (only admin and pastor)
+    if (!isAdmin() && !isPastor()) {
+      onError('Only administrators and pastors can create new departments');
       return;
     }
 
@@ -196,10 +199,11 @@ const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, o
     }
   };
 
-  const filteredLeaders = availableLeaders.filter(leader =>
-    leader.name.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
-    leader.surname.toLowerCase().includes(searchLeaderTerm.toLowerCase()) ||
-    leader.residence?.toLowerCase().includes(searchLeaderTerm.toLowerCase())
+  const filteredMembers = availableMembers.filter(member =>
+    member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
+    member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
+    member.residence?.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
+    member.admin_role?.toLowerCase().includes(searchMemberTerm.toLowerCase())
   );
 
   if (!isOpen) return null;
@@ -315,9 +319,9 @@ const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, o
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <input
                   type="text"
-                  placeholder="Search for leaders..."
-                  value={searchLeaderTerm}
-                  onChange={(e) => setSearchLeaderTerm(e.target.value)}
+                  placeholder="Search for church members..."
+                  value={searchMemberTerm}
+                  onChange={(e) => setSearchMemberTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -329,19 +333,23 @@ const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, o
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">No leader assigned</option>
-                {filteredLeaders.map((leader) => (
-                  <option key={leader.id} value={leader.id}>
-                    {leader.name} {leader.surname} ({leader.admin_role})
+                {filteredMembers.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} {member.surname} 
+                    {member.admin_role ? ` (${member.admin_role})` : ''}
                   </option>
                 ))}
               </select>
               
-              {filteredLeaders.length === 0 && searchLeaderTerm && (
+              {filteredMembers.length === 0 && searchMemberTerm && (
                 <p className="text-sm text-gray-500 text-center py-2">
-                  No leaders found matching your search
+                  No members found matching your search
                 </p>
               )}
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              You can select any church member to be the department leader. They will be assigned the "department_leader" role.
+            </p>
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -394,7 +402,8 @@ const EditDepartmentModal: React.FC<EditDepartmentModalProps> = ({ isOpen, depar
     description: '',
     leader_id: '',
   });
-  const [availableLeaders, setAvailableLeaders] = useState<Member[]>([]);
+  const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
+  const [previousLeaderId, setPreviousLeaderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && department) {
@@ -406,22 +415,23 @@ const EditDepartmentModal: React.FC<EditDepartmentModalProps> = ({ isOpen, depar
         description: department.description || '',
         leader_id: department.leader_id || '',
       });
-      loadAvailableLeaders();
+      setPreviousLeaderId(department.leader_id);
+      loadAllMembers();
     }
   }, [isOpen, department]);
 
-  const loadAvailableLeaders = async () => {
+  const loadAllMembers = async () => {
     try {
       const { data, error } = await supabase
         .from('members')
         .select('*')
-        .or('admin_role.eq.department_leader,admin_role.eq.deacon,admin_role.eq.pastor,admin_role.eq.administrator,admin_role.eq.admin')
         .order('name');
 
       if (error) throw error;
-      setAvailableLeaders(data || []);
+      setAvailableMembers(data || []);
     } catch (error: any) {
-      console.error('Failed to load leaders:', error);
+      console.error('Failed to load members:', error);
+      onError('Failed to load church members');
     }
   };
 
@@ -482,26 +492,29 @@ const EditDepartmentModal: React.FC<EditDepartmentModalProps> = ({ isOpen, depar
       if (error) throw error;
 
       // Handle leader assignment changes
-      const previousLeaderId = department.leader_id;
       if (previousLeaderId !== formData.leader_id) {
-        // Remove previous leader's role if they're no longer a leader elsewhere
+        // Remove previous leader's role if they were a department leader
         if (previousLeaderId) {
-          // Check if this person is a leader of any other department
-          const { count } = await supabase
-            .from('departments')
-            .select('*', { count: 'exact', head: true })
-            .eq('leader_id', previousLeaderId)
-            .neq('id', department.id);
-
-          if (count === 0) {
-            await supabase
-              .from('members')
-              .update({ 
-                admin_role: 'member',
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', previousLeaderId);
+          // Get previous leader's current role
+          const { data: previousLeader } = await supabase
+            .from('members')
+            .select('admin_role')
+            .eq('id', previousLeaderId)
+            .single();
+          
+          // Revert to 'member' role if they were a department leader
+          let newRole = previousLeader?.admin_role || 'member';
+          if (newRole === 'department_leader') {
+            newRole = 'member';
           }
+          
+          await supabase
+            .from('members')
+            .update({ 
+              admin_role: newRole,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', previousLeaderId);
         }
 
         // Assign new leader
@@ -641,12 +654,16 @@ const EditDepartmentModal: React.FC<EditDepartmentModalProps> = ({ isOpen, depar
               className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">No leader assigned</option>
-              {availableLeaders.map((leader) => (
-                <option key={leader.id} value={leader.id}>
-                  {leader.name} {leader.surname} ({leader.admin_role})
+              {availableMembers.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} {member.surname} 
+                  {member.admin_role ? ` (${member.admin_role})` : ''}
                 </option>
               ))}
             </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Selecting a new leader will update their role to "department_leader".
+            </p>
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -726,22 +743,26 @@ const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, d
       
       // Remove leader assignment if exists
       if (department.leader_id) {
-        // Check if this person is a leader of any other department
-        const { count } = await supabase
-          .from('departments')
-          .select('*', { count: 'exact', head: true })
-          .eq('leader_id', department.leader_id)
-          .neq('id', department.id);
-
-        if (count === 0) {
-          await supabase
-            .from('members')
-            .update({ 
-              admin_role: 'member',
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', department.leader_id);
+        // Get leader's current role
+        const { data: leader } = await supabase
+          .from('members')
+          .select('admin_role')
+          .eq('id', department.leader_id)
+          .single();
+        
+        // Revert to 'member' role if they were a department leader
+        let newRole = leader?.admin_role || 'member';
+        if (newRole === 'department_leader') {
+          newRole = 'member';
         }
+        
+        await supabase
+          .from('members')
+          .update({ 
+            admin_role: newRole,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', department.leader_id);
       }
 
       // Delete the department
@@ -845,6 +866,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
   onMeetingCreated: () => void; 
   onError: (message: string) => void; 
 }) => {
+  const { canCreateDepartmentMeetings } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -885,6 +907,12 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
 
     if (!formData.meeting_date || !formData.location) {
       onError('Please fill in all required fields');
+      return;
+    }
+
+    // Check permission
+    if (!canCreateDepartmentMeetings(department.id)) {
+      onError('You do not have permission to create meetings for this department');
       return;
     }
 
@@ -1009,7 +1037,7 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
           
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !canCreateDepartmentMeetings(department.id)}
             className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
           >
             <Save className="h-4 w-4" />
@@ -1056,7 +1084,6 @@ interface DepartmentAttendanceStepProps {
   onMeetingSelect: (meeting: DepartmentMeeting) => void;
   onAttendanceSaved: () => void;
   onError: (message: string) => void;
-  refreshDepartmentData: () => void;
 }
 
 const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({ 
@@ -1065,9 +1092,9 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
   selectedMeeting, 
   onMeetingSelect, 
   onAttendanceSaved, 
-  onError,
-  refreshDepartmentData 
+  onError 
 }) => {
+  const { canManageDepartmentAttendance } = useAuth();
   const [loading, setLoading] = useState(false);
   const [departmentMembers, setDepartmentMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
@@ -1081,6 +1108,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     absentWithReason: 0,
     total: 0
   });
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   useEffect(() => {
     loadDepartmentMembers();
@@ -1110,29 +1138,32 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
   const loadDepartmentMembers = async () => {
     try {
-      const { data: departmentMembersData, error } = await supabase
+      // Get department members from department_members table
+      const { data: deptMembersData, error } = await supabase
         .from('department_members')
         .select(`
-          *,
+          member_id,
           members:member_id (*)
         `)
         .eq('department_id', department.id);
 
       if (error) throw error;
       
-      const memberData = departmentMembersData?.map(dm => ({
+      const memberData = deptMembersData?.map(dm => ({
         ...dm.members,
-        department_role: dm.role
+        department_role: 'member' // Default role
       })) || [];
       
       setDepartmentMembers(memberData as Member[]);
       
-      // Initialize all members as present by default
-      const initialAttendance: Record<string, 'present'> = {};
-      memberData?.forEach(member => {
-        if (member.id) initialAttendance[member.id] = 'present';
-      });
-      setAttendance(initialAttendance);
+      // Only initialize as present if we don't have existing attendance loaded
+      if (!initialLoadComplete) {
+        const initialAttendance: Record<string, 'present'> = {};
+        memberData?.forEach(member => {
+          if (member.id) initialAttendance[member.id] = 'present';
+        });
+        setAttendance(initialAttendance);
+      }
     } catch (error: any) {
       onError('Failed to load department members: ' + error.message);
     }
@@ -1177,6 +1208,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       
       setAttendance(existingAttendance);
       setNotes(existingNotes);
+      setInitialLoadComplete(true);
     } catch (error: any) {
       console.error('Failed to load existing attendance:', error);
     }
@@ -1218,9 +1250,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
 
       if (error) throw error;
       
-      // Refresh department members list AND refresh main department data
       await loadDepartmentMembers();
-      refreshDepartmentData();
       setShowAddAttendeeModal(false);
       setSearchMemberTerm('');
       setAttendance(prev => ({ ...prev, [member.id]: 'present' }));
@@ -1238,6 +1268,12 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       return;
     }
 
+    // Check permission
+    if (!canManageDepartmentAttendance(department.id)) {
+      onError('You do not have permission to manage attendance for this department');
+      return;
+    }
+
     try {
       setLoading(true);
       const attendanceRecords = departmentMembers.map(member => ({
@@ -1247,7 +1283,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
-      // First delete existing attendance for this meeting
+      // First, delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('department_attendance')
         .delete()
@@ -1256,16 +1292,22 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
       if (deleteError) throw deleteError;
 
       // Then insert new attendance records
-      if (attendanceRecords.length > 0) {
-        const { error: insertError } = await supabase
-          .from('department_attendance')
-          .insert(attendanceRecords);
+      const { error: insertError } = await supabase
+        .from('department_attendance')
+        .insert(attendanceRecords);
 
-        if (insertError) throw insertError;
-      }
-      
-      // Reload attendance data after saving
+      if (insertError) throw insertError;
+
+      // Update the meeting status to completed
+      await supabase
+        .from('department_meetings')
+        .update({ status: 'completed' })
+        .eq('id', selectedMeeting.id);
+
+      // Reload attendance data after saving to ensure state is synced
       await loadExistingAttendance();
+
+      // Call the success callback AFTER the reload completes
       onAttendanceSaved();
       onError('Attendance saved successfully!');
     } catch (error: any) {
@@ -1394,7 +1436,8 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               <span className="text-sm text-gray-600">{departmentMembers.length} department members</span>
               <button
                 onClick={() => setShowAddAttendeeModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                disabled={!canManageDepartmentAttendance(department.id)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
               >
                 <UserPlus className="h-4 w-4" />
                 Add Attendee
@@ -1408,7 +1451,8 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               <p className="text-gray-600">No members found in this department.</p>
               <button
                 onClick={() => setShowAddAttendeeModal(true)}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                disabled={!canManageDepartmentAttendance(department.id)}
+                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
                 Add Members
               </button>
@@ -1425,11 +1469,9 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                             {member.name} {member.surname}
                           </div>
                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                            member.department_role === 'leader' ? 'bg-yellow-100 text-yellow-800' : 
-                            member.department_role === 'assistant' ? 'bg-blue-100 text-blue-800' : 
-                            'bg-gray-100 text-gray-800'
+                            member.admin_role === 'department_leader' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                           }`}>
-                            {member.department_role || 'member'}
+                            {member.admin_role || 'member'}
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
@@ -1439,33 +1481,36 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'present')}
+                          disabled={!canManageDepartmentAttendance(department.id)}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                             attendance[member.id] === 'present'
                               ? 'bg-green-600 text-white shadow-lg'
                               : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
+                          } ${!canManageDepartmentAttendance(department.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           <CheckCircle className="h-4 w-4" />
                           Present
                         </button>
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'absent')}
+                          disabled={!canManageDepartmentAttendance(department.id)}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                             attendance[member.id] === 'absent'
                               ? 'bg-red-600 text-white shadow-lg'
                               : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
+                          } ${!canManageDepartmentAttendance(department.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           <X className="h-4 w-4" />
                           Absent
                         </button>
                         <button
                           onClick={() => handleAttendanceChange(member.id, 'absent_with_reason')}
+                          disabled={!canManageDepartmentAttendance(department.id)}
                           className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                             attendance[member.id] === 'absent_with_reason'
                               ? 'bg-orange-600 text-white shadow-lg'
                               : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
+                          } ${!canManageDepartmentAttendance(department.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           <FileText className="h-4 w-4" />
                           Absent with Notes
@@ -1481,6 +1526,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           onChange={(e) => handleNotesChange(member.id, e.target.value)}
                           placeholder="Enter notes for absence..."
                           className="w-full px-3 py-2 border border-orange-300 rounded-lg bg-orange-50 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          disabled={!canManageDepartmentAttendance(department.id)}
                         />
                       </div>
                     )}
@@ -1490,7 +1536,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
               <div className="flex justify-center pt-6">
                 <button
                   onClick={saveAttendance}
-                  disabled={loading}
+                  disabled={loading || !canManageDepartmentAttendance(department.id)}
                   className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 flex items-center gap-2"
                 >
                   {loading ? 'Saving Department Attendance...' : 'Save Department Attendance'}
@@ -1542,7 +1588,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                       </div>
                       <button
                         onClick={() => addMemberToDepartment(member)}
-                        disabled={loading}
+                        disabled={loading || !canManageDepartmentAttendance(department.id)}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
                       >
                         Add to Department
@@ -1573,6 +1619,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
   onNewcomerAdded, 
   onError 
 }) => {
+  const { canAddDepartmentNewcomers } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -1623,6 +1670,12 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
       return;
     }
 
+    // Check permission
+    if (!canAddDepartmentNewcomers(department.id)) {
+      onError('You do not have permission to add newcomers to this department');
+      return;
+    }
+
     try {
       setLoading(true);
       
@@ -1647,8 +1700,8 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
           .from('members')
           .update({ 
             status: 'newcomer',
-            first_time_visit_date: new Date().toISOString(),
             invited_by: formData.invited_by || null,
+            first_time_visit_date: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .eq('id', existingMember.id);
@@ -1750,7 +1803,8 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
         <div className="text-center">
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium mx-auto"
+            disabled={!canAddDepartmentNewcomers(department.id)}
+            className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium mx-auto disabled:opacity-50"
           >
             <UserPlus className="h-5 w-5" />
             Add Department Newcomer
@@ -1758,6 +1812,9 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
           <p className="text-sm text-gray-500 mt-3">
             Register first-time visitors who attended the department meeting
           </p>
+          {!canAddDepartmentNewcomers(department.id) && (
+            <p className="text-sm text-red-500 mt-2">You don't have permission to add newcomers</p>
+          )}
         </div>
       )}
 
@@ -1880,7 +1937,7 @@ const DepartmentNewcomerStep: React.FC<DepartmentNewcomerStepProps> = ({
             <div className="flex gap-3 pt-4">
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !canAddDepartmentNewcomers(department.id)}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
               >
                 <Save className="h-4 w-4" />
@@ -1929,6 +1986,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   onReportCreated, 
   onError 
 }) => {
+  const { canCreateDepartmentReports } = useAuth();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<DepartmentAttendanceRecord[]>([]);
   const [existingReport, setExistingReport] = useState<DepartmentReport | null>(null);
@@ -1976,7 +2034,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
         .from('department_attendance')
         .select(`
           *,
-          members!inner (
+          members:member_id (
             id, name, surname, residence, phone
           )
         `)
@@ -2039,6 +2097,12 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   const generateReport = async () => {
     if (!selectedMeeting) {
       onError('Please select a meeting first');
+      return;
+    }
+
+    // Check permission
+    if (!canCreateDepartmentReports(department.id)) {
+      onError('You do not have permission to create reports for this department');
       return;
     }
 
@@ -2423,14 +2487,16 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                 <div className="flex gap-2 mt-4 print:hidden">
                   <button
                     onClick={downloadReport}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    disabled={!canCreateDepartmentReports(department.id)}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     <Download className="h-4 w-4" />
                     Download
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    disabled={!canCreateDepartmentReports(department.id)}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     <Printer className="h-4 w-4" />
                     Print
@@ -2545,7 +2611,7 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
                 <div className="flex gap-3 pt-6">
                   <button
                     onClick={generateReport}
-                    disabled={loading || !selectedMeeting || !reportData.report_text.trim()}
+                    disabled={loading || !selectedMeeting || !reportData.report_text.trim() || !canCreateDepartmentReports(department.id)}
                     className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium flex items-center justify-center gap-2"
                   >
                     <FileDown className="h-4 w-4" />
@@ -2578,7 +2644,6 @@ interface DepartmentWorkflowProps {
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
-  refreshDepartmentData: () => void;
 }
 
 const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({ 
@@ -2587,8 +2652,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
   members: _members, 
   onClose, 
   onSuccess, 
-  onError,
-  refreshDepartmentData 
+  onError 
 }) => {
   const { profile, canCreateDepartmentMeetings, canManageDepartmentAttendance, canAddDepartmentNewcomers, canCreateDepartmentReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
@@ -2665,7 +2729,6 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
               setCurrentStep(3);
             }}
             onError={onError}
-            refreshDepartmentData={refreshDepartmentData}
           />
         )}
 
@@ -2676,7 +2739,6 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
             onNewcomerAdded={() => {
               onSuccess('Newcomer added successfully!');
               setCurrentStep(4);
-              refreshDepartmentData();
             }}
             onError={onError}
           />
@@ -2690,7 +2752,6 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
             onMeetingSelect={setSelectedMeeting}
             onReportCreated={() => {
               onSuccess('Department report generated successfully!');
-              refreshDepartmentData();
               onClose();
             }}
             onError={onError}
@@ -2730,7 +2791,16 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
 
 // Main Departments Component
 const Departments = () => {
-  const { profile, canViewDepartment, canManageDepartment, getRoles } = useAuth();
+  const { 
+    profile, 
+    canViewDepartment, 
+    canManageDepartment, 
+    getRoles, 
+    isAdmin, 
+    isPastor, 
+    isDepartmentLeader, 
+    isMember 
+  } = useAuth();
   
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
@@ -2750,42 +2820,6 @@ const Departments = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
-
-  // Check if user has administrator privileges
-  const isAdministrator = () => {
-    if (!profile) return false;
-    
-    // Check all possible admin fields
-    const adminRole = profile.admin_role?.toLowerCase();
-    const isAdminField = profile.is_admin === true;
-    const isPastorField = profile.pastor_role === true;
-    
-    return isAdminField || 
-           profile.is_developer === true ||
-           isPastorField ||
-           (adminRole && ['admin', 'administrator', 'pastor', 'deacon'].includes(adminRole));
-  };
-
-  // Check if user has pastor privileges
-  const isPastor = () => {
-    if (!profile) return false;
-    return profile.pastor_role === true || 
-           (profile.admin_role?.toLowerCase() === 'pastor') ||
-           profile.is_admin === true;
-  };
-
-  // Check if user is a department leader
-  const isDepartmentLeader = () => {
-    if (!profile) return false;
-    return profile.department_leader === true || 
-           profile.admin_role?.toLowerCase() === 'department_leader';
-  };
-
-  // Check if user is a regular member
-  const isMember = () => {
-    if (!profile) return false;
-    return !isAdministrator() && !isPastor() && !isDepartmentLeader();
-  };
 
   useEffect(() => {
     if (profile) {
@@ -2844,7 +2878,7 @@ const Departments = () => {
       // Filter departments based on user role
       let filteredDepartments = departmentsWithDetails;
       
-      if (!isAdministrator() && !isPastor()) {
+      if (!isAdmin() && !isPastor()) {
         if (isDepartmentLeader()) {
           // Department Leaders can see only their own department
           filteredDepartments = departmentsWithDetails.filter(department => 
@@ -2856,6 +2890,9 @@ const Departments = () => {
           filteredDepartments = departmentsWithDetails.filter(department => 
             userDepartments.some(ud => ud.id === department.id)
           );
+        } else {
+          // No role - no access
+          filteredDepartments = [];
         }
       }
       // Administrators and Pastors can see all departments (no filtering)
@@ -2867,12 +2904,6 @@ const Departments = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Function to refresh all department data
-  const refreshAllData = async () => {
-    await loadDepartments();
-    await loadAllMembers();
   };
 
   const getUserDepartments = async (): Promise<Department[]> => {
@@ -2931,12 +2962,11 @@ const Departments = () => {
 
   const loadAttendanceForMeeting = async (meetingId: string) => {
     try {
-      // FIXED: Correct query for report attendance
       const { data, error } = await supabase
         .from('department_attendance')
         .select(`
           *,
-          members!inner (
+          members:member_id (
             id, name, surname, residence, phone
           )
         `)
@@ -2989,8 +3019,9 @@ const Departments = () => {
   };
 
   const openEditDepartmentModal = (department: Department) => {
-    if (!canEditDepartment(department)) {
-      setError('You do not have permission to edit this department');
+    // Only allow admin and pastor to edit departments
+    if (!isAdmin() && !isPastor()) {
+      setError('Only administrators and pastors can edit departments');
       return;
     }
     setSelectedDepartment(department);
@@ -2998,7 +3029,8 @@ const Departments = () => {
   };
 
   const openDeleteDepartmentModal = (department: Department) => {
-    if (!canDeleteDepartment(department)) {
+    // Only allow admin and pastor to delete departments
+    if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete departments');
       return;
     }
@@ -3019,65 +3051,63 @@ const Departments = () => {
   };
 
   const handleDepartmentCreated = () => {
-    refreshAllData(); // Refresh all data after creating department
+    loadDepartments();
     setSuccess('Department created successfully!');
     setTimeout(() => setSuccess(null), 3000);
   };
 
   const handleDepartmentUpdated = () => {
-    refreshAllData(); // Refresh all data after updating department
+    loadDepartments();
     setSuccess('Department updated successfully!');
     setTimeout(() => setSuccess(null), 3000);
   };
 
   const handleDepartmentDeleted = () => {
-    refreshAllData(); // Refresh all data after deleting department
+    loadDepartments();
     setSuccess('Department deleted successfully!');
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Permission functions - FIXED for administrators and pastors
+  // Permission functions
   const canCreateDepartments = () => {
-    return isAdministrator() || isPastor();
+    return isAdmin() || isPastor();
   };
 
   const canEditDepartment = (department: Department) => {
-    if (isAdministrator() || isPastor()) {
-      return true; // Admins & Pastors can edit all departments
-    }
-    if (isDepartmentLeader()) {
-      return department.leader_id === profile?.id; // Leaders can edit only their own department
-    }
-    return false; // Members cannot edit any departments
+    // Only admin and pastor can edit departments
+    return isAdmin() || isPastor();
   };
 
   const canDeleteDepartment = (department: Department) => {
-    return isAdministrator() || isPastor(); // Only admins & pastors can delete
+    // Only admin and pastor can delete departments
+    return isAdmin() || isPastor();
+  };
+
+  const canViewDepartmentDetails = (department: Department) => {
+    if (isAdmin() || isPastor()) {
+      return true; // Admins & Pastors can view all departments
+    }
+    if (isDepartmentLeader()) {
+      return department.leader_id === profile?.id; // Leaders can view only their own department
+    }
+    if (isMember()) {
+      // Members can view only departments they belong to
+      return true; // We'll filter this in loadDepartments
+    }
+    return false;
   };
 
   const getUserRoleDisplay = () => {
     if (!profile) return 'Guest';
     
-    if (isAdministrator()) {
-      if (profile.pastor_role === true || profile.admin_role?.toLowerCase() === 'pastor') {
-        return 'Pastor/Administrator';
-      }
-      return 'Administrator';
-    }
-    
-    if (isDepartmentLeader()) {
-      return 'Department Leader';
-    }
-    
-    if (profile.admin_role === 'deacon') {
-      return 'Deacon';
-    }
-    
-    if (profile.admin_role === 'group_leader') {
-      return 'Group Leader';
-    }
-    
-    return 'Member';
+    const roles = getRoles();
+    if (roles.includes('admin') || roles.includes('administrator')) return 'Administrator';
+    if (roles.includes('pastor')) return 'Pastor';
+    if (roles.includes('deacon')) return 'Deacon';
+    if (roles.includes('department_leader')) return 'Department Leader';
+    if (roles.includes('group_leader')) return 'Group Leader';
+    if (roles.includes('member')) return 'Member';
+    return 'Guest';
   };
 
   const getAttendanceStats = () => {
@@ -3098,11 +3128,6 @@ const Departments = () => {
           <p className="text-lg text-gray-600">
             {profile ? `Logged in as ${getUserRoleDisplay()}` : 'Please log in to view departments'}
           </p>
-          {(isAdministrator() || isPastor()) && (
-            <div className="mt-2 text-sm text-purple-600 font-medium">
-              ⚡ Full Administrative Access
-            </div>
-          )}
         </div>
 
         {/* Search and Create Department Bar */}
@@ -3293,7 +3318,8 @@ const Departments = () => {
                       <div className="flex gap-2">
                         <button
                           onClick={() => openMeetingsModal(department)}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                          disabled={!canView}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
                         >
                           View Meetings
                         </button>
@@ -3413,7 +3439,7 @@ const Departments = () => {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
             <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none">
               <div className="flex justify-between items-center mb-6 print:mb-8">
-                <h3 className="text-2xl font-bold text-gray-900 print:text-black print:text-3xl">
+                <h3 className="text-2xl font-bold text-gray-900 print:text-black">
                   Department Meeting Report
                 </h3>
                 <div className="flex gap-2 print:hidden">
@@ -3599,7 +3625,7 @@ const Departments = () => {
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
                                 <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt=1.5"></div>
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
                                   <div className="flex-1">
                                     <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
@@ -3666,7 +3692,6 @@ const Departments = () => {
                   setError(message);
                   setTimeout(() => setError(null), 3000);
                 }}
-                refreshDepartmentData={refreshAllData}
               />
             </div>
           </div>
