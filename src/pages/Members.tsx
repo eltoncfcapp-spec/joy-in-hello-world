@@ -9,13 +9,12 @@ interface Member {
   residence: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  ministry_group_id: string | null;
   gender: 'male' | 'female' | null;
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
   baptism: string | null;
   cell_groups: { name: string } | null;
-  ministry_groups: { name: string } | null;
+  ministry_groups: { name: string } | null; // This will come from a separate query
   status: string | null;
   status_date: string | null;
   not_attending_reason: string | null;
@@ -35,10 +34,8 @@ interface MinistryGroup {
 }
 
 // Based on your schema, these are the expected status values from the member_status enum
-// Make sure these match your actual database enum values
 const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
 const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
-// Combined list for validation
 const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
 
 const Members = () => {
@@ -54,6 +51,11 @@ const Members = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>(VALID_STATUSES);
   const [showHiddenMembers, setShowHiddenMembers] = useState(false);
+  
+  // Separate state for ministry group selection
+  const [selectedMinistryGroup, setSelectedMinistryGroup] = useState('');
+  const [editSelectedMinistryGroup, setEditSelectedMinistryGroup] = useState('');
+  
   const [formData, setFormData] = useState({
     name: '',
     surname: '',
@@ -61,10 +63,10 @@ const Members = () => {
     phone: '',
     invited_by: '',
     cell_group_id: '',
-    ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     baptism: '',
   });
+  
   const [editFormData, setEditFormData] = useState({
     name: '',
     surname: '',
@@ -72,7 +74,6 @@ const Members = () => {
     phone: '',
     invited_by: '',
     cell_group_id: '',
-    ministry_group_id: '',
     gender: '' as 'male' | 'female' | '',
     baptism: '',
     status: 'newcomer',
@@ -116,21 +117,46 @@ const Members = () => {
       setLoading(true);
       setError(null);
       
-      const { data, error } = await supabase
+      // Get members with their cell groups
+      const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
           *,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
+          cell_groups!fk_cell_group(name)
         `)
         .eq('is_hidden', false)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        throw error;
+      if (membersError) {
+        throw membersError;
       }
 
-      setMembers(data || []);
+      // Get ministry group memberships for all members
+      const memberIds = membersData?.map(m => m.id) || [];
+      let ministryGroupsMap: Record<string, { name: string }> = {};
+
+      if (memberIds.length > 0) {
+        // Use the ministry_membership view or query junction table directly
+        const { data: ministryData, error: ministryError } = await supabase
+          .from('ministry_membership')
+          .select('member_id, ministry_group_name')
+          .in('member_id', memberIds);
+
+        if (!ministryError && ministryData) {
+          // Create a map of member_id -> ministry group
+          ministryData.forEach(item => {
+            ministryGroupsMap[item.member_id] = { name: item.ministry_group_name };
+          });
+        }
+      }
+
+      // Combine the data
+      const membersWithMinistryGroups = membersData?.map(member => ({
+        ...member,
+        ministry_groups: ministryGroupsMap[member.id] || null
+      })) || [];
+
+      setMembers(membersWithMinistryGroups);
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members. Please check your connection.');
@@ -141,21 +167,42 @@ const Members = () => {
 
   const fetchHiddenMembers = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
           *,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name)
+          cell_groups!fk_cell_group(name)
         `)
         .eq('is_hidden', true)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        throw error;
+      if (membersError) {
+        throw membersError;
       }
 
-      setHiddenMembers(data || []);
+      // Get ministry group memberships for hidden members
+      const memberIds = membersData?.map(m => m.id) || [];
+      let ministryGroupsMap: Record<string, { name: string }> = {};
+
+      if (memberIds.length > 0) {
+        const { data: ministryData, error: ministryError } = await supabase
+          .from('ministry_membership')
+          .select('member_id, ministry_group_name')
+          .in('member_id', memberIds);
+
+        if (!ministryError && ministryData) {
+          ministryData.forEach(item => {
+            ministryGroupsMap[item.member_id] = { name: item.ministry_group_name };
+          });
+        }
+      }
+
+      const membersWithMinistryGroups = membersData?.map(member => ({
+        ...member,
+        ministry_groups: ministryGroupsMap[member.id] || null
+      })) || [];
+
+      setHiddenMembers(membersWithMinistryGroups);
     } catch (error: any) {
       console.error('Error fetching hidden members:', error);
     }
@@ -210,7 +257,8 @@ const Members = () => {
     }
 
     try {
-      const { error } = await supabase
+      // First, create the member
+      const { data: newMember, error: memberError } = await supabase
         .from('members')
         .insert([{
           name: formData.name.trim(),
@@ -218,20 +266,36 @@ const Members = () => {
           residence: formData.residence.trim(),
           phone: formData.phone.trim() || null,
           cell_group_id: formData.cell_group_id || null,
-          ministry_group_id: formData.ministry_group_id || null,
           gender: formData.gender || null,
           invited_by: formData.invited_by.trim() || null,
           baptism: formData.baptism || null,
           status: 'newcomer',
           status_date: new Date().toISOString(),
           is_permanent_member: false,
-          is_hidden: false, // New members are always shown with newcomer status
+          is_hidden: false,
           not_attending_reason: null,
         }])
-        .select();
+        .select()
+        .single();
 
-      if (error) {
-        throw error;
+      if (memberError) {
+        throw memberError;
+      }
+
+      // Then, add to ministry group if selected
+      if (selectedMinistryGroup && newMember) {
+        const { error: ministryError } = await supabase
+          .from('ministry_group_members')
+          .insert({
+            member_id: newMember.id,
+            ministry_group_id: selectedMinistryGroup,
+            role: 'member'
+          });
+
+        if (ministryError) {
+          console.error('Error adding to ministry group:', ministryError);
+          // Don't throw - still show success for member creation
+        }
       }
 
       setShowForm(false);
@@ -242,10 +306,10 @@ const Members = () => {
         phone: '', 
         invited_by: '', 
         cell_group_id: '',
-        ministry_group_id: '',
         gender: '',
         baptism: '',
       });
+      setSelectedMinistryGroup('');
       setSuccess('Member added successfully as a newcomer!');
       fetchMembers();
       fetchHiddenMembers();
@@ -259,7 +323,7 @@ const Members = () => {
     }
   };
 
-  const handleEditMember = (member: Member) => {
+  const handleEditMember = async (member: Member) => {
     setEditingMember(member.id);
     setEditFormData({
       name: member.name,
@@ -268,7 +332,6 @@ const Members = () => {
       phone: member.phone || '',
       invited_by: member.invited_by || '',
       cell_group_id: member.cell_group_id || '',
-      ministry_group_id: member.ministry_group_id || '',
       gender: member.gender || '',
       baptism: member.baptism || '',
       status: member.status || 'newcomer',
@@ -276,6 +339,17 @@ const Members = () => {
       not_attending_reason: member.not_attending_reason || '',
       is_hidden: member.is_hidden || false,
     });
+    
+    // Fetch current ministry group for this member
+    if (member.id) {
+      const { data: ministryData } = await supabase
+        .from('ministry_membership')
+        .select('ministry_group_id')
+        .eq('member_id', member.id)
+        .single();
+      
+      setEditSelectedMinistryGroup(ministryData?.ministry_group_id || '');
+    }
   };
 
   const handleSaveMember = async (memberId: string) => {
@@ -316,7 +390,6 @@ const Members = () => {
         residence: editFormData.residence.trim(),
         phone: editFormData.phone.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
-        ministry_group_id: editFormData.ministry_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
         baptism: editFormData.baptism || null,
@@ -324,20 +397,45 @@ const Members = () => {
         status_date: editFormData.status_date ? new Date(editFormData.status_date).toISOString() : new Date().toISOString(),
         is_permanent_member: editFormData.status.toLowerCase().includes('permanent'),
         not_attending_reason,
-        is_hidden: shouldBeHidden, // Auto-set based on status
+        is_hidden: shouldBeHidden,
       };
 
       if (editFormData.status.toLowerCase().includes('permanent')) {
         updateData.permanent_member_date = new Date().toISOString();
       }
 
-      const { error } = await supabase
+      // Update member
+      const { error: memberError } = await supabase
         .from('members')
         .update(updateData)
         .eq('id', memberId);
 
-      if (error) {
-        throw error;
+      if (memberError) {
+        throw memberError;
+      }
+
+      // Handle ministry group separately
+      if (editSelectedMinistryGroup) {
+        // Remove from all ministry groups first
+        await supabase
+          .from('ministry_group_members')
+          .delete()
+          .eq('member_id', memberId);
+        
+        // Add to selected ministry group
+        await supabase
+          .from('ministry_group_members')
+          .insert({
+            member_id: memberId,
+            ministry_group_id: editSelectedMinistryGroup,
+            role: 'member'
+          });
+      } else {
+        // Remove from all ministry groups if no group selected
+        await supabase
+          .from('ministry_group_members')
+          .delete()
+          .eq('member_id', memberId);
       }
 
       setEditingMember(null);
@@ -372,7 +470,6 @@ const Members = () => {
       phone: '',
       invited_by: '',
       cell_group_id: '',
-      ministry_group_id: '',
       gender: '',
       baptism: '',
       status: 'newcomer',
@@ -380,6 +477,7 @@ const Members = () => {
       not_attending_reason: '',
       is_hidden: false,
     });
+    setEditSelectedMinistryGroup('');
   };
 
   const handleRestoreMember = async (memberId: string) => {
@@ -424,6 +522,13 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
+      // First, remove from ministry groups
+      await supabase
+        .from('ministry_group_members')
+        .delete()
+        .eq('member_id', memberId);
+      
+      // Then delete the member
       const { error: deleteError } = await supabase
         .from('members')
         .delete()
@@ -450,7 +555,8 @@ const Members = () => {
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase())
+      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.ministry_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const filteredHiddenMembers = hiddenMembers.filter(
@@ -458,7 +564,8 @@ const Members = () => {
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.phone?.toLowerCase().includes(searchQuery.toLowerCase())
+      member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.ministry_groups?.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getInitials = (name: string, surname: string) => {
@@ -473,10 +580,10 @@ const Members = () => {
       phone: '', 
       invited_by: '', 
       cell_group_id: '',
-      ministry_group_id: '',
       gender: '',
       baptism: '',
     });
+    setSelectedMinistryGroup('');
     setShowForm(false);
     setError(null);
   };
@@ -626,6 +733,23 @@ const Members = () => {
                 className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
                 placeholder="Invited by"
               />
+            </div>
+
+            {/* Ministry Group Selection in Edit Form */}
+            <div className="flex items-center gap-3">
+              <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
+              <select
+                value={editSelectedMinistryGroup}
+                onChange={(e) => setEditSelectedMinistryGroup(e.target.value)}
+                className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+              >
+                <option value="">Select ministry group</option>
+                {ministryGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -1016,11 +1140,11 @@ const Members = () => {
                     Ministry Group
                   </label>
                   <select
-                    value={formData.ministry_group_id}
-                    onChange={(e) => setFormData({ ...formData, ministry_group_id: e.target.value })}
+                    value={selectedMinistryGroup}
+                    onChange={(e) => setSelectedMinistryGroup(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   >
-                    <option value="">Select ministry group</option>
+                    <option value="">Select ministry group (optional)</option>
                     {ministryGroups.map((group) => (
                       <option key={group.id} value={group.id}>
                         {group.name}
