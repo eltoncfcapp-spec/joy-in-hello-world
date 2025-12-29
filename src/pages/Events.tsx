@@ -47,10 +47,10 @@ interface Member {
   login_username: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  cell_groups: { name: string } | null;
   ministry_group_id: string | null;
-  ministry_groups: { name: string } | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  cell_groups?: { name: string } | null;
+  ministry_groups?: { name: string } | null;
   department_members?: Array<{
     departments: {
       id: string;
@@ -91,7 +91,6 @@ interface EventAttendee {
   } | null;
 }
 
-// Move SermonModal outside the Events component to prevent re-renders
 interface SermonModalProps {
   showSermonModal: string | null;
   closeSermonModal: () => void;
@@ -135,7 +134,6 @@ const SermonModal = ({
 }: SermonModalProps) => {
   if (!showSermonModal) return null;
 
-  // Memoize the handlers with useCallback to prevent re-renders
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setSermonFormData(prev => ({ ...prev, [name]: value }));
@@ -184,7 +182,6 @@ const SermonModal = ({
                 required
                 minLength={2}
                 maxLength={200}
-                key="sermon-title-input"
               />
             </div>
 
@@ -202,7 +199,6 @@ const SermonModal = ({
                 required
                 minLength={10}
                 maxLength={1000}
-                key="sermon-summary-textarea"
               />
             </div>
 
@@ -221,7 +217,6 @@ const SermonModal = ({
                   required
                   minLength={2}
                   maxLength={100}
-                  key="pastor-name-input"
                 />
               </div>
 
@@ -236,7 +231,6 @@ const SermonModal = ({
                   onChange={handleInputChange}
                   className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   required
-                  key="sermon-date-input"
                 />
               </div>
             </div>
@@ -287,7 +281,6 @@ const SermonModal = ({
                     accept="video/*"
                     onChange={(e) => handleFileChange('video', e.target.files?.[0] || null)}
                     className="hidden"
-                    key="video-file-input"
                   />
                 </label>
               </div>
@@ -331,7 +324,6 @@ const SermonModal = ({
                     accept=".pdf,.doc,.docx,.txt"
                     onChange={(e) => handleFileChange('document', e.target.files?.[0] || null)}
                     className="hidden"
-                    key="document-file-input"
                   />
                 </label>
               </div>
@@ -519,8 +511,12 @@ const Events = () => {
           cell_group_id,
           ministry_group_id,
           status,
-          cell_groups!fk_cell_group(name),
-          ministry_groups(name),
+          cell_groups!fk_cell_group (
+            name
+          ),
+          ministry_groups!members_ministry_group_id_fkey (
+            name
+          ),
           department_members (
             departments (
               id,
@@ -595,8 +591,12 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
+            cell_groups!fk_cell_group (
+              name
+            ),
+            ministry_groups!members_ministry_group_id_fkey (
+              name
+            ),
             department_members (
               departments (
                 id,
@@ -710,7 +710,7 @@ const Events = () => {
         }
       }
 
-      // 3. Delete event attendees (cascade should handle this, but we do it explicitly)
+      // 3. Delete event attendees
       const { error: attendeesError } = await supabase
         .from('event_attendees')
         .delete()
@@ -1609,8 +1609,12 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
+            cell_groups!fk_cell_group (
+              name
+            ),
+            ministry_groups!members_ministry_group_id_fkey (
+              name
+            ),
             department_members (
               departments (
                 id,
@@ -1863,8 +1867,12 @@ const Events = () => {
             status,
             cell_group_id,
             ministry_group_id,
-            cell_groups!fk_cell_group(name),
-            ministry_groups(name),
+            cell_groups!fk_cell_group (
+              name
+            ),
+            ministry_groups!members_ministry_group_id_fkey (
+              name
+            ),
             department_members (
               departments (
                 id,
@@ -2409,16 +2417,16 @@ const Events = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  login_username Address
+                  Email Address
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
-                    type="login_username"
+                    type="email"
                     value={newcomerFormData.login_username}
                     onChange={(e) => setNewcomerFormData({ ...newcomerFormData, login_username: e.target.value })}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter login_username address"
+                    placeholder="Enter email address"
                   />
                 </div>
               </div>
