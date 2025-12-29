@@ -1,10 +1,6 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Activity, Shield, Key, Users, Lock, Unlock, Filter, Download, Upload } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { useAuth } from '../contexts/AuthContext';
-import { useActivityLog } from '../hooks/useActivityLog';
-import { formatDistanceToNow } from 'date-fns';
-import { ProtectedRoute } from '../components/ProtectedRoute';
 
 interface Member {
   id: string;
@@ -33,7 +29,6 @@ interface Member {
 interface CellGroup {
   id: string;
   name: string;
-  leader_id: string | null;
 }
 
 interface MinistryGroup {
@@ -41,28 +36,36 @@ interface MinistryGroup {
   name: string;
 }
 
-interface ActivityLog {
-  id: string;
-  action: string;
-  details: any;
-  created_at: string;
-  members: {
-    name: string;
-    surname: string;
-  };
-  profiles: {
-    full_name: string;
-  };
-}
-
 const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
 const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
 const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
 
+// Audit log function
+const logAudit = async (
+  tableName: string,
+  recordId: string,
+  action: 'INSERT' | 'UPDATE' | 'DELETE',
+  oldData?: any,
+  newData?: any
+) => {
+  try {
+    // Get current user from Supabase auth
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    await supabase.from('audit_logs').insert({
+      table_name: tableName,
+      record_id: recordId,
+      action: action,
+      old_data: oldData,
+      new_data: newData,
+      user_id: user?.id || null
+    });
+  } catch (error) {
+    console.error('Error logging audit:', error);
+  }
+};
+
 const Members = () => {
-  const { userRole } = useAuth();
-  const { logActivity, getActivityLogs } = useActivityLog();
-  
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [hiddenMembers, setHiddenMembers] = useState<Member[]>([]);
@@ -75,8 +78,6 @@ const Members = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>(VALID_STATUSES);
   const [showHiddenMembers, setShowHiddenMembers] = useState(false);
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
-  const [showActivityLogs, setShowActivityLogs] = useState(false);
   const [exporting, setExporting] = useState(false);
   
   // Separate state for ministry group selection
@@ -136,45 +137,6 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Check permissions based on role
-  const canViewAll = () => {
-    return ['admin', 'pastor'].includes(userRole?.role || '');
-  };
-
-  const canEdit = (memberCellGroupId?: string | null) => {
-    if (['admin', 'pastor'].includes(userRole?.role || '')) {
-      return true;
-    }
-    
-    if (userRole?.role === 'deacon') {
-      // Check if deacon has edit permission
-      return userRole?.permissions?.canEdit || false;
-    }
-    
-    if (userRole?.role === 'leader') {
-      // Leaders can only edit members in their cell group
-      return memberCellGroupId === userRole?.cell_group_id;
-    }
-    
-    return false;
-  };
-
-  const canDelete = () => {
-    return ['admin', 'pastor'].includes(userRole?.role || '');
-  };
-
-  const canViewHidden = () => {
-    return ['admin', 'pastor', 'deacon'].includes(userRole?.role || '');
-  };
-
-  const canCreate = () => {
-    return ['admin', 'pastor', 'deacon', 'leader'].includes(userRole?.role || '');
-  };
-
-  const canViewActivity = () => {
-    return ['admin', 'pastor'].includes(userRole?.role || '');
-  };
-
   const isNotAttendingStatus = (status: string | null): boolean => {
     if (!status) return false;
     const statusLower = status.toLowerCase();
@@ -195,12 +157,6 @@ const Members = () => {
     fetchMembers();
     fetchCellGroups();
     fetchMinistryGroups();
-    if (canViewHidden()) {
-      fetchHiddenMembers();
-    }
-    if (canViewActivity()) {
-      fetchActivityLogs();
-    }
   }, []);
 
   const fetchMembers = async () => {
@@ -208,50 +164,41 @@ const Members = () => {
       setLoading(true);
       setError(null);
       
-      let query = supabase
+      // Get members with their cell groups
+      const { data: membersData, error: membersError } = await supabase
         .from('members')
         .select(`
           *,
-          cell_groups!fk_cell_group(name, leader_id)
+          cell_groups!fk_cell_group(name)
         `)
-        .eq('is_hidden', false);
-
-      // Apply role-based filtering
-      if (userRole?.role === 'leader' && userRole.cell_group_id) {
-        query = query.eq('cell_group_id', userRole.cell_group_id);
-      } else if (userRole?.role === 'member') {
-        // Members can only see themselves
-        query = query.eq('id', userRole.id).maybeSingle();
-      }
-
-      const { data: membersData, error: membersError } = await query
+        .eq('is_hidden', false)
         .order('created_at', { ascending: false });
 
       if (membersError) {
         throw membersError;
       }
 
-      // Handle single member case
-      const membersArray = Array.isArray(membersData) ? membersData : (membersData ? [membersData] : []);
-
-      // Get ministry group memberships
-      const memberIds = membersArray?.map(m => m.id) || [];
+      // Get ministry group memberships for all members
+      const memberIds = membersData?.map(m => m.id) || [];
       let ministryGroupsMap: Record<string, { name: string }> = {};
 
       if (memberIds.length > 0) {
+        // Use the ministry_membership view or query junction table directly
         const { data: ministryData, error: ministryError } = await supabase
           .from('ministry_membership')
           .select('member_id, ministry_group_name')
           .in('member_id', memberIds);
 
         if (!ministryError && ministryData) {
+          // Create a map of member_id -> ministry group
           ministryData.forEach(item => {
             ministryGroupsMap[item.member_id] = { name: item.ministry_group_name };
           });
         }
       }
 
-      const membersWithMinistryGroups = membersArray?.map(member => ({
+      // Combine the data
+      const membersWithMinistryGroups = membersData?.map(member => ({
         ...member,
         ministry_groups: ministryGroupsMap[member.id] || null
       })) || [];
@@ -259,15 +206,13 @@ const Members = () => {
       setMembers(membersWithMinistryGroups);
     } catch (error: any) {
       console.error('Error fetching members:', error);
-      setError(error.message || 'Failed to load members.');
+      setError(error.message || 'Failed to load members. Please check your connection.');
     } finally {
       setLoading(false);
     }
   };
 
   const fetchHiddenMembers = async () => {
-    if (!canViewHidden()) return;
-
     try {
       const { data: membersData, error: membersError } = await supabase
         .from('members')
@@ -282,7 +227,7 @@ const Members = () => {
         throw membersError;
       }
 
-      // Get ministry group memberships
+      // Get ministry group memberships for hidden members
       const memberIds = membersData?.map(m => m.id) || [];
       let ministryGroupsMap: Record<string, { name: string }> = {};
 
@@ -314,7 +259,7 @@ const Members = () => {
     try {
       const { data, error } = await supabase
         .from('cell_groups')
-        .select('id, name, leader_id')
+        .select('id, name')
         .order('name');
 
       if (error) {
@@ -324,6 +269,7 @@ const Members = () => {
       setCellGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
+      setError(error.message || 'Failed to load cell groups.');
     }
   };
 
@@ -341,15 +287,7 @@ const Members = () => {
       setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
-    }
-  };
-
-  const fetchActivityLogs = async () => {
-    try {
-      const logs = await getActivityLogs(undefined, 20);
-      setActivityLogs(logs || []);
-    } catch (error) {
-      console.error('Error fetching activity logs:', error);
+      setError(error.message || 'Failed to load ministry groups.');
     }
   };
 
@@ -366,27 +304,29 @@ const Members = () => {
     }
 
     try {
+      const newMemberData = {
+        name: formData.name.trim(),
+        surname: formData.surname.trim(),
+        residence: formData.residence.trim(),
+        phone: formData.phone.trim() || null,
+        email: formData.email.trim() || null,
+        birth_date: formData.birth_date || null,
+        occupation: formData.occupation.trim() || null,
+        cell_group_id: formData.cell_group_id || null,
+        gender: formData.gender || null,
+        invited_by: formData.invited_by.trim() || null,
+        baptism: formData.baptism || null,
+        status: 'newcomer',
+        status_date: new Date().toISOString(),
+        is_permanent_member: false,
+        is_hidden: false,
+        not_attending_reason: null,
+      };
+
       // First, create the member
       const { data: newMember, error: memberError } = await supabase
         .from('members')
-        .insert([{
-          name: formData.name.trim(),
-          surname: formData.surname.trim(),
-          residence: formData.residence.trim(),
-          phone: formData.phone.trim() || null,
-          email: formData.email.trim() || null,
-          birth_date: formData.birth_date || null,
-          occupation: formData.occupation.trim() || null,
-          cell_group_id: formData.cell_group_id || null,
-          gender: formData.gender || null,
-          invited_by: formData.invited_by.trim() || null,
-          baptism: formData.baptism || null,
-          status: 'newcomer',
-          status_date: new Date().toISOString(),
-          is_permanent_member: false,
-          is_hidden: false,
-          not_attending_reason: null,
-        }])
+        .insert([newMemberData])
         .select()
         .single();
 
@@ -394,51 +334,49 @@ const Members = () => {
         throw memberError;
       }
 
-      // Log the activity
-      await logActivity(newMember.id, 'member_created', {
-        name: newMember.name,
-        surname: newMember.surname,
-        role: userRole?.role
-      });
+      // Log the audit
+      await logAudit('members', newMember.id, 'INSERT', null, newMemberData);
 
-      // Add to ministry group if selected
+      // Then, add to ministry group if selected
       if (selectedMinistryGroup && newMember) {
+        const ministryData = {
+          member_id: newMember.id,
+          ministry_group_id: selectedMinistryGroup,
+          role: 'member'
+        };
+
         const { error: ministryError } = await supabase
           .from('ministry_group_members')
-          .insert({
-            member_id: newMember.id,
-            ministry_group_id: selectedMinistryGroup,
-            role: 'member'
-          });
+          .insert([ministryData]);
 
         if (ministryError) {
           console.error('Error adding to ministry group:', ministryError);
+          // Log the error but don't stop the process
+          await logAudit('ministry_group_members', newMember.id, 'INSERT', null, {
+            ...ministryData,
+            error: ministryError.message
+          });
+        } else {
+          await logAudit('ministry_group_members', newMember.id, 'INSERT', null, ministryData);
         }
       }
 
       setShowForm(false);
       resetForm();
       setSuccess('Member added successfully as a newcomer!');
-      
       fetchMembers();
-      if (canViewHidden()) fetchHiddenMembers();
-      if (canViewActivity()) fetchActivityLogs();
+      fetchHiddenMembers();
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error adding member:', error);
-      setError(error.message || 'Failed to add member.');
+      setError(error.message || 'Failed to add member. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleEditMember = async (member: Member) => {
-    if (!canEdit(member.cell_group_id)) {
-      setError('You do not have permission to edit this member.');
-      return;
-    }
-
     setEditingMember(member.id);
     setEditFormData({
       name: member.name,
@@ -458,14 +396,18 @@ const Members = () => {
       is_hidden: member.is_hidden || false,
     });
     
-    // Fetch current ministry group
+    // Fetch current ministry group for this member
     if (member.id) {
       try {
-        const { data: ministryData } = await supabase
+        const { data: ministryData, error } = await supabase
           .from('ministry_membership')
           .select('ministry_group_id')
           .eq('member_id', member.id)
           .maybeSingle();
+        
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error fetching ministry group:', error);
+        }
         
         setEditSelectedMinistryGroup(ministryData?.ministry_group_id || '');
       } catch (error) {
@@ -475,33 +417,34 @@ const Members = () => {
     }
   };
 
-  const handleSaveMember = async (memberId: string, originalMember: Member) => {
-    if (!canEdit(originalMember.cell_group_id)) {
-      setError('You do not have permission to edit this member.');
-      return;
-    }
-
+  const handleSaveMember = async (memberId: string) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
     
     try {
       if (!editFormData.name.trim() || !editFormData.surname.trim() || !editFormData.residence.trim() || !editFormData.gender) {
-        setError('Required fields are missing.');
+        setError('Name, surname, residence, and gender are required fields.');
         setLoading(false);
         return;
       }
 
+      // Validate status
       const status = editFormData.status.toLowerCase();
       if (!VALID_STATUSES.some(validStatus => status.includes(validStatus.toLowerCase()))) {
-        setError(`Invalid status. Please use: ${VALID_STATUSES.join(', ')}`);
+        setError(`Invalid status. Please use one of: ${VALID_STATUSES.join(', ')}`);
         setLoading(false);
         return;
       }
 
+      // Determine if status is not attending
       const isNotAttending = isNotAttendingStatus(editFormData.status);
       const isAttending = isAttendingStatus(editFormData.status);
+      
+      // Auto-set is_hidden based on status
       const shouldBeHidden = isNotAttending;
+      
+      // Set not_attending_reason if status indicates not attending
       const not_attending_reason = isNotAttending 
         ? (editFormData.not_attending_reason || 'Member stopped attending')
         : null;
@@ -529,6 +472,13 @@ const Members = () => {
         updateData.permanent_member_date = new Date().toISOString();
       }
 
+      // First get the old data for audit log
+      const { data: oldMemberData } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', memberId)
+        .single();
+
       // Update member
       const { error: memberError } = await supabase
         .from('members')
@@ -539,63 +489,64 @@ const Members = () => {
         throw memberError;
       }
 
-      // Log the activity
-      await logActivity(memberId, 'member_updated', {
-        changes: getChanges(originalMember, updateData),
-        role: userRole?.role
-      });
+      // Log the audit
+      await logAudit('members', memberId, 'UPDATE', oldMemberData, updateData);
 
-      // Handle ministry group
-      await supabase
+      // Handle ministry group separately
+      // Remove from all ministry groups first
+      const { data: oldMinistryData } = await supabase
         .from('ministry_group_members')
-        .delete()
+        .select('*')
         .eq('member_id', memberId);
-      
-      if (editSelectedMinistryGroup) {
+
+      if (oldMinistryData && oldMinistryData.length > 0) {
         await supabase
           .from('ministry_group_members')
-          .insert({
-            member_id: memberId,
-            ministry_group_id: editSelectedMinistryGroup,
-            role: 'member'
-          });
+          .delete()
+          .eq('member_id', memberId);
+
+        // Log the deletion
+        await logAudit('ministry_group_members', memberId, 'DELETE', oldMinistryData, null);
+      }
+      
+      // Add to selected ministry group if one is selected
+      if (editSelectedMinistryGroup) {
+        const newMinistryData = {
+          member_id: memberId,
+          ministry_group_id: editSelectedMinistryGroup,
+          role: 'member'
+        };
+
+        await supabase
+          .from('ministry_group_members')
+          .insert([newMinistryData]);
+
+        // Log the insertion
+        await logAudit('ministry_group_members', memberId, 'INSERT', null, newMinistryData);
       }
 
       setEditingMember(null);
       setEditSelectedMinistryGroup('');
       
+      // Show appropriate success message
       let message = 'Member details updated successfully!';
       if (isNotAttending) {
-        message += ' Member has been automatically hidden.';
+        message += ' Member has been automatically hidden due to not attending status.';
       } else if (isAttending && editFormData.is_hidden) {
-        message += ' Member is now visible.';
+        message += ' Member is now visible due to attending status.';
       }
       
       setSuccess(message);
       fetchMembers();
-      if (canViewHidden()) fetchHiddenMembers();
-      if (canViewActivity()) fetchActivityLogs();
+      fetchHiddenMembers();
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error updating member:', error);
-      setError(error.message || 'Failed to update member.');
+      setError(error.message || 'Failed to update member details. Please check if the status value is valid.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const getChanges = (original: any, updated: any) => {
-    const changes: any = {};
-    Object.keys(updated).forEach(key => {
-      if (JSON.stringify(original[key]) !== JSON.stringify(updated[key])) {
-        changes[key] = {
-          from: original[key],
-          to: updated[key]
-        };
-      }
-    });
-    return changes;
   };
 
   const handleCancelEdit = () => {
@@ -621,12 +572,7 @@ const Members = () => {
   };
 
   const handleRestoreMember = async (memberId: string) => {
-    if (!canEdit(null)) {
-      setError('You do not have permission to restore members.');
-      return;
-    }
-
-    if (!confirm('Restore this member?')) {
+    if (!confirm('Restore this member? They will appear in the main members list again as a newcomer.')) {
       return;
     }
 
@@ -634,30 +580,35 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
+      // First get the old data for audit log
+      const { data: oldMemberData } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', memberId)
+        .single();
+
+      const updateData = { 
+        is_hidden: false,
+        status: 'newcomer',
+        status_date: new Date().toISOString(),
+        not_attending_reason: null
+      };
+
       const { error: restoreError } = await supabase
         .from('members')
-        .update({ 
-          is_hidden: false,
-          status: 'newcomer',
-          status_date: new Date().toISOString(),
-          not_attending_reason: null
-        })
+        .update(updateData)
         .eq('id', memberId);
 
       if (restoreError) {
         throw restoreError;
       }
+
+      // Log the audit
+      await logAudit('members', memberId, 'UPDATE', oldMemberData, updateData);
       
-      // Log the activity
-      await logActivity(memberId, 'member_restored', {
-        role: userRole?.role
-      });
-      
-      setSuccess('Member restored successfully!');
+      setSuccess('Member restored successfully as a newcomer!');
       fetchMembers();
-      if (canViewHidden()) fetchHiddenMembers();
-      if (canViewActivity()) fetchActivityLogs();
-      
+      fetchHiddenMembers();
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error restoring member:', error);
@@ -666,12 +617,7 @@ const Members = () => {
   };
 
   const handlePermanentDeleteMember = async (memberId: string, memberName: string) => {
-    if (!canDelete()) {
-      setError('You do not have permission to delete members.');
-      return;
-    }
-
-    if (!confirm(`⚠️ WARNING: This will permanently delete ${memberName}. This action cannot be undone. Are you sure?`)) {
+    if (!confirm(`⚠️ WARNING: This will permanently delete ${memberName}. This action cannot be undone. Are you absolutely sure?`)) {
       return;
     }
 
@@ -679,19 +625,32 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
-      // Log activity before deletion
-      await logActivity(memberId, 'member_deleted', {
-        member_name: memberName,
-        role: userRole?.role
-      });
-      
-      // Remove from ministry groups
+      // First get all related data for audit logs
+      const { data: memberData } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', memberId)
+        .single();
+
+      const { data: ministryData } = await supabase
+        .from('ministry_group_members')
+        .select('*')
+        .eq('member_id', memberId);
+
+      // First, remove from ministry groups
       await supabase
         .from('ministry_group_members')
         .delete()
         .eq('member_id', memberId);
+
+      // Log ministry group deletions
+      if (ministryData && ministryData.length > 0) {
+        for (const ministry of ministryData) {
+          await logAudit('ministry_group_members', ministry.id, 'DELETE', ministry, null);
+        }
+      }
       
-      // Delete the member
+      // Then delete the member
       const { error: deleteError } = await supabase
         .from('members')
         .delete()
@@ -700,16 +659,17 @@ const Members = () => {
       if (deleteError) {
         throw deleteError;
       }
+
+      // Log the member deletion
+      await logAudit('members', memberId, 'DELETE', memberData, null);
       
       setSuccess('Member permanently deleted.');
       fetchMembers();
-      if (canViewHidden()) fetchHiddenMembers();
-      if (canViewActivity()) fetchActivityLogs();
-      
+      fetchHiddenMembers();
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting member:', error);
-      setError(error.message || 'Cannot delete member.');
+      setError(error.message || 'Cannot delete member. They may have records in other tables.');
     }
   };
 
@@ -731,10 +691,12 @@ const Members = () => {
         Occupation: member.occupation,
         'Invited By': member.invited_by,
         'Member Since': member.created_at,
+        'Permanent Member': member.is_permanent_member ? 'Yes' : 'No',
+        'Permanent Since': member.permanent_member_date,
       }));
 
       const csvContent = [
-        Object.keys(exportData[0]).join(','),
+        Object.keys(exportData[0] || {}).join(','),
         ...exportData.map(row => Object.values(row).map(val => 
           `"${val ? val.toString().replace(/"/g, '""') : ''}"`
         ).join(','))
@@ -758,6 +720,34 @@ const Members = () => {
     } finally {
       setExporting(false);
     }
+  };
+
+  const filteredMembers = members.filter((member) => {
+    const matchesSearch = 
+      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.ministry_groups?.name.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesCellGroup = !selectedCellGroup || member.cell_group_id === selectedCellGroup;
+    const matchesStatus = !selectedStatus || member.status === selectedStatus;
+    const matchesGender = !selectedGender || member.gender === selectedGender;
+
+    return matchesSearch && matchesCellGroup && matchesStatus && matchesGender;
+  });
+
+  const filteredHiddenMembers = hiddenMembers.filter(
+    (member) =>
+      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.surname.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const getInitials = (name: string, surname: string) => {
+    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
   const resetForm = () => {
@@ -815,34 +805,6 @@ const Members = () => {
       baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
       hidden: hiddenMembers.length,
     };
-  };
-
-  const filteredMembers = members.filter((member) => {
-    const matchesSearch = 
-      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.ministry_groups?.name.toLowerCase().includes(searchQuery.toLowerCase());
-
-    const matchesCellGroup = !selectedCellGroup || member.cell_group_id === selectedCellGroup;
-    const matchesStatus = !selectedStatus || member.status === selectedStatus;
-    const matchesGender = !selectedGender || member.gender === selectedGender;
-
-    return matchesSearch && matchesCellGroup && matchesStatus && matchesGender;
-  });
-
-  const filteredHiddenMembers = hiddenMembers.filter(
-    (member) =>
-      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.surname.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const getInitials = (name: string, surname: string) => {
-    return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   };
 
   const statusCounts = getStatusCounts();
@@ -1065,7 +1027,7 @@ const Members = () => {
 
           <div className="flex flex-col sm:flex-row gap-3 pt-4">
             <button
-              onClick={() => handleSaveMember(member.id, member)}
+              onClick={() => handleSaveMember(member.id)}
               disabled={loading}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
             >
@@ -1111,7 +1073,6 @@ const Members = () => {
                   )}
                   {member.is_permanent_member && (
                     <span className="px-2 md:px-3 py-1 rounded-full text-sm font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 flex items-center gap-1">
-                      <Shield className="h-3 w-3" />
                       Permanent
                     </span>
                   )}
@@ -1167,7 +1128,7 @@ const Members = () => {
                     </div>
                   )}
                   <div className="flex items-center gap-3">
-                    <Users className="h-4 w-4 flex-shrink-0" />
+                    <MapPin className="h-4 w-4 flex-shrink-0" />
                     <span className="font-medium">{member.cell_groups?.name || 'No Cell Group'}</span>
                   </div>
                   {member.ministry_groups?.name && (
@@ -1204,37 +1165,31 @@ const Members = () => {
           
           <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
             <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3">
-              {canEdit(member.cell_group_id) && (
-                <button
-                  onClick={() => handleEditMember(member)}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                >
-                  <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                  <span className="hidden sm:inline">Edit</span>
-                </button>
-              )}
+              <button
+                onClick={() => handleEditMember(member)}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+              >
+                <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                <span className="hidden sm:inline">Edit</span>
+              </button>
               {isHidden ? (
                 <>
-                  {canEdit(null) && (
-                    <button
-                      onClick={() => handleRestoreMember(member.id)}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                    >
-                      <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
-                      <span className="hidden sm:inline">Restore</span>
-                    </button>
-                  )}
-                  {canDelete() && (
-                    <button
-                      onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                    >
-                      <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                      <span className="hidden sm:inline">Delete</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleRestoreMember(member.id)}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  >
+                    <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
+                    <span className="hidden sm:inline">Restore</span>
+                  </button>
+                  <button
+                    onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  >
+                    <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
                 </>
-              ) : canDelete() && (
+              ) : (
                 <button
                   onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
                   className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -1271,371 +1226,205 @@ const Members = () => {
   );
 
   return (
-    <ProtectedRoute allowedRoles={['admin', 'pastor', 'deacon', 'leader', 'member']}>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  Members Directory
-                </h1>
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  userRole?.role === 'admin' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
-                  userRole?.role === 'pastor' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
-                  userRole?.role === 'deacon' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
-                  userRole?.role === 'leader' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-                  'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300'
-                }`}>
-                  {userRole?.role?.toUpperCase()}
-                </span>
-              </div>
-              <p className="text-gray-600 dark:text-gray-400">
-                {userRole?.role === 'leader' ? 'View and manage members in your cell group' :
-                 userRole?.role === 'member' ? 'View your member profile' :
-                 'Manage and view all church members'}
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-              {canViewActivity() && (
-                <button
-                  onClick={() => setShowActivityLogs(!showActivityLogs)}
-                  className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-gray-600 to-gray-800 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-                >
-                  <Activity className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                  {showActivityLogs ? 'Hide Logs' : 'Show Logs'}
-                </button>
-              )}
-              {canViewHidden() && (
-                <button
-                  onClick={() => setShowHiddenMembers(!showHiddenMembers)}
-                  className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-                >
-                  {showHiddenMembers ? (
-                    <>
-                      <Eye className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                      Show Active
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                      Show Hidden ({hiddenMembers.length})
-                    </>
-                  )}
-                </button>
-              )}
-              {canCreate() && (
-                <button
-                  onClick={() => setShowForm(!showForm)}
-                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-                >
-                  <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-                  {showForm ? 'Cancel' : 'Add Member'}
-                </button>
-              )}
-              {canViewAll() && (
-                <button
-                  onClick={handleExportMembers}
-                  disabled={exporting}
-                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group disabled:opacity-50"
-                >
-                  <Download className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                  {exporting ? 'Exporting...' : 'Export CSV'}
-                </button>
-              )}
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              Members Directory
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">Manage and view all church members</p>
           </div>
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <button
+              onClick={() => setShowHiddenMembers(!showHiddenMembers)}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              {showHiddenMembers ? (
+                <>
+                  <Eye className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  Show Active Members
+                </>
+              ) : (
+                <>
+                  <EyeOff className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                  Show Hidden Members ({hiddenMembers.length})
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+            >
+              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+              {showForm ? 'Cancel' : 'Add Member'}
+            </button>
+            <button
+              onClick={handleExportMembers}
+              disabled={exporting}
+              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group disabled:opacity-50"
+            >
+              <Download className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+              {exporting ? 'Exporting...' : 'Export CSV'}
+            </button>
+          </div>
+        </div>
 
-          {/* Activity Logs */}
-          {showActivityLogs && (
-            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 mb-8 shadow-lg">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <Activity className="h-6 w-6 text-blue-500" />
-                  Recent Activity Logs
-                </h2>
-                <button
-                  onClick={fetchActivityLogs}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-200"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  Refresh
-                </button>
-              </div>
-              <div className="space-y-3">
-                {activityLogs.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    No activity logs found.
-                  </div>
-                ) : (
-                  activityLogs.map((log) => (
-                    <div key={log.id} className="flex items-start gap-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                        <Activity className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            {log.profiles?.full_name || 'Unknown User'}
-                          </span>
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            {log.action.replace('_', ' ')}
-                          </span>
-                          <span className="text-sm text-gray-500 dark:text-gray-500">
-                            {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          Member: {log.members?.name} {log.members?.surname}
-                        </div>
-                        {log.details && (
-                          <div className="mt-2 text-xs text-gray-500 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 p-2 rounded">
-                            <pre className="whitespace-pre-wrap">{JSON.stringify(log.details, null, 2)}</pre>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
+        {/* Success Message */}
+        {success && (
+          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
+            {success}
+          </div>
+        )}
 
-          {/* Success Message */}
-          {success && (
-            <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
-              {success}
-            </div>
-          )}
+        {/* Error Message */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
+            {error}
+          </div>
+        )}
 
-          {/* Error Message */}
-          {error && (
-            <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
-              {error}
-            </div>
-          )}
-
-          {/* Add Member Form */}
-          {showForm && (
-            <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add New Member</h2>
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      First Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter first name"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Last Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.surname}
-                      onChange={(e) => setFormData({ ...formData, surname: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter last name"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter email address"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Phone
-                    </label>
-                    <input
-                      type="tel"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter phone number"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Residence *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.residence}
-                      onChange={(e) => setFormData({ ...formData, residence: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter residence address"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Birth Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.birth_date}
-                      onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Occupation
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.occupation}
-                      onChange={(e) => setFormData({ ...formData, occupation: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Enter occupation"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Invited By
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.invited_by}
-                      onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      placeholder="Who invited this member?"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Baptism Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.baptism}
-                      onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Gender *
-                    </label>
-                    <select
-                      value={formData.gender}
-                      onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' | '' })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      required
-                    >
-                      <option value="">Select gender</option>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Cell Group
-                    </label>
-                    <select
-                      value={formData.cell_group_id}
-                      onChange={(e) => setFormData({ ...formData, cell_group_id: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    >
-                      <option value="">Select cell group</option>
-                      {cellGroups.map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Ministry Group
-                    </label>
-                    <select
-                      value={selectedMinistryGroup}
-                      onChange={(e) => setSelectedMinistryGroup(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    >
-                      <option value="">Select ministry group (optional)</option>
-                      {ministryGroups.map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Plus className="h-4 w-4" />
-                    {loading ? 'Adding Member...' : 'Add Member'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={resetForm}
-                    className="flex-1 sm:flex-none px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-center"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* Search and Filters */}
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 mb-6 shadow-sm">
-            <div className="space-y-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder={`Search ${showHiddenMembers ? 'hidden' : 'active'} members...`}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Add Member Form */}
+        {showForm && (
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add New Member</h2>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                    <Filter className="h-4 w-4" />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    First Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter first name"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Last Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.surname}
+                    onChange={(e) => setFormData({ ...formData, surname: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter last name"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter email address"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Residence *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.residence}
+                    onChange={(e) => setFormData({ ...formData, residence: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter residence address"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Birth Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.birth_date}
+                    onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Occupation
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.occupation}
+                    onChange={(e) => setFormData({ ...formData, occupation: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter occupation"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Invited By
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.invited_by}
+                    onChange={(e) => setFormData({ ...formData, invited_by: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Who invited this member?"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Baptism Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.baptism}
+                    onChange={(e) => setFormData({ ...formData, baptism: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Gender *
+                  </label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' | '' })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  >
+                    <option value="">Select gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Cell Group
                   </label>
                   <select
-                    value={selectedCellGroup}
-                    onChange={(e) => setSelectedCellGroup(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={formData.cell_group_id}
+                    onChange={(e) => setFormData({ ...formData, cell_group_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   >
-                    <option value="">All Groups</option>
+                    <option value="">Select cell group</option>
                     {cellGroups.map((group) => (
                       <option key={group.id} value={group.id}>
                         {group.name}
@@ -1643,138 +1432,217 @@ const Members = () => {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                    <Filter className="h-4 w-4" />
-                    Status
+                <div className="space-y-2 md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Ministry Group
                   </label>
                   <select
-                    value={selectedStatus}
-                    onChange={(e) => setSelectedStatus(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={selectedMinistryGroup}
+                    onChange={(e) => setSelectedMinistryGroup(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   >
-                    <option value="">All Statuses</option>
-                    {VALID_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
+                    <option value="">Select ministry group (optional)</option>
+                    {ministryGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
                       </option>
                     ))}
                   </select>
                 </div>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                    <Filter className="h-4 w-4" />
-                    Gender
-                  </label>
-                  <select
-                    value={selectedGender}
-                    onChange={(e) => setSelectedGender(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All Genders</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                  </select>
-                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus className="h-4 w-4" />
+                  {loading ? 'Adding Member...' : 'Add Member'}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="flex-1 sm:flex-none px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-center"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Search and Filters */}
+        <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 mb-6 shadow-sm">
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder={`Search ${showHiddenMembers ? 'hidden' : 'active'} members...`}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Filter className="h-4 w-4" />
+                  Cell Group
+                </label>
+                <select
+                  value={selectedCellGroup}
+                  onChange={(e) => setSelectedCellGroup(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Groups</option>
+                  {cellGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Filter className="h-4 w-4" />
+                  Status
+                </label>
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Statuses</option>
+                  {VALID_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Filter className="h-4 w-4" />
+                  Gender
+                </label>
+                <select
+                  value={selectedGender}
+                  onChange={(e) => setSelectedGender(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Genders</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
               </div>
             </div>
           </div>
-
-          {/* Loading State */}
-          {loading && members.length === 0 && (
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading members...</p>
-            </div>
-          )}
-
-          {/* Hidden Members Section */}
-          {showHiddenMembers ? (
-            <div className="space-y-6">
-              <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 border border-red-200 dark:border-red-700/50 rounded-2xl p-6">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                      <EyeOff className="h-6 w-6 text-red-500" />
-                      Hidden Members
-                    </h2>
-                    <p className="text-gray-600 dark:text-gray-400 mt-1">
-                      Members with "not attending" status are automatically hidden.
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-3xl font-bold text-red-600 dark:text-red-400">{hiddenMembers.length}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">Hidden Members</div>
-                  </div>
-                </div>
-                
-                {filteredHiddenMembers.length === 0 ? (
-                  <div className="text-center py-12">
-                    <EyeOff className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                      {searchQuery ? 'No Hidden Members Found' : 'No Hidden Members'}
-                    </h3>
-                    <p className="text-gray-500 dark:text-gray-500">
-                      {searchQuery ? 'Try adjusting your search terms' : 'All members are currently attending'}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:gap-6">
-                    {filteredHiddenMembers.map((member) => renderMemberCard(member, true))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Active Members Grid */}
-              <div className="grid gap-4 md:gap-6">
-                {!loading && filteredMembers.length === 0 ? (
-                  <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
-                    <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                      {searchQuery ? 'No Members Found' : 'No Members Yet'}
-                    </h3>
-                    <p className="text-gray-500 dark:text-gray-500">
-                      {searchQuery ? 'Try adjusting your search terms' : 'Add your first member to get started'}
-                    </p>
-                  </div>
-                ) : (
-                  filteredMembers.map((member) => renderMemberCard(member, false))
-                )}
-              </div>
-
-              {/* Stats Summary */}
-              <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 md:gap-6">
-                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                  <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
-                  <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Total Active</div>
-                </div>
-                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                  <div className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400 mb-2">{statusCounts.hidden}</div>
-                  <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Hidden</div>
-                </div>
-                {Object.entries(statusCounts)
-                  .filter(([key]) => key !== 'total' && key !== 'baptized' && key !== 'hidden')
-                  .slice(0, 4)
-                  .map(([status, count]) => (
-                    <div key={status} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                      <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{count}</div>
-                      <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={status}>
-                        {status === 'baptized' ? 'Baptized' : status}
-                      </div>
-                    </div>
-                  ))}
-                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                  <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
-                  <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
-                </div>
-              </div>
-            </>
-          )}
         </div>
+
+        {/* Loading State */}
+        {loading && members.length === 0 && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading members...</p>
+          </div>
+        )}
+
+        {/* Hidden Members Section */}
+        {showHiddenMembers ? (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 border border-red-200 dark:border-red-700/50 rounded-2xl p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <EyeOff className="h-6 w-6 text-red-500" />
+                    Hidden Members
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 mt-1">
+                    Members with "not attending" status are automatically hidden.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-red-600 dark:text-red-400">{hiddenMembers.length}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Hidden Members</div>
+                </div>
+              </div>
+              
+              {filteredHiddenMembers.length === 0 ? (
+                <div className="text-center py-12">
+                  <EyeOff className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                    {searchQuery ? 'No Hidden Members Found' : 'No Hidden Members'}
+                  </h3>
+                  <p className="text-gray-500 dark:text-gray-500">
+                    {searchQuery ? 'Try adjusting your search terms' : 'All members are currently attending'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:gap-6">
+                  {filteredHiddenMembers.map((member) => renderMemberCard(member, true))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Active Members Grid */}
+            <div className="grid gap-4 md:gap-6">
+              {!loading && filteredMembers.length === 0 ? (
+                <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+                  <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                    {searchQuery ? 'No Members Found' : 'No Members Yet'}
+                  </h3>
+                  <p className="text-gray-500 dark:text-gray-500">
+                    {searchQuery ? 'Try adjusting your search terms' : 'Add your first member to get started'}
+                  </p>
+                </div>
+              ) : (
+                filteredMembers.map((member) => renderMemberCard(member, false))
+              )}
+            </div>
+
+            {/* Stats Summary */}
+            <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 md:gap-6">
+              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
+                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Total Active</div>
+              </div>
+              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                <div className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400 mb-2">{statusCounts.hidden}</div>
+                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Hidden</div>
+              </div>
+              {Object.entries(statusCounts)
+                .filter(([key]) => key !== 'total' && key !== 'baptized' && key !== 'hidden')
+                .slice(0, 4)
+                .map(([status, count]) => (
+                  <div key={status} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                    <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{count}</div>
+                    <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={status}>
+                      {status === 'baptized' ? 'Baptized' : status}
+                    </div>
+                  </div>
+                ))}
+              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
+                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
-    </ProtectedRoute>
+    </div>
   );
 };
 
