@@ -68,7 +68,7 @@ const logAudit = async (
 };
 
 const Members = () => {
-  const { profile, isAdmin, isPastor, isDeacon, isGroupLeader, isMember, hasPermission } = useAuth();
+  const { profile, isAdmin, isPastor, isDeacon, isGroupLeader, isMember, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
@@ -142,17 +142,25 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Check if user can access members page
+  // Check if user can access members page - UPDATED LOGIC
   useEffect(() => {
-    if (profile) {
-      const canAccess = isAdmin() || isPastor() || isDeacon() || isGroupLeader() || isMember();
-      if (!canAccess) {
-        navigate('/unauthorized');
-      }
+    if (!authLoading && profile === null) {
+      // User is not logged in
+      navigate('/login');
+    } else if (!authLoading && profile) {
+      // User is logged in, everyone should have access to members page
+      // All roles (admin, pastor, deacon, group_leader, member) can access
+      console.log('User role check:', {
+        isAdmin: isAdmin(),
+        isPastor: isPastor(),
+        isDeacon: isDeacon(),
+        isGroupLeader: isGroupLeader(),
+        profile
+      });
     }
-  }, [profile, navigate]);
+  }, [authLoading, profile, navigate]);
 
-  // Permission checks
+  // Permission checks - UPDATED LOGIC
   const canViewAllMembers = () => {
     return isAdmin() || isPastor() || isDeacon();
   };
@@ -176,6 +184,10 @@ const Members = () => {
     }
     
     // Regular members cannot edit anyone
+    if (isMember()) {
+      return false;
+    }
+    
     return false;
   };
 
@@ -206,8 +218,8 @@ const Members = () => {
     }
     
     // Regular member can only see themselves
-    if (isMember()) {
-      return profile?.id || null;
+    if (isMember() && profile?.id) {
+      return profile.id;
     }
     
     return null;
@@ -230,12 +242,16 @@ const Members = () => {
   };
 
   useEffect(() => {
-    fetchMembers();
-    fetchCellGroups();
-    fetchMinistryGroups();
-  }, []);
+    if (profile) {
+      fetchMembers();
+      fetchCellGroups();
+      fetchMinistryGroups();
+    }
+  }, [profile]);
 
   const fetchMembers = async () => {
+    if (!profile) return;
+
     try {
       setLoading(true);
       setError(null);
@@ -253,13 +269,20 @@ const Members = () => {
       if (visibleCellGroup) {
         if (isMember()) {
           // Regular members can only see themselves
-          query = query.eq('id', visibleCellGroup).maybeSingle();
-        } else {
+          query = query.eq('id', visibleCellGroup);
+        } else if (isGroupLeader()) {
           // Group leaders can see members in their cell group
           query = query.eq('cell_group_id', visibleCellGroup);
         }
-      } else {
-        // Admin, Pastor, Deacon can see all non-hidden members
+      } else if (!isAdmin() && !isPastor() && !isDeacon()) {
+        // If no visible cell group and not admin/pastor/deacon, show nothing
+        setMembers([]);
+        setLoading(false);
+        return;
+      }
+
+      // Always exclude hidden members by default (unless showing hidden)
+      if (!showHiddenMembers) {
         query = query.eq('is_hidden', false);
       }
 
@@ -934,6 +957,8 @@ const Members = () => {
 
   // Render role badge
   const renderRoleBadge = () => {
+    if (!profile) return null;
+    
     if (isAdmin()) {
       return (
         <span className="px-3 py-1 rounded-full text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex items-center gap-1">
@@ -962,7 +987,7 @@ const Members = () => {
           Group Leader
         </span>
       );
-    } else if (isMember()) {
+    } else {
       return (
         <span className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300 flex items-center gap-1">
           <User className="h-3 w-3" />
@@ -970,7 +995,6 @@ const Members = () => {
         </span>
       );
     }
-    return null;
   };
 
   const renderMemberCard = (member: Member, isHidden: boolean = false) => (
@@ -1395,21 +1419,56 @@ const Members = () => {
     </div>
   );
 
-  // If user is a regular member, show their profile only
-  if (isMember() && !canViewAllMembers()) {
-    const memberProfile = members[0];
+  // Show loading while auth is loading
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Redirecting to login...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If user is a regular member (with no special roles), show their profile only
+  if (isMember() && !isAdmin() && !isPastor() && !isDeacon() && !isGroupLeader()) {
+    const memberProfile = members.find(m => m.id === profile.id);
     
     if (!memberProfile) {
       return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
-            <div className="text-center py-12">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                    My Profile
+                  </h1>
+                  {renderRoleBadge()}
+                </div>
+                <p className="text-gray-600 dark:text-gray-400">
+                  View your member profile information
+                </p>
+              </div>
+            </div>
+
+            <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
               <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                Member Profile Not Found
+                Profile Not Found
               </h3>
               <p className="text-gray-500 dark:text-gray-500">
-                Your member profile could not be loaded.
+                Your member profile could not be loaded. Please contact an administrator.
               </p>
             </div>
           </div>
@@ -1456,7 +1515,7 @@ const Members = () => {
             </div>
             <p className="text-gray-600 dark:text-gray-400">
               {isGroupLeader() ? 'View and manage members in your cell group' :
-               isDeacon() ? 'View all members (view only)' :
+               isDeacon() ? 'View all members' :
                'Manage and view all church members'}
             </p>
           </div>
