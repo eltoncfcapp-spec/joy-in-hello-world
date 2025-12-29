@@ -1,4 +1,4 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key } from 'lucide-react';
+import { Search, Plus, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -41,7 +41,6 @@ const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending'
 const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
 const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
 
-// Audit log function
 const logAudit = async (
   tableName: string,
   recordId: string,
@@ -50,7 +49,6 @@ const logAudit = async (
   newData?: any
 ) => {
   try {
-    // Get current user from Supabase auth
     const { data: { user } } = await supabase.auth.getUser();
     
     await supabase.from('audit_logs').insert({
@@ -67,7 +65,7 @@ const logAudit = async (
 };
 
 const Members = () => {
-  const { profile, isAdmin, isPastor, isDeacon, isGroupLeader, isMember, loading: authLoading } = useAuth();
+  const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
@@ -80,15 +78,13 @@ const Members = () => {
   const [editingMember, setEditingMember] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [availableStatuses, setAvailableStatuses] = useState<string[]>(VALID_STATUSES);
+  const [availableStatuses] = useState<string[]>(VALID_STATUSES);
   const [showHiddenMembers, setShowHiddenMembers] = useState(false);
   const [exporting, setExporting] = useState(false);
   
-  // Separate state for ministry group selection
   const [selectedMinistryGroup, setSelectedMinistryGroup] = useState('');
   const [editSelectedMinistryGroup, setEditSelectedMinistryGroup] = useState('');
   
-  // Filter states
   const [selectedCellGroup, setSelectedCellGroup] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
   const [selectedGender, setSelectedGender] = useState('');
@@ -138,86 +134,40 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Check if user can access members page - UPDATED LOGIC
+  // Role check functions
+  const isAdmin = () => profile?.admin_role === 'admin' || profile?.admin_role === 'administrator';
+  const isPastor = () => profile?.admin_role === 'pastor';
+  const isDeacon = () => profile?.admin_role === 'deacon';
+  const isGroupLeader = () => profile?.admin_role === 'group_leader';
+  const isMember = () => profile?.admin_role === 'member' || !profile?.admin_role;
+
   useEffect(() => {
-    if (!authLoading && profile === null) {
-      // User is not logged in
+    if (!authLoading && !profile) {
       navigate('/login');
-    } else if (!authLoading && profile) {
-      // User is logged in, everyone should have access to members page
-      // All roles (admin, pastor, deacon, group_leader, member) can access
-      console.log('User role check:', {
-        isAdmin: isAdmin(),
-        isPastor: isPastor(),
-        isDeacon: isDeacon(),
-        isGroupLeader: isGroupLeader(),
-        profile
-      });
     }
   }, [authLoading, profile, navigate]);
 
-  // Permission checks - UPDATED LOGIC
-  const canViewAllMembers = () => {
-    return isAdmin() || isPastor() || isDeacon();
-  };
-
-  const canViewHiddenMembers = () => {
-    return isAdmin() || isPastor() || isDeacon();
-  };
-
+  // Permission checks
+  const canViewAllMembers = () => isAdmin() || isPastor() || isDeacon();
+  const canViewHiddenMembers = () => isAdmin() || isPastor() || isDeacon();
   const canEditMember = (memberCellGroupId?: string | null) => {
-    // Admin and Pastor can edit all members
     if (isAdmin() || isPastor()) return true;
-    
-    // Deacon can edit if they have edit permission
-    if (isDeacon()) {
-      return profile?.can_edit_members || false;
-    }
-    
-    // Group leader can edit members in their cell group
-    if (isGroupLeader()) {
-      return memberCellGroupId === profile?.cell_group_id;
-    }
-    
-    // Regular members cannot edit anyone
-    if (isMember()) {
-      return false;
-    }
-    
+    if (isDeacon()) return profile?.can_edit_members || false;
+    if (isGroupLeader()) return memberCellGroupId === profile?.cell_group_id;
     return false;
   };
-
-  const canDeleteMember = () => {
-    return isAdmin() || isPastor();
-  };
-
+  const canDeleteMember = () => isAdmin() || isPastor();
   const canCreateMember = () => {
     if (isAdmin() || isPastor()) return true;
-    if (isDeacon()) return profile?.can_add_members || false;
-    if (isGroupLeader()) return profile?.can_add_members || false;
+    if (isDeacon() || isGroupLeader()) return profile?.can_add_members || false;
     return false;
   };
+  const canExportMembers = () => isAdmin() || isPastor();
 
-  const canExportMembers = () => {
-    return isAdmin() || isPastor();
-  };
-
-  const getVisibleCellGroupFilter = () => {
-    // Admin, Pastor, and Deacon can see all members
-    if (isAdmin() || isPastor() || isDeacon()) {
-      return null;
-    }
-    
-    // Group leader can only see members in their cell group
-    if (isGroupLeader()) {
-      return profile?.cell_group_id || null;
-    }
-    
-    // Regular member can only see themselves
-    if (isMember() && profile?.id) {
-      return profile.id;
-    }
-    
+  const getVisibleMembers = () => {
+    if (canViewAllMembers()) return null;
+    if (isGroupLeader()) return profile?.cell_group_id || null;
+    if (isMember() && profile?.id) return profile.id;
     return null;
   };
 
@@ -229,21 +179,13 @@ const Members = () => {
     );
   };
 
-  const isAttendingStatus = (status: string | null): boolean => {
-    if (!status) return false;
-    const statusLower = status.toLowerCase();
-    return ATTENDING_STATUSES.some(attendingStatus => 
-      statusLower.includes(attendingStatus.toLowerCase())
-    );
-  };
-
   useEffect(() => {
     if (profile) {
       fetchMembers();
       fetchCellGroups();
       fetchMinistryGroups();
     }
-  }, [profile]);
+  }, [profile, showHiddenMembers]);
 
   const fetchMembers = async () => {
     if (!profile) return;
@@ -259,25 +201,21 @@ const Members = () => {
           cell_groups!fk_cell_group(name)
         `);
 
-      // Apply role-based filtering
-      const visibleCellGroup = getVisibleCellGroupFilter();
+      const visibleFilter = getVisibleMembers();
       
-      if (visibleCellGroup) {
+      if (visibleFilter) {
         if (isMember()) {
-          // Regular members can only see themselves
-          query = query.eq('id', visibleCellGroup);
+          query = query.eq('id', visibleFilter);
         } else if (isGroupLeader()) {
-          // Group leaders can see members in their cell group
-          query = query.eq('cell_group_id', visibleCellGroup);
+          query = query.eq('cell_group_id', visibleFilter);
         }
-      } else if (!isAdmin() && !isPastor() && !isDeacon()) {
-        // If no visible cell group and not admin/pastor/deacon, show nothing
+      } else if (!canViewAllMembers()) {
         setMembers([]);
+        setHiddenMembers([]);
         setLoading(false);
         return;
       }
 
-      // Always exclude hidden members by default (unless showing hidden)
       if (!showHiddenMembers) {
         query = query.eq('is_hidden', false);
       }
@@ -289,10 +227,8 @@ const Members = () => {
         throw membersError;
       }
 
-      // Handle single member case (for regular members)
       const membersArray = Array.isArray(membersData) ? membersData : (membersData ? [membersData] : []);
 
-      // Get ministry group memberships
       const memberIds = membersArray?.map(m => m.id) || [];
       let ministryGroupsMap: Record<string, { name: string }> = {};
 
@@ -314,7 +250,11 @@ const Members = () => {
         ministry_groups: ministryGroupsMap[member.id] || null
       })) || [];
 
-      setMembers(membersWithMinistryGroups);
+      if (showHiddenMembers) {
+        setHiddenMembers(membersWithMinistryGroups);
+      } else {
+        setMembers(membersWithMinistryGroups);
+      }
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
@@ -340,7 +280,6 @@ const Members = () => {
         throw membersError;
       }
 
-      // Get ministry group memberships
       const memberIds = membersData?.map(m => m.id) || [];
       let ministryGroupsMap: Record<string, { name: string }> = {};
 
@@ -375,10 +314,7 @@ const Members = () => {
         .select('id, name')
         .order('name');
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setCellGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
@@ -392,10 +328,7 @@ const Members = () => {
         .select('id, name')
         .order('name');
 
-      if (error) {
-        throw error;
-      }
-
+      if (error) throw error;
       setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
@@ -439,7 +372,6 @@ const Members = () => {
         not_attending_reason: null,
       };
 
-      // First, create the member
       const { data: newMember, error: memberError } = await supabase
         .from('members')
         .insert([newMemberData])
@@ -450,10 +382,8 @@ const Members = () => {
         throw memberError;
       }
 
-      // Log the audit
       await logAudit('members', newMember.id, 'INSERT', null, newMemberData);
 
-      // Then, add to ministry group if selected
       if (selectedMinistryGroup && newMember) {
         const ministryData = {
           member_id: newMember.id,
@@ -467,7 +397,6 @@ const Members = () => {
 
         if (ministryError) {
           console.error('Error adding to ministry group:', ministryError);
-          // Log the error but don't stop the process
           await logAudit('ministry_group_members', newMember.id, 'INSERT', null, {
             ...ministryData,
             error: ministryError.message
@@ -516,7 +445,6 @@ const Members = () => {
       is_hidden: member.is_hidden || false,
     });
     
-    // Fetch current ministry group for this member
     if (member.id) {
       try {
         const { data: ministryData, error } = await supabase
@@ -554,7 +482,6 @@ const Members = () => {
         return;
       }
 
-      // Validate status
       const status = editFormData.status.toLowerCase();
       if (!VALID_STATUSES.some(validStatus => status.includes(validStatus.toLowerCase()))) {
         setError(`Invalid status. Please use one of: ${VALID_STATUSES.join(', ')}`);
@@ -562,14 +489,9 @@ const Members = () => {
         return;
       }
 
-      // Determine if status is not attending
       const isNotAttending = isNotAttendingStatus(editFormData.status);
-      const isAttending = isAttendingStatus(editFormData.status);
-      
-      // Auto-set is_hidden based on status
       const shouldBeHidden = isNotAttending;
       
-      // Set not_attending_reason if status indicates not attending
       const not_attending_reason = isNotAttending 
         ? (editFormData.not_attending_reason || 'Member stopped attending')
         : null;
@@ -596,14 +518,12 @@ const Members = () => {
         updateData.permanent_member_date = new Date().toISOString();
       }
 
-      // First get the old data for audit log
       const { data: oldMemberData } = await supabase
         .from('members')
         .select('*')
         .eq('id', memberId)
         .single();
 
-      // Update member
       const { error: memberError } = await supabase
         .from('members')
         .update(updateData)
@@ -613,11 +533,8 @@ const Members = () => {
         throw memberError;
       }
 
-      // Log the audit
       await logAudit('members', memberId, 'UPDATE', oldMemberData, updateData);
 
-      // Handle ministry group separately
-      // Remove from all ministry groups first
       const { data: oldMinistryData } = await supabase
         .from('ministry_group_members')
         .select('*')
@@ -629,11 +546,9 @@ const Members = () => {
           .delete()
           .eq('member_id', memberId);
 
-        // Log the deletion
         await logAudit('ministry_group_members', memberId, 'DELETE', oldMinistryData, null);
       }
       
-      // Add to selected ministry group if one is selected
       if (editSelectedMinistryGroup) {
         const newMinistryData = {
           member_id: memberId,
@@ -645,19 +560,15 @@ const Members = () => {
           .from('ministry_group_members')
           .insert([newMinistryData]);
 
-        // Log the insertion
         await logAudit('ministry_group_members', memberId, 'INSERT', null, newMinistryData);
       }
 
       setEditingMember(null);
       setEditSelectedMinistryGroup('');
       
-      // Show appropriate success message
       let message = 'Member details updated successfully!';
       if (isNotAttending) {
         message += ' Member has been automatically hidden due to not attending status.';
-      } else if (isAttending && editFormData.is_hidden) {
-        message += ' Member is now visible due to attending status.';
       }
       
       setSuccess(message);
@@ -708,7 +619,6 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
-      // First get the old data for audit log
       const { data: oldMemberData } = await supabase
         .from('members')
         .select('*')
@@ -731,7 +641,6 @@ const Members = () => {
         throw restoreError;
       }
 
-      // Log the audit
       await logAudit('members', memberId, 'UPDATE', oldMemberData, updateData);
       
       setSuccess('Member restored successfully as a newcomer!');
@@ -758,7 +667,6 @@ const Members = () => {
       setError(null);
       setSuccess(null);
       
-      // First get all related data for audit logs
       const { data: memberData } = await supabase
         .from('members')
         .select('*')
@@ -770,20 +678,17 @@ const Members = () => {
         .select('*')
         .eq('member_id', memberId);
 
-      // First, remove from ministry groups
       await supabase
         .from('ministry_group_members')
         .delete()
         .eq('member_id', memberId);
 
-      // Log ministry group deletions
       if (ministryData && ministryData.length > 0) {
         for (const ministry of ministryData) {
           await logAudit('ministry_group_members', ministry.id, 'DELETE', ministry, null);
         }
       }
       
-      // Then delete the member
       const { error: deleteError } = await supabase
         .from('members')
         .delete()
@@ -793,7 +698,6 @@ const Members = () => {
         throw deleteError;
       }
 
-      // Log the member deletion
       await logAudit('members', memberId, 'DELETE', memberData, null);
       
       setSuccess('Member permanently deleted.');
@@ -944,7 +848,6 @@ const Members = () => {
 
   const statusCounts = getStatusCounts();
 
-  // Render role badge
   const renderRoleBadge = () => {
     if (!profile) return null;
     
@@ -1034,13 +937,6 @@ const Members = () => {
 
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center gap-3">
-                <Mail className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                <input
-                  onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-                  className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                />
-              </div>
               <div className="flex items-center gap-3">
                 <Phone className="h-4 w-4 text-gray-400 flex-shrink-0" />
                 <input
@@ -1166,11 +1062,6 @@ const Members = () => {
                     (Will auto-hide)
                   </span>
                 )}
-                {isAttendingStatus(editFormData.status) && (
-                  <span className="text-xs text-green-600 dark:text-green-400">
-                    (Will auto-show)
-                  </span>
-                )}
               </div>
               
               {isNotAttendingStatus(editFormData.status) && (
@@ -1253,12 +1144,6 @@ const Members = () => {
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-gray-600 dark:text-gray-400">
-                  {member.email && (
-                    <div className="flex items-center gap-3">
-                      <Mail className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium break-all">{member.email}</span>
-                    </div>
-                  )}
                   {member.phone && (
                     <div className="flex items-center gap-3">
                       <Phone className="h-4 w-4 flex-shrink-0" />
@@ -1490,7 +1375,6 @@ const Members = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -1509,7 +1393,6 @@ const Members = () => {
             {canViewHiddenMembers() && (
               <button
                 onClick={() => {
-                  fetchHiddenMembers();
                   setShowHiddenMembers(!showHiddenMembers);
                 }}
                 className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
@@ -1549,21 +1432,18 @@ const Members = () => {
           </div>
         </div>
 
-        {/* Success Message */}
         {success && (
           <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
             {success}
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
             {error}
           </div>
         )}
 
-        {/* Add Member Form */}
         {showForm && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Add New Member</h2>
@@ -1593,18 +1473,6 @@ const Members = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter last name"
                     required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1749,7 +1617,6 @@ const Members = () => {
           </div>
         )}
 
-        {/* Search and Filters */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 mb-6 shadow-sm">
           <div className="space-y-4">
             <div className="relative">
@@ -1829,7 +1696,6 @@ const Members = () => {
           </div>
         </div>
 
-        {/* Loading State */}
         {loading && members.length === 0 && (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -1837,7 +1703,6 @@ const Members = () => {
           </div>
         )}
 
-        {/* Hidden Members Section */}
         {showHiddenMembers ? (
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 border border-red-200 dark:border-red-700/50 rounded-2xl p-6">
@@ -1876,7 +1741,6 @@ const Members = () => {
           </div>
         ) : (
           <>
-            {/* Active Members Grid */}
             <div className="grid gap-4 md:gap-6">
               {!loading && filteredMembers.length === 0 ? (
                 <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
@@ -1893,7 +1757,6 @@ const Members = () => {
               )}
             </div>
 
-            {/* Stats Summary - Only show for admins, pastors, and deacons */}
             {(isAdmin() || isPastor() || isDeacon()) && (
               <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 md:gap-6">
                 <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
