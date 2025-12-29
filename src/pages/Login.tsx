@@ -40,20 +40,74 @@ export default function Login() {
     const fetchUpcomingEvents = async () => {
       try {
         setEventsLoading(true);
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
         
+        console.log('Fetching events from:', today);
+        
+        // First, let's check if the events table exists and has data
+        const { count: totalEvents, error: countError } = await supabase
+          .from('events')
+          .select('*', { count: 'exact', head: true });
+        
+        if (countError) {
+          console.error('Error counting events:', countError);
+        } else {
+          console.log('Total events in database:', totalEvents);
+        }
+
+        // Fetch upcoming events
         const { data, error } = await supabase
           .from('events')
           .select('id, name, topic, event_date, event_time, location, pamphlet_url')
-          .gte('event_date', today)
+          .gte('event_date', today)  // Get events from today onward
+          .eq('is_completed', false)  // Only get non-completed events
           .order('event_date', { ascending: true })
+          .order('event_time', { ascending: true })
           .limit(5);
 
-        if (error) throw error;
+        if (error) {
+          console.error('Supabase query error:', error);
+          throw error;
+        }
         
+        console.log('Fetched events:', data);
         setUpcomingEvents(data || []);
-      } catch (error) {
+        
+        // If no upcoming events found, try to get the most recent upcoming events
+        if ((data || []).length === 0) {
+          console.log('No upcoming events found, trying alternative query...');
+          const { data: upcomingData, error: upcomingError } = await supabase
+            .from('events')
+            .select('id, name, topic, event_date, event_time, location, pamphlet_url')
+            .order('event_date', { ascending: true })
+            .order('event_time', { ascending: true })
+            .limit(3);
+            
+          if (upcomingError) {
+            console.error('Alternative query error:', upcomingError);
+          } else {
+            console.log('Alternative query results:', upcomingData);
+            setUpcomingEvents(upcomingData || []);
+          }
+        }
+        
+      } catch (error: any) {
         console.error('Error fetching upcoming events:', error);
+        // Try a simpler query as fallback
+        try {
+          const { data, error } = await supabase
+            .from('events')
+            .select('id, name, topic, event_date, event_time, location, pamphlet_url')
+            .limit(5);
+            
+          if (error) {
+            console.error('Fallback query error:', error);
+          } else {
+            setUpcomingEvents(data || []);
+          }
+        } catch (fallbackError) {
+          console.error('Fallback query also failed:', fallbackError);
+        }
       } finally {
         setEventsLoading(false);
       }
@@ -87,21 +141,51 @@ export default function Login() {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Date not available';
+      }
+      return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Invalid date';
+    }
   };
 
   const formatTime = (timeString: string) => {
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const formattedHour = hour % 12 || 12;
-    return `${formattedHour}:${minutes} ${ampm}`;
+    try {
+      if (!timeString) return 'Time not available';
+      
+      // Handle different time formats
+      let hours: number, minutes: string;
+      
+      if (timeString.includes(':')) {
+        const [h, m] = timeString.split(':');
+        hours = parseInt(h);
+        minutes = m || '00';
+      } else if (timeString.length === 4) {
+        // Handle HHMM format
+        hours = parseInt(timeString.substring(0, 2));
+        minutes = timeString.substring(2, 4);
+      } else {
+        return 'Invalid time format';
+      }
+      
+      if (isNaN(hours)) return 'Invalid time';
+      
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const formattedHour = hours % 12 || 12;
+      return `${formattedHour}:${minutes.padStart(2, '0')} ${ampm}`;
+    } catch (error) {
+      console.error('Error formatting time:', error);
+      return 'Invalid time';
+    }
   };
 
   const nextEvent = () => {
@@ -140,11 +224,22 @@ export default function Login() {
     }
     
     // If it's just a path in storage, construct the full URL
-    if (pamphletUrl.startsWith('pamphlets/')) {
-      const { data: { publicUrl } } = supabase.storage
-        .from('pamphlets')
-        .getPublicUrl(pamphletUrl);
-      return publicUrl;
+    // Check different possible bucket names
+    const possibleBuckets = ['event-pamphlets', 'pamphlets', 'events'];
+    
+    for (const bucket of possibleBuckets) {
+      if (pamphletUrl.startsWith(bucket + '/') || !pamphletUrl.includes('/')) {
+        const filePath = pamphletUrl.includes('/') ? pamphletUrl : `${bucket}/${pamphletUrl}`;
+        try {
+          const { data: { publicUrl } } = supabase.storage
+            .from(bucket)
+            .getPublicUrl(filePath);
+          return publicUrl;
+        } catch (error) {
+          console.error(`Error getting public URL for bucket ${bucket}:`, error);
+          continue;
+        }
+      }
     }
     
     return pamphletUrl;
@@ -169,6 +264,16 @@ export default function Login() {
               src={expandedImage} 
               alt="Event Pamphlet" 
               className="w-full h-auto max-h-[90vh] object-contain rounded-lg"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+                target.parentElement!.innerHTML = `
+                  <div class="flex flex-col items-center justify-center h-64 bg-gray-100 rounded-lg p-4">
+                    <ImageIcon class="h-12 w-12 text-gray-400 mb-2" />
+                    <p class="text-gray-500">Pamphlet preview not available</p>
+                  </div>
+                `;
+              }}
             />
           </div>
         </div>
@@ -331,6 +436,9 @@ export default function Login() {
               <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 mb-2">No Upcoming Events</h3>
               <p className="text-gray-500">Check back later for upcoming church events</p>
+              <p className="text-xs text-gray-400 mt-2">
+                Total events in system: {upcomingEvents.length}
+              </p>
             </div>
           ) : (
             <div className="space-y-6">
@@ -373,6 +481,12 @@ export default function Login() {
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
                             target.style.display = 'none';
+                            target.parentElement!.innerHTML = `
+                              <div class="flex flex-col items-center justify-center h-48 bg-gray-100 rounded-lg p-4">
+                                <ImageIcon class="h-8 w-8 text-gray-400 mb-2" />
+                                <p class="text-gray-500 text-sm">Pamphlet preview not available</p>
+                              </div>
+                            `;
                           }}
                         />
                         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-300 flex items-center justify-center">
