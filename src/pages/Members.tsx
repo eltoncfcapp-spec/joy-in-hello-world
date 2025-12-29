@@ -23,7 +23,6 @@ interface Member {
   created_at: string | null;
   invited_by: string | null;
   is_hidden: boolean | null;
-  email: string | null;
   birth_date: string | null;
   occupation: string | null;
 }
@@ -99,7 +98,6 @@ const Members = () => {
     surname: '',
     residence: '',
     phone: '',
-    email: '',
     birth_date: '',
     occupation: '',
     invited_by: '',
@@ -113,7 +111,6 @@ const Members = () => {
     surname: string;
     residence: string;
     phone: string;
-    email: string;
     birth_date: string;
     occupation: string;
     invited_by: string;
@@ -129,7 +126,6 @@ const Members = () => {
     surname: '',
     residence: '',
     phone: '',
-    email: '',
     birth_date: '',
     occupation: '',
     invited_by: '',
@@ -430,7 +426,6 @@ const Members = () => {
         surname: formData.surname.trim(),
         residence: formData.residence.trim(),
         phone: formData.phone.trim() || null,
-        email: formData.email.trim() || null,
         birth_date: formData.birth_date || null,
         occupation: formData.occupation.trim() || null,
         cell_group_id: formData.cell_group_id || null,
@@ -509,7 +504,6 @@ const Members = () => {
       surname: member.surname,
       residence: member.residence || '',
       phone: member.phone || '',
-      email: member.email || '',
       birth_date: member.birth_date || '',
       occupation: member.occupation || '',
       invited_by: member.invited_by || '',
@@ -585,7 +579,6 @@ const Members = () => {
         surname: editFormData.surname.trim(),
         residence: editFormData.residence.trim(),
         phone: editFormData.phone.trim() || null,
-        email: editFormData.email.trim() || null,
         birth_date: editFormData.birth_date || null,
         occupation: editFormData.occupation.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
@@ -687,7 +680,6 @@ const Members = () => {
       surname: '',
       residence: '',
       phone: '',
-      email: '',
       birth_date: '',
       occupation: '',
       invited_by: '',
@@ -825,7 +817,6 @@ const Members = () => {
       const exportData = members.map(member => ({
         Name: member.name,
         Surname: member.surname,
-        Email: member.email,
         Phone: member.phone,
         Residence: member.residence,
         Gender: member.gender,
@@ -874,7 +865,6 @@ const Members = () => {
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.baptism?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.ministry_groups?.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -902,7 +892,6 @@ const Members = () => {
       surname: '', 
       residence: '', 
       phone: '', 
-      email: '',
       birth_date: '',
       occupation: '',
       invited_by: '', 
@@ -1048,11 +1037,8 @@ const Members = () => {
               <div className="flex items-center gap-3">
                 <Mail className="h-4 w-4 text-gray-400 flex-shrink-0" />
                 <input
-                  type="email"
-                  value={editFormData.email}
                   onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
                   className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                  placeholder="Email address"
                 />
               </div>
               <div className="flex items-center gap-3">
