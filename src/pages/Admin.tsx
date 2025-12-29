@@ -2,7 +2,7 @@ import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
-//
+
 // UUID Validation Helper
 const cleanUUIDArray = (ids: string[]): string[] => {
   if (!Array.isArray(ids)) return [];
@@ -174,6 +174,14 @@ interface ImportFieldMapping {
   [key: string]: string; // Column name in CSV -> Database field name
 }
 
+interface ImportPreviewRow {
+  index: number;
+  rawData: { [key: string]: string };
+  mappedData: { [key: string]: any };
+  errors: string[];
+  status: 'pending' | 'processing' | 'success' | 'error';
+}
+
 // Helper functions
 const getRolesFromMember = (member: Member): string[] => {
   const roles: string[] = [];
@@ -242,6 +250,37 @@ const setRolesToMember = (roles: string[]): Partial<Member> => {
   });
 
   return updateData;
+};
+
+// Parse CSV row with proper handling of quoted values
+const parseCSVRow = (row: string): string[] => {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < row.length; i++) {
+    const char = row[i];
+    const nextChar = row[i + 1];
+    
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // Escaped quote
+        current += '"';
+        i++; // Skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  
+  // Add the last field
+  result.push(current.trim());
+  return result;
 };
 
 // Extended Cloud Service Functions
@@ -373,6 +412,23 @@ const cloudService = {
       return data.name;
     } catch (error) {
       console.error('❌ Error fetching cell group name:', error);
+      return null;
+    }
+  },
+
+  async getCellGroupIdByName(groupName: string): Promise<string | null> {
+    try {
+      console.log(`🔍 Getting cell group ID for name: ${groupName}`);
+      const { data, error } = await supabase
+        .from('cell_groups')
+        .select('id')
+        .ilike('name', groupName.trim())
+        .single();
+
+      if (error || !data) return null;
+      return data.id;
+    } catch (error) {
+      console.error('❌ Error fetching cell group ID:', error);
       return null;
     }
   },
@@ -646,7 +702,7 @@ const cloudService = {
           }
 
           const headerRow = rows[0];
-          const headers = headerRow.split(',').map(col => col.replace(/^"|"$/g, '').trim());
+          const headers = parseCSVRow(headerRow).map(col => col.replace(/^"|"$/g, '').trim());
           
           // Validate that we have headers
           if (headers.length === 0 || headers.every(h => !h.trim())) {
@@ -660,11 +716,19 @@ const cloudService = {
 
           console.log(`📥 Importing ${rows.length - 1} rows from CSV...`);
 
+          // First, create a map of cell group names to IDs for faster lookup
+          const cellGroupMap = new Map<string, string>();
+          cellGroups.forEach(group => {
+            if (group.type === 'cell_group') {
+              cellGroupMap.set(group.name.toLowerCase(), group.id);
+            }
+          });
+
           for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
             if (!row.trim()) continue;
             
-            const columns = row.split(',').map(col => col.replace(/^"|"$/g, '').trim());
+            const columns = parseCSVRow(row).map(col => col.replace(/^"|"$/g, '').trim());
             
             try {
               // Map CSV columns to database fields
@@ -690,6 +754,8 @@ const cloudService = {
                 department_leader: false,
                 admin_role: 'member'
               };
+              
+              let cellGroupValue = '';
               
               // Process each mapped field
               for (const csvHeader of headers) {
@@ -718,16 +784,7 @@ const cloudService = {
                         memberData.phone = value.trim();
                         break;
                       case 'cell_group':
-                        // Find cell group by name
-                        const cellGroup = cellGroups.find(g => 
-                          g.type === 'cell_group' && 
-                          g.name.toLowerCase() === value.toLowerCase().trim()
-                        );
-                        if (cellGroup) {
-                          memberData.cell_group_id = cellGroup.id;
-                        } else if (value.trim()) {
-                          throw new Error(`Cell group "${value}" not found. Please create it first or check spelling.`);
-                        }
+                        cellGroupValue = value.trim();
                         break;
                       case 'gender':
                         const genderValue = value.toLowerCase().trim();
@@ -739,9 +796,10 @@ const cloudService = {
                         break;
                       case 'baptism':
                         if (value.trim()) {
-                          const baptismDate = new Date(value);
-                          if (!isNaN(baptismDate.getTime())) {
-                            memberData.baptism = baptismDate.toISOString();
+                          // Try to parse the date in various formats
+                          const parsedDate = new Date(value);
+                          if (!isNaN(parsedDate.getTime())) {
+                            memberData.baptism = parsedDate.toISOString();
                           } else {
                             throw new Error(`Invalid baptism date format: "${value}". Use YYYY-MM-DD format.`);
                           }
@@ -767,6 +825,32 @@ const cloudService = {
                         break;
                     }
                   }
+                }
+              }
+
+              // Handle cell group after all fields are processed
+              if (cellGroupValue) {
+                // Try to find cell group by name first
+                let cellGroupId = cellGroupMap.get(cellGroupValue.toLowerCase());
+                
+                // If not found by name, try to see if it's a UUID
+                if (!cellGroupId) {
+                  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                  if (uuidPattern.test(cellGroupValue)) {
+                    // It's a UUID, check if it exists in cell groups
+                    const matchingGroup = cellGroups.find(g => 
+                      g.type === 'cell_group' && g.id === cellGroupValue
+                    );
+                    if (matchingGroup) {
+                      cellGroupId = matchingGroup.id;
+                    }
+                  }
+                }
+                
+                if (cellGroupId) {
+                  memberData.cell_group_id = cellGroupId;
+                } else {
+                  throw new Error(`Cell group "${cellGroupValue}" not found. Please create it first or check spelling.`);
                 }
               }
 
@@ -1092,6 +1176,12 @@ const Admin = () => {
   const [importProgress, setImportProgress] = useState<{current: number; total: number} | null>(null);
   const [auditLogFilter, setAuditLogFilter] = useState<string>('all'); // 'all', 'today', 'week', 'month'
   const [searchAuditTerm, setSearchAuditTerm] = useState('');
+
+  // New states for import preview and progress
+  const [importPreviewData, setImportPreviewData] = useState<ImportPreviewRow[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [currentImportRow, setCurrentImportRow] = useState(0);
+  const [importStatusMessage, setImportStatusMessage] = useState('');
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -1473,6 +1563,10 @@ const Admin = () => {
     setCsvHeaders([]);
     setShowImportMapping(false);
     setImportProgress(null);
+    setImportPreviewData([]);
+    setIsImporting(false);
+    setCurrentImportRow(0);
+    setImportStatusMessage('');
   };
 
   const handleUpdateSecuritySettings = async () => {
@@ -1510,27 +1604,162 @@ const Admin = () => {
     }
   };
 
+  // Updated handleImportData with progress tracking and preview
   const handleImportData = async () => {
     if (!importFile) {
       setError('Please select a file to import');
       return;
     }
 
-    setLoading(true);
+    setIsImporting(true);
     setError(null);
-    setImportProgress({ current: 0, total: 0 });
+    setImportStatusMessage('Starting import...');
     
     try {
-      const results = await cloudService.importData(importFile, importOptions, importFieldMapping, groups);
-      setImportResults(results);
+      const rows = importPreviewData.filter(row => row.errors.length === 0);
+      setImportProgress({ current: 0, total: rows.length });
+      
+      let success = 0;
+      let errors = 0;
+      const errorMessages: string[] = [];
+      
+      // Create a map of cell group names to IDs for faster lookup
+      const cellGroupMap = new Map<string, string>();
+      groups.forEach(group => {
+        if (group.type === 'cell_group') {
+          cellGroupMap.set(group.name.toLowerCase(), group.id);
+        }
+      });
+      
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        setCurrentImportRow(i + 1);
+        setImportStatusMessage(`Processing row ${i + 1} of ${rows.length}: ${row.mappedData.name} ${row.mappedData.surname}`);
+        setImportProgress({ current: i + 1, total: rows.length });
+        
+        // Update preview status
+        setImportPreviewData(prev => prev.map(r => 
+          r.index === row.index ? { ...r, status: 'processing' } : r
+        ));
+        
+        try {
+          const memberData = { ...row.mappedData };
+          
+          // Handle cell group
+          if (memberData.cell_group) {
+            let cellGroupId = cellGroupMap.get(memberData.cell_group.toLowerCase());
+            
+            // If not found by name, try to see if it's a UUID
+            if (!cellGroupId) {
+              const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              if (uuidPattern.test(memberData.cell_group)) {
+                const matchingGroup = groups.find(g => 
+                  g.type === 'cell_group' && g.id === memberData.cell_group
+                );
+                if (matchingGroup) {
+                  cellGroupId = matchingGroup.id;
+                }
+              }
+            }
+            
+            if (cellGroupId) {
+              memberData.cell_group_id = cellGroupId;
+            } else {
+              throw new Error(`Cell group "${memberData.cell_group}" not found`);
+            }
+            delete memberData.cell_group; // Remove the temporary field
+          }
+
+          // Check if member exists
+          let existingMemberId: string | null = null;
+          if (importOptions.updateExisting) {
+            const query = supabase
+              .from('members')
+              .select('id')
+              .eq('name', memberData.name)
+              .eq('surname', memberData.surname);
+            
+            if (memberData.phone) {
+              query.eq('phone', memberData.phone);
+            }
+            
+            const { data: existingMembers, error: findError } = await query.limit(1);
+
+            if (!findError && existingMembers && existingMembers.length > 0) {
+              existingMemberId = existingMembers[0].id;
+            }
+          }
+
+          if (existingMemberId) {
+            // Update existing member
+            const { error: updateError } = await supabase
+              .from('members')
+              .update(memberData)
+              .eq('id', existingMemberId);
+
+            if (!updateError) {
+              success++;
+              setImportPreviewData(prev => prev.map(r => 
+                r.index === row.index ? { ...r, status: 'success' } : r
+              ));
+            } else {
+              throw new Error(`Update failed: ${updateError.message}`);
+            }
+          } else if (importOptions.createMissing) {
+            // Create new member
+            const { error: insertError } = await supabase
+              .from('members')
+              .insert(memberData);
+
+            if (!insertError) {
+              success++;
+              setImportPreviewData(prev => prev.map(r => 
+                r.index === row.index ? { ...r, status: 'success' } : r
+              ));
+            } else {
+              throw new Error(`Create failed: ${insertError.message}`);
+            }
+          } else {
+            throw new Error('Member not found and "Create missing members" is disabled');
+          }
+        } catch (rowError) {
+          const errorMsg = rowError instanceof Error ? rowError.message : 'Unknown error';
+          errorMessages.push(`Row ${row.index}: ${errorMsg}`);
+          errors++;
+          setImportPreviewData(prev => prev.map(r => 
+            r.index === row.index ? { ...r, status: 'error', errors: [errorMsg] } : r
+          ));
+        }
+        
+        // Small delay to show progress
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      // Log audit event for import
+      if (success > 0) {
+        await logAuditEvent(
+          'IMPORT',
+          'members',
+          { 
+            fileName: importFile.name, 
+            fileSize: importFile.size, 
+            successCount: success, 
+            errorCount: errors,
+            options: importOptions 
+          },
+          (window as any).currentUserId
+        );
+      }
+
+      setImportResults({ success, errors, errorMessages });
       await loadData();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to import data';
       setError(`Import failed: ${errorMessage}. Please check your CSV format and field mappings.`);
       console.error('❌ Import error:', err);
     } finally {
-      setLoading(false);
-      setImportProgress(null);
+      setIsImporting(false);
+      setImportStatusMessage('');
     }
   };
 
@@ -1558,6 +1787,7 @@ const Admin = () => {
     setImportFieldMapping({});
     setCsvHeaders([]);
     setShowImportMapping(false);
+    setImportPreviewData([]);
     setError(null);
 
     // Validate file type
@@ -1577,14 +1807,14 @@ const Admin = () => {
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const rows = content.split('\n');
+        const rows = content.split('\n').filter(row => row.trim() !== '');
         
         if (rows.length === 0) {
           setError('File is empty. Please upload a CSV file with data.');
           return;
         }
 
-        const headers = rows[0].split(',').map(col => col.replace(/^"|"$/g, '').trim());
+        const headers = parseCSVRow(rows[0]).map(col => col.replace(/^"|"$/g, '').trim());
         
         // Validate headers
         if (headers.length === 0 || headers.every(h => !h.trim())) {
@@ -1626,6 +1856,9 @@ const Admin = () => {
         
         setImportFieldMapping(autoMapping);
         
+        // Preview the first 10 rows
+        generateImportPreview(content, headers, autoMapping);
+        
         // Show warning if required fields aren't auto-mapped
         const requiredFields = ['surname', 'name', 'residence'];
         const missingRequired = requiredFields.filter(field => !Object.values(autoMapping).includes(field));
@@ -1644,6 +1877,138 @@ const Admin = () => {
     };
     
     reader.readAsText(file);
+  };
+
+  const generateImportPreview = (content: string, headers: string[], mapping: ImportFieldMapping) => {
+    const rows = content.split('\n').filter(row => row.trim() !== '');
+    const previewData: ImportPreviewRow[] = [];
+    
+    // Process first 20 rows for preview
+    const maxPreviewRows = Math.min(20, rows.length - 1);
+    
+    for (let i = 1; i <= maxPreviewRows; i++) {
+      const row = rows[i];
+      if (!row.trim()) continue;
+      
+      const columns = parseCSVRow(row).map(col => col.replace(/^"|"$/g, '').trim());
+      
+      const rawData: { [key: string]: string } = {};
+      const mappedData: any = {
+        status: 'newcomer',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        first_time_visit_date: new Date().toISOString(),
+        is_permanent_member: false,
+        is_leader: false,
+        is_hidden: false,
+        is_developer: false,
+        is_admin: false,
+        assigned_groups: [],
+        assigned_departments: [],
+        permissions: [],
+        can_add_members: false,
+        can_edit_members: false,
+        can_view_own_data: false,
+        pastor_role: false,
+        deacon_role: false,
+        group_leader: false,
+        department_leader: false,
+        admin_role: 'member'
+      };
+      
+      const errors: string[] = [];
+      
+      // Collect raw data
+      headers.forEach((header, idx) => {
+        rawData[header] = columns[idx] || '';
+      });
+      
+      // Map data
+      for (const csvHeader of headers) {
+        const dbField = mapping[csvHeader];
+        if (dbField && rawData[csvHeader]) {
+          const value = rawData[csvHeader];
+          
+          try {
+            switch (dbField) {
+              case 'surname':
+                mappedData.surname = value.trim();
+                break;
+              case 'name':
+                mappedData.name = value.trim();
+                break;
+              case 'residence':
+                mappedData.residence = value.trim();
+                break;
+              case 'phone':
+                mappedData.phone = value.trim();
+                break;
+              case 'cell_group':
+                mappedData.cell_group = value.trim(); // Store temporarily for validation
+                break;
+              case 'gender':
+                const genderValue = value.toLowerCase().trim();
+                if (genderValue === 'male' || genderValue === 'female') {
+                  mappedData.gender = genderValue;
+                } else if (value.trim()) {
+                  errors.push(`Invalid gender: "${value}". Must be "Male" or "Female"`);
+                }
+                break;
+              case 'baptism':
+                if (value.trim()) {
+                  const baptismDate = new Date(value);
+                  if (!isNaN(baptismDate.getTime())) {
+                    mappedData.baptism = baptismDate.toISOString();
+                  } else {
+                    errors.push(`Invalid baptism date: "${value}"`);
+                  }
+                }
+                break;
+              case 'is_permanent_member':
+                mappedData.is_permanent_member = value.toLowerCase().trim() === 'true' || 
+                                                value.toLowerCase().trim() === 'yes' || 
+                                                value === '1';
+                break;
+              case 'is_leader':
+                mappedData.is_leader = value.toLowerCase().trim() === 'true' || 
+                                      value.toLowerCase().trim() === 'yes' || 
+                                      value === '1';
+                break;
+              case 'status':
+                const validStatuses = ['newcomer', 'active', 'inactive', 'not_attending'];
+                if (validStatuses.includes(value.toLowerCase().trim())) {
+                  mappedData.status = value.toLowerCase().trim();
+                } else if (value.trim()) {
+                  errors.push(`Invalid status: "${value}". Must be one of: ${validStatuses.join(', ')}`);
+                }
+                break;
+            }
+          } catch (error) {
+            errors.push(`Error processing ${dbField}: ${error}`);
+          }
+        }
+      }
+      
+      // Validate required fields
+      if (!mappedData.name || !mappedData.surname || !mappedData.residence) {
+        const missingFields = [];
+        if (!mappedData.name) missingFields.push('name');
+        if (!mappedData.surname) missingFields.push('surname');
+        if (!mappedData.residence) missingFields.push('residence');
+        
+        errors.push(`Missing required fields: ${missingFields.join(', ')}`);
+      }
+      
+      previewData.push({
+        index: i,
+        rawData,
+        mappedData,
+        errors,
+        status: 'pending'
+      });
+    }
+    
+    setImportPreviewData(previewData);
   };
 
   const handleGenerateCredentials = async () => {
@@ -2068,9 +2433,9 @@ const Admin = () => {
 
   const filteredAuditLogs = getFilteredAuditLogs();
 
-  // Modal Components
+  // Update the DataManagementModal to include import preview
   const DataManagementModal = () => (
-    <Modal title="Data Management" onClose={closeModal} size="max-w-6xl">
+    <Modal title="Data Management" onClose={closeModal} size="max-w-7xl">
       <div className="space-y-6">
         {/* Storage Information */}
         <div className="bg-gray-50 p-6 rounded-lg">
@@ -2215,139 +2580,337 @@ const Admin = () => {
             </div>
           ) : (
             <div className="space-y-6">
-              <div className="bg-white p-4 rounded-lg border">
-                <h4 className="font-medium text-gray-900 mb-4">Map CSV Columns to Database Fields</h4>
-                <p className="text-sm text-gray-600 mb-4">
-                  Please map each CSV column to its corresponding database field.
-                  <span className="text-red-500 font-medium"> Required fields are marked with *</span>
-                </p>
-                
-                <div className="space-y-4">
-                  {csvHeaders.map((header, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex-1">
-                        <span className="font-medium text-gray-900">CSV Column: </span>
-                        <code className="bg-gray-200 px-2 py-1 rounded text-sm">{header}</code>
-                      </div>
-                      <select
-                        value={importFieldMapping[header] || ''}
-                        onChange={(e) => setImportFieldMapping(prev => ({
-                          ...prev,
-                          [header]: e.target.value
-                        }))}
-                        className="px-3 py-2 border border-gray-300 rounded-lg min-w-48"
-                      >
-                        <option value="">Select database field...</option>
-                        {databaseFields.map(field => (
-                          <option key={field.value} value={field.value}>
-                            {field.label} {field.required ? '* (Required)' : ''}
-                          </option>
-                        ))}
-                      </select>
+              {!isImporting ? (
+                <>
+                  <div className="bg-white p-4 rounded-lg border">
+                    <h4 className="font-medium text-gray-900 mb-4">Map CSV Columns to Database Fields</h4>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Please map each CSV column to its corresponding database field.
+                      <span className="text-red-500 font-medium"> Required fields are marked with *</span>
+                    </p>
+                    
+                    <div className="space-y-4">
+                      {csvHeaders.map((header, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex-1">
+                            <span className="font-medium text-gray-900">CSV Column: </span>
+                            <code className="bg-gray-200 px-2 py-1 rounded text-sm">{header}</code>
+                          </div>
+                          <select
+                            value={importFieldMapping[header] || ''}
+                            onChange={(e) => {
+                              const newMapping = {
+                                ...importFieldMapping,
+                                [header]: e.target.value
+                              };
+                              setImportFieldMapping(newMapping);
+                              // Regenerate preview with new mapping
+                              if (importFile) {
+                                const reader = new FileReader();
+                                reader.onload = (e) => {
+                                  const content = e.target?.result as string;
+                                  generateImportPreview(content, csvHeaders, newMapping);
+                                };
+                                reader.readAsText(importFile);
+                              }
+                            }}
+                            className="px-3 py-2 border border-gray-300 rounded-lg min-w-48"
+                          >
+                            <option value="">Select database field...</option>
+                            {databaseFields.map(field => (
+                              <option key={field.value} value={field.value}>
+                                {field.label} {field.required ? '* (Required)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                  <h5 className="font-medium text-blue-900 mb-2">Database Fields Description:</h5>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {databaseFields.map(field => (
-                      <div key={field.value} className="text-sm">
-                        <span className={`font-medium ${field.required ? 'text-red-700' : 'text-gray-900'}`}>
-                          {field.label}
-                        </span>
-                        {field.required && <span className="text-red-500 ml-1">*</span>}
-                        <p className="text-xs text-gray-500 mt-1">{field.description}</p>
+                    
+                    <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+                      <h5 className="font-medium text-blue-900 mb-2">Database Fields Description:</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {databaseFields.map(field => (
+                          <div key={field.value} className="text-sm">
+                            <span className={`font-medium ${field.required ? 'text-red-700' : 'text-gray-900'}`}>
+                              {field.label}
+                            </span>
+                            {field.required && <span className="text-red-500 ml-1">*</span>}
+                            <p className="text-xs text-gray-500 mt-1">{field.description}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
                   </div>
-                </div>
-              </div>
-              
-              {error && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <p className="text-yellow-700 text-sm font-medium">{error}</p>
+                  
+                  {/* Import Preview Table */}
+                  {importPreviewData.length > 0 && (
+                    <div className="bg-white p-4 rounded-lg border">
+                      <h4 className="font-medium text-gray-900 mb-4">Import Preview (First {importPreviewData.length} rows)</h4>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Row</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Surname</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Residence</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cell Group</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Errors</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {importPreviewData.map((row) => (
+                              <tr key={row.index} className={row.errors.length > 0 ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {row.index}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                  {row.mappedData.name || <span className="text-red-500">Missing</span>}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                  {row.mappedData.surname || <span className="text-red-500">Missing</span>}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                  {row.mappedData.residence || <span className="text-red-500">Missing</span>}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                  {row.mappedData.cell_group || '-'}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  {row.errors.length === 0 ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                      Valid
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                      {row.errors.length} error(s)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {row.errors.length > 0 && (
+                                    <div className="text-xs text-red-600 space-y-1">
+                                      {row.errors.map((error, idx) => (
+                                        <div key={idx}>• {error}</div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="mt-4 text-sm text-gray-500">
+                        Showing {importPreviewData.length} rows. {importPreviewData.filter(r => r.errors.length === 0).length} valid, {importPreviewData.filter(r => r.errors.length > 0).length} with errors.
+                      </div>
+                    </div>
+                  )}
+                  
+                  {error && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <p className="text-yellow-700 text-sm font-medium">{error}</p>
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleImportData}
+                      disabled={isImporting || Object.keys(importFieldMapping).filter(k => importFieldMapping[k]).length < 3}
+                      className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+                    >
+                      <Upload className="h-4 w-4" />
+                      Start Import
+                    </button>
+                    <button
+                      onClick={() => setShowImportMapping(false)}
+                      className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                    >
+                      Back
+                    </button>
+                  </div>
+                  
+                  <div className="text-sm text-gray-500">
+                    <p><strong>Note:</strong> At minimum, you must map the 3 required fields: Surname, Name, and Residence.</p>
+                    <p className="mt-1">Cell groups must already exist in the system. The import will match by exact group name.</p>
+                  </div>
+                </>
+              ) : (
+                /* Import Progress Display */
+                <div className="bg-white p-6 rounded-lg border">
+                  <h4 className="font-medium text-gray-900 mb-6">Importing Data...</h4>
+                  
+                  <div className="space-y-6">
+                    {/* Progress bar */}
+                    <div>
+                      <div className="flex justify-between text-sm text-gray-600 mb-2">
+                        <span>{importStatusMessage}</span>
+                        <span>{currentImportRow} / {importProgress?.total}</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-4">
+                        <div 
+                          className="bg-green-600 h-4 rounded-full transition-all duration-300"
+                          style={{ width: `${importProgress ? (importProgress.current / importProgress.total) * 100 : 0}%` }}
+                        ></div>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        {importProgress && (
+                          <span>{importProgress.current} of {importProgress.total} rows processed</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Current row details */}
+                    {currentImportRow > 0 && importPreviewData[currentImportRow - 1] && (
+                      <div className="bg-gray-50 p-4 rounded-lg">
+                        <h5 className="font-medium text-gray-900 mb-2">Current Row:</h5>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div>
+                            <span className="text-xs text-gray-500">Name</span>
+                            <p className="font-medium">{importPreviewData[currentImportRow - 1].mappedData.name}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-gray-500">Surname</span>
+                            <p className="font-medium">{importPreviewData[currentImportRow - 1].mappedData.surname}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-gray-500">Residence</span>
+                            <p className="font-medium">{importPreviewData[currentImportRow - 1].mappedData.residence}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-gray-500">Status</span>
+                            <p className="font-medium">
+                              {importPreviewData[currentImportRow - 1].status === 'processing' ? (
+                                <span className="text-blue-600">Processing...</span>
+                              ) : importPreviewData[currentImportRow - 1].status === 'success' ? (
+                                <span className="text-green-600">Success</span>
+                              ) : importPreviewData[currentImportRow - 1].status === 'error' ? (
+                                <span className="text-red-600">Error</span>
+                              ) : (
+                                <span className="text-gray-600">Pending</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Progress preview table */}
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Row</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {importPreviewData.slice(0, 10).map((row) => (
+                            <tr key={row.index}>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                {row.index}
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                                {row.mappedData.name} {row.mappedData.surname}
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap">
+                                {row.status === 'pending' && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                    Pending
+                                  </span>
+                                )}
+                                {row.status === 'processing' && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                                    Processing
+                                  </span>
+                                )}
+                                {row.status === 'success' && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    Success
+                                  </span>
+                                )}
+                                {row.status === 'error' && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                    Error
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    
+                    <div className="text-center">
+                      <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span className="text-sm text-gray-600">Import in progress...</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
               
-              <div className="flex gap-3">
-                <button
-                  onClick={handleImportData}
-                  disabled={loading || Object.keys(importFieldMapping).filter(k => importFieldMapping[k]).length < 3}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
-                >
-                  <Upload className="h-4 w-4" />
-                  {loading ? 'Importing...' : 'Start Import'}
-                </button>
-                <button
-                  onClick={() => setShowImportMapping(false)}
-                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                >
-                  Back
-                </button>
-              </div>
-              
-              <div className="text-sm text-gray-500">
-                <p><strong>Note:</strong> At minimum, you must map the 3 required fields: Surname, Name, and Residence.</p>
-                <p className="mt-1">Cell groups must already exist in the system. The import will match by exact group name.</p>
-              </div>
-            </div>
-          )}
-
-          {importResults && (
-            <div className={`mt-6 p-6 rounded-lg ${
-              importResults.errors > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'
-            }`}>
-              <div className="flex items-center justify-between mb-4">
-                <h4 className={`text-lg font-bold ${importResults.errors > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
-                  Import Complete!
-                </h4>
-                <button
-                  onClick={() => setImportResults(null)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="text-center p-4 bg-white rounded-lg border">
-                  <div className="text-3xl font-bold text-green-600">{importResults.success}</div>
-                  <div className="text-sm text-gray-600">Successful</div>
-                </div>
-                <div className="text-center p-4 bg-white rounded-lg border">
-                  <div className="text-3xl font-bold text-red-600">{importResults.errors}</div>
-                  <div className="text-sm text-gray-600">Errors</div>
-                </div>
-              </div>
-              
-              {importResults.errorMessages.length > 0 && (
-                <div className="mt-4">
-                  <h5 className="text-sm font-medium text-red-700 mb-3">Error Details:</h5>
-                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    {importResults.errorMessages.map((msg, idx) => (
-                      <div key={idx} className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-100">
-                        <span className="font-medium">Row {idx + 2}:</span> {msg}
-                      </div>
-                    ))}
+              {importResults && (
+                <div className={`mt-6 p-6 rounded-lg ${
+                  importResults.errors > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className={`text-lg font-bold ${importResults.errors > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
+                      Import Complete!
+                    </h4>
+                    <button
+                      onClick={() => setImportResults(null)}
+                      className="text-gray-500 hover:text-gray-700"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-3">
-                    Note: Row numbers start from 2 (Row 1 is headers)
-                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="text-center p-4 bg-white rounded-lg border">
+                      <div className="text-3xl font-bold text-green-600">{importResults.success}</div>
+                      <div className="text-sm text-gray-600">Successful</div>
+                    </div>
+                    <div className="text-center p-4 bg-white rounded-lg border">
+                      <div className="text-3xl font-bold text-red-600">{importResults.errors}</div>
+                      <div className="text-sm text-gray-600">Errors</div>
+                    </div>
+                  </div>
+                  
+                  {importResults.errorMessages.length > 0 && (
+                    <div className="mt-4">
+                      <h5 className="text-sm font-medium text-red-700 mb-3">Error Details:</h5>
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                        {importResults.errorMessages.map((msg, idx) => (
+                          <div key={idx} className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-100">
+                            <span className="font-medium">Row {idx + 2}:</span> {msg}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-3">
+                        Note: Row numbers start from 2 (Row 1 is headers)
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div className="mt-6 pt-4 border-t border-gray-200">
+                    <button
+                      onClick={() => {
+                        setImportResults(null);
+                        closeModal();
+                      }}
+                      className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                    >
+                      Close and View Members
+                    </button>
+                  </div>
                 </div>
               )}
-              
-              <div className="mt-6 pt-4 border-t border-gray-200">
-                <button
-                  onClick={() => {
-                    setImportResults(null);
-                    closeModal();
-                  }}
-                  className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                >
-                  Close and View Members
-                </button>
-              </div>
             </div>
           )}
         </div>
