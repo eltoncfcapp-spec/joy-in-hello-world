@@ -1,6 +1,8 @@
-import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter } from 'lucide-react';
+import { Search, Plus, Mail, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 interface Member {
   id: string;
@@ -66,6 +68,9 @@ const logAudit = async (
 };
 
 const Members = () => {
+  const { profile, isAdmin, isPastor, isDeacon, isGroupLeader, isMember, hasPermission } = useAuth();
+  const navigate = useNavigate();
+  
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [hiddenMembers, setHiddenMembers] = useState<Member[]>([]);
@@ -137,6 +142,77 @@ const Members = () => {
     is_hidden: false,
   });
 
+  // Check if user can access members page
+  useEffect(() => {
+    if (profile) {
+      const canAccess = isAdmin() || isPastor() || isDeacon() || isGroupLeader() || isMember();
+      if (!canAccess) {
+        navigate('/unauthorized');
+      }
+    }
+  }, [profile, navigate]);
+
+  // Permission checks
+  const canViewAllMembers = () => {
+    return isAdmin() || isPastor() || isDeacon();
+  };
+
+  const canViewHiddenMembers = () => {
+    return isAdmin() || isPastor() || isDeacon();
+  };
+
+  const canEditMember = (memberCellGroupId?: string | null) => {
+    // Admin and Pastor can edit all members
+    if (isAdmin() || isPastor()) return true;
+    
+    // Deacon can edit if they have edit permission
+    if (isDeacon()) {
+      return profile?.can_edit_members || false;
+    }
+    
+    // Group leader can edit members in their cell group
+    if (isGroupLeader()) {
+      return memberCellGroupId === profile?.cell_group_id;
+    }
+    
+    // Regular members cannot edit anyone
+    return false;
+  };
+
+  const canDeleteMember = () => {
+    return isAdmin() || isPastor();
+  };
+
+  const canCreateMember = () => {
+    if (isAdmin() || isPastor()) return true;
+    if (isDeacon()) return profile?.can_add_members || false;
+    if (isGroupLeader()) return profile?.can_add_members || false;
+    return false;
+  };
+
+  const canExportMembers = () => {
+    return isAdmin() || isPastor();
+  };
+
+  const getVisibleCellGroupFilter = () => {
+    // Admin, Pastor, and Deacon can see all members
+    if (isAdmin() || isPastor() || isDeacon()) {
+      return null;
+    }
+    
+    // Group leader can only see members in their cell group
+    if (isGroupLeader()) {
+      return profile?.cell_group_id || null;
+    }
+    
+    // Regular member can only see themselves
+    if (isMember()) {
+      return profile?.id || null;
+    }
+    
+    return null;
+  };
+
   const isNotAttendingStatus = (status: string | null): boolean => {
     if (!status) return false;
     const statusLower = status.toLowerCase();
@@ -164,41 +240,57 @@ const Members = () => {
       setLoading(true);
       setError(null);
       
-      // Get members with their cell groups
-      const { data: membersData, error: membersError } = await supabase
+      let query = supabase
         .from('members')
         .select(`
           *,
           cell_groups!fk_cell_group(name)
-        `)
-        .eq('is_hidden', false)
+        `);
+
+      // Apply role-based filtering
+      const visibleCellGroup = getVisibleCellGroupFilter();
+      
+      if (visibleCellGroup) {
+        if (isMember()) {
+          // Regular members can only see themselves
+          query = query.eq('id', visibleCellGroup).maybeSingle();
+        } else {
+          // Group leaders can see members in their cell group
+          query = query.eq('cell_group_id', visibleCellGroup);
+        }
+      } else {
+        // Admin, Pastor, Deacon can see all non-hidden members
+        query = query.eq('is_hidden', false);
+      }
+
+      const { data: membersData, error: membersError } = await query
         .order('created_at', { ascending: false });
 
       if (membersError) {
         throw membersError;
       }
 
-      // Get ministry group memberships for all members
-      const memberIds = membersData?.map(m => m.id) || [];
+      // Handle single member case (for regular members)
+      const membersArray = Array.isArray(membersData) ? membersData : (membersData ? [membersData] : []);
+
+      // Get ministry group memberships
+      const memberIds = membersArray?.map(m => m.id) || [];
       let ministryGroupsMap: Record<string, { name: string }> = {};
 
       if (memberIds.length > 0) {
-        // Use the ministry_membership view or query junction table directly
         const { data: ministryData, error: ministryError } = await supabase
           .from('ministry_membership')
           .select('member_id, ministry_group_name')
           .in('member_id', memberIds);
 
         if (!ministryError && ministryData) {
-          // Create a map of member_id -> ministry group
           ministryData.forEach(item => {
             ministryGroupsMap[item.member_id] = { name: item.ministry_group_name };
           });
         }
       }
 
-      // Combine the data
-      const membersWithMinistryGroups = membersData?.map(member => ({
+      const membersWithMinistryGroups = membersArray?.map(member => ({
         ...member,
         ministry_groups: ministryGroupsMap[member.id] || null
       })) || [];
@@ -206,13 +298,15 @@ const Members = () => {
       setMembers(membersWithMinistryGroups);
     } catch (error: any) {
       console.error('Error fetching members:', error);
-      setError(error.message || 'Failed to load members. Please check your connection.');
+      setError(error.message || 'Failed to load members.');
     } finally {
       setLoading(false);
     }
   };
 
   const fetchHiddenMembers = async () => {
+    if (!canViewHiddenMembers()) return;
+
     try {
       const { data: membersData, error: membersError } = await supabase
         .from('members')
@@ -227,7 +321,7 @@ const Members = () => {
         throw membersError;
       }
 
-      // Get ministry group memberships for hidden members
+      // Get ministry group memberships
       const memberIds = membersData?.map(m => m.id) || [];
       let ministryGroupsMap: Record<string, { name: string }> = {};
 
@@ -269,7 +363,6 @@ const Members = () => {
       setCellGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching cell groups:', error);
-      setError(error.message || 'Failed to load cell groups.');
     }
   };
 
@@ -287,12 +380,17 @@ const Members = () => {
       setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
-      setError(error.message || 'Failed to load ministry groups.');
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!canCreateMember()) {
+      setError('You do not have permission to add members.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -377,6 +475,11 @@ const Members = () => {
   };
 
   const handleEditMember = async (member: Member) => {
+    if (!canEditMember(member.cell_group_id)) {
+      setError('You do not have permission to edit this member.');
+      return;
+    }
+
     setEditingMember(member.id);
     setEditFormData({
       name: member.name,
@@ -418,6 +521,11 @@ const Members = () => {
   };
 
   const handleSaveMember = async (memberId: string) => {
+    if (!canEditMember()) {
+      setError('You do not have permission to edit members.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -572,6 +680,11 @@ const Members = () => {
   };
 
   const handleRestoreMember = async (memberId: string) => {
+    if (!canEditMember()) {
+      setError('You do not have permission to restore members.');
+      return;
+    }
+
     if (!confirm('Restore this member? They will appear in the main members list again as a newcomer.')) {
       return;
     }
@@ -617,6 +730,11 @@ const Members = () => {
   };
 
   const handlePermanentDeleteMember = async (memberId: string, memberName: string) => {
+    if (!canDeleteMember()) {
+      setError('You do not have permission to delete members.');
+      return;
+    }
+
     if (!confirm(`⚠️ WARNING: This will permanently delete ${memberName}. This action cannot be undone. Are you absolutely sure?`)) {
       return;
     }
@@ -674,6 +792,11 @@ const Members = () => {
   };
 
   const handleExportMembers = async () => {
+    if (!canExportMembers()) {
+      setError('You do not have permission to export members.');
+      return;
+    }
+
     setExporting(true);
     try {
       const exportData = members.map(member => ({
@@ -808,6 +931,47 @@ const Members = () => {
   };
 
   const statusCounts = getStatusCounts();
+
+  // Render role badge
+  const renderRoleBadge = () => {
+    if (isAdmin()) {
+      return (
+        <span className="px-3 py-1 rounded-full text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex items-center gap-1">
+          <Shield className="h-3 w-3" />
+          Admin
+        </span>
+      );
+    } else if (isPastor()) {
+      return (
+        <span className="px-3 py-1 rounded-full text-sm font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 flex items-center gap-1">
+          <User className="h-3 w-3" />
+          Pastor
+        </span>
+      );
+    } else if (isDeacon()) {
+      return (
+        <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex items-center gap-1">
+          <Users className="h-3 w-3" />
+          Deacon
+        </span>
+      );
+    } else if (isGroupLeader()) {
+      return (
+        <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 flex items-center gap-1">
+          <Key className="h-3 w-3" />
+          Group Leader
+        </span>
+      );
+    } else if (isMember()) {
+      return (
+        <span className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300 flex items-center gap-1">
+          <User className="h-3 w-3" />
+          Member
+        </span>
+      );
+    }
+    return null;
+  };
 
   const renderMemberCard = (member: Member, isHidden: boolean = false) => (
     <div 
@@ -1165,31 +1329,37 @@ const Members = () => {
           
           <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
             <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3">
-              <button
-                onClick={() => handleEditMember(member)}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-              >
-                <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                <span className="hidden sm:inline">Edit</span>
-              </button>
+              {canEditMember(member.cell_group_id) && (
+                <button
+                  onClick={() => handleEditMember(member)}
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                >
+                  <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                  <span className="hidden sm:inline">Edit</span>
+                </button>
+              )}
               {isHidden ? (
                 <>
-                  <button
-                    onClick={() => handleRestoreMember(member.id)}
-                    className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                  >
-                    <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
-                    <span className="hidden sm:inline">Restore</span>
-                  </button>
-                  <button
-                    onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
-                    className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                  >
-                    <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                    <span className="hidden sm:inline">Delete</span>
-                  </button>
+                  {canEditMember(null) && (
+                    <button
+                      onClick={() => handleRestoreMember(member.id)}
+                      className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                    >
+                      <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
+                      <span className="hidden sm:inline">Restore</span>
+                    </button>
+                  )}
+                  {canDeleteMember() && (
+                    <button
+                      onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
+                      className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                    >
+                      <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                      <span className="hidden sm:inline">Delete</span>
+                    </button>
+                  )}
                 </>
-              ) : (
+              ) : canDeleteMember() && (
                 <button
                   onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
                   className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
@@ -1225,49 +1395,112 @@ const Members = () => {
     </div>
   );
 
+  // If user is a regular member, show their profile only
+  if (isMember() && !canViewAllMembers()) {
+    const memberProfile = members[0];
+    
+    if (!memberProfile) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center py-12">
+              <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                Member Profile Not Found
+              </h3>
+              <p className="text-gray-500 dark:text-gray-500">
+                Your member profile could not be loaded.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                  My Profile
+                </h1>
+                {renderRoleBadge()}
+              </div>
+              <p className="text-gray-600 dark:text-gray-400">
+                View your member profile information
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:gap-6">
+            {renderMemberCard(memberProfile, false)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-              Members Directory
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">Manage and view all church members</p>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Members Directory
+              </h1>
+              {renderRoleBadge()}
+            </div>
+            <p className="text-gray-600 dark:text-gray-400">
+              {isGroupLeader() ? 'View and manage members in your cell group' :
+               isDeacon() ? 'View all members (view only)' :
+               'Manage and view all church members'}
+            </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            <button
-              onClick={() => setShowHiddenMembers(!showHiddenMembers)}
-              className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-            >
-              {showHiddenMembers ? (
-                <>
-                  <Eye className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                  Show Active Members
-                </>
-              ) : (
-                <>
-                  <EyeOff className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-                  Show Hidden Members ({hiddenMembers.length})
-                </>
-              )}
-            </button>
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
-            >
-              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
-              {showForm ? 'Cancel' : 'Add Member'}
-            </button>
-            <button
-              onClick={handleExportMembers}
-              disabled={exporting}
-              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group disabled:opacity-50"
-            >
-              <Download className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
-              {exporting ? 'Exporting...' : 'Export CSV'}
-            </button>
+            {canViewHiddenMembers() && (
+              <button
+                onClick={() => {
+                  fetchHiddenMembers();
+                  setShowHiddenMembers(!showHiddenMembers);
+                }}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+              >
+                {showHiddenMembers ? (
+                  <>
+                    <Eye className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                    Show Active Members
+                  </>
+                ) : (
+                  <>
+                    <EyeOff className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                    Show Hidden Members ({hiddenMembers.length})
+                  </>
+                )}
+              </button>
+            )}
+            {canCreateMember() && (
+              <button
+                onClick={() => setShowForm(!showForm)}
+                className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+              >
+                <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+                {showForm ? 'Cancel' : 'Add Member'}
+              </button>
+            )}
+            {canExportMembers() && (
+              <button
+                onClick={handleExportMembers}
+                disabled={exporting}
+                className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group disabled:opacity-50"
+              >
+                <Download className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+                {exporting ? 'Exporting...' : 'Export CSV'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1493,59 +1726,61 @@ const Members = () => {
               )}
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <Filter className="h-4 w-4" />
-                  Cell Group
-                </label>
-                <select
-                  value={selectedCellGroup}
-                  onChange={(e) => setSelectedCellGroup(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">All Groups</option>
-                  {cellGroups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </select>
+            {!isMember() && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <Filter className="h-4 w-4" />
+                    Cell Group
+                  </label>
+                  <select
+                    value={selectedCellGroup}
+                    onChange={(e) => setSelectedCellGroup(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All Groups</option>
+                    {cellGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <Filter className="h-4 w-4" />
+                    Status
+                  </label>
+                  <select
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All Statuses</option>
+                    {VALID_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <Filter className="h-4 w-4" />
+                    Gender
+                  </label>
+                  <select
+                    value={selectedGender}
+                    onChange={(e) => setSelectedGender(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All Genders</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <Filter className="h-4 w-4" />
-                  Status
-                </label>
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">All Statuses</option>
-                  {VALID_STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <Filter className="h-4 w-4" />
-                  Gender
-                </label>
-                <select
-                  value={selectedGender}
-                  onChange={(e) => setSelectedGender(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">All Genders</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                </select>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -1613,32 +1848,34 @@ const Members = () => {
               )}
             </div>
 
-            {/* Stats Summary */}
-            <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 md:gap-6">
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
-                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Total Active</div>
-              </div>
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                <div className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400 mb-2">{statusCounts.hidden}</div>
-                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Hidden</div>
-              </div>
-              {Object.entries(statusCounts)
-                .filter(([key]) => key !== 'total' && key !== 'baptized' && key !== 'hidden')
-                .slice(0, 4)
-                .map(([status, count]) => (
-                  <div key={status} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                    <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{count}</div>
-                    <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={status}>
-                      {status === 'baptized' ? 'Baptized' : status}
+            {/* Stats Summary - Only show for admins, pastors, and deacons */}
+            {(isAdmin() || isPastor() || isDeacon()) && (
+              <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 md:gap-6">
+                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                  <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.total}</div>
+                  <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Total Active</div>
+                </div>
+                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                  <div className="text-2xl md:text-3xl font-bold text-red-600 dark:text-red-400 mb-2">{statusCounts.hidden}</div>
+                  <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Hidden</div>
+                </div>
+                {Object.entries(statusCounts)
+                  .filter(([key]) => key !== 'total' && key !== 'baptized' && key !== 'hidden')
+                  .slice(0, 4)
+                  .map(([status, count]) => (
+                    <div key={status} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                      <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{count}</div>
+                      <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium truncate" title={status}>
+                        {status === 'baptized' ? 'Baptized' : status}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
-                <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
-                <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
+                  ))}
+                <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 text-center">
+                  <div className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{statusCounts.baptized}</div>
+                  <div className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium">Baptized</div>
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </div>
