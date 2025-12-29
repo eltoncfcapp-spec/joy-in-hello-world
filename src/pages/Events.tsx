@@ -47,10 +47,9 @@ interface Member {
   login_username: string | null;
   phone: string | null;
   cell_group_id: string | null;
-  ministry_group_id: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
   cell_group_name?: string | null;
-  ministry_group_name?: string | null;
+  ministry_group_names?: string[];
   department_names?: string[];
 }
 
@@ -498,7 +497,7 @@ const Events = () => {
       // First fetch members
       const { data: membersData, error: membersError } = await supabase
         .from('members')
-        .select('id, name, surname, login_username, phone, cell_group_id, ministry_group_id, status')
+        .select('id, name, surname, login_username, phone, cell_group_id, status')
         .order('name');
 
       if (membersError) throw membersError;
@@ -510,12 +509,16 @@ const Events = () => {
 
       const cellGroupMap = new Map(cellGroupsData?.map(cg => [cg.id, cg.name]) || []);
 
-      // Fetch ministry group names
-      const { data: ministryGroupsData } = await supabase
-        .from('ministry_groups')
-        .select('id, name');
+      // Fetch ministry group memberships
+      const { data: ministryGroupMembersData } = await supabase
+        .from('ministry_group_members')
+        .select('member_id, ministry_groups!inner(id, name)');
 
-      const ministryGroupMap = new Map(ministryGroupsData?.map(mg => [mg.id, mg.name]) || []);
+      const ministryGroupMap = new Map<string, string[]>();
+      ministryGroupMembersData?.forEach(mgm => {
+        const existing = ministryGroupMap.get(mgm.member_id) || [];
+        ministryGroupMap.set(mgm.member_id, [...existing, mgm.ministry_groups.name]);
+      });
 
       // Fetch department memberships
       const { data: departmentMembersData } = await supabase
@@ -532,7 +535,7 @@ const Events = () => {
       const membersWithDetails = (membersData || []).map((member: any) => ({
         ...member,
         cell_group_name: member.cell_group_id ? cellGroupMap.get(member.cell_group_id) : null,
-        ministry_group_name: member.ministry_group_id ? ministryGroupMap.get(member.ministry_group_id) : null,
+        ministry_group_names: ministryGroupMap.get(member.id) || [],
         department_names: departmentMap.get(member.id) || []
       }));
 
@@ -602,7 +605,7 @@ const Events = () => {
           // Fetch member
           const { data: memberData } = await supabase
             .from('members')
-            .select('id, name, surname, login_username, phone, cell_group_id, ministry_group_id, status')
+            .select('id, name, surname, login_username, phone, cell_group_id, status')
             .eq('id', attendee.members_id)
             .single();
 
@@ -870,6 +873,29 @@ const Events = () => {
     }
   };
 
+  const isMemberInMinistryGroup = async (memberId: string, ministryGroupId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('ministry_group_members')
+        .select('id')
+        .eq('member_id', memberId)
+        .eq('ministry_group_id', ministryGroupId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return false;
+        }
+        throw error;
+      }
+
+      return !!data;
+    } catch (error) {
+      console.error('Error checking ministry group membership:', error);
+      return false;
+    }
+  };
+
   const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
     if (event.is_whole_church) return true;
 
@@ -880,13 +906,17 @@ const Events = () => {
     }
 
     if (event.target_departments && event.target_departments.length > 0) {
-      if (member.ministry_group_id && event.target_departments.includes(member.ministry_group_id)) {
-        return true;
-      }
-
-      for (const deptId of event.target_departments) {
-        const isInDept = await isMemberInDepartment(member.id, deptId);
-        if (isInDept) return true;
+      // Check if member is in any of the target ministry groups
+      for (const groupId of event.target_departments) {
+        const isMinistryGroup = ministryGroups.some(mg => mg.id === groupId);
+        if (isMinistryGroup) {
+          const isInMinistryGroup = await isMemberInMinistryGroup(member.id, groupId);
+          if (isInMinistryGroup) return true;
+        } else {
+          // Check if it's a department
+          const isInDept = await isMemberInDepartment(member.id, groupId);
+          if (isInDept) return true;
+        }
       }
     }
 
@@ -1856,7 +1886,7 @@ const Events = () => {
         phone: newcomerFormData.phone.trim() || null,
         status: 'newcomer' as const,
         cell_group_id: null,
-        ministry_group_id: null
+        ministry_group_names: []
       };
 
       const attendeeWithMember = {
