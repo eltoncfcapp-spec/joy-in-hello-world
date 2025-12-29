@@ -14,7 +14,7 @@ interface Member {
   permanent_member_date: string | null;
   baptism: string | null;
   cell_groups: { name: string } | null;
-  ministry_groups: { name: string } | null; // This will come from a separate query
+  ministry_groups: { name: string } | null;
   status: string | null;
   status_date: string | null;
   not_attending_reason: string | null;
@@ -67,14 +67,27 @@ const Members = () => {
     baptism: '',
   });
   
-  const [editFormData, setEditFormData] = useState({
+  const [editFormData, setEditFormData] = useState<{
+    name: string;
+    surname: string;
+    residence: string;
+    phone: string;
+    invited_by: string;
+    cell_group_id: string;
+    gender: 'male' | 'female' | '';
+    baptism: string;
+    status: string;
+    status_date: string;
+    not_attending_reason: string;
+    is_hidden: boolean;
+  }>({
     name: '',
     surname: '',
     residence: '',
     phone: '',
     invited_by: '',
     cell_group_id: '',
-    gender: '' as 'male' | 'female' | '',
+    gender: '',
     baptism: '',
     status: 'newcomer',
     status_date: '',
@@ -98,11 +111,6 @@ const Members = () => {
     return ATTENDING_STATUSES.some(attendingStatus => 
       statusLower.includes(attendingStatus.toLowerCase())
     );
-  };
-
-  // Helper function to get correct is_hidden value based on status
-  const getIsHiddenFromStatus = (status: string | null): boolean => {
-    return isNotAttendingStatus(status);
   };
 
   useEffect(() => {
@@ -335,20 +343,29 @@ const Members = () => {
       gender: member.gender || '',
       baptism: member.baptism || '',
       status: member.status || 'newcomer',
-      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : '',
+      status_date: member.status_date ? new Date(member.status_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       not_attending_reason: member.not_attending_reason || '',
       is_hidden: member.is_hidden || false,
     });
     
     // Fetch current ministry group for this member
     if (member.id) {
-      const { data: ministryData } = await supabase
-        .from('ministry_membership')
-        .select('ministry_group_id')
-        .eq('member_id', member.id)
-        .single();
-      
-      setEditSelectedMinistryGroup(ministryData?.ministry_group_id || '');
+      try {
+        const { data: ministryData, error } = await supabase
+          .from('ministry_membership')
+          .select('ministry_group_id')
+          .eq('member_id', member.id)
+          .maybeSingle(); // Use maybeSingle instead of single
+        
+        if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+          console.error('Error fetching ministry group:', error);
+        }
+        
+        setEditSelectedMinistryGroup(ministryData?.ministry_group_id || '');
+      } catch (error) {
+        console.error('Error fetching ministry group:', error);
+        setEditSelectedMinistryGroup('');
+      }
     }
   };
 
@@ -390,7 +407,7 @@ const Members = () => {
         residence: editFormData.residence.trim(),
         phone: editFormData.phone.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
-        gender: editFormData.gender || null,
+        gender: editFormData.gender || null, // This should be valid now
         invited_by: editFormData.invited_by.trim() || null,
         baptism: editFormData.baptism || null,
         status: editFormData.status,
@@ -415,14 +432,14 @@ const Members = () => {
       }
 
       // Handle ministry group separately
+      // Remove from all ministry groups first
+      await supabase
+        .from('ministry_group_members')
+        .delete()
+        .eq('member_id', memberId);
+      
+      // Add to selected ministry group if one is selected
       if (editSelectedMinistryGroup) {
-        // Remove from all ministry groups first
-        await supabase
-          .from('ministry_group_members')
-          .delete()
-          .eq('member_id', memberId);
-        
-        // Add to selected ministry group
         await supabase
           .from('ministry_group_members')
           .insert({
@@ -430,15 +447,10 @@ const Members = () => {
             ministry_group_id: editSelectedMinistryGroup,
             role: 'member'
           });
-      } else {
-        // Remove from all ministry groups if no group selected
-        await supabase
-          .from('ministry_group_members')
-          .delete()
-          .eq('member_id', memberId);
       }
 
       setEditingMember(null);
+      setEditSelectedMinistryGroup('');
       
       // Show appropriate success message
       let message = 'Member details updated successfully!';
@@ -735,6 +747,21 @@ const Members = () => {
               />
             </div>
 
+            {/* Gender Selection - FIXED */}
+            <div className="flex items-center gap-3">
+              <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
+              <select
+                value={editFormData.gender}
+                onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value as 'male' | 'female' | '' })}
+                className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
+                required
+              >
+                <option value="">Select gender *</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+
             {/* Ministry Group Selection in Edit Form */}
             <div className="flex items-center gap-3">
               <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
@@ -886,6 +913,12 @@ const Members = () => {
                     <div className="flex items-center gap-3">
                       <User className="h-4 w-4 flex-shrink-0" />
                       <span className="font-medium">{member.ministry_groups.name}</span>
+                    </div>
+                  )}
+                  {member.gender && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <User className="h-4 w-4 flex-shrink-0" />
+                      <span>Gender: {member.gender}</span>
                     </div>
                   )}
                   {member.invited_by && (
