@@ -574,7 +574,6 @@ const NewcomerModal = ({
 const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
-  const [showAttendeeForm, setShowAttendeeForm] = useState<string | null>(null);
   const [showSermonModal, setShowSermonModal] = useState<string | null>(null);
   const [showSermonList, setShowSermonList] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
@@ -588,10 +587,6 @@ const Events = () => {
   const [sermonLoading, setSermonLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [inviterSearchTerm, setInviterSearchTerm] = useState('');
-  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
-  const [isInviterDropdownOpen, setIsInviterDropdownOpen] = useState(false);
   const [uploadingPamphlet, setUploadingPamphlet] = useState<string | null>(null);
   const [viewingPamphlet, setViewingPamphlet] = useState<string | null>(null);
   const [uploadingSermonFile, setUploadingSermonFile] = useState<{type: string, eventId?: string} | null>(null);
@@ -621,26 +616,7 @@ const Events = () => {
     targetDepartments: [] as string[],
   });
 
-  const [attendeeFormData, setAttendeeFormData] = useState({
-    memberId: '',
-    firstTime: false,
-    invitedById: '',
-  });
-
-  const [sermonFormData, setSermonFormData] = useState({
-    title: '',
-    summary: '',
-    pastorName: '',
-    sermonDate: '',
-    eventId: '',
-    videoFile: null as File | null,
-    documentFile: null as File | null,
-    existingVideoUrl: '',
-    existingDocumentUrl: '',
-  });
-
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [selectedInviter, setSelectedInviter] = useState<Member | null>(null);
+  const [bulkAttendanceSearch, setBulkAttendanceSearch] = useState('');
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
@@ -651,33 +627,6 @@ const Events = () => {
   const hasAccess = useMemo(() => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
-
-  // Optimize member filtering
-  const filteredMembers = useMemo(() => {
-    const searchLower = searchTerm.toLowerCase();
-    return members.filter(member => {
-      return (
-        member.name.toLowerCase().includes(searchLower) ||
-        member.surname.toLowerCase().includes(searchLower) ||
-        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-        member.phone?.toLowerCase().includes(searchLower) ||
-        member.login_username?.toLowerCase().includes(searchLower)
-      );
-    });
-  }, [members, searchTerm]);
-
-  const filteredInviters = useMemo(() => {
-    const searchLower = inviterSearchTerm.toLowerCase();
-    return members.filter(member => {
-      return (
-        member.name.toLowerCase().includes(searchLower) ||
-        member.surname.toLowerCase().includes(searchLower) ||
-        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-        member.phone?.toLowerCase().includes(searchLower) ||
-        member.login_username?.toLowerCase().includes(searchLower)
-      );
-    });
-  }, [members, inviterSearchTerm]);
 
   // Fetch functions with optimizations
   const fetchEvents = useCallback(async () => {
@@ -942,6 +891,22 @@ const Events = () => {
     });
   }, [members, isMemberInTargetGroups]);
 
+  // Filter members for bulk attendance search
+  const filterTargetMembers = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
+    if (!searchTerm.trim()) return targetMembers;
+    
+    const searchLower = searchTerm.toLowerCase();
+    return targetMembers.filter(member => {
+      return (
+        member.name.toLowerCase().includes(searchLower) ||
+        member.surname.toLowerCase().includes(searchLower) ||
+        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+        member.phone?.toLowerCase().includes(searchLower) ||
+        member.login_username?.toLowerCase().includes(searchLower)
+      );
+    });
+  }, []);
+
   // Optimized handleDeleteEvent
   const handleDeleteEvent = useCallback(async (eventId: string) => {
     if (!confirm('Are you sure you want to delete this event? This action cannot be undone.')) return;
@@ -1011,7 +976,7 @@ const Events = () => {
     }
   }, [events, sermons]);
 
-  const saveAttendance = useCallback(async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string, firstTime?: boolean, invitedById?: string) => {
+  const saveAttendance = useCallback(async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -1026,8 +991,8 @@ const Events = () => {
       const attendanceData: any = {
         event_id: eventId,
         members_id: memberId,
-        first_time: firstTime || false,
-        invited_by_id: invitedById || null,
+        first_time: false,
+        invited_by_id: null,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
         notes: notes || null,
@@ -1813,56 +1778,6 @@ const Events = () => {
     }
   }, [eventFormData, hasAccess, fetchEvents]);
 
-  const handleAttendeeSubmit = useCallback(async (e: React.FormEvent, eventId: string) => {
-    e.preventDefault();
-    
-    if (!attendeeFormData.memberId) {
-      setError('Please select a member');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-
-    const alreadyRegistered = attendees.some(
-      a => a.event_id === eventId && a.members_id === attendeeFormData.memberId
-    );
-
-    if (alreadyRegistered) {
-      setError('This member is already registered for this event');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
-      if (!selectedMember) throw new Error('Selected member not found');
-
-      // Save the attendance with first_time and invited_by_id data
-      const success = await saveAttendance(
-        eventId, 
-        attendeeFormData.memberId, 
-        'present', 
-        undefined, 
-        attendeeFormData.firstTime, 
-        attendeeFormData.invitedById || undefined
-      );
-
-      if (success) {
-        resetAttendeeForm();
-        setSuccess('Attendee added successfully!');
-        setTimeout(() => setSuccess(null), 3000);
-      }
-    } catch (error: any) {
-      console.error('Error adding attendee:', error);
-      setError(error.message || 'Failed to add attendee. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [attendeeFormData, attendees, members, saveAttendance]);
-
   const handleRemoveAttendee = useCallback(async (attendeeId: string, eventId: string) => {
     if (!confirm('Are you sure you want to remove this attendee?')) return;
 
@@ -1888,41 +1803,6 @@ const Events = () => {
     }
   }, [fetchEventAttendees]);
 
-  const resetAttendeeForm = useCallback(() => {
-    setShowAttendeeForm(null);
-    setAttendeeFormData({
-      memberId: '',
-      firstTime: false,
-      invitedById: '',
-    });
-    setSelectedMember(null);
-    setSelectedInviter(null);
-    setSearchTerm('');
-    setInviterSearchTerm('');
-    setIsMemberDropdownOpen(false);
-    setIsInviterDropdownOpen(false);
-  }, []);
-
-  const handleMemberSelect = useCallback((member: Member) => {
-    setAttendeeFormData({
-      ...attendeeFormData,
-      memberId: member.id,
-    });
-    setSelectedMember(member);
-    setSearchTerm(`${member.name} ${member.surname}`);
-    setIsMemberDropdownOpen(false);
-  }, [attendeeFormData]);
-
-  const handleInviterSelect = useCallback((member: Member) => {
-    setAttendeeFormData({
-      ...attendeeFormData,
-      invitedById: member.id,
-    });
-    setSelectedInviter(member);
-    setInviterSearchTerm(`${member.name} ${member.surname}`);
-    setIsInviterDropdownOpen(false);
-  }, [attendeeFormData]);
-
   const openAttendeeModal = useCallback((type: 'present' | 'absent', eventId: string) => {
     setShowAttendeeModal({ type, eventId });
   }, []);
@@ -1934,6 +1814,7 @@ const Events = () => {
   // Optimized openBulkAttendanceModal
   const openBulkAttendanceModal = useCallback((eventId: string) => {
     setShowBulkAttendanceModal(eventId);
+    setBulkAttendanceSearch('');
     
     const event = events.find(e => e.id === eventId);
     if (!event) return;
@@ -1954,6 +1835,7 @@ const Events = () => {
 
   const closeBulkAttendanceModal = useCallback(() => {
     setShowBulkAttendanceModal(null);
+    setBulkAttendanceSearch('');
     setBulkAttendance({});
     setAttendanceNotes({});
     attendanceNotesRef.current = {};
@@ -2176,20 +2058,6 @@ const Events = () => {
         icon: AlertCircle
       };
     }
-  }, []);
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('.member-dropdown') && !target.closest('.inviter-dropdown')) {
-        setIsMemberDropdownOpen(false);
-        setIsInviterDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Clean up file URLs
@@ -2491,11 +2359,13 @@ const Events = () => {
     if (!event) return null;
 
     const targetMembers = fetchTargetMembersForEvent(event);
+    const filteredMembers = filterTargetMembers(targetMembers, bulkAttendanceSearch);
     
     const stats = {
       present: Object.values(bulkAttendance).filter(status => status === 'present').length,
       absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
-      total: targetMembers.length
+      total: targetMembers.length,
+      filtered: filteredMembers.length
     };
 
     return (
@@ -2508,6 +2378,7 @@ const Events = () => {
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Manage attendance for all target members - {targetMembers.length} members found
+                {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
               </p>
             </div>
             <button
@@ -2518,8 +2389,35 @@ const Events = () => {
             </button>
           </div>
           
-          <div className="p-6 max-h-[70vh] overflow-y-auto">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="p-6">
+            {/* Search Bar */}
+            <div className="mb-6">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={bulkAttendanceSearch}
+                  onChange={(e) => setBulkAttendanceSearch(e.target.value)}
+                  className="w-full px-4 py-3 pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Search by name, surname, phone, or email..."
+                />
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                {bulkAttendanceSearch && (
+                  <button
+                    onClick={() => setBulkAttendanceSearch('')}
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                  >
+                    <X className="h-4 w-4 text-gray-500" />
+                  </button>
+                )}
+              </div>
+              {bulkAttendanceSearch && (
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
                 <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
@@ -2531,6 +2429,10 @@ const Events = () => {
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
                 <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
                 <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.filtered}</div>
+                <div className="text-sm text-purple-700 dark:text-purple-300 font-medium">Currently Showing</div>
               </div>
             </div>
 
@@ -2567,16 +2469,48 @@ const Events = () => {
               >
                 Clear All
               </button>
+              {bulkAttendanceSearch && (
+                <button
+                  onClick={() => {
+                    const newAttendance = { ...bulkAttendance };
+                    filteredMembers.forEach(member => {
+                      newAttendance[member.id] = 'present';
+                    });
+                    setBulkAttendance(newAttendance);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                >
+                  Mark Filtered Present
+                </button>
+              )}
+              {bulkAttendanceSearch && (
+                <button
+                  onClick={() => {
+                    const newAttendance = { ...bulkAttendance };
+                    filteredMembers.forEach(member => {
+                      newAttendance[member.id] = 'absent';
+                    });
+                    setBulkAttendance(newAttendance);
+                  }}
+                  className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm"
+                >
+                  Mark Filtered Absent
+                </button>
+              )}
             </div>
 
-            <div className="space-y-3">
-              {targetMembers.length === 0 ? (
+            <div className="max-h-[50vh] overflow-y-auto space-y-3">
+              {filteredMembers.length === 0 ? (
                 <div className="text-center py-8">
                   <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400">No target members found for this event.</p>
+                  <p className="text-gray-500 dark:text-gray-400">
+                    {bulkAttendanceSearch 
+                      ? `No members found matching "${bulkAttendanceSearch}"` 
+                      : 'No target members found for this event.'}
+                  </p>
                 </div>
               ) : (
-                targetMembers.map((member) => (
+                filteredMembers.map((member) => (
                   <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2689,7 +2623,7 @@ const Events = () => {
         </div>
       </div>
     );
-  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
+  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendanceSearch, filterTargetMembers, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
 
   const AttendeeModal = useCallback(() => {
     if (!showAttendeeModal) return null;
@@ -3516,13 +3450,7 @@ const Events = () => {
                     <div className="flex flex-col gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
-                          <button
-                            onClick={() => setShowAttendeeForm(showAttendeeForm === event.id ? null : event.id)}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
-                          >
-                            <Plus className="h-4 w-4" />
-                            Add Attendee
-                          </button>
+                          {/* REMOVED: Add Attendee button */}
                           <button
                             onClick={() => openBulkAttendanceModal(event.id)}
                             className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
@@ -3587,196 +3515,6 @@ const Events = () => {
                       </button>
                     </div>
                   </div>
-
-                  {showAttendeeForm === event.id && (
-                    <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
-                      <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Attendee</h4>
-                      <form onSubmit={(e) => handleAttendeeSubmit(e, event.id)} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Member *</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={searchTerm}
-                                onChange={(e) => {
-                                  setSearchTerm(e.target.value);
-                                  setIsMemberDropdownOpen(true);
-                                }}
-                                onFocus={() => setIsMemberDropdownOpen(true)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                                placeholder="Search members..."
-                              />
-                              <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
-                              
-                              {isMemberDropdownOpen && filteredMembers.length > 0 && (
-                                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                                  {filteredMembers.map((member) => (
-                                    <div
-                                      key={member.id}
-                                      onClick={() => handleMemberSelect(member)}
-                                      className="flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer transition-colors duration-150"
-                                    >
-                                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
-                                        {getInitials(member.name, member.surname)}
-                                      </div>
-                                      <div className="flex-1">
-                                        <div className="font-medium text-gray-900 dark:text-white">
-                                          {member.name} {member.surname}
-                                        </div>
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.login_username}
-                                        </div>
-                                      </div>
-                                      <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(member.status).color}`}>
-                                        {getStatusBadge(member.status).text}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Invited By (Optional)</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={inviterSearchTerm}
-                                onChange={(e) => {
-                                  setInviterSearchTerm(e.target.value);
-                                  setIsInviterDropdownOpen(true);
-                                }}
-                                onFocus={() => setIsInviterDropdownOpen(true)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                                placeholder="Search inviter..."
-                              />
-                              <Search className="absolute right-3 top-3.5 h-4 w-4 text-gray-400" />
-                              
-                              {isInviterDropdownOpen && filteredInviters.length > 0 && (
-                                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-                                  {filteredInviters.map((member) => (
-                                    <div
-                                      key={member.id}
-                                      onClick={() => handleInviterSelect(member)}
-                                      className="flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer transition-colors duration-150"
-                                    >
-                                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
-                                        {getInitials(member.name, member.surname)}
-                                      </div>
-                                      <div className="flex-1">
-                                        <div className="font-medium text-gray-900 dark:text-white">
-                                          {member.name} {member.surname}
-                                        </div>
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                                          {member.phone || member.login_username}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            id="firstTime"
-                            checked={attendeeFormData.firstTime}
-                            onChange={(e) => setAttendeeFormData({ ...attendeeFormData, firstTime: e.target.checked })}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                          />
-                          <label htmlFor="firstTime" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            First time attending an event
-                          </label>
-                        </div>
-
-                        {selectedMember && (
-                          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
-                                  {getInitials(selectedMember.name, selectedMember.surname)}
-                                </div>
-                                <div>
-                                  <div className="font-medium text-gray-900 dark:text-white">
-                                    {selectedMember.name} {selectedMember.surname}
-                                  </div>
-                                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    {selectedMember.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{selectedMember.phone}</span>}
-                                    {selectedMember.login_username && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{selectedMember.login_username}</span>}
-                                  </div>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedMember(null);
-                                  setAttendeeFormData({ ...attendeeFormData, memberId: '' });
-                                  setSearchTerm('');
-                                }}
-                                className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                              >
-                                <X className="h-4 w-4 text-red-500" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {selectedInviter && (
-                          <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-white text-sm font-medium">
-                                  {getInitials(selectedInviter.name, selectedInviter.surname)}
-                                </div>
-                                <div>
-                                  <div className="font-medium text-gray-900 dark:text-white">
-                                    {selectedInviter.name} {selectedInviter.surname}
-                                  </div>
-                                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    Invited by this member
-                                  </div>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedInviter(null);
-                                  setAttendeeFormData({ ...attendeeFormData, invitedById: '' });
-                                  setInviterSearchTerm('');
-                                }}
-                                className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                              >
-                                <X className="h-4 w-4 text-red-500" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex gap-3">
-                          <button
-                            type="submit"
-                            disabled={loading || !attendeeFormData.memberId}
-                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Plus className="h-4 w-4" />
-                            {loading ? 'Adding...' : 'Add Attendee'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={resetAttendeeForm}
-                            className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  )}
                 </div>
               );
             })}
