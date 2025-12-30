@@ -629,21 +629,11 @@ const Events = () => {
   });
 
   const [bulkAttendanceSearch, setBulkAttendanceSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   // Track if we've set the Sunday service name
   const [isSundayServiceSet, setIsSundayServiceSet] = useState(false);
-
-  // Debounce search input
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(bulkAttendanceSearch);
-    }, 150); // 150ms delay
-
-    return () => clearTimeout(timer);
-  }, [bulkAttendanceSearch]);
 
   // Optimize access check
   const hasAccess = useMemo(() => {
@@ -913,19 +903,32 @@ const Events = () => {
     });
   }, [members, isMemberInTargetGroups]);
 
-  // FIXED: Optimized filter members for bulk attendance search
-  const filterTargetMembers = useMemo(() => {
-    return (targetMembers: Member[], searchTerm: string): Member[] => {
-      if (!searchTerm.trim()) return targetMembers;
-      
-      const searchLower = searchTerm.toLowerCase().trim();
-      
-      return targetMembers.filter(member => {
-        // Create searchable text once
-        const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
-        return searchableText.includes(searchLower);
-      });
-    };
+  // FIXED: Optimized filter members for bulk attendance search with debouncing
+  const useDebouncedSearch = (searchTerm: string, delay: number = 150) => {
+    const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
+
+    useEffect(() => {
+      const timer = setTimeout(() => {
+        setDebouncedSearch(searchTerm);
+      }, delay);
+
+      return () => {
+        clearTimeout(timer);
+      };
+    }, [searchTerm, delay]);
+
+    return debouncedSearch;
+  };
+
+  const filterTargetMembers = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
+    if (!searchTerm.trim()) return targetMembers;
+    
+    const searchLower = searchTerm.toLowerCase().trim();
+    
+    return targetMembers.filter(member => {
+      const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
+      return searchableText.includes(searchLower);
+    });
   }, []);
 
   // Optimized handleDeleteEvent
@@ -1836,7 +1839,6 @@ const Events = () => {
   const openBulkAttendanceModal = useCallback((eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     setBulkAttendanceSearch('');
-    setDebouncedSearch('');
     
     const event = events.find(e => e.id === eventId);
     if (!event) return;
@@ -1858,7 +1860,6 @@ const Events = () => {
   const closeBulkAttendanceModal = useCallback(() => {
     setShowBulkAttendanceModal(null);
     setBulkAttendanceSearch('');
-    setDebouncedSearch('');
     setBulkAttendance({});
     setAttendanceNotes({});
     attendanceNotesRef.current = {};
@@ -2375,6 +2376,7 @@ const Events = () => {
     );
   }, [showSyncModal, events, getAttendanceStats, getEventAttendees, exportEventData, syncEventToCloud, loading]);
 
+  // FIXED: BulkAttendanceModal with proper debouncing
   const BulkAttendanceModal = useCallback(() => {
     if (!showBulkAttendanceModal) return null;
 
@@ -2382,6 +2384,10 @@ const Events = () => {
     if (!event) return null;
 
     const targetMembers = fetchTargetMembersForEvent(event);
+    
+    // Use the custom debounced search hook
+    const debouncedSearch = useDebouncedSearch(bulkAttendanceSearch, 150);
+    
     const filteredMembers = filterTargetMembers(targetMembers, debouncedSearch);
     
     const stats = {
@@ -2414,7 +2420,7 @@ const Events = () => {
           
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="p-4 sm:p-6 flex-shrink-0">
-              {/* Search Bar - FIXED with debouncing */}
+              {/* Search Bar - FIXED with proper debouncing */}
               <div className="mb-4">
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
@@ -2429,10 +2435,7 @@ const Events = () => {
                   />
                   {bulkAttendanceSearch && (
                     <button
-                      onClick={() => {
-                        setBulkAttendanceSearch('');
-                        setDebouncedSearch('');
-                      }}
+                      onClick={() => setBulkAttendanceSearch('')}
                       className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
                     >
                       <X className="h-4 w-4 text-gray-500" />
@@ -2647,7 +2650,7 @@ const Events = () => {
         </div>
       </div>
     );
-  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, debouncedSearch, filterTargetMembers, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
+  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendanceSearch, filterTargetMembers, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
 
   const AttendeeModal = useCallback(() => {
     if (!showAttendeeModal) return null;
