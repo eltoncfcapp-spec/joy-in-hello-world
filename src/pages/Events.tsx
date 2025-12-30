@@ -571,7 +571,7 @@ const NewcomerModal = ({
   );
 };
 
-// BulkAttendanceModal Component (Fixed with useMemo)
+// BulkAttendanceModal Component (Fixed with useMemo and default to "all absent")
 const BulkAttendanceModal = ({ 
   showBulkAttendanceModal, 
   closeBulkAttendanceModal,
@@ -697,15 +697,10 @@ const BulkAttendanceModal = ({
             <div className="flex flex-wrap gap-2 mb-4">
               <button
                 onClick={() => {
-                  const newAttendance = { ...bulkAttendance };
+                  // Mark all as present
                   targetMembers.forEach(member => {
-                    newAttendance[member.id] = 'present';
+                    handleBulkAttendanceChange(member.id, 'present');
                   });
-                  // Use functional update to ensure React batches the state update
-                  handleBulkAttendanceChange('__all__', 'present');
-                  // For immediate UI update, we need to set the state directly
-                  // Since this is a controlled component pattern, we'll handle it differently
-                  // This should be managed by parent component
                 }}
                 className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm"
               >
@@ -713,11 +708,10 @@ const BulkAttendanceModal = ({
               </button>
               <button
                 onClick={() => {
-                  const newAttendance = { ...bulkAttendance };
+                  // Mark all as absent (this is the default)
                   targetMembers.forEach(member => {
-                    newAttendance[member.id] = 'absent';
+                    handleBulkAttendanceChange(member.id, 'absent');
                   });
-                  handleBulkAttendanceChange('__all__', 'absent');
                 }}
                 className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm"
               >
@@ -726,9 +720,7 @@ const BulkAttendanceModal = ({
               <button
                 onClick={() => {
                   // Clear all attendance
-                  Object.keys(bulkAttendance).forEach(memberId => {
-                    handleBulkAttendanceChange(memberId, 'present'); // Reset to default
-                  });
+                  setBulkAttendance({});
                 }}
                 className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
               >
@@ -2130,7 +2122,7 @@ const Events = () => {
     setShowAttendeeModal(null);
   }, []);
 
-  // Optimized openBulkAttendanceModal
+  // Optimized openBulkAttendanceModal - DEFAULT TO ALL ABSENT
   const openBulkAttendanceModal = useCallback((eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     setBulkAttendanceSearch('');
@@ -2146,7 +2138,8 @@ const Events = () => {
 
     for (const member of targetMembers) {
       const existingAttendee = existingAttendeeMap.get(member.id);
-      initialAttendance[member.id] = existingAttendee?.attendance_status as 'present' | 'absent' || 'present';
+      // CHANGED: Default to 'absent' instead of 'present'
+      initialAttendance[member.id] = existingAttendee?.attendance_status as 'present' | 'absent' || 'absent';
     }
 
     setBulkAttendance(initialAttendance);
