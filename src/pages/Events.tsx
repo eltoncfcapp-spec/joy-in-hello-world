@@ -629,11 +629,21 @@ const Events = () => {
   });
 
   const [bulkAttendanceSearch, setBulkAttendanceSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
   // Track if we've set the Sunday service name
   const [isSundayServiceSet, setIsSundayServiceSet] = useState(false);
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(bulkAttendanceSearch);
+    }, 150); // 150ms delay
+
+    return () => clearTimeout(timer);
+  }, [bulkAttendanceSearch]);
 
   // Optimize access check
   const hasAccess = useMemo(() => {
@@ -903,22 +913,19 @@ const Events = () => {
     });
   }, [members, isMemberInTargetGroups]);
 
-  // Filter members for bulk attendance search - OPTIMIZED VERSION
-  const filterTargetMembers = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
-    if (!searchTerm.trim()) return targetMembers;
-    
-    const searchLower = searchTerm.toLowerCase();
-    
-    return targetMembers.filter(member => {
-      const fullName = `${member.name} ${member.surname}`.toLowerCase();
-      return (
-        member.name.toLowerCase().includes(searchLower) ||
-        member.surname.toLowerCase().includes(searchLower) ||
-        fullName.includes(searchLower) ||
-        (member.phone?.toLowerCase().includes(searchLower) ?? false) ||
-        (member.login_username?.toLowerCase().includes(searchLower) ?? false)
-      );
-    });
+  // FIXED: Optimized filter members for bulk attendance search
+  const filterTargetMembers = useMemo(() => {
+    return (targetMembers: Member[], searchTerm: string): Member[] => {
+      if (!searchTerm.trim()) return targetMembers;
+      
+      const searchLower = searchTerm.toLowerCase().trim();
+      
+      return targetMembers.filter(member => {
+        // Create searchable text once
+        const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
+        return searchableText.includes(searchLower);
+      });
+    };
   }, []);
 
   // Optimized handleDeleteEvent
@@ -1829,6 +1836,7 @@ const Events = () => {
   const openBulkAttendanceModal = useCallback((eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     setBulkAttendanceSearch('');
+    setDebouncedSearch('');
     
     const event = events.find(e => e.id === eventId);
     if (!event) return;
@@ -1850,6 +1858,7 @@ const Events = () => {
   const closeBulkAttendanceModal = useCallback(() => {
     setShowBulkAttendanceModal(null);
     setBulkAttendanceSearch('');
+    setDebouncedSearch('');
     setBulkAttendance({});
     setAttendanceNotes({});
     attendanceNotesRef.current = {};
@@ -2373,7 +2382,7 @@ const Events = () => {
     if (!event) return null;
 
     const targetMembers = fetchTargetMembersForEvent(event);
-    const filteredMembers = filterTargetMembers(targetMembers, bulkAttendanceSearch);
+    const filteredMembers = filterTargetMembers(targetMembers, debouncedSearch);
     
     const stats = {
       present: Object.values(bulkAttendance).filter(status => status === 'present').length,
@@ -2392,7 +2401,7 @@ const Events = () => {
               </h3>
               <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1 truncate">
                 Manage attendance for all target members - {targetMembers.length} members found
-                {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
+                {debouncedSearch && ` (${filteredMembers.length} filtered)`}
               </p>
             </div>
             <button
@@ -2405,7 +2414,7 @@ const Events = () => {
           
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="p-4 sm:p-6 flex-shrink-0">
-              {/* Search Bar - FIXED with proper state management */}
+              {/* Search Bar - FIXED with debouncing */}
               <div className="mb-4">
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
@@ -2413,7 +2422,6 @@ const Events = () => {
                     type="text"
                     value={bulkAttendanceSearch}
                     onChange={(e) => {
-                      // This should update immediately
                       setBulkAttendanceSearch(e.target.value);
                     }}
                     className="w-full px-4 py-3 pl-10 sm:pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
@@ -2421,16 +2429,19 @@ const Events = () => {
                   />
                   {bulkAttendanceSearch && (
                     <button
-                      onClick={() => setBulkAttendanceSearch('')}
+                      onClick={() => {
+                        setBulkAttendanceSearch('');
+                        setDebouncedSearch('');
+                      }}
                       className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
                     >
                       <X className="h-4 w-4 text-gray-500" />
                     </button>
                   )}
                 </div>
-                {bulkAttendanceSearch && (
+                {debouncedSearch && (
                   <p className="mt-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                    Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
+                    Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{debouncedSearch}"
                   </p>
                 )}
               </div>
@@ -2487,7 +2498,7 @@ const Events = () => {
                 >
                   Clear All
                 </button>
-                {bulkAttendanceSearch && (
+                {debouncedSearch && (
                   <button
                     onClick={() => {
                       const newAttendance = { ...bulkAttendance };
@@ -2501,7 +2512,7 @@ const Events = () => {
                     Mark Filtered Present
                   </button>
                 )}
-                {bulkAttendanceSearch && (
+                {debouncedSearch && (
                   <button
                     onClick={() => {
                       const newAttendance = { ...bulkAttendance };
@@ -2523,90 +2534,76 @@ const Events = () => {
                 <div className="text-center py-8">
                   <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
-                    {bulkAttendanceSearch 
-                      ? `No members found matching "${bulkAttendanceSearch}"` 
+                    {debouncedSearch 
+                      ? `No members found matching "${debouncedSearch}"` 
                       : 'No target members found for this event.'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {filteredMembers.map((member) => (
-                    <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                      <div className="flex flex-col gap-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-3 flex-1 min-w-0">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0 mt-1">
-                              {getInitials(member.name, member.surname)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-gray-900 dark:text-white truncate text-sm sm:text-base">
-                                {member.name} {member.surname}
-                              </div>
-                              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 space-y-1 mt-1">
-                                {member.phone && (
-                                  <div className="flex items-center gap-1">
-                                    <Phone className="h-3 w-3 flex-shrink-0" />
-                                    <span className="truncate">{member.phone}</span>
-                                  </div>
-                                )}
-                                {member.login_username && (
-                                  <div className="flex items-center gap-1">
-                                    <Mail className="h-3 w-3 flex-shrink-0" />
-                                    <span className="truncate">{member.login_username}</span>
-                                  </div>
-                                )}
-                                {member.cell_group_name && (
-                                  <div className="flex items-center gap-1">
-                                    <UsersIcon className="h-3 w-3 flex-shrink-0" />
-                                    <span className="truncate">{member.cell_group_name}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                    <div key={member.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
+                      <div className="flex items-center justify-between gap-3">
+                        {/* Left side - Member info */}
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                            {getInitials(member.name, member.surname)}
                           </div>
-                          <div className="flex flex-col gap-2">
-                            <button
-                              onClick={() => handleBulkAttendanceChange(member.id, 'present')}
-                              className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors text-xs sm:text-sm min-w-[80px] ${
-                                bulkAttendance[member.id] === 'present'
-                                  ? 'bg-green-600 text-white shadow-lg'
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                              }`}
-                            >
-                              <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                              <span>Present</span>
-                            </button>
-                            <button
-                              onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
-                              className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors text-xs sm:text-sm min-w-[80px] ${
-                                bulkAttendance[member.id] === 'absent'
-                                  ? 'bg-red-600 text-white shadow-lg'
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                              }`}
-                            >
-                              <X className="h-3 w-3 sm:h-4 sm:w-4" />
-                              <span>Absent</span>
-                            </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                              {member.name} {member.surname}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
+                              {member.phone && <span className="truncate">{member.phone}</span>}
+                              {member.cell_group_name && (
+                                <>
+                                  <span>•</span>
+                                  <span className="truncate">{member.cell_group_name}</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                         
-                        {bulkAttendance[member.id] === 'absent' && (
-                          <div className="mt-2">
-                            <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                              Reason for absence (optional)
-                            </label>
-                            <textarea
-                              defaultValue={attendanceNotesRef.current[member.id] || ''}
-                              onChange={(e) => {
-                                attendanceNotesRef.current[member.id] = e.target.value;
-                              }}
-                              placeholder="Enter reason for absence..."
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs sm:text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                              rows={2}
-                            />
-                          </div>
-                        )}
+                        {/* Right side - Buttons */}
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                            className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
+                              bulkAttendance[member.id] === 'present'
+                                ? 'bg-green-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            Present
+                          </button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                            className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
+                              bulkAttendance[member.id] === 'absent'
+                                ? 'bg-red-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            Absent
+                          </button>
+                        </div>
                       </div>
+                      
+                      {/* Notes section - only show when absent */}
+                      {bulkAttendance[member.id] === 'absent' && (
+                        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                          <textarea
+                            defaultValue={attendanceNotesRef.current[member.id] || ''}
+                            onChange={(e) => {
+                              attendanceNotesRef.current[member.id] = e.target.value;
+                            }}
+                            placeholder="Reason for absence (optional)..."
+                            className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                            rows={1}
+                          />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2650,7 +2647,7 @@ const Events = () => {
         </div>
       </div>
     );
-  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendanceSearch, filterTargetMembers, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
+  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, debouncedSearch, filterTargetMembers, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
 
   const AttendeeModal = useCallback(() => {
     if (!showAttendeeModal) return null;
