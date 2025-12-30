@@ -903,29 +903,14 @@ const Events = () => {
     });
   }, [members, isMemberInTargetGroups]);
 
-  // FIXED: Optimized filter members for bulk attendance search with debouncing
-  const useDebouncedSearch = (searchTerm: string, delay: number = 150) => {
-    const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-
-    useEffect(() => {
-      const timer = setTimeout(() => {
-        setDebouncedSearch(searchTerm);
-      }, delay);
-
-      return () => {
-        clearTimeout(timer);
-      };
-    }, [searchTerm, delay]);
-
-    return debouncedSearch;
-  };
-
+  // FIXED: Optimized filter members for bulk attendance search - immediate filtering
   const filterTargetMembers = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
     if (!searchTerm.trim()) return targetMembers;
     
     const searchLower = searchTerm.toLowerCase().trim();
     
     return targetMembers.filter(member => {
+      // Create searchable text once
       const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
       return searchableText.includes(searchLower);
     });
@@ -2376,7 +2361,7 @@ const Events = () => {
     );
   }, [showSyncModal, events, getAttendanceStats, getEventAttendees, exportEventData, syncEventToCloud, loading]);
 
-  // FIXED: BulkAttendanceModal with proper debouncing
+  // FIXED: BulkAttendanceModal with immediate filtering and no debouncing
   const BulkAttendanceModal = useCallback(() => {
     if (!showBulkAttendanceModal) return null;
 
@@ -2384,11 +2369,7 @@ const Events = () => {
     if (!event) return null;
 
     const targetMembers = fetchTargetMembersForEvent(event);
-    
-    // Use the custom debounced search hook
-    const debouncedSearch = useDebouncedSearch(bulkAttendanceSearch, 150);
-    
-    const filteredMembers = filterTargetMembers(targetMembers, debouncedSearch);
+    const filteredMembers = filterTargetMembers(targetMembers, bulkAttendanceSearch);
     
     const stats = {
       present: Object.values(bulkAttendance).filter(status => status === 'present').length,
@@ -2407,7 +2388,7 @@ const Events = () => {
               </h3>
               <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1 truncate">
                 Manage attendance for all target members - {targetMembers.length} members found
-                {debouncedSearch && ` (${filteredMembers.length} filtered)`}
+                {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
               </p>
             </div>
             <button
@@ -2420,16 +2401,14 @@ const Events = () => {
           
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="p-4 sm:p-6 flex-shrink-0">
-              {/* Search Bar - FIXED with proper debouncing */}
+              {/* Search Bar - Immediate filtering */}
               <div className="mb-4">
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
                   <input
                     type="text"
                     value={bulkAttendanceSearch}
-                    onChange={(e) => {
-                      setBulkAttendanceSearch(e.target.value);
-                    }}
+                    onChange={(e) => setBulkAttendanceSearch(e.target.value)}
                     className="w-full px-4 py-3 pl-10 sm:pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                     placeholder="Search by name, surname, phone, or email..."
                   />
@@ -2442,9 +2421,9 @@ const Events = () => {
                     </button>
                   )}
                 </div>
-                {debouncedSearch && (
+                {bulkAttendanceSearch && (
                   <p className="mt-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                    Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{debouncedSearch}"
+                    Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
                   </p>
                 )}
               </div>
@@ -2501,7 +2480,7 @@ const Events = () => {
                 >
                   Clear All
                 </button>
-                {debouncedSearch && (
+                {bulkAttendanceSearch && (
                   <button
                     onClick={() => {
                       const newAttendance = { ...bulkAttendance };
@@ -2515,7 +2494,7 @@ const Events = () => {
                     Mark Filtered Present
                   </button>
                 )}
-                {debouncedSearch && (
+                {bulkAttendanceSearch && (
                   <button
                     onClick={() => {
                       const newAttendance = { ...bulkAttendance };
@@ -2537,8 +2516,8 @@ const Events = () => {
                 <div className="text-center py-8">
                   <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
-                    {debouncedSearch 
-                      ? `No members found matching "${debouncedSearch}"` 
+                    {bulkAttendanceSearch 
+                      ? `No members found matching "${bulkAttendanceSearch}"` 
                       : 'No target members found for this event.'}
                   </p>
                 </div>
