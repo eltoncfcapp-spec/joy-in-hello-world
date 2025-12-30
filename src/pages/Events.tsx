@@ -616,7 +616,6 @@ const Events = () => {
     targetDepartments: [] as string[],
   });
 
-  // Add the missing sermonFormData state declaration
   const [sermonFormData, setSermonFormData] = useState({
     title: '',
     summary: '',
@@ -904,18 +903,20 @@ const Events = () => {
     });
   }, [members, isMemberInTargetGroups]);
 
-  // Filter members for bulk attendance search
+  // Filter members for bulk attendance search - OPTIMIZED VERSION
   const filterTargetMembers = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
     if (!searchTerm.trim()) return targetMembers;
     
     const searchLower = searchTerm.toLowerCase();
+    
     return targetMembers.filter(member => {
+      const fullName = `${member.name} ${member.surname}`.toLowerCase();
       return (
         member.name.toLowerCase().includes(searchLower) ||
         member.surname.toLowerCase().includes(searchLower) ||
-        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-        member.phone?.toLowerCase().includes(searchLower) ||
-        member.login_username?.toLowerCase().includes(searchLower)
+        fullName.includes(searchLower) ||
+        (member.phone?.toLowerCase().includes(searchLower) ?? false) ||
+        (member.login_username?.toLowerCase().includes(searchLower) ?? false)
       );
     });
   }, []);
