@@ -2119,7 +2119,7 @@ const Events = () => {
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sermons</h2>
           <button
             onClick={() => openSermonModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
           >
             <Plus className="h-4 w-4" />
             Add Sermon
@@ -2148,7 +2148,7 @@ const Events = () => {
                   <div className="flex gap-1">
                     <button
                       onClick={() => openSermonModal(undefined, sermon)}
-                      className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
+                      className="p-2 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
                       title="Edit Sermon"
                       disabled={sermonLoading === sermon.id}
                     >
@@ -2156,7 +2156,7 @@ const Events = () => {
                     </button>
                     <button
                       onClick={() => handleDeleteSermon(sermon.id)}
-                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                      className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
                       title="Delete Sermon"
                       disabled={sermonLoading === sermon.id}
                     >
@@ -2191,7 +2191,7 @@ const Events = () => {
                         href={sermon.video_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
+                        className="flex items-center gap-1 px-3 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
                       >
                         <PlayCircle className="h-3 w-3" />
                         Video
@@ -2199,7 +2199,7 @@ const Events = () => {
                       {hasAccess && (
                         <button
                           onClick={() => removeSermonFile(sermon.id, 'video')}
-                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
+                          className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
                           title="Remove Video"
                           disabled={sermonLoading === `remove-video-${sermon.id}`}
                         >
@@ -2218,7 +2218,7 @@ const Events = () => {
                         href={sermon.document_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                        className="flex items-center gap-1 px-3 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
                       >
                         <Download className="h-3 w-3" />
                         Notes
@@ -2226,7 +2226,7 @@ const Events = () => {
                       {hasAccess && (
                         <button
                           onClick={() => removeSermonFile(sermon.id, 'document')}
-                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
+                          className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
                           title="Remove Document"
                           disabled={sermonLoading === `remove-document-${sermon.id}`}
                         >
@@ -2332,7 +2332,7 @@ const Events = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => exportEventData(event.id)}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 font-medium"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-50 dark:hover:bg-green-900/20 transition-all duration-200 font-medium text-sm"
                 >
                   <Download className="h-4 w-4" />
                   Export as CSV
@@ -2340,7 +2340,7 @@ const Events = () => {
                 <button
                   onClick={() => syncEventToCloud(event.id)}
                   disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Upload className="h-4 w-4" />
                   {loading ? 'Syncing...' : 'Sync to Cloud'}
@@ -2356,7 +2356,7 @@ const Events = () => {
           <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={() => setShowSyncModal(null)}
-              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
             >
               Close
             </button>
@@ -2384,239 +2384,252 @@ const Events = () => {
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-            <div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+            <div className="min-w-0">
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                 Bulk Attendance - {event.name}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1 truncate">
                 Manage attendance for all target members - {targetMembers.length} members found
                 {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
               </p>
             </div>
             <button
               onClick={closeBulkAttendanceModal}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200 flex-shrink-0 ml-2"
             >
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
           
-          <div className="p-6">
-            {/* Search Bar */}
-            <div className="mb-6">
-              <div className="relative">
-                <input
-                  type="text"
-                  value={bulkAttendanceSearch}
-                  onChange={(e) => setBulkAttendanceSearch(e.target.value)}
-                  className="w-full px-4 py-3 pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  placeholder="Search by name, surname, phone, or email..."
-                />
-                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="p-4 sm:p-6 flex-shrink-0">
+              {/* Search Bar - FIXED with proper state management */}
+              <div className="mb-4">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={bulkAttendanceSearch}
+                    onChange={(e) => {
+                      // This should update immediately
+                      setBulkAttendanceSearch(e.target.value);
+                    }}
+                    className="w-full px-4 py-3 pl-10 sm:pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
+                    placeholder="Search by name, surname, phone, or email..."
+                  />
+                  {bulkAttendanceSearch && (
+                    <button
+                      onClick={() => setBulkAttendanceSearch('')}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                    >
+                      <X className="h-4 w-4 text-gray-500" />
+                    </button>
+                  )}
+                </div>
                 {bulkAttendanceSearch && (
-                  <button
-                    onClick={() => setBulkAttendanceSearch('')}
-                    className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                  >
-                    <X className="h-4 w-4 text-gray-500" />
-                  </button>
+                  <p className="mt-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                    Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
+                  </p>
                 )}
               </div>
-              {bulkAttendanceSearch && (
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                  Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
-                </p>
-              )}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
-                <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3 sm:p-4 text-center">
+                  <div className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                  <div className="text-xs sm:text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+                </div>
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-3 sm:p-4 text-center">
+                  <div className="text-lg sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                  <div className="text-xs sm:text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+                </div>
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3 sm:p-4 text-center">
+                  <div className="text-lg sm:text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                  <div className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+                </div>
+                <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-xl p-3 sm:p-4 text-center">
+                  <div className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.filtered}</div>
+                  <div className="text-xs sm:text-sm text-purple-700 dark:text-purple-300 font-medium">Currently Showing</div>
+                </div>
               </div>
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
-                <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
-              </div>
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
-                <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
-              </div>
-              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.filtered}</div>
-                <div className="text-sm text-purple-700 dark:text-purple-300 font-medium">Currently Showing</div>
-              </div>
-            </div>
 
-            <div className="flex gap-2 mb-6 flex-wrap">
-              <button
-                onClick={() => {
-                  const newAttendance = { ...bulkAttendance };
-                  targetMembers.forEach(member => {
-                    newAttendance[member.id] = 'present';
-                  });
-                  setBulkAttendance(newAttendance);
-                }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-              >
-                Mark All Present
-              </button>
-              <button
-                onClick={() => {
-                  const newAttendance = { ...bulkAttendance };
-                  targetMembers.forEach(member => {
-                    newAttendance[member.id] = 'absent';
-                  });
-                  setBulkAttendance(newAttendance);
-                }}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
-              >
-                Mark All Absent
-              </button>
-              <button
-                onClick={() => {
-                  setBulkAttendance({});
-                }}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
-              >
-                Clear All
-              </button>
-              {bulkAttendanceSearch && (
+              <div className="flex flex-wrap gap-2 mb-4">
                 <button
                   onClick={() => {
                     const newAttendance = { ...bulkAttendance };
-                    filteredMembers.forEach(member => {
+                    targetMembers.forEach(member => {
                       newAttendance[member.id] = 'present';
                     });
                     setBulkAttendance(newAttendance);
                   }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                  className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm"
                 >
-                  Mark Filtered Present
+                  Mark All Present
                 </button>
-              )}
-              {bulkAttendanceSearch && (
                 <button
                   onClick={() => {
                     const newAttendance = { ...bulkAttendance };
-                    filteredMembers.forEach(member => {
+                    targetMembers.forEach(member => {
                       newAttendance[member.id] = 'absent';
                     });
                     setBulkAttendance(newAttendance);
                   }}
-                  className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm"
+                  className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm"
                 >
-                  Mark Filtered Absent
+                  Mark All Absent
                 </button>
-              )}
+                <button
+                  onClick={() => {
+                    setBulkAttendance({});
+                  }}
+                  className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
+                >
+                  Clear All
+                </button>
+                {bulkAttendanceSearch && (
+                  <button
+                    onClick={() => {
+                      const newAttendance = { ...bulkAttendance };
+                      filteredMembers.forEach(member => {
+                        newAttendance[member.id] = 'present';
+                      });
+                      setBulkAttendance(newAttendance);
+                    }}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+                  >
+                    Mark Filtered Present
+                  </button>
+                )}
+                {bulkAttendanceSearch && (
+                  <button
+                    onClick={() => {
+                      const newAttendance = { ...bulkAttendance };
+                      filteredMembers.forEach(member => {
+                        newAttendance[member.id] = 'absent';
+                      });
+                      setBulkAttendance(newAttendance);
+                    }}
+                    className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs sm:text-sm"
+                  >
+                    Mark Filtered Absent
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="max-h-[50vh] overflow-y-auto space-y-3">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-4">
               {filteredMembers.length === 0 ? (
                 <div className="text-center py-8">
                   <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400">
+                  <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
                     {bulkAttendanceSearch 
                       ? `No members found matching "${bulkAttendanceSearch}"` 
                       : 'No target members found for this event.'}
                   </p>
                 </div>
               ) : (
-                filteredMembers.map((member) => (
-                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between flex-wrap gap-3">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
-                            {getInitials(member.name, member.surname)}
+                <div className="space-y-3">
+                  {filteredMembers.map((member) => (
+                    <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium flex-shrink-0 mt-1">
+                              {getInitials(member.name, member.surname)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 dark:text-white truncate text-sm sm:text-base">
+                                {member.name} {member.surname}
+                              </div>
+                              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 space-y-1 mt-1">
+                                {member.phone && (
+                                  <div className="flex items-center gap-1">
+                                    <Phone className="h-3 w-3 flex-shrink-0" />
+                                    <span className="truncate">{member.phone}</span>
+                                  </div>
+                                )}
+                                {member.login_username && (
+                                  <div className="flex items-center gap-1">
+                                    <Mail className="h-3 w-3 flex-shrink-0" />
+                                    <span className="truncate">{member.login_username}</span>
+                                  </div>
+                                )}
+                                {member.cell_group_name && (
+                                  <div className="flex items-center gap-1">
+                                    <UsersIcon className="h-3 w-3 flex-shrink-0" />
+                                    <span className="truncate">{member.cell_group_name}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 dark:text-white truncate">
-                              {member.name} {member.surname}
-                            </div>
-                            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              {member.phone && (
-                                <div className="flex items-center gap-1">
-                                  <Phone className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate">{member.phone}</span>
-                                </div>
-                              )}
-                              {member.login_username && (
-                                <div className="flex items-center gap-1">
-                                  <Mail className="h-3 w-3 flex-shrink-0" />
-                                  <span className="truncate">{member.login_username}</span>
-                                </div>
-                              )}
-                            </div>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                              className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors text-xs sm:text-sm min-w-[80px] ${
+                                bulkAttendance[member.id] === 'present'
+                                  ? 'bg-green-600 text-white shadow-lg'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                              }`}
+                            >
+                              <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <span>Present</span>
+                            </button>
+                            <button
+                              onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                              className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors text-xs sm:text-sm min-w-[80px] ${
+                                bulkAttendance[member.id] === 'absent'
+                                  ? 'bg-red-600 text-white shadow-lg'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                              }`}
+                            >
+                              <X className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <span>Absent</span>
+                            </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                              bulkAttendance[member.id] === 'present'
-                                ? 'bg-green-600 text-white shadow-lg'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                            <span className="hidden sm:inline">Present</span>
-                          </button>
-                          <button
-                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm ${
-                              bulkAttendance[member.id] === 'absent'
-                                ? 'bg-red-600 text-white shadow-lg'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <X className="h-4 w-4" />
-                            <span className="hidden sm:inline">Absent</span>
-                          </button>
-                        </div>
+                        
+                        {bulkAttendance[member.id] === 'absent' && (
+                          <div className="mt-2">
+                            <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              Reason for absence (optional)
+                            </label>
+                            <textarea
+                              defaultValue={attendanceNotesRef.current[member.id] || ''}
+                              onChange={(e) => {
+                                attendanceNotesRef.current[member.id] = e.target.value;
+                              }}
+                              placeholder="Enter reason for absence..."
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs sm:text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                              rows={2}
+                            />
+                          </div>
+                        )}
                       </div>
-                      
-                      {bulkAttendance[member.id] === 'absent' && (
-                        <div className="mt-2 pl-0 sm:pl-13">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Reason for absence (optional)
-                          </label>
-                          <textarea
-                            defaultValue={attendanceNotesRef.current[member.id] || ''}
-                            onChange={(e) => {
-                              attendanceNotesRef.current[member.id] = e.target.value;
-                            }}
-                            placeholder="Enter reason for absence..."
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                            rows={2}
-                          />
-                        </div>
-                      )}
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           </div>
 
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6 flex-shrink-0">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                 {stats.present + stats.absent} of {targetMembers.length} members marked
               </div>
               <div className="flex gap-3 w-full sm:w-auto">
                 <button
                   onClick={closeBulkAttendanceModal}
-                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                  className="flex-1 sm:flex-none px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
                   disabled={loading || Object.keys(bulkAttendance).length === 0}
-                  className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                  className="flex-1 sm:flex-none px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                 >
                   {loading ? (
                     <>
@@ -2649,23 +2662,23 @@ const Events = () => {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-            <div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+          <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+            <div className="min-w-0">
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">
                 {type === 'present' ? 'Present' : 'Absent'} Attendees - {event?.name}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1">
                 Total: {attendees.length} {type === 'present' ? 'present' : 'absent'}
               </p>
             </div>
             <button
               onClick={closeAttendeeModal}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200 flex-shrink-0 ml-2"
             >
               <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
-          <div className="p-6 max-h-[70vh] overflow-y-auto">
+          <div className="p-4 sm:p-6 max-h-[70vh] overflow-y-auto">
             {attendees.length === 0 ? (
               <div className="text-center py-12">
                 <UsersIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -2679,36 +2692,36 @@ const Events = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {attendees.map((attendee) => (
                   <div key={attendee.id} className={`flex items-center justify-between p-4 ${
                     type === 'present' 
                       ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700' 
                       : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700'
                   } rounded-xl`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-medium ${
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white text-sm font-medium flex-shrink-0 ${
                         type === 'present'
                           ? 'bg-gradient-to-br from-green-500 to-emerald-500'
                           : 'bg-gradient-to-br from-red-500 to-orange-500'
                       }`}>
                         {getInitials(attendee.members.name, attendee.members.surname)}
                       </div>
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-900 dark:text-white truncate text-sm sm:text-base">
                           {attendee.members.name} {attendee.members.surname}
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                        <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 space-y-1">
                           {attendee.members.phone && (
-                            <div className="flex items-center gap-1">
-                              <Phone className="h-3 w-3" />
-                              {attendee.members.phone}
+                            <div className="flex items-center gap-1 truncate">
+                              <Phone className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">{attendee.members.phone}</span>
                             </div>
                           )}
                           {attendee.members.login_username && (
-                            <div className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              {attendee.members.login_username}
+                            <div className="flex items-center gap-1 truncate">
+                              <Mail className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">{attendee.members.login_username}</span>
                             </div>
                           )}
                           {type === 'present' && attendee.first_time && (
@@ -2717,7 +2730,7 @@ const Events = () => {
                             </span>
                           )}
                           {type === 'present' && attendee.invited_by_member && (
-                            <div className="text-xs text-gray-500">
+                            <div className="text-xs text-gray-500 truncate">
                               Invited by: {attendee.invited_by_member.name} {attendee.invited_by_member.surname}
                             </div>
                           )}
@@ -2727,7 +2740,7 @@ const Events = () => {
                     {type === 'present' && hasAccess && (
                       <button
                         onClick={() => handleRemoveAttendee(attendee.id, eventId)}
-                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150 flex-shrink-0 ml-2"
                         title="Remove Attendee"
                       >
                         <X className="h-4 w-4 text-red-500" />
@@ -2738,10 +2751,10 @@ const Events = () => {
               </div>
             )}
           </div>
-          <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-end p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={closeAttendeeModal}
-              className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+              className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
             >
               Close
             </button>
@@ -2801,7 +2814,7 @@ const Events = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(null)}
-                className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
               >
                 Cancel
               </button>
@@ -2811,7 +2824,7 @@ const Events = () => {
                   setShowDeleteConfirm(null);
                 }}
                 disabled={loading}
-                className="flex-1 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
@@ -2858,14 +2871,14 @@ const Events = () => {
                 href={viewingPamphlet}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200"
+                className="flex items-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 text-sm"
               >
                 <FileText className="h-4 w-4" />
                 Open in New Tab
               </a>
               <button
                 onClick={closePamphletModal}
-                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
+                className="px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 text-sm"
               >
                 Close
               </button>
@@ -2919,7 +2932,7 @@ const Events = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 sm:p-6">
       {loading && events.length === 0 && !showEventForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-2xl p-8">
@@ -2930,44 +2943,44 @@ const Events = () => {
       )}
       
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            <h1 className="text-2xl sm:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
               Events & Sermons
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Manage church events and sermons</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm sm:text-base">Manage church events and sermons</p>
             <div className="mt-2">
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                 {isAdmin?.() ? 'Administrator' : isPastor?.() ? 'Pastor' : 'Member'}
               </span>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-2 sm:gap-3">
             <button 
               onClick={() => setShowSermonList(!showSermonList)}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium text-sm group"
             >
-              <BookOpen className="h-5 w-5 group-hover:scale-110 transition-transform duration-200" />
+              <BookOpen className="h-4 w-5 group-hover:scale-110 transition-transform duration-200" />
               {showSermonList ? 'Hide Sermons' : 'View Sermons'}
             </button>
             <button 
               onClick={() => setShowEventForm(!showEventForm)}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
+              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium text-sm group"
             >
-              <Plus className="h-5 w-5 group-hover:rotate-90 transition-transform duration-200" />
+              <Plus className="h-4 w-5 group-hover:rotate-90 transition-transform duration-200" />
               {showEventForm ? 'Cancel' : 'Create Event'}
             </button>
           </div>
         </div>
 
         {success && (
-          <div className="mb-6 p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300">
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-xl text-green-700 dark:text-green-300 text-sm sm:text-base">
             {success}
           </div>
         )}
 
         {error && (
-          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300">
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300 text-sm sm:text-base">
             {error}
           </div>
         )}
@@ -2975,9 +2988,9 @@ const Events = () => {
         {showSermonList && <SermonList />}
 
         {showEventForm && (
-          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Create New Event</h2>
-            <form onSubmit={handleEventSubmit} className="space-y-6">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6">Create New Event</h2>
+            <form onSubmit={handleEventSubmit} className="space-y-4 sm:space-y-6">
               {!eventFormData.eventType && (
                 <div className="space-y-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Event Type *</label>
@@ -2994,23 +3007,23 @@ const Events = () => {
                           setIsSundayServiceSet(true);
                         }
                       }}
-                      className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200"
+                      className="flex items-center justify-center gap-3 p-4 sm:p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200"
                     >
-                      <CalendarIcon className="h-8 w-8 text-blue-600" />
+                      <CalendarIcon className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
                       <div className="text-left">
-                        <div className="font-semibold text-gray-900 dark:text-white text-lg">Sunday Service</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">Regular Sunday worship service</div>
+                        <div className="font-semibold text-gray-900 dark:text-white text-sm sm:text-lg">Sunday Service</div>
+                        <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Regular Sunday worship service</div>
                       </div>
                     </button>
                     <button
                       type="button"
                       onClick={() => setEventFormData({ ...eventFormData, eventType: 'other' })}
-                      className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200"
+                      className="flex items-center justify-center gap-3 p-4 sm:p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200"
                     >
-                      <Plus className="h-8 w-8 text-purple-600" />
+                      <Plus className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600" />
                       <div className="text-left">
-                        <div className="font-semibold text-gray-900 dark:text-white text-lg">Other Event</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">Custom event with your own name</div>
+                        <div className="font-semibold text-gray-900 dark:text-white text-sm sm:text-lg">Other Event</div>
+                        <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Custom event with your own name</div>
                       </div>
                     </button>
                   </div>
@@ -3020,7 +3033,7 @@ const Events = () => {
               {eventFormData.eventType && (
                 <>
                   <div className="flex items-center gap-2 mb-4">
-                    <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium">
+                    <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-xs sm:text-sm font-medium">
                       {eventFormData.eventType === 'sunday' ? 'Sunday Service' : 'Other Event'}
                     </span>
                     <button
@@ -3033,12 +3046,12 @@ const Events = () => {
                         });
                         setIsSundayServiceSet(false);
                       }}
-                      className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm underline"
+                      className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs sm:text-sm underline"
                     >
                       Change type
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     {eventFormData.eventType === 'sunday' ? (
                       <div className="space-y-2">
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
@@ -3052,7 +3065,7 @@ const Events = () => {
                               setIsSundayServiceSet(true);
                             }
                           }}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                           placeholder="Enter event name (default: Sunday)"
                           required
                           minLength={2}
@@ -3067,7 +3080,7 @@ const Events = () => {
                           type="text"
                           value={eventFormData.name}
                           onChange={(e) => setEventFormData({ ...eventFormData, name: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                           placeholder="Enter event name"
                           required
                           minLength={2}
@@ -3081,7 +3094,7 @@ const Events = () => {
                         type="text"
                         value={eventFormData.topic}
                         onChange={(e) => setEventFormData({ ...eventFormData, topic: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                         placeholder="Event topic or theme"
                         maxLength={200}
                       />
@@ -3092,7 +3105,7 @@ const Events = () => {
                         type="date"
                         value={eventFormData.eventDate}
                         onChange={(e) => setEventFormData({ ...eventFormData, eventDate: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                         required
                       />
                     </div>
@@ -3102,7 +3115,7 @@ const Events = () => {
                         type="time"
                         value={eventFormData.eventTime}
                         onChange={(e) => setEventFormData({ ...eventFormData, eventTime: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                         required
                       />
                     </div>
@@ -3112,7 +3125,7 @@ const Events = () => {
                         type="text"
                         value={eventFormData.location}
                         onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
                         placeholder="Event location"
                         maxLength={200}
                       />
@@ -3131,8 +3144,8 @@ const Events = () => {
                           />
                           <Building className="h-5 w-5 text-purple-600" />
                           <div>
-                            <div className="font-medium text-gray-900 dark:text-white">Whole Church Event</div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
+                            <div className="font-medium text-gray-900 dark:text-white text-sm sm:text-base">Whole Church Event</div>
+                            <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">All church members are expected to attend</div>
                           </div>
                         </label>
                         <label className="flex items-center gap-3 p-4 border border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 flex-1">
@@ -3145,8 +3158,8 @@ const Events = () => {
                           />
                           <UsersIcon className="h-5 w-5 text-orange-600" />
                           <div>
-                            <div className="font-medium text-gray-900 dark:text-white">Target Groups Only</div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
+                            <div className="font-medium text-gray-900 dark:text-white text-sm sm:text-base">Target Groups Only</div>
+                            <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Specific cell groups, ministry groups, or departments</div>
                           </div>
                         </label>
                       </div>
@@ -3177,7 +3190,7 @@ const Events = () => {
                                   }}
                                   className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                                 />
-                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                                <span className="text-gray-700 dark:text-gray-300 text-sm">{group.name}</span>
                               </label>
                             ))}
                           </div>
@@ -3205,7 +3218,7 @@ const Events = () => {
                                   }}
                                   className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                                 />
-                                <span className="text-gray-700 dark:text-gray-300">{group.name}</span>
+                                <span className="text-gray-700 dark:text-gray-300 text-sm">{group.name}</span>
                               </label>
                             ))}
                           </div>
@@ -3233,7 +3246,7 @@ const Events = () => {
                                   }}
                                   className="text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                                 />
-                                <span className="text-gray-700 dark:text-gray-300">{dept.name}</span>
+                                <span className="text-gray-700 dark:text-gray-300 text-sm">{dept.name}</span>
                               </label>
                             ))}
                           </div>
@@ -3245,14 +3258,14 @@ const Events = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {loading ? 'Creating...' : 'Create Event'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowEventForm(false)}
-                      className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+                      className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
                     >
                       Cancel
                     </button>
@@ -3270,7 +3283,7 @@ const Events = () => {
             <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {events.map((event) => {
               const scopeBadge = getEventScopeBadge(event);
               const statusBadge = getEventStatusBadge(event);
@@ -3280,64 +3293,64 @@ const Events = () => {
               const stats = getAttendanceStats(event.id);
               
               return (
-                <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
-                  <div className="flex flex-col lg:flex-row justify-between gap-6">
+                <div key={event.id} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 hover:shadow-xl transition-all duration-300 hover:border-gray-300/50 dark:hover:border-gray-600/50">
+                  <div className="flex flex-col lg:flex-row justify-between gap-4 sm:gap-6">
                     <div className="flex-1">
-                      <div className="flex items-start gap-4 mb-4">
-                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-lg">
-                          <CalendarIcon className="h-7 w-7 text-white" />
+                      <div className="flex items-start gap-3 sm:gap-4 mb-4">
+                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 shadow-lg">
+                          <CalendarIcon className="h-6 w-6 sm:h-7 sm:w-7 text-white" />
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
-                            <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${statusBadge.color}`}>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 flex-wrap">
+                            <h3 className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
+                            <span className={`px-2 py-1 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 ${statusBadge.color}`}>
                               <StatusIcon className="h-3 w-3" />
                               {statusBadge.text}
                             </span>
-                            <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${scopeBadge.color}`}>
+                            <span className={`px-2 py-1 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 ${scopeBadge.color}`}>
                               <ScopeIcon className="h-3 w-3" />
                               {scopeBadge.text}
                             </span>
                             {sermon && (
-                              <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                              <span className="px-2 py-1 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium flex items-center gap-1 sm:gap-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                                 <BookOpen className="h-3 w-3" />
                                 Has Sermon
                               </span>
                             )}
                           </div>
                           {event.topic && (
-                            <p className="text-blue-600 dark:text-blue-400 font-medium">{event.topic}</p>
+                            <p className="text-blue-600 dark:text-blue-400 font-medium text-sm sm:text-base">{event.topic}</p>
                           )}
                         </div>
                       </div>
                       
-                      <div className="space-y-3 text-gray-600 dark:text-gray-400 ml-18">
-                        <div className="flex items-center gap-3">
+                      <div className="space-y-2 sm:space-y-3 text-gray-600 dark:text-gray-400 ml-0 sm:ml-18">
+                        <div className="flex items-center gap-2 sm:gap-3">
                           <CalendarIcon className="h-4 w-4" />
-                          <span className="font-medium">{formatDate(event.event_date)}</span>
+                          <span className="font-medium text-sm sm:text-base">{formatDate(event.event_date)}</span>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3">
                           <Clock className="h-4 w-4" />
-                          <span className="font-medium">{formatTime(event.event_time)}</span>
+                          <span className="font-medium text-sm sm:text-base">{formatTime(event.event_time)}</span>
                         </div>
                         {event.location && (
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 sm:gap-3">
                             <MapPin className="h-4 w-4" />
-                            <span className="font-medium">{event.location}</span>
+                            <span className="font-medium text-sm sm:text-base">{event.location}</span>
                           </div>
                         )}
                       </div>
 
                       {sermon && (
-                        <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <BookOpen className="h-5 w-5 text-blue-600" />
-                              <div>
-                                <div className="font-medium text-gray-900 dark:text-white">
+                        <div className="mt-4 p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <BookOpen className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <div className="font-medium text-gray-900 dark:text-white text-sm sm:text-base truncate">
                                   {sermon.title} by {sermon.pastor_name}
                                 </div>
-                                <div className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
                                   {sermon.summary}
                                 </div>
                               </div>
@@ -3348,7 +3361,7 @@ const Events = () => {
                                   href={sermon.video_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="flex items-center gap-1 px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-xs hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
+                                  className="flex items-center gap-1 px-2 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-xs hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200 flex-shrink-0"
                                 >
                                   <PlayCircle className="h-3 w-3" />
                                   Video
@@ -3359,7 +3372,7 @@ const Events = () => {
                                   href={sermon.document_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-xs hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                                  className="flex items-center gap-1 px-2 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-xs hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200 flex-shrink-0"
                                 >
                                   <Download className="h-3 w-3" />
                                   Notes
@@ -3372,34 +3385,34 @@ const Events = () => {
 
                       {event.pamphlet_url && (
                         <div className="mt-4">
-                          <div className="flex items-center gap-3 flex-wrap">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
                             <div className="flex items-center gap-2">
                               <FileText className="h-5 w-5 text-green-600" />
-                              <span className="font-medium text-gray-700 dark:text-gray-300">Event Pamphlet:</span>
+                              <span className="font-medium text-gray-700 dark:text-gray-300 text-sm sm:text-base">Event Pamphlet:</span>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap gap-2">
                               <button
                                 onClick={() => viewPamphlet(event.pamphlet_url!)}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-xl hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200 text-xs sm:text-sm"
                               >
-                                <Eye className="h-4 w-4" />
+                                <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
                                 View Pamphlet
                               </button>
                               <a
                                 href={event.pamphlet_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200"
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 text-xs sm:text-sm"
                               >
-                                <FileText className="h-4 w-4" />
+                                <FileText className="h-3 w-3 sm:h-4 sm:w-4" />
                                 Download
                               </a>
                               {hasAccess && (
                                 <button
                                   onClick={() => deletePamphlet(event.id)}
-                                  className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200"
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200 text-xs sm:text-sm"
                                 >
-                                  <X className="h-4 w-4" />
+                                  <X className="h-3 w-3 sm:h-4 sm:w-4" />
                                   Remove
                                 </button>
                               )}
@@ -3410,8 +3423,8 @@ const Events = () => {
 
                       {hasAccess && !event.pamphlet_url && (
                         <div className="mt-4">
-                          <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
-                            <Upload className="h-4 w-4" />
+                          <label className="inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer text-xs sm:text-sm">
+                            <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
                             {uploadingPamphlet === event.id ? 'Uploading...' : 'Upload Pamphlet'}
                             <input
                               type="file"
@@ -3429,62 +3442,61 @@ const Events = () => {
                         </div>
                       )}
 
-                      <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
+                      <div className="mt-4 sm:mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
                         <button
                           onClick={() => openAttendeeModal('present', event.id)}
-                          className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
+                          className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-3 sm:p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
                         >
-                          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
-                          <div className="text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+                          <div className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                          <div className="text-xs sm:text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
                           <div className="text-xs text-green-600 dark:text-green-400 mt-1">Click to view</div>
                         </button>
                         <button
                           onClick={() => openAttendeeModal('absent', event.id)}
-                          className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
+                          className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-3 sm:p-4 text-center hover:shadow-lg transition-all duration-200 cursor-pointer"
                         >
-                          <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
-                          <div className="text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+                          <div className="text-lg sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                          <div className="text-xs sm:text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
                           <div className="text-xs text-red-600 dark:text-red-400 mt-1">Click to view</div>
                         </button>
-                        <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 text-center">
-                          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                        <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3 sm:p-4 text-center">
+                          <div className="text-lg sm:text-2xl font-bold text-blue-600 dark:text-blue-400">
                             {stats.firstTimers}
                           </div>
-                          <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">First Timers</div>
+                          <div className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 font-medium">First Timers</div>
                         </div>
-                        <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4 text-center">
-                          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                        <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-3 sm:p-4 text-center">
+                          <div className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">
                             {stats.total}
                           </div>
-                          <div className="text-sm text-purple-700 dark:text-purple-300 font-medium">Total Registered</div>
+                          <div className="text-xs sm:text-sm text-purple-700 dark:text-purple-300 font-medium">Total Registered</div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-3 lg:w-48">
+                    <div className="flex flex-col gap-2 sm:gap-3 lg:w-48">
                       {!event.is_completed && (
                         <>
-                          {/* REMOVED: Add Attendee button */}
                           <button
                             onClick={() => openBulkAttendanceModal(event.id)}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                            className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                           >
-                            <UsersIcon className="h-4 w-4" />
+                            <UsersIcon className="h-3 w-3 sm:h-4 sm:w-4" />
                             Bulk Attendance
                           </button>
                           <button
                             onClick={() => openNewcomerModal(event.id)}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                            className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                           >
-                            <User className="h-4 w-4" />
+                            <User className="h-3 w-3 sm:h-4 sm:w-4" />
                             Add Newcomer
                           </button>
                           {hasAccess && (
                             <button
                               onClick={() => handleCompleteEvent(event.id)}
-                              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                              className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                             >
-                              <CheckCircle className="h-4 w-4" />
+                              <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
                               Complete Event
                             </button>
                           )}
@@ -3492,40 +3504,40 @@ const Events = () => {
                       )}
                       <button
                         onClick={() => openSermonModal(event.id)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                        className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                       >
-                        <BookOpen className="h-4 w-4" />
+                        <BookOpen className="h-3 w-3 sm:h-4 sm:w-4" />
                         {sermon ? 'Edit Sermon' : 'Add Sermon'}
                       </button>
                       <button
                         onClick={() => setShowSyncModal(event.id)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                        className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                       >
-                        <Upload className="h-4 w-4" />
+                        <Upload className="h-3 w-3 sm:h-4 sm:w-4" />
                         Sync to Cloud
                       </button>
                       {hasAccess && (
                         <button
                           onClick={() => setShowDeleteConfirm(event.id)}
-                          className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
+                          className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
                           Delete Event
                         </button>
                       )}
                       <button
                         onClick={() => openAttendeeModal('present', event.id)}
-                        className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
+                        className="flex items-center justify-between px-3 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-xs sm:text-sm"
                       >
                         <span>View Present ({stats.present})</span>
-                        <Eye className="h-4 w-4" />
+                        <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
                       </button>
                       <button
                         onClick={() => openAttendeeModal('absent', event.id)}
-                        className="flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
+                        className="flex items-center justify-between px-3 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-xs sm:text-sm"
                       >
                         <span>View Absent ({stats.absent})</span>
-                        <Eye className="h-4 w-4" />
+                        <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
                       </button>
                     </div>
                   </div>
