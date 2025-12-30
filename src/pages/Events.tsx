@@ -362,6 +362,8 @@ interface NewcomerModalProps {
     phone: string;
     login_username: string;
     notes: string;
+    residence: string;
+    gender: string;
   }, eventId: string) => Promise<void>;
   loading: boolean;
   eventName?: string;
@@ -379,7 +381,9 @@ const NewcomerModal = ({
     surname: '',
     phone: '',
     login_username: '',
-    notes: ''
+    notes: '',
+    residence: '',
+    gender: ''
   });
 
   useEffect(() => {
@@ -390,14 +394,16 @@ const NewcomerModal = ({
         surname: '',
         phone: '',
         login_username: '',
-        notes: ''
+        notes: '',
+        residence: '',
+        gender: ''
       });
     }
   }, [showNewcomerModal]);
 
   if (!showNewcomerModal) return null;
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setNewcomerFormData(prev => ({
       ...prev,
@@ -492,6 +498,39 @@ const NewcomerModal = ({
                   placeholder="Enter email address"
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Residence *
+              </label>
+              <input
+                type="text"
+                name="residence"
+                value={newcomerFormData.residence}
+                onChange={handleChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                placeholder="Enter residence address"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Gender *
+              </label>
+              <select
+                name="gender"
+                value={newcomerFormData.gender}
+                onChange={handleChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                required
+              >
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
             </div>
           </div>
 
@@ -972,7 +1011,7 @@ const Events = () => {
     }
   }, [events, sermons]);
 
-  const saveAttendance = useCallback(async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
+  const saveAttendance = useCallback(async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string, firstTime?: boolean, invitedById?: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -987,8 +1026,8 @@ const Events = () => {
       const attendanceData: any = {
         event_id: eventId,
         members_id: memberId,
-        first_time: false,
-        invited_by_id: null,
+        first_time: firstTime || false,
+        invited_by_id: invitedById || null,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
         notes: notes || null,
@@ -1116,7 +1155,9 @@ const Events = () => {
           member_name: `${attendee.members.name} ${attendee.members.surname}`,
           status: attendee.attendance_status,
           first_time: attendee.first_time,
-          attended_at: attendee.attended_at
+          invited_by: attendee.invited_by_member ? `${attendee.invited_by_member.name} ${attendee.invited_by_member.surname}` : null,
+          attended_at: attendee.attended_at,
+          notes: attendee.notes
         })),
         synced_at: new Date().toISOString(),
         synced_by: user?.id,
@@ -1799,46 +1840,28 @@ const Events = () => {
       const selectedMember = members.find(m => m.id === attendeeFormData.memberId);
       if (!selectedMember) throw new Error('Selected member not found');
 
-      const attendeeData = {
-        event_id: eventId,
-        members_id: attendeeFormData.memberId,
-        first_time: attendeeFormData.firstTime,
-        invited_by_id: attendeeFormData.invitedById || null,
-        attendance_status: 'present' as const,
-        attended_at: new Date().toISOString()
-      };
+      // Save the attendance with first_time and invited_by_id data
+      const success = await saveAttendance(
+        eventId, 
+        attendeeFormData.memberId, 
+        'present', 
+        undefined, 
+        attendeeFormData.firstTime, 
+        attendeeFormData.invitedById || undefined
+      );
 
-      const { data, error } = await supabase
-        .from('event_attendees')
-        .insert([attendeeData])
-        .select('*')
-        .single();
-
-      if (error) throw error;
-
-      // Fetch the newly created attendee with member details
-      const newAttendee = {
-        ...data,
-        members: selectedMember,
-        invited_by_member: attendeeFormData.invitedById 
-          ? members.find(m => m.id === attendeeFormData.invitedById) || null
-          : null
-      };
-
-      setAttendees(prev => [...prev, newAttendee]);
-      await fetchEventAttendees(eventId);
-
-      resetAttendeeForm();
-      
-      setSuccess('Attendee added successfully!');
-      setTimeout(() => setSuccess(null), 3000);
+      if (success) {
+        resetAttendeeForm();
+        setSuccess('Attendee added successfully!');
+        setTimeout(() => setSuccess(null), 3000);
+      }
     } catch (error: any) {
       console.error('Error adding attendee:', error);
       setError(error.message || 'Failed to add attendee. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [attendeeFormData, attendees, members, fetchEventAttendees]);
+  }, [attendeeFormData, attendees, members, saveAttendance]);
 
   const handleRemoveAttendee = useCallback(async (attendeeId: string, eventId: string) => {
     if (!confirm('Are you sure you want to remove this attendee?')) return;
@@ -1948,16 +1971,30 @@ const Events = () => {
     setShowNewcomerModal(null);
   }, []);
 
-  // UPDATED handleNewcomerSubmit to accept form data as parameter
+  // UPDATED handleNewcomerSubmit with residence and gender
   const handleNewcomerSubmit = useCallback(async (newcomerData: {
     name: string;
     surname: string;
     phone: string;
     login_username: string;
     notes: string;
+    residence: string;
+    gender: string;
   }, eventId: string) => {
     if (!newcomerData.name.trim() || !newcomerData.surname.trim()) {
       setError('Name and surname are required');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (!newcomerData.residence.trim()) {
+      setError('Residence is required');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (!newcomerData.gender) {
+      setError('Gender is required');
       setTimeout(() => setError(null), 3000);
       return;
     }
@@ -1996,6 +2033,8 @@ const Events = () => {
           surname: newcomerData.surname.trim(),
           phone: newcomerData.phone.trim() || null,
           login_username: newcomerData.login_username.trim() || null,
+          residence: newcomerData.residence.trim(),
+          gender: newcomerData.gender,
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -2022,6 +2061,7 @@ const Events = () => {
         memberId = memberData.id;
       }
 
+      // Add as attendee with first_time = true
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
@@ -2046,6 +2086,8 @@ const Events = () => {
         surname: newcomerData.surname.trim(),
         login_username: newcomerData.login_username.trim() || null,
         phone: newcomerData.phone.trim() || null,
+        residence: newcomerData.residence.trim(),
+        gender: newcomerData.gender,
         status: 'newcomer' as const,
         cell_group_id: null,
         ministry_group_names: []
@@ -2376,6 +2418,10 @@ const Events = () => {
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4" />
+                  Inviter information
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
                   Sync timestamp and user information
                 </li>
               </ul>
@@ -2391,7 +2437,7 @@ const Events = () => {
                 <div className="text-sm text-gray-600 dark:text-gray-400">Absent</div>
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">{eventAttendees.length}</div>
+                <div className="text-2xl font-bold text-gray-900 dark:text-gray-400">{eventAttendees.length}</div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">Total Registered</div>
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
