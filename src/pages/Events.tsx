@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, Mail, Building, Users as UsersIcon, CheckCircle, AlertCircle, Upload, FileText, Eye, BookOpen, Download, PlayCircle, AlertTriangle, Edit, Trash2 } from 'lucide-react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -126,6 +126,12 @@ const SermonModal = ({
   uploadingSermonFile,
   handleSermonSubmit 
 }: SermonModalProps) => {
+  const modalTitle = useMemo(() => {
+    if (editingSermon) return 'Edit Sermon';
+    if (showSermonModal === 'new') return 'Add New Sermon';
+    return 'Add Sermon to Event';
+  }, [editingSermon, showSermonModal]);
+
   if (!showSermonModal) return null;
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -134,16 +140,15 @@ const SermonModal = ({
   }, [setSermonFormData]);
 
   const handleFileChange = useCallback((type: 'video' | 'document', file: File | null) => {
-    if (type === 'video') {
-      setSermonFormData(prev => ({ ...prev, videoFile: file }));
-    } else {
-      setSermonFormData(prev => ({ ...prev, documentFile: file }));
-    }
+    setSermonFormData(prev => ({
+      ...prev,
+      [type === 'video' ? 'videoFile' : 'documentFile']: file
+    }));
   }, [setSermonFormData]);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    await handleSermonSubmit();
+    await handleSermonSubmit(e);
   }, [handleSermonSubmit]);
 
   return (
@@ -151,11 +156,12 @@ const SermonModal = ({
       <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-            {editingSermon ? 'Edit Sermon' : showSermonModal === 'new' ? 'Add New Sermon' : 'Add Sermon to Event'}
+            {modalTitle}
           </h3>
           <button
             onClick={closeSermonModal}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+            aria-label="Close modal"
           >
             <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
           </button>
@@ -380,6 +386,9 @@ const Events = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   
   const attendanceNotesRef = useRef<Record<string, string>>({});
+  const memberDepartmentMapRef = useRef<Map<string, string[]>>(new Map());
+  const memberMinistryMapRef = useRef<Map<string, string[]>>(new Map());
+  const memberCellGroupMapRef = useRef<Map<string, string>>(new Map());
 
   const [eventFormData, setEventFormData] = useState({
     eventType: '' as 'sunday' | 'other' | '',
@@ -425,11 +434,39 @@ const Events = () => {
     notes: ''
   });
 
-  const hasAccess = useCallback(() => {
+  // Optimize access check
+  const hasAccess = useMemo(() => {
     return isAdmin?.() || isPastor?.();
   }, [isAdmin, isPastor]);
 
-  // Fetch functions
+  // Optimize member filtering
+  const filteredMembers = useMemo(() => {
+    const searchLower = searchTerm.toLowerCase();
+    return members.filter(member => {
+      return (
+        member.name.toLowerCase().includes(searchLower) ||
+        member.surname.toLowerCase().includes(searchLower) ||
+        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+        member.phone?.toLowerCase().includes(searchLower) ||
+        member.login_username?.toLowerCase().includes(searchLower)
+      );
+    });
+  }, [members, searchTerm]);
+
+  const filteredInviters = useMemo(() => {
+    const searchLower = inviterSearchTerm.toLowerCase();
+    return members.filter(member => {
+      return (
+        member.name.toLowerCase().includes(searchLower) ||
+        member.surname.toLowerCase().includes(searchLower) ||
+        `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
+        member.phone?.toLowerCase().includes(searchLower) ||
+        member.login_username?.toLowerCase().includes(searchLower)
+      );
+    });
+  }, [members, inviterSearchTerm]);
+
+  // Fetch functions with optimizations
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
@@ -457,6 +494,7 @@ const Events = () => {
       
       setEvents(eventsWithDefaults as Event[]);
       
+      // Fetch attendees for all events in parallel
       const attendeePromises = eventsWithDefaults.map((event: Event) => 
         fetchEventAttendees(event.id)
       );
@@ -494,42 +532,46 @@ const Events = () => {
     try {
       setError(null);
       
-      // First fetch members
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select('id, name, surname, login_username, phone, cell_group_id, status')
-        .order('name');
+      // Fetch all data in parallel
+      const [
+        { data: membersData, error: membersError },
+        { data: cellGroupsData },
+        { data: ministryGroupMembersData },
+        { data: departmentMembersData }
+      ] = await Promise.all([
+        supabase
+          .from('members')
+          .select('id, name, surname, login_username, phone, cell_group_id, status')
+          .order('name'),
+        supabase.from('cell_groups').select('id, name'),
+        supabase.from('ministry_group_members').select('member_id, ministry_groups!inner(id, name)'),
+        supabase.from('department_members').select('member_id, departments!inner(id, name)')
+      ]);
 
       if (membersError) throw membersError;
 
-      // Fetch cell group names
-      const { data: cellGroupsData } = await supabase
-        .from('cell_groups')
-        .select('id, name');
-
+      // Create maps for faster lookups
       const cellGroupMap = new Map(cellGroupsData?.map(cg => [cg.id, cg.name]) || []);
-
-      // Fetch ministry group memberships
-      const { data: ministryGroupMembersData } = await supabase
-        .from('ministry_group_members')
-        .select('member_id, ministry_groups!inner(id, name)');
-
       const ministryGroupMap = new Map<string, string[]>();
+      const departmentMap = new Map<string, string[]>();
+      const cellGroupIdMap = new Map<string, string>();
+
+      // Build ministry group map
       ministryGroupMembersData?.forEach(mgm => {
         const existing = ministryGroupMap.get(mgm.member_id) || [];
-        ministryGroupMap.set(mgm.member_id, [...existing, mgm.ministry_groups.name]);
+        ministryGroupMap.set(mgm.member_id, [...existing, mgm.ministry_groups.id]);
       });
 
-      // Fetch department memberships
-      const { data: departmentMembersData } = await supabase
-        .from('department_members')
-        .select('member_id, departments!inner(id, name)');
-
-      const departmentMap = new Map<string, string[]>();
+      // Build department map
       departmentMembersData?.forEach(dm => {
         const existing = departmentMap.get(dm.member_id) || [];
-        departmentMap.set(dm.member_id, [...existing, dm.departments.name]);
+        departmentMap.set(dm.member_id, [...existing, dm.departments.id]);
       });
+
+      // Store in ref for performance
+      memberMinistryMapRef.current = ministryGroupMap;
+      memberDepartmentMapRef.current = departmentMap;
+      memberCellGroupMapRef.current = cellGroupMap;
 
       // Combine all data
       const membersWithDetails = (membersData || []).map((member: any) => ({
@@ -590,44 +632,45 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      // Fetch attendees with basic member info
+      // Fetch attendees with member info in a single query
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
-        .select('*')
+        .select(`
+          *,
+          members:members_id (
+            id, name, surname, login_username, phone, cell_group_id, status
+          )
+        `)
         .eq('event_id', eventId)
         .order('attended_at', { ascending: false });
 
       if (attendeesError) throw attendeesError;
 
-      // Fetch member details for each attendee
-      const attendeesWithDetails = await Promise.all(
-        (attendeesData || []).map(async (attendee: any) => {
-          // Fetch member
-          const { data: memberData } = await supabase
-            .from('members')
-            .select('id, name, surname, login_username, phone, cell_group_id, status')
-            .eq('id', attendee.members_id)
-            .single();
+      // Fetch inviter details in batch
+      const inviteeIds = (attendeesData || [])
+        .filter(attendee => attendee.invited_by_id)
+        .map(attendee => attendee.invited_by_id);
+      
+      let invitedByMap = new Map();
+      if (inviteeIds.length > 0) {
+        const { data: inviterData } = await supabase
+          .from('members')
+          .select('id, name, surname')
+          .in('id', inviteeIds);
+        
+        if (inviterData) {
+          inviterData.forEach(inviter => {
+            invitedByMap.set(inviter.id, inviter);
+          });
+        }
+      }
 
-          // Fetch inviter if exists
-          let invitedByMember = null;
-          if (attendee.invited_by_id) {
-            const { data: inviterData } = await supabase
-              .from('members')
-              .select('id, name, surname')
-              .eq('id', attendee.invited_by_id)
-              .single();
-            invitedByMember = inviterData;
-          }
-
-          return {
-            ...attendee,
-            attendance_status: attendee.attendance_status || 'present',
-            members: memberData || { id: attendee.members_id, name: 'Unknown', surname: 'Member' },
-            invited_by_member: invitedByMember
-          };
-        })
-      );
+      const attendeesWithDetails = (attendeesData || []).map((attendee: any) => ({
+        ...attendee,
+        attendance_status: attendee.attendance_status || 'present',
+        members: attendee.members || { id: attendee.members_id, name: 'Unknown', surname: 'Member' },
+        invited_by_member: attendee.invited_by_id ? invitedByMap.get(attendee.invited_by_id) : null
+      }));
 
       setAttendees(prev => {
         const filtered = prev.filter(attendee => attendee.event_id !== eventId);
@@ -641,41 +684,55 @@ const Events = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (user && !authLoading) {
-      const initializeData = async () => {
-        try {
-          setLoading(true);
-          await Promise.all([
-            fetchEvents(),
-            fetchSermons(),
-            fetchMembers(),
-            fetchCellGroups(),
-            fetchMinistryGroups(),
-            fetchDepartments()
-          ]);
-        } catch (error) {
-          console.error('Error initializing data:', error);
-        } finally {
-          setLoading(false);
-        }
-      };
-      
-      initializeData();
-    }
-  }, [
-    user, 
-    authLoading, 
-    fetchEvents, 
-    fetchSermons, 
-    fetchMembers, 
-    fetchCellGroups, 
-    fetchMinistryGroups, 
-    fetchDepartments
-  ]);
+  // Optimized version of isMemberInTargetGroups
+  const isMemberInTargetGroups = useCallback((member: Member, event: Event): boolean => {
+    if (event.is_whole_church) return true;
 
-  // Delete Event Functionality
-  const handleDeleteEvent = async (eventId: string) => {
+    // Check cell groups
+    if (event.target_groups && event.target_groups.length > 0) {
+      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
+        return true;
+      }
+    }
+
+    // Check departments and ministry groups
+    if (event.target_departments && event.target_departments.length > 0) {
+      // Use cached maps for faster lookups
+      const memberDepartments = memberDepartmentMapRef.current.get(member.id) || [];
+      const memberMinistries = memberMinistryMapRef.current.get(member.id) || [];
+      
+      // Convert arrays to Sets for O(1) lookups
+      const memberDeptSet = new Set(memberDepartments);
+      const memberMinistrySet = new Set(memberMinistries);
+      
+      // Check if member is in any target department or ministry group
+      for (const targetId of event.target_departments) {
+        if (memberDeptSet.has(targetId) || memberMinistrySet.has(targetId)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }, []);
+
+  // Batch fetch for bulk attendance
+  const fetchTargetMembersForEvent = useCallback((event: Event): Member[] => {
+    if (event.is_whole_church) {
+      // For whole church events, all non-"not_attending" members are targets
+      return members.filter(member => member.status !== 'not_attending');
+    }
+
+    return members.filter(member => {
+      if (member.status === 'not_attending') return false;
+      return isMemberInTargetGroups(member, event);
+    });
+  }, [members, isMemberInTargetGroups]);
+
+  // Optimized handleDeleteEvent
+  const handleDeleteEvent = useCallback(async (eventId: string) => {
+    if (!confirm('Are you sure you want to delete this event? This action cannot be undone.')) return;
+
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -684,24 +741,22 @@ const Events = () => {
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
+      // Prepare all promises
+      const promises = [];
+
       // 1. Delete associated sermons and their files
       const eventSermons = sermons.filter(s => s.event_id === eventId);
       for (const sermon of eventSermons) {
         if (sermon.video_url) {
-          await deleteSermonFile(sermon.video_url, 'video');
+          promises.push(deleteSermonFile(sermon.video_url, 'video'));
         }
         if (sermon.document_url) {
-          await deleteSermonFile(sermon.document_url, 'document');
+          promises.push(deleteSermonFile(sermon.document_url, 'document'));
         }
         
-        const { error: sermonError } = await supabase
-          .from('sermons')
-          .delete()
-          .eq('id', sermon.id);
-
-        if (sermonError) {
-          console.warn('Failed to delete sermon:', sermonError);
-        }
+        promises.push(
+          supabase.from('sermons').delete().eq('id', sermon.id)
+        );
       }
 
       // 2. Delete event pamphlet if exists
@@ -710,34 +765,25 @@ const Events = () => {
         const fileName = urlParts[urlParts.length - 1];
         const filePath = `event-pamphlets/${fileName}`;
 
-        const { error: pamphletError } = await supabase.storage
-          .from('event-pamphlets')
-          .remove([filePath]);
-
-        if (pamphletError) {
-          console.warn('Failed to delete pamphlet file:', pamphletError);
-        }
+        promises.push(
+          supabase.storage.from('event-pamphlets').remove([filePath])
+        );
       }
 
       // 3. Delete event attendees
-      const { error: attendeesError } = await supabase
-        .from('event_attendees')
-        .delete()
-        .eq('event_id', eventId);
-
-      if (attendeesError) {
-        console.warn('Failed to delete event attendees:', attendeesError);
-      }
+      promises.push(
+        supabase.from('event_attendees').delete().eq('event_id', eventId)
+      );
 
       // 4. Delete the event itself
-      const { error: eventError } = await supabase
-        .from('events')
-        .delete()
-        .eq('id', eventId);
+      promises.push(
+        supabase.from('events').delete().eq('id', eventId)
+      );
 
-      if (eventError) throw eventError;
+      // Execute all promises
+      await Promise.all(promises);
 
-      // 5. Update local state
+      // Update local state
       setEvents(prev => prev.filter(event => event.id !== eventId));
       setSermons(prev => prev.filter(sermon => sermon.event_id !== eventId));
       setAttendees(prev => prev.filter(attendee => attendee.event_id !== eventId));
@@ -750,9 +796,9 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [events, sermons]);
 
-  const saveAttendance = async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
+  const saveAttendance = useCallback(async (eventId: string, memberId: string, status: 'present' | 'absent', notes?: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -799,9 +845,9 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchEventAttendees]);
 
-  const saveBulkAttendance = async (eventId: string) => {
+  const saveBulkAttendance = useCallback(async (eventId: string) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -835,95 +881,42 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [bulkAttendance, saveAttendance, fetchEventAttendees]);
 
-  const getAttendanceStats = (eventId: string) => {
+  // Memoize event attendees
+  const getEventAttendees = useCallback((eventId: string) => {
+    return attendees.filter(attendee => attendee.event_id === eventId);
+  }, [attendees]);
+
+  const getPresentAttendees = useCallback((eventId: string) => {
+    const eventAttendees = getEventAttendees(eventId);
+    return eventAttendees.filter(attendee => 
+      attendee.attendance_status === 'present'
+    );
+  }, [getEventAttendees]);
+
+  const getAbsentAttendees = useCallback((eventId: string) => {
+    const eventAttendees = getEventAttendees(eventId);
+    return eventAttendees.filter(attendee => 
+      attendee.attendance_status === 'absent'
+    );
+  }, [getEventAttendees]);
+
+  // Memoize attendance stats
+  const getAttendanceStats = useCallback((eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
     const absent = eventAttendees.filter(a => a.attendance_status === 'absent').length;
     const firstTimers = eventAttendees.filter(a => a.first_time && a.attendance_status === 'present').length;
     
     return { present, absent, firstTimers, total: present + absent };
-  };
+  }, [getEventAttendees]);
 
-  const getSermonForEvent = (eventId: string) => {
+  const getSermonForEvent = useCallback((eventId: string) => {
     return sermons.find(sermon => sermon.event_id === eventId);
-  };
+  }, [sermons]);
 
-  const isMemberInDepartment = async (memberId: string, departmentId: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('department_members')
-        .select('id')
-        .eq('member_id', memberId)
-        .eq('department_id', departmentId)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return false;
-        }
-        throw error;
-      }
-
-      return !!data;
-    } catch (error) {
-      console.error('Error checking department membership:', error);
-      return false;
-    }
-  };
-
-  const isMemberInMinistryGroup = async (memberId: string, ministryGroupId: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('ministry_group_members')
-        .select('id')
-        .eq('member_id', memberId)
-        .eq('ministry_group_id', ministryGroupId)
-        .single();
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return false;
-        }
-        throw error;
-      }
-
-      return !!data;
-    } catch (error) {
-      console.error('Error checking ministry group membership:', error);
-      return false;
-    }
-  };
-
-  const isMemberInTargetGroups = async (member: Member, event: Event): Promise<boolean> => {
-    if (event.is_whole_church) return true;
-
-    if (event.target_groups && event.target_groups.length > 0) {
-      if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
-        return true;
-      }
-    }
-
-    if (event.target_departments && event.target_departments.length > 0) {
-      // Check if member is in any of the target ministry groups
-      for (const groupId of event.target_departments) {
-        const isMinistryGroup = ministryGroups.some(mg => mg.id === groupId);
-        if (isMinistryGroup) {
-          const isInMinistryGroup = await isMemberInMinistryGroup(member.id, groupId);
-          if (isInMinistryGroup) return true;
-        } else {
-          // Check if it's a department
-          const isInDept = await isMemberInDepartment(member.id, groupId);
-          if (isInDept) return true;
-        }
-      }
-    }
-
-    return false;
-  };
-
-  const syncEventToCloud = async (eventId: string) => {
+  const syncEventToCloud = useCallback(async (eventId: string) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -998,9 +991,9 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [events, getEventAttendees, getAttendanceStats, user, profile]);
 
-  const exportEventData = (eventId: string) => {
+  const exportEventData = useCallback((eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
@@ -1044,9 +1037,9 @@ const Events = () => {
     
     setSuccess(`Event data exported successfully!`);
     setTimeout(() => setSuccess(null), 3000);
-  };
+  }, [events, getEventAttendees]);
 
-  const uploadPamphlet = async (eventId: string, file: File) => {
+  const uploadPamphlet = useCallback(async (eventId: string, file: File) => {
     try {
       setUploadingPamphlet(eventId);
       setError(null);
@@ -1105,9 +1098,9 @@ const Events = () => {
     } finally {
       setUploadingPamphlet(null);
     }
-  };
+  }, []);
 
-  const deletePamphlet = async (eventId: string) => {
+  const deletePamphlet = useCallback(async (eventId: string) => {
     try {
       if (!confirm('Are you sure you want to delete this pamphlet?')) return;
 
@@ -1147,17 +1140,17 @@ const Events = () => {
       console.error('Error deleting pamphlet:', error);
       setError(error.message || 'Failed to delete pamphlet.');
     }
-  };
+  }, [events]);
 
-  const viewPamphlet = (pamphletUrl: string) => {
+  const viewPamphlet = useCallback((pamphletUrl: string) => {
     setViewingPamphlet(pamphletUrl);
-  };
+  }, []);
 
-  const closePamphletModal = () => {
+  const closePamphletModal = useCallback(() => {
     setViewingPamphlet(null);
-  };
+  }, []);
 
-  const uploadSermonFile = async (file: File, type: 'video' | 'document'): Promise<string> => {
+  const uploadSermonFile = useCallback(async (file: File, type: 'video' | 'document'): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     const filePath = `${type}s/${fileName}`;
@@ -1176,9 +1169,9 @@ const Events = () => {
       .getPublicUrl(filePath);
 
     return publicUrl;
-  };
+  }, []);
 
-  const deleteSermonFile = async (fileUrl: string, type: 'video' | 'document') => {
+  const deleteSermonFile = useCallback(async (fileUrl: string, type: 'video' | 'document') => {
     try {
       if (!fileUrl) return;
       
@@ -1196,12 +1189,12 @@ const Events = () => {
     } catch (error: any) {
       console.error('Error deleting file:', error);
     }
-  };
+  }, []);
 
-  const handleSermonSubmit = async (e?: React.FormEvent) => {
+  const handleSermonSubmit = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
-    if (!hasAccess()) {
+    if (!hasAccess) {
       setError('You do not have permission to manage sermons');
       setTimeout(() => setError(null), 3000);
       return;
@@ -1306,9 +1299,9 @@ const Events = () => {
     } finally {
       setSermonLoading(null);
     }
-  };
+  }, [hasAccess, sermonFormData, editingSermon, uploadSermonFile, fetchSermons]);
 
-  const handleDeleteSermon = async (sermonId: string) => {
+  const handleDeleteSermon = useCallback(async (sermonId: string) => {
     if (!confirm('Are you sure you want to delete this sermon? This action cannot be undone.')) return;
 
     try {
@@ -1342,9 +1335,9 @@ const Events = () => {
     } finally {
       setSermonLoading(null);
     }
-  };
+  }, [sermons, deleteSermonFile, fetchSermons]);
 
-  const openSermonModal = (eventId?: string, sermonToEdit?: Sermon) => {
+  const openSermonModal = useCallback((eventId?: string, sermonToEdit?: Sermon) => {
     if (sermonToEdit) {
       setEditingSermon(sermonToEdit);
       setSermonFormData({
@@ -1375,9 +1368,9 @@ const Events = () => {
     }
     
     setShowSermonModal(eventId || sermonToEdit?.id || 'new');
-  };
+  }, [events]);
 
-  const closeSermonModal = () => {
+  const closeSermonModal = useCallback(() => {
     setShowSermonModal(null);
     setEditingSermon(null);
     setSermonFormData({ 
@@ -1393,9 +1386,9 @@ const Events = () => {
     });
     setError(null);
     setUploadingSermonFile(null);
-  };
+  }, []);
 
-  const removeSermonFile = async (sermonId: string, fileType: 'video' | 'document') => {
+  const removeSermonFile = useCallback(async (sermonId: string, fileType: 'video' | 'document') => {
     if (!confirm(`Are you sure you want to remove the ${fileType} file?`)) return;
 
     try {
@@ -1430,9 +1423,9 @@ const Events = () => {
     } finally {
       setSermonLoading(null);
     }
-  };
+  }, [sermons, deleteSermonFile, fetchSermons]);
 
-  const markMembersAsAbsent = async (eventId: string, absentMemberIds: string[]) => {
+  const markMembersAsAbsent = useCallback(async (eventId: string, absentMemberIds: string[]) => {
     try {
       const absentRecords = absentMemberIds.map(memberId => ({
         event_id: eventId,
@@ -1468,9 +1461,9 @@ const Events = () => {
       console.error('Error marking members as absent:', error);
       throw error;
     }
-  };
+  }, [fetchEventAttendees]);
 
-  const handleCompleteEvent = async (eventId: string) => {
+  const handleCompleteEvent = useCallback(async (eventId: string) => {
     if (!confirm('Are you sure you want to mark this event as completed? This will automatically mark all expected but unregistered members as absent.')) {
       return;
     }
@@ -1492,7 +1485,7 @@ const Events = () => {
         if (member.status === 'not_attending') continue;
         if (attendeeIds.has(member.id)) continue;
 
-        const shouldAttend = await isMemberInTargetGroups(member, event);
+        const shouldAttend = isMemberInTargetGroups(member, event);
         if (shouldAttend) {
           absentMemberIds.push(member.id);
         }
@@ -1526,12 +1519,12 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [events, members, isMemberInTargetGroups, getEventAttendees, markMembersAsAbsent]);
 
-  const handleEventSubmit = async (e: React.FormEvent) => {
+  const handleEventSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!hasAccess()) {
+    if (!hasAccess) {
       setError('You do not have permission to create events');
       setTimeout(() => setError(null), 3000);
       return;
@@ -1593,9 +1586,9 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [eventFormData, hasAccess, fetchEvents]);
 
-  const handleAttendeeSubmit = async (e: React.FormEvent, eventId: string) => {
+  const handleAttendeeSubmit = useCallback(async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
     
     if (!attendeeFormData.memberId) {
@@ -1661,9 +1654,9 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [attendeeFormData, attendees, members, fetchEventAttendees]);
 
-  const handleRemoveAttendee = async (attendeeId: string, eventId: string) => {
+  const handleRemoveAttendee = useCallback(async (attendeeId: string, eventId: string) => {
     if (!confirm('Are you sure you want to remove this attendee?')) return;
 
     try {
@@ -1686,9 +1679,9 @@ const Events = () => {
       console.error('Error removing attendee:', error);
       setError(error.message || 'Failed to remove attendee.');
     }
-  };
+  }, [fetchEventAttendees]);
 
-  const resetAttendeeForm = () => {
+  const resetAttendeeForm = useCallback(() => {
     setShowAttendeeForm(null);
     setAttendeeFormData({
       memberId: '',
@@ -1701,9 +1694,9 @@ const Events = () => {
     setInviterSearchTerm('');
     setIsMemberDropdownOpen(false);
     setIsInviterDropdownOpen(false);
-  };
+  }, []);
 
-  const handleMemberSelect = (member: Member) => {
+  const handleMemberSelect = useCallback((member: Member) => {
     setAttendeeFormData({
       ...attendeeFormData,
       memberId: member.id,
@@ -1711,9 +1704,9 @@ const Events = () => {
     setSelectedMember(member);
     setSearchTerm(`${member.name} ${member.surname}`);
     setIsMemberDropdownOpen(false);
-  };
+  }, [attendeeFormData]);
 
-  const handleInviterSelect = (member: Member) => {
+  const handleInviterSelect = useCallback((member: Member) => {
     setAttendeeFormData({
       ...attendeeFormData,
       invitedById: member.id,
@@ -1721,66 +1714,53 @@ const Events = () => {
     setSelectedInviter(member);
     setInviterSearchTerm(`${member.name} ${member.surname}`);
     setIsInviterDropdownOpen(false);
-  };
+  }, [attendeeFormData]);
 
-  const openAttendeeModal = (type: 'present' | 'absent', eventId: string) => {
+  const openAttendeeModal = useCallback((type: 'present' | 'absent', eventId: string) => {
     setShowAttendeeModal({ type, eventId });
-  };
+  }, []);
 
-  const closeAttendeeModal = () => {
+  const closeAttendeeModal = useCallback(() => {
     setShowAttendeeModal(null);
-  };
+  }, []);
 
-  const openBulkAttendanceModal = async (eventId: string) => {
+  // Optimized openBulkAttendanceModal
+  const openBulkAttendanceModal = useCallback((eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     
     const event = events.find(e => e.id === eventId);
     if (!event) return;
 
-    const [targetMembers] = await Promise.all([
-      (async () => {
-        const membersList: Member[] = [];
-        for (const member of members) {
-          if (member.status === 'not_attending') continue;
-          const shouldAttend = await isMemberInTargetGroups(member, event);
-          if (shouldAttend) {
-            membersList.push(member);
-          }
-        }
-        return membersList;
-      })()
-    ]);
-
+    const targetMembers = fetchTargetMembersForEvent(event);
+    
     const initialAttendance: Record<string, 'present' | 'absent'> = {};
+    const existingAttendees = getEventAttendees(eventId);
+    const existingAttendeeMap = new Map(existingAttendees.map(a => [a.members_id, a]));
 
     for (const member of targetMembers) {
-      initialAttendance[member.id] = 'present';
+      const existingAttendee = existingAttendeeMap.get(member.id);
+      initialAttendance[member.id] = existingAttendee?.attendance_status as 'present' | 'absent' || 'present';
     }
 
-    const existingAttendees = getEventAttendees(eventId);
-    existingAttendees.forEach(attendee => {
-      initialAttendance[attendee.members_id] = attendee.attendance_status as 'present' | 'absent';
-    });
-
     setBulkAttendance(initialAttendance);
-  };
+  }, [events, fetchTargetMembersForEvent, getEventAttendees]);
 
-  const closeBulkAttendanceModal = () => {
+  const closeBulkAttendanceModal = useCallback(() => {
     setShowBulkAttendanceModal(null);
     setBulkAttendance({});
     setAttendanceNotes({});
     attendanceNotesRef.current = {};
-  };
+  }, []);
 
-  const handleBulkAttendanceChange = (memberId: string, status: 'present' | 'absent') => {
+  const handleBulkAttendanceChange = useCallback((memberId: string, status: 'present' | 'absent') => {
     setBulkAttendance(prev => ({ ...prev, [memberId]: status }));
-  };
+  }, []);
 
-  const openNewcomerModal = (eventId: string) => {
+  const openNewcomerModal = useCallback((eventId: string) => {
     setShowNewcomerModal(eventId);
-  };
+  }, []);
 
-  const closeNewcomerModal = () => {
+  const closeNewcomerModal = useCallback(() => {
     setShowNewcomerModal(null);
     setNewcomerFormData({
       name: '',
@@ -1789,9 +1769,9 @@ const Events = () => {
       login_username: '',
       notes: ''
     });
-  };
+  }, []);
 
-  const handleNewcomerSubmit = async (e: React.FormEvent, eventId: string) => {
+  const handleNewcomerSubmit = useCallback(async (e: React.FormEvent, eventId: string) => {
     e.preventDefault();
 
     if (!newcomerFormData.name.trim() || !newcomerFormData.surname.trim()) {
@@ -1909,47 +1889,9 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [newcomerFormData, fetchMembers, closeNewcomerModal]);
 
-  const filteredMembers = members.filter(member => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const filteredInviters = members.filter(member => {
-    const searchLower = inviterSearchTerm.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(searchLower) ||
-      member.surname.toLowerCase().includes(searchLower) ||
-      `${member.name} ${member.surname}`.toLowerCase().includes(searchLower) ||
-      member.phone?.toLowerCase().includes(searchLower) ||
-      member.login_username?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const getEventAttendees = (eventId: string) => {
-    return attendees.filter(attendee => attendee.event_id === eventId);
-  };
-
-  const getPresentAttendees = (eventId: string) => {
-    return getEventAttendees(eventId).filter(attendee => 
-      attendee.attendance_status === 'present'
-    );
-  };
-
-  const getAbsentAttendees = (eventId: string) => {
-    return getEventAttendees(eventId).filter(attendee => 
-      attendee.attendance_status === 'absent'
-    );
-  };
-
-  const formatDate = (dateString: string) => {
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
@@ -1957,30 +1899,30 @@ const Events = () => {
       month: 'long',
       day: 'numeric'
     });
-  };
+  }, []);
 
-  const formatTime = (timeString: string) => {
+  const formatTime = useCallback((timeString: string) => {
     const [hours, minutes] = timeString.split(':');
     const hour = parseInt(hours);
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const formattedHour = hour % 12 || 12;
     return `${formattedHour}:${minutes} ${ampm}`;
-  };
+  }, []);
 
-  const getInitials = (name: string, surname: string) => {
+  const getInitials = useCallback((name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
-  };
+  }, []);
 
-  const getStatusBadge = (status: string | null) => {
+  const getStatusBadge = useCallback((status: string | null) => {
     const badges = {
       newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
       signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
       not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
     };
     return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
-  };
+  }, []);
 
-  const getEventScopeBadge = (event: Event) => {
+  const getEventScopeBadge = useCallback((event: Event) => {
     if (event.is_whole_church) {
       return {
         color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
@@ -1994,9 +1936,9 @@ const Events = () => {
         icon: UsersIcon
       };
     }
-  };
+  }, []);
 
-  const getEventStatusBadge = (event: Event) => {
+  const getEventStatusBadge = useCallback((event: Event) => {
     if (event.is_completed) {
       return {
         color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
@@ -2010,9 +1952,197 @@ const Events = () => {
         icon: AlertCircle
       };
     }
-  };
+  }, []);
 
-  const SyncModal = () => {
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.member-dropdown') && !target.closest('.inviter-dropdown')) {
+        setIsMemberDropdownOpen(false);
+        setIsInviterDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Clean up file URLs
+  useEffect(() => {
+    return () => {
+      if (viewingPamphlet && viewingPamphlet.startsWith('blob:')) {
+        URL.revokeObjectURL(viewingPamphlet);
+      }
+    };
+  }, [viewingPamphlet]);
+
+  // Initialize data
+  useEffect(() => {
+    if (user && !authLoading) {
+      const initializeData = async () => {
+        try {
+          setLoading(true);
+          
+          // Fetch all data in parallel
+          await Promise.all([
+            fetchEvents(),
+            fetchSermons(),
+            fetchMembers(),
+            fetchCellGroups(),
+            fetchMinistryGroups(),
+            fetchDepartments()
+          ]);
+        } catch (error) {
+          console.error('Error initializing data:', error);
+          setError('Failed to initialize data. Please refresh the page.');
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      initializeData();
+    }
+  }, [user, authLoading, fetchEvents, fetchSermons, fetchMembers, fetchCellGroups, fetchMinistryGroups, fetchDepartments]);
+
+  // Sermon List Component
+  const SermonList = useCallback(() => {
+    return (
+      <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sermons</h2>
+          <button
+            onClick={() => openSermonModal()}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
+          >
+            <Plus className="h-4 w-4" />
+            Add Sermon
+          </button>
+        </div>
+
+        {sermons.length === 0 ? (
+          <div className="text-center py-12">
+            <BookOpen className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Sermons Yet</h3>
+            <p className="text-gray-500 dark:text-gray-500">Add your first sermon to get started</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {sermons.map((sermon) => (
+              <div key={sermon.id} className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl p-6 hover:shadow-lg transition-all duration-300">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900 dark:text-white text-lg mb-1">
+                      {sermon.title}
+                    </h3>
+                    <p className="text-blue-600 dark:text-blue-400 text-sm">
+                      {sermon.events?.name || 'Standalone Sermon'}
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => openSermonModal(undefined, sermon)}
+                      className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
+                      title="Edit Sermon"
+                      disabled={sermonLoading === sermon.id}
+                    >
+                      <Edit className="h-4 w-4 text-blue-500" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSermon(sermon.id)}
+                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
+                      title="Delete Sermon"
+                      disabled={sermonLoading === sermon.id}
+                    >
+                      {sermonLoading === sermon.id ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500" />
+                      ) : (
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 mb-4">
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <User className="h-3 w-3" />
+                    <span>By {sermon.pastor_name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <CalendarIcon className="h-3 w-3" />
+                    <span>{formatDate(sermon.sermon_date)}</span>
+                  </div>
+                </div>
+
+                <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3">
+                  {sermon.summary}
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  {sermon.video_url && (
+                    <div className="flex items-center gap-1">
+                      <a
+                        href={sermon.video_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
+                      >
+                        <PlayCircle className="h-3 w-3" />
+                        Video
+                      </a>
+                      {hasAccess && (
+                        <button
+                          onClick={() => removeSermonFile(sermon.id, 'video')}
+                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
+                          title="Remove Video"
+                          disabled={sermonLoading === `remove-video-${sermon.id}`}
+                        >
+                          {sermonLoading === `remove-video-${sermon.id}` ? (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
+                          ) : (
+                            <X className="h-3 w-3 text-red-500" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {sermon.document_url && (
+                    <div className="flex items-center gap-1">
+                      <a
+                        href={sermon.document_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
+                      >
+                        <Download className="h-3 w-3" />
+                        Notes
+                      </a>
+                      {hasAccess && (
+                        <button
+                          onClick={() => removeSermonFile(sermon.id, 'document')}
+                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
+                          title="Remove Document"
+                          disabled={sermonLoading === `remove-document-${sermon.id}`}
+                        >
+                          {sermonLoading === `remove-document-${sermon.id}` ? (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
+                          ) : (
+                            <X className="h-3 w-3 text-red-500" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }, [sermons, sermonLoading, hasAccess, formatDate, openSermonModal, handleDeleteSermon, removeSermonFile]);
+
+  const SyncModal = useCallback(() => {
     if (!showSyncModal) return null;
 
     const event = events.find(e => e.id === showSyncModal);
@@ -2124,32 +2254,16 @@ const Events = () => {
         </div>
       </div>
     );
-  };
+  }, [showSyncModal, events, getAttendanceStats, getEventAttendees, exportEventData, syncEventToCloud, loading]);
 
-  const BulkAttendanceModal = () => {
+  const BulkAttendanceModal = useCallback(() => {
     if (!showBulkAttendanceModal) return null;
 
     const event = events.find(e => e.id === showBulkAttendanceModal);
     if (!event) return null;
 
-    const [targetMembers, setTargetMembers] = useState<Member[]>([]);
+    const targetMembers = fetchTargetMembersForEvent(event);
     
-    useEffect(() => {
-      const loadTargetMembers = async () => {
-        const membersList: Member[] = [];
-        for (const member of members) {
-          if (member.status === 'not_attending') continue;
-          const shouldAttend = await isMemberInTargetGroups(member, event);
-          if (shouldAttend) {
-            membersList.push(member);
-          }
-        }
-        setTargetMembers(membersList);
-      };
-      
-      loadTargetMembers();
-    }, [event, members]);
-
     const stats = {
       present: Object.values(bulkAttendance).filter(status => status === 'present').length,
       absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
@@ -2347,9 +2461,9 @@ const Events = () => {
         </div>
       </div>
     );
-  };
+  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
 
-  const NewcomerModal = () => {
+  const NewcomerModal = useCallback(() => {
     if (!showNewcomerModal) return null;
 
     const event = events.find(e => e.id === showNewcomerModal);
@@ -2470,9 +2584,9 @@ const Events = () => {
         </div>
       </div>
     );
-  };
+  }, [showNewcomerModal, events, newcomerFormData, handleNewcomerSubmit, loading, closeNewcomerModal]);
 
-  const AttendeeModal = () => {
+  const AttendeeModal = useCallback(() => {
     if (!showAttendeeModal) return null;
 
     const { type, eventId } = showAttendeeModal;
@@ -2557,7 +2671,7 @@ const Events = () => {
                         </div>
                       </div>
                     </div>
-                    {type === 'present' && hasAccess() && (
+                    {type === 'present' && hasAccess && (
                       <button
                         onClick={() => handleRemoveAttendee(attendee.id, eventId)}
                         className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
@@ -2582,9 +2696,9 @@ const Events = () => {
         </div>
       </div>
     );
-  };
+  }, [showAttendeeModal, events, getPresentAttendees, getAbsentAttendees, hasAccess, handleRemoveAttendee, closeAttendeeModal, getInitials]);
 
-  const DeleteConfirmModal = () => {
+  const DeleteConfirmModal = useCallback(() => {
     if (!showDeleteConfirm) return null;
 
     const event = events.find(e => e.id === showDeleteConfirm);
@@ -2663,156 +2777,9 @@ const Events = () => {
         </div>
       </div>
     );
-  };
+  }, [showDeleteConfirm, events, getEventAttendees, sermons, handleDeleteEvent, loading]);
 
-  // Sermon List Component
-  const SermonList = () => {
-    const formatDate = (dateString: string) => {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    };
-
-    return (
-      <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sermons</h2>
-          <button
-            onClick={() => openSermonModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium"
-          >
-            <Plus className="h-4 w-4" />
-            Add Sermon
-          </button>
-        </div>
-
-        {sermons.length === 0 ? (
-          <div className="text-center py-12">
-            <BookOpen className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Sermons Yet</h3>
-            <p className="text-gray-500 dark:text-gray-500">Add your first sermon to get started</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sermons.map((sermon) => (
-              <div key={sermon.id} className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl p-6 hover:shadow-lg transition-all duration-300">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-gray-900 dark:text-white text-lg mb-1">
-                      {sermon.title}
-                    </h3>
-                    <p className="text-blue-600 dark:text-blue-400 text-sm">
-                      {sermon.events?.name || 'Standalone Sermon'}
-                    </p>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => openSermonModal(undefined, sermon)}
-                      className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors duration-150"
-                      title="Edit Sermon"
-                      disabled={sermonLoading === sermon.id}
-                    >
-                      <Edit className="h-4 w-4 text-blue-500" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteSermon(sermon.id)}
-                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors duration-150"
-                      title="Delete Sermon"
-                      disabled={sermonLoading === sermon.id}
-                    >
-                      {sermonLoading === sermon.id ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500" />
-                      ) : (
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <User className="h-3 w-3" />
-                    <span>By {sermon.pastor_name}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <CalendarIcon className="h-3 w-3" />
-                    <span>{formatDate(sermon.sermon_date)}</span>
-                  </div>
-                </div>
-
-                <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-3">
-                  {sermon.summary}
-                </p>
-
-                <div className="flex flex-wrap gap-2">
-                  {sermon.video_url && (
-                    <div className="flex items-center gap-1">
-                      <a
-                        href={sermon.video_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-200 dark:hover:bg-purple-800/30 transition-all duration-200"
-                      >
-                        <PlayCircle className="h-3 w-3" />
-                        Video
-                      </a>
-                      {hasAccess() && (
-                        <button
-                          onClick={() => removeSermonFile(sermon.id, 'video')}
-                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
-                          title="Remove Video"
-                          disabled={sermonLoading === `remove-video-${sermon.id}`}
-                        >
-                          {sermonLoading === `remove-video-${sermon.id}` ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
-                          ) : (
-                            <X className="h-3 w-3 text-red-500" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {sermon.document_url && (
-                    <div className="flex items-center gap-1">
-                      <a
-                        href={sermon.document_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-sm hover:bg-green-200 dark:hover:bg-green-800/30 transition-all duration-200"
-                      >
-                        <Download className="h-3 w-3" />
-                        Notes
-                      </a>
-                      {hasAccess() && (
-                        <button
-                          onClick={() => removeSermonFile(sermon.id, 'document')}
-                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors duration-150"
-                          title="Remove Document"
-                          disabled={sermonLoading === `remove-document-${sermon.id}`}
-                        >
-                          {sermonLoading === `remove-document-${sermon.id}` ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-500" />
-                          ) : (
-                            <X className="h-3 w-3 text-red-500" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const PamphletModal = () => {
+  const PamphletModal = useCallback(() => {
     if (!viewingPamphlet) return null;
 
     return (
@@ -2854,7 +2821,7 @@ const Events = () => {
         </div>
       </div>
     );
-  };
+  }, [viewingPamphlet, closePamphletModal]);
 
   if (authLoading) {
     return (
@@ -2881,7 +2848,7 @@ const Events = () => {
     );
   }
 
-  if (!hasAccess()) {
+  if (!hasAccess) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
         <div className="max-w-md text-center">
@@ -2900,6 +2867,15 @@ const Events = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+      {loading && events.length === 0 && !showEventForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-8">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading events...</p>
+          </div>
+        </div>
+      )}
+      
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -3204,22 +3180,15 @@ const Events = () => {
           </div>
         )}
 
-        {loading && events.length === 0 && (
-          <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading events...</p>
+        {!loading && events.length === 0 && !showEventForm ? (
+          <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
+            <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
+            <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
           </div>
-        )}
-
-        <div className="space-y-6">
-          {!loading && events.length === 0 ? (
-            <div className="text-center py-12 bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl">
-              <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">No Events Yet</h3>
-              <p className="text-gray-500 dark:text-gray-500">Create your first event to get started</p>
-            </div>
-          ) : (
-            events.map((event) => {
+        ) : (
+          <div className="space-y-6">
+            {events.map((event) => {
               const scopeBadge = getEventScopeBadge(event);
               const statusBadge = getEventStatusBadge(event);
               const ScopeIcon = scopeBadge.icon;
@@ -3342,7 +3311,7 @@ const Events = () => {
                                 <FileText className="h-4 w-4" />
                                 Download
                               </a>
-                              {hasAccess() && (
+                              {hasAccess && (
                                 <button
                                   onClick={() => deletePamphlet(event.id)}
                                   className="inline-flex items-center gap-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-800/30 transition-all duration-200"
@@ -3356,7 +3325,7 @@ const Events = () => {
                         </div>
                       )}
 
-                      {hasAccess() && !event.pamphlet_url && (
+                      {hasAccess && !event.pamphlet_url && (
                         <div className="mt-4">
                           <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-200 dark:hover:bg-blue-800/30 transition-all duration-200 cursor-pointer">
                             <Upload className="h-4 w-4" />
@@ -3433,7 +3402,7 @@ const Events = () => {
                             <User className="h-4 w-4" />
                             Add Newcomer
                           </button>
-                          {hasAccess() && (
+                          {hasAccess && (
                             <button
                               onClick={() => handleCompleteEvent(event.id)}
                               className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
@@ -3458,7 +3427,7 @@ const Events = () => {
                         <Upload className="h-4 w-4" />
                         Sync to Cloud
                       </button>
-                      {hasAccess() && (
+                      {hasAccess && (
                         <button
                           onClick={() => setShowDeleteConfirm(event.id)}
                           className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-sm"
@@ -3675,9 +3644,9 @@ const Events = () => {
                   )}
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
 
       <SermonModal
