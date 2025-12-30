@@ -353,6 +353,185 @@ const SermonModal = ({
   );
 };
 
+interface NewcomerModalProps {
+  showNewcomerModal: string | null;
+  closeNewcomerModal: () => void;
+  handleNewcomerSubmit: (newcomerData: {
+    name: string;
+    surname: string;
+    phone: string;
+    login_username: string;
+    notes: string;
+  }, eventId: string) => Promise<void>;
+  loading: boolean;
+  eventName?: string;
+}
+
+const NewcomerModal = ({ 
+  showNewcomerModal, 
+  closeNewcomerModal, 
+  handleNewcomerSubmit, 
+  loading,
+  eventName 
+}: NewcomerModalProps) => {
+  const [newcomerFormData, setNewcomerFormData] = useState({
+    name: '',
+    surname: '',
+    phone: '',
+    login_username: '',
+    notes: ''
+  });
+
+  useEffect(() => {
+    if (!showNewcomerModal) {
+      // Reset form when modal closes
+      setNewcomerFormData({
+        name: '',
+        surname: '',
+        phone: '',
+        login_username: '',
+        notes: ''
+      });
+    }
+  }, [showNewcomerModal]);
+
+  if (!showNewcomerModal) return null;
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setNewcomerFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await handleNewcomerSubmit(newcomerFormData, showNewcomerModal);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+            Add Newcomer - {eventName || 'Event'}
+          </h3>
+          <button
+            onClick={closeNewcomerModal}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                First Name *
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  name="name"
+                  value={newcomerFormData.name}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter first name"
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Last Name *
+              </label>
+              <input
+                type="text"
+                name="surname"
+                value={newcomerFormData.surname}
+                onChange={handleChange}
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                placeholder="Enter last name"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Phone Number
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="tel"
+                  name="phone"
+                  value={newcomerFormData.phone}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter phone number"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="email"
+                  name="login_username"
+                  value={newcomerFormData.login_username}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  placeholder="Enter email address"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Additional Notes
+            </label>
+            <textarea
+              name="notes"
+              value={newcomerFormData.notes}
+              onChange={handleChange}
+              rows={3}
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+              placeholder="Any additional notes about the newcomer..."
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors disabled:opacity-50 font-medium"
+            >
+              <User className="h-4 w-4" />
+              {loading ? 'Adding Newcomer...' : 'Add Newcomer'}
+            </button>
+            <button
+              type="button"
+              onClick={closeNewcomerModal}
+              className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
@@ -426,13 +605,8 @@ const Events = () => {
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
 
-  const [newcomerFormData, setNewcomerFormData] = useState({
-    name: '',
-    surname: '',
-    phone: '',
-    login_username: '',
-    notes: ''
-  });
+  // Track if we've set the Sunday service name
+  const [isSundayServiceSet, setIsSundayServiceSet] = useState(false);
 
   // Optimize access check
   const hasAccess = useMemo(() => {
@@ -1535,8 +1709,17 @@ const Events = () => {
     setSuccess(null);
     
     try {
+      // For Sunday service, use "Sunday" if name is empty or use the user's input
+      const eventName = eventFormData.eventType === 'sunday' && !eventFormData.name.trim() 
+        ? 'Sunday' 
+        : eventFormData.name.trim();
+
+      if (!eventName) {
+        throw new Error('Event name is required');
+      }
+
       const eventData = {
-        name: eventFormData.name.trim(),
+        name: eventName,
         topic: eventFormData.topic.trim() || null,
         event_date: eventFormData.eventDate,
         event_time: eventFormData.eventTime,
@@ -1575,6 +1758,7 @@ const Events = () => {
         targetMinistryGroups: [],
         targetDepartments: [],
       });
+      setIsSundayServiceSet(false);
       
       await fetchEvents();
       setSuccess('Event created successfully!');
@@ -1762,19 +1946,17 @@ const Events = () => {
 
   const closeNewcomerModal = useCallback(() => {
     setShowNewcomerModal(null);
-    setNewcomerFormData({
-      name: '',
-      surname: '',
-      phone: '',
-      login_username: '',
-      notes: ''
-    });
   }, []);
 
-  const handleNewcomerSubmit = useCallback(async (e: React.FormEvent, eventId: string) => {
-    e.preventDefault();
-
-    if (!newcomerFormData.name.trim() || !newcomerFormData.surname.trim()) {
+  // UPDATED handleNewcomerSubmit to accept form data as parameter
+  const handleNewcomerSubmit = useCallback(async (newcomerData: {
+    name: string;
+    surname: string;
+    phone: string;
+    login_username: string;
+    notes: string;
+  }, eventId: string) => {
+    if (!newcomerData.name.trim() || !newcomerData.surname.trim()) {
       setError('Name and surname are required');
       setTimeout(() => setError(null), 3000);
       return;
@@ -1786,20 +1968,20 @@ const Events = () => {
 
     try {
       let existingMember = null;
-      if (newcomerFormData.login_username.trim()) {
+      if (newcomerData.login_username.trim()) {
         const { data: login_usernameMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('login_username', newcomerFormData.login_username.trim())
+          .eq('login_username', newcomerData.login_username.trim())
           .single();
         existingMember = login_usernameMatch;
       }
       
-      if (!existingMember && newcomerFormData.phone.trim()) {
+      if (!existingMember && newcomerData.phone.trim()) {
         const { data: phoneMatch } = await supabase
           .from('members')
           .select('*')
-          .eq('phone', newcomerFormData.phone.trim())
+          .eq('phone', newcomerData.phone.trim())
           .single();
         existingMember = phoneMatch;
       }
@@ -1810,10 +1992,10 @@ const Events = () => {
         memberId = existingMember.id;
       } else {
         const memberPayload = {
-          name: newcomerFormData.name.trim(),
-          surname: newcomerFormData.surname.trim(),
-          phone: newcomerFormData.phone.trim() || null,
-          login_username: newcomerFormData.login_username.trim() || null,
+          name: newcomerData.name.trim(),
+          surname: newcomerData.surname.trim(),
+          phone: newcomerData.phone.trim() || null,
+          login_username: newcomerData.login_username.trim() || null,
           status: 'newcomer' as const,
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
@@ -1860,10 +2042,10 @@ const Events = () => {
       // Add the new attendee to state
       const memberData = existingMember || { 
         id: memberId, 
-        name: newcomerFormData.name.trim(), 
-        surname: newcomerFormData.surname.trim(),
-        login_username: newcomerFormData.login_username.trim() || null,
-        phone: newcomerFormData.phone.trim() || null,
+        name: newcomerData.name.trim(), 
+        surname: newcomerData.surname.trim(),
+        login_username: newcomerData.login_username.trim() || null,
+        phone: newcomerData.phone.trim() || null,
         status: 'newcomer' as const,
         cell_group_id: null,
         ministry_group_names: []
@@ -1889,7 +2071,7 @@ const Events = () => {
     } finally {
       setLoading(false);
     }
-  }, [newcomerFormData, fetchMembers, closeNewcomerModal]);
+  }, [fetchMembers, closeNewcomerModal]);
 
   const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
@@ -2213,7 +2395,7 @@ const Events = () => {
                 <div className="text-sm text-gray-600 dark:text-gray-400">Total Registered</div>
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.firstTimers}</div>
+                <div className="text-2xl font-bold text-gray-900 dark:text-gray-400">{stats.firstTimers}</div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">First Timers</div>
               </div>
             </div>
@@ -2462,129 +2644,6 @@ const Events = () => {
       </div>
     );
   }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
-
-  const NewcomerModal = useCallback(() => {
-    if (!showNewcomerModal) return null;
-
-    const event = events.find(e => e.id === showNewcomerModal);
-    if (!event) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-              Add Newcomer - {event.name}
-            </h3>
-            <button
-              onClick={closeNewcomerModal}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
-            >
-              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-            </button>
-          </div>
-
-          <form onSubmit={(e) => handleNewcomerSubmit(e, showNewcomerModal)} className="p-6 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  First Name *
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={newcomerFormData.name}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, name: e.target.value })}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter first name"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Last Name *
-                </label>
-                <input
-                  type="text"
-                  value={newcomerFormData.surname}
-                  onChange={(e) => setNewcomerFormData({ ...newcomerFormData, surname: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  placeholder="Enter last name"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Phone Number
-                </label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="tel"
-                    value={newcomerFormData.phone}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, phone: e.target.value })}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter phone number"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="email"
-                    value={newcomerFormData.login_username}
-                    onChange={(e) => setNewcomerFormData({ ...newcomerFormData, login_username: e.target.value })}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter email address"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Additional Notes
-              </label>
-              <textarea
-                value={newcomerFormData.notes}
-                onChange={(e) => setNewcomerFormData({ ...newcomerFormData, notes: e.target.value })}
-                rows={3}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                placeholder="Any additional notes about the newcomer..."
-              />
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors disabled:opacity-50 font-medium"
-              >
-                <User className="h-4 w-4" />
-                {loading ? 'Adding Newcomer...' : 'Add Newcomer'}
-              </button>
-              <button
-                type="button"
-                onClick={closeNewcomerModal}
-                className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }, [showNewcomerModal, events, newcomerFormData, handleNewcomerSubmit, loading, closeNewcomerModal]);
 
   const AttendeeModal = useCallback(() => {
     if (!showAttendeeModal) return null;
@@ -2931,7 +2990,16 @@ const Events = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button
                       type="button"
-                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'sunday', name: 'Sunday' })}
+                      onClick={() => {
+                        setEventFormData({ 
+                          ...eventFormData, 
+                          eventType: 'sunday',
+                          name: isSundayServiceSet ? eventFormData.name : 'Sunday'
+                        });
+                        if (!isSundayServiceSet) {
+                          setIsSundayServiceSet(true);
+                        }
+                      }}
                       className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-200"
                     >
                       <CalendarIcon className="h-8 w-8 text-blue-600" />
@@ -2942,7 +3010,7 @@ const Events = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'other', name: '' })}
+                      onClick={() => setEventFormData({ ...eventFormData, eventType: 'other' })}
                       className="flex items-center justify-center gap-3 p-6 border-2 border-gray-300 dark:border-gray-600 rounded-xl hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200"
                     >
                       <Plus className="h-8 w-8 text-purple-600" />
@@ -2963,7 +3031,14 @@ const Events = () => {
                     </span>
                     <button
                       type="button"
-                      onClick={() => setEventFormData({ ...eventFormData, eventType: '', name: '' })}
+                      onClick={() => {
+                        setEventFormData({ 
+                          ...eventFormData, 
+                          eventType: '', 
+                          name: '' 
+                        });
+                        setIsSundayServiceSet(false);
+                      }}
                       className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm underline"
                     >
                       Change type
@@ -2972,10 +3047,24 @@ const Events = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {eventFormData.eventType === 'sunday' ? (
                       <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
-                        <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white">
-                          Sunday
-                        </div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name *</label>
+                        <input
+                          type="text"
+                          value={eventFormData.name}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setEventFormData({ ...eventFormData, name: value });
+                            if (value !== 'Sunday') {
+                              setIsSundayServiceSet(true);
+                            }
+                          }}
+                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          placeholder="Enter event name (default: Sunday)"
+                          required
+                          minLength={2}
+                          maxLength={100}
+                        />
+                        <p className="text-xs text-gray-500">Default name is "Sunday" but you can customize it</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -3659,9 +3748,18 @@ const Events = () => {
         uploadingSermonFile={uploadingSermonFile}
         handleSermonSubmit={handleSermonSubmit}
       />
+
+      {/* Use the separate NewcomerModal component */}
+      <NewcomerModal
+        showNewcomerModal={showNewcomerModal}
+        closeNewcomerModal={closeNewcomerModal}
+        handleNewcomerSubmit={handleNewcomerSubmit}
+        loading={loading}
+        eventName={showNewcomerModal ? events.find(e => e.id === showNewcomerModal)?.name : undefined}
+      />
+
       <PamphletModal />
       <BulkAttendanceModal />
-      <NewcomerModal />
       <AttendeeModal />
       <SyncModal />
       <DeleteConfirmModal />
