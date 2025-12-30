@@ -616,6 +616,19 @@ const Events = () => {
     targetDepartments: [] as string[],
   });
 
+  // Add the missing sermonFormData state declaration
+  const [sermonFormData, setSermonFormData] = useState({
+    title: '',
+    summary: '',
+    pastorName: '',
+    sermonDate: '',
+    eventId: '',
+    videoFile: null as File | null,
+    documentFile: null as File | null,
+    existingVideoUrl: '',
+    existingDocumentUrl: '',
+  });
+
   const [bulkAttendanceSearch, setBulkAttendanceSearch] = useState('');
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
