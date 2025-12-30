@@ -44,6 +44,10 @@ interface Member {
   status?: string | null;
   admin_role?: string | null;
   invited_by?: string | null;
+  first_time_visit_date?: string | null;
+  is_permanent_member?: boolean;
+  is_leader?: boolean;
+  status_date?: string | null;
 }
 
 interface GroupAttendanceRecord {
@@ -64,6 +68,46 @@ interface GroupReport {
   next_meeting_date: string | null;
   created_at: string | null;
 }
+
+interface AuditLog {
+  id: string;
+  table_name: string;
+  record_id: string;
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC';
+  old_data: any;
+  new_data: any;
+  user_id: string | null;
+  created_at: string;
+}
+
+// Audit Log Functions
+const logAuditEvent = async (
+  tableName: string,
+  recordId: string,
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC',
+  oldData: any = null,
+  newData: any = null,
+  userId: string | null = null
+) => {
+  try {
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert([{
+        table_name: tableName,
+        record_id: recordId,
+        action: action,
+        old_data: oldData,
+        new_data: newData,
+        user_id: userId
+      }]);
+
+    if (error) {
+      console.error('Failed to log audit event:', error);
+    }
+  } catch (error) {
+    console.error('Audit logging error:', error);
+  }
+};
 
 // New Group Creation Component
 interface CreateGroupModalProps {
@@ -168,8 +212,17 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
       if (error) throw error;
 
+      // Log audit event
+      await logAuditEvent('cell_groups', data.id, 'INSERT', null, newGroup, userId);
+
       // If a leader was selected, update their group assignment and role
       if (formData.leader_id) {
+        const { data: oldLeaderData } = await supabase
+          .from('members')
+          .select('*')
+          .eq('id', formData.leader_id)
+          .single();
+
         await supabase
           .from('members')
           .update({ 
@@ -178,6 +231,17 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
             updated_at: new Date().toISOString()
           })
           .eq('id', formData.leader_id);
+
+        // Log leader update
+        if (oldLeaderData) {
+          const newLeaderData = {
+            ...oldLeaderData,
+            cell_group_id: data.id,
+            admin_role: 'group_leader',
+            updated_at: new Date().toISOString()
+          };
+          await logAuditEvent('members', formData.leader_id, 'UPDATE', oldLeaderData, newLeaderData, userId);
+        }
       }
 
       setFormData({
@@ -405,6 +469,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
   });
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
   const [previousLeaderId, setPreviousLeaderId] = useState<string | null>(null);
+  const { profile } = useAuth();
 
   useEffect(() => {
     if (isOpen && group) {
@@ -462,6 +527,13 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
     try {
       setLoading(true);
       
+      // Get old group data for audit log
+      const { data: oldGroupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', group.id)
+        .single();
+
       // Check if group with same name already exists (excluding current group)
       const { data: existingGroup } = await supabase
         .from('cell_groups')
@@ -492,6 +564,9 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
       if (error) throw error;
 
+      // Log audit event
+      await logAuditEvent('cell_groups', group.id, 'UPDATE', oldGroupData, updatedGroup, profile?.id || null);
+
       // Handle leader assignment changes
       if (previousLeaderId !== formData.leader_id) {
         // Remove previous leader's group assignment and revert role
@@ -499,7 +574,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
           // Get previous leader's current role
           const { data: previousLeader } = await supabase
             .from('members')
-            .select('admin_role')
+            .select('*')
             .eq('id', previousLeaderId)
             .single();
           
@@ -509,14 +584,22 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             newRole = 'member';
           }
           
+          const updatedPreviousLeader = {
+            cell_group_id: null,
+            admin_role: newRole,
+            updated_at: new Date().toISOString()
+          };
+          
           await supabase
             .from('members')
-            .update({ 
-              cell_group_id: null,
-              admin_role: newRole,
-              updated_at: new Date().toISOString()
-            })
+            .update(updatedPreviousLeader)
             .eq('id', previousLeaderId);
+
+          // Log previous leader update
+          await logAuditEvent('members', previousLeaderId, 'UPDATE', previousLeader, {
+            ...previousLeader,
+            ...updatedPreviousLeader
+          }, profile?.id || null);
         }
 
         // Assign new leader
@@ -524,7 +607,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
           // Check if new leader is already in another group
           const { data: newLeader } = await supabase
             .from('members')
-            .select('cell_group_id')
+            .select('*')
             .eq('id', formData.leader_id)
             .single();
           
@@ -533,14 +616,22 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             return;
           }
           
+          const updatedNewLeader = {
+            cell_group_id: group.id,
+            admin_role: 'group_leader',
+            updated_at: new Date().toISOString()
+          };
+          
           await supabase
             .from('members')
-            .update({ 
-              cell_group_id: group.id,
-              admin_role: 'group_leader',
-              updated_at: new Date().toISOString()
-            })
+            .update(updatedNewLeader)
             .eq('id', formData.leader_id);
+
+          // Log new leader update
+          await logAuditEvent('members', formData.leader_id, 'UPDATE', newLeader, {
+            ...newLeader,
+            ...updatedNewLeader
+          }, profile?.id || null);
         }
       }
 
@@ -722,6 +813,7 @@ interface DeleteGroupModalProps {
 const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
+  const { profile } = useAuth();
 
   useEffect(() => {
     if (isOpen && group) {
@@ -761,12 +853,19 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
     try {
       setLoading(true);
       
+      // Get group data for audit log
+      const { data: groupData } = await supabase
+        .from('cell_groups')
+        .select('*')
+        .eq('id', group.id)
+        .single();
+
       // Remove leader assignment if exists
       if (group.leader_id) {
         // Get leader's current role
         const { data: leader } = await supabase
           .from('members')
-          .select('admin_role')
+          .select('*')
           .eq('id', group.leader_id)
           .single();
         
@@ -776,14 +875,22 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
           newRole = 'member';
         }
         
+        const updatedLeader = {
+          cell_group_id: null,
+          admin_role: newRole,
+          updated_at: new Date().toISOString()
+        };
+        
         await supabase
           .from('members')
-          .update({ 
-            cell_group_id: null,
-            admin_role: newRole,
-            updated_at: new Date().toISOString()
-          })
+          .update(updatedLeader)
           .eq('id', group.leader_id);
+
+        // Log leader update
+        await logAuditEvent('members', group.leader_id, 'UPDATE', leader, {
+          ...leader,
+          ...updatedLeader
+        }, profile?.id || null);
       }
 
       // Delete the group
@@ -793,6 +900,9 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
         .eq('id', group.id);
 
       if (error) throw error;
+
+      // Log group deletion
+      await logAuditEvent('cell_groups', group.id, 'DELETE', groupData, null, profile?.id || null);
 
       onConfirm();
     } catch (error: any) {
@@ -883,7 +993,7 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
 
 // Group Meeting Creation Step
 const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
-  const { canCreateGroupMeetings } = useAuth();
+  const { canCreateGroupMeetings, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     meeting_date: '',
@@ -945,13 +1055,16 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         status: 'scheduled'
       };
 
-      const { error } = await supabase
+      const { data: meetingData, error } = await supabase
         .from('meetings')
         .insert([newMeeting])
         .select()
         .single();
 
       if (error) throw error;
+
+      // Log audit event
+      await logAuditEvent('meetings', meetingData.id, 'INSERT', null, newMeeting, profile?.id || null);
 
       setFormData({
         meeting_date: '',
@@ -1104,7 +1217,7 @@ interface GroupAttendanceStepProps {
 }
 
 const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
-  const { canManageGroupAttendance } = useAuth();
+  const { canManageGroupAttendance, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
@@ -1241,17 +1354,43 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         return;
       }
 
+      // Get old member data for audit log
+      const { data: oldMemberData } = await supabase
+        .from('members')
+        .select('*')
+        .eq('id', member.id)
+        .single();
+
+      const updatedMember = {
+        cell_group_id: group.id,
+        updated_at: new Date().toISOString()
+      };
+
       const { error } = await supabase
         .from('members')
-        .update({ cell_group_id: group.id })
+        .update(updatedMember)
         .eq('id', member.id);
 
       if (error) throw error;
+
+      // Log audit event
+      await logAuditEvent('members', member.id, 'UPDATE', oldMemberData, {
+        ...oldMemberData,
+        ...updatedMember
+      }, profile?.id || null);
+
+      // Add member to local state immediately
+      const newMember = {
+        ...member,
+        cell_group_id: group.id,
+        updated_at: new Date().toISOString()
+      };
       
-      await loadGroupMembers();
+      setGroupMembers(prev => [...prev, newMember]);
+      setAttendance(prev => ({ ...prev, [member.id]: 'present' }));
+      
       setShowAddAttendeeModal(false);
       setSearchMemberTerm('');
-      setAttendance(prev => ({ ...prev, [member.id]: 'present' }));
       onError('Member added to group successfully!');
     } catch (error: any) {
       onError('Failed to add member to group: ' + error.message);
@@ -1274,6 +1413,13 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
     try {
       setLoading(true);
+      
+      // Get existing attendance for audit logging
+      const { data: existingAttendance } = await supabase
+        .from('meeting_attendance')
+        .select('*')
+        .eq('meeting_id', selectedMeeting.id);
+
       const attendanceRecords = groupMembers.map(member => ({
         meeting_id: selectedMeeting.id,
         member_id: member.id,
@@ -1289,25 +1435,57 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (deleteError) throw deleteError;
 
+      // Log deletion of old attendance records
+      if (existingAttendance && existingAttendance.length > 0) {
+        for (const record of existingAttendance) {
+          await logAuditEvent('meeting_attendance', record.id, 'DELETE', record, null, profile?.id || null);
+        }
+      }
+
       // Then insert new attendance records
-      const { error: insertError } = await supabase
+      const { data: newAttendance, error: insertError } = await supabase
         .from('meeting_attendance')
-        .insert(attendanceRecords);
+        .insert(attendanceRecords)
+        .select();
 
-if (insertError) throw insertError;
+      if (insertError) throw insertError;
 
-// Update the meeting status to completed
-await supabase
-  .from('meetings')
-  .update({ status: 'completed' })
-  .eq('id', selectedMeeting.id);
+      // Log creation of new attendance records
+      if (newAttendance) {
+        for (const record of newAttendance) {
+          await logAuditEvent('meeting_attendance', record.id, 'INSERT', null, record, profile?.id || null);
+        }
+      }
 
-// Reload attendance data after saving to ensure state is synced
-await loadExistingAttendance();
+      // Update the meeting status to completed
+      const { data: oldMeetingData } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('id', selectedMeeting.id)
+        .single();
 
-// Call the success callback AFTER the reload completes
-onAttendanceSaved();
-onError('Attendance saved successfully!');
+      const updatedMeeting = {
+        status: 'completed',
+        updated_at: new Date().toISOString()
+      };
+
+      await supabase
+        .from('meetings')
+        .update(updatedMeeting)
+        .eq('id', selectedMeeting.id);
+
+      // Log meeting update
+      await logAuditEvent('meetings', selectedMeeting.id, 'UPDATE', oldMeetingData, {
+        ...oldMeetingData,
+        ...updatedMeeting
+      }, profile?.id || null);
+
+      // Reload attendance data after saving to ensure state is synced
+      await loadExistingAttendance();
+
+      // Call the success callback AFTER the reload completes
+      onAttendanceSaved();
+      onError('Attendance saved successfully!');
     } catch (error: any) {
       onError('Failed to save group attendance: ' + error.message);
     } finally {
@@ -1589,7 +1767,7 @@ onError('Attendance saved successfully!');
                         disabled={loading || !canManageGroupAttendance(group.id)}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
                       >
-                        Add to Group
+                        + Add to Group
                       </button>
                     </div>
                   </div>
@@ -1612,7 +1790,7 @@ interface GroupNewcomerStepProps {
 }
 
 const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
-  const { canAddGroupNewcomers } = useAuth();
+  const { canAddGroupNewcomers, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -1625,6 +1803,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   });
   const [allChurchMembers, setAllChurchMembers] = useState<Member[]>([]);
   const [searchInviterTerm, setSearchInviterTerm] = useState('');
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     loadAllChurchMembers();
@@ -1647,6 +1826,8 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    // Reset submitted state when user starts typing
+    if (submitted) setSubmitted(false);
   };
 
   const filteredInviters = allChurchMembers.filter(member =>
@@ -1684,21 +1865,32 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       }
 
       let memberId;
+      let memberData;
       
       if (existingMember) {
         // Use existing member
         memberId = existingMember.id;
         // Update member status and group assignment
-        await supabase
+        const updatedMember = {
+          status: 'newcomer',
+          cell_group_id: group.id,
+          invited_by: formData.invited_by || null,
+          first_time_visit_date: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        const { data: updatedData, error: updateError } = await supabase
           .from('members')
-          .update({ 
-            status: 'newcomer',
-            cell_group_id: group.id,
-            invited_by: formData.invited_by || null,
-            first_time_visit_date: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingMember.id);
+          .update(updatedMember)
+          .eq('id', existingMember.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        memberData = updatedData;
+
+        // Log audit event for existing member update
+        await logAuditEvent('members', memberId, 'UPDATE', existingMember, updatedData, profile?.id || null);
       } else {
         // Create new member
         const memberPayload = {
@@ -1718,7 +1910,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           status_date: new Date().toISOString()
         };
 
-        const { data: memberData, error: memberError } = await supabase
+        const { data: newMemberData, error: memberError } = await supabase
           .from('members')
           .insert([memberPayload])
           .select()
@@ -1731,26 +1923,47 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           }
           throw memberError;
         }
-        memberId = memberData.id;
+        memberId = newMemberData.id;
+        memberData = newMemberData;
+
+        // Log audit event for new member creation
+        await logAuditEvent('members', memberId, 'INSERT', null, newMemberData, profile?.id || null);
       }
 
       // Record attendance for selected meeting
       if (selectedMeeting) {
-        const { error: attendanceError } = await supabase
+        const attendancePayload = {
+          meeting_id: selectedMeeting.id,
+          member_id: memberId,
+          status: 'present',
+          notes: 'First-time group visitor - ' + (formData.notes || 'No additional notes')
+        };
+        
+        const { data: attendanceData, error: attendanceError } = await supabase
           .from('meeting_attendance')
-          .insert([{
-            meeting_id: selectedMeeting.id,
-            member_id: memberId,
-            status: 'present',
-            notes: 'First-time group visitor - ' + (formData.notes || 'No additional notes')
-          }]);
-        if (attendanceError) console.error('Failed to record attendance:', attendanceError);
+          .insert([attendancePayload])
+          .select()
+          .single();
+
+        if (attendanceError) {
+          console.error('Failed to record attendance:', attendanceError);
+        } else {
+          // Log attendance record
+          await logAuditEvent('meeting_attendance', attendanceData.id, 'INSERT', null, attendanceData, profile?.id || null);
+        }
       }
 
+      // Reset form and show success
       setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
-      setShowForm(false);
+      setSubmitted(true);
       onNewcomerAdded();
-      onError('Newcomer added successfully!');
+      
+      // Don't show success message immediately - let the user see the form reset
+      setTimeout(() => {
+        setSubmitted(false);
+        setShowForm(false);
+      }, 1500);
+      
     } catch (error: any) {
       console.error('Error adding newcomer:', error);
       onError('Failed to add newcomer: ' + (error.message || 'Unknown error'));
@@ -1785,7 +1998,10 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       {!showForm && (
         <div className="text-center">
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => {
+              setShowForm(true);
+              setSubmitted(false);
+            }}
             disabled={!canAddGroupNewcomers(group.id)}
             className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium mx-auto disabled:opacity-50"
           >
@@ -1803,141 +2019,154 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
 
       {showForm && (
         <div className="bg-white border border-gray-200 rounded-2xl p-6">
-          <h4 className="text-lg font-semibold text-gray-900 mb-4">Newcomer Information</h4>
-          <form onSubmit={addNewcomer} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
+          {submitted ? (
+            <div className="text-center py-8">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <CheckCircle className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Newcomer Added Successfully!</h3>
+              <p className="text-gray-600">The newcomer has been registered to {group.name}.</p>
+            </div>
+          ) : (
+            <>
+              <h4 className="text-lg font-semibold text-gray-900 mb-4">Newcomer Information</h4>
+              <form onSubmit={addNewcomer} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        name="name"
+                        value={formData.name}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Enter first name"
+                        required
+                        minLength={1}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
+                    <input
+                      type="text"
+                      name="surname"
+                      value={formData.surname}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Enter last name"
+                      required
+                      minLength={1}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="tel"
+                        name="phone"
+                        value={formData.phone}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Enter phone number"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Residence *</label>
+                    <div className="relative">
+                      <Home className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        name="residence"
+                        value={formData.residence}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Enter residence"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Invited By</label>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                      <input
+                        type="text"
+                        placeholder="Search for church member..."
+                        value={searchInviterTerm}
+                        onChange={(e) => setSearchInviterTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                    
+                    <select
+                      name="invited_by"
+                      value={formData.invited_by}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="">Not specified</option>
+                      {filteredInviters.map((member) => (
+                        <option key={member.id} value={`${member.name} ${member.surname}`}>
+                          {member.name} {member.surname} ({member.residence})
+                        </option>
+                      ))}
+                    </select>
+                    
+                    {filteredInviters.length === 0 && searchInviterTerm && (
+                      <p className="text-sm text-gray-500 text-center py-2">
+                        No church members found matching your search
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
                     onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter first name"
-                    required
-                    minLength={1}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Any additional notes about the newcomer..."
                   />
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
-                <input
-                  type="text"
-                  name="surname"
-                  value={formData.surname}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="Enter last name"
-                  required
-                  minLength={1}
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="tel"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter phone number"
-                  />
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    disabled={loading || !canAddGroupNewcomers(group.id)}
+                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
+                  >
+                    <Save className="h-4 w-4" />
+                    {loading ? 'Adding Newcomer...' : 'Add to Group'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
+                      setSubmitted(false);
+                    }}
+                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Residence *</label>
-                <div className="relative">
-                  <Home className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    name="residence"
-                    value={formData.residence}
-                    onChange={handleInputChange}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Enter residence"
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Invited By</label>
-              <div className="space-y-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <input
-                    type="text"
-                    placeholder="Search for church member..."
-                    value={searchInviterTerm}
-                    onChange={(e) => setSearchInviterTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-                
-                <select
-                  name="invited_by"
-                  value={formData.invited_by}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="">Not specified</option>
-                  {filteredInviters.map((member) => (
-                    <option key={member.id} value={`${member.name} ${member.surname}`}>
-                      {member.name} {member.surname} ({member.residence})
-                    </option>
-                  ))}
-                </select>
-                
-                {filteredInviters.length === 0 && searchInviterTerm && (
-                  <p className="text-sm text-gray-500 text-center py-2">
-                    No church members found matching your search
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
-              <textarea
-                name="notes"
-                value={formData.notes}
-                onChange={handleInputChange}
-                rows={3}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="Any additional notes about the newcomer..."
-              />
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="submit"
-                disabled={loading || !canAddGroupNewcomers(group.id)}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
-              >
-                <Save className="h-4 w-4" />
-                {loading ? 'Adding Newcomer...' : 'Add to Group'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
-                }}
-                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+              </form>
+            </>
+          )}
         </div>
       )}
 
@@ -1962,7 +2191,7 @@ interface GroupReportStepProps {
 }
 
 const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
-  const { canCreateGroupReports } = useAuth();
+  const { canCreateGroupReports, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
   const [existingReport, setExistingReport] = useState<GroupReport | null>(null);
@@ -2093,25 +2322,68 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       };
 
       let error;
+      let reportId;
+      
       if (existingReport) {
+        // Get old report data for audit log
+        const { data: oldReportData } = await supabase
+          .from('meeting_reports')
+          .select('*')
+          .eq('id', existingReport.id)
+          .single();
+
         const { error: updateError } = await supabase
           .from('meeting_reports')
           .update(reportPayload)
           .eq('id', existingReport.id);
         error = updateError;
+        reportId = existingReport.id;
+
+        // Log audit event for report update
+        await logAuditEvent('meeting_reports', existingReport.id, 'UPDATE', oldReportData, {
+          ...oldReportData,
+          ...reportPayload,
+          updated_at: new Date().toISOString()
+        }, profile?.id || null);
       } else {
-        const { error: insertError } = await supabase
+        const { data: newReport, error: insertError } = await supabase
           .from('meeting_reports')
-          .insert([reportPayload]);
+          .insert([reportPayload])
+          .select()
+          .single();
         error = insertError;
+        reportId = newReport?.id;
+
+        // Log audit event for new report creation
+        if (newReport) {
+          await logAuditEvent('meeting_reports', newReport.id, 'INSERT', null, newReport, profile?.id || null);
+        }
       }
 
       if (error) throw error;
 
+      // Get old meeting data for audit log
+      const { data: oldMeetingData } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('id', selectedMeeting.id)
+        .single();
+
+      const updatedMeeting = {
+        status: 'completed',
+        updated_at: new Date().toISOString()
+      };
+
       await supabase
         .from('meetings')
-        .update({ status: 'completed' })
+        .update(updatedMeeting)
         .eq('id', selectedMeeting.id);
+
+      // Log meeting update
+      await logAuditEvent('meetings', selectedMeeting.id, 'UPDATE', oldMeetingData, {
+        ...oldMeetingData,
+        ...updatedMeeting
+      }, profile?.id || null);
 
       onReportCreated();
     } catch (error: any) {
