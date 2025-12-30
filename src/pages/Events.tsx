@@ -571,6 +571,316 @@ const NewcomerModal = ({
   );
 };
 
+// BulkAttendanceModal Component (Fixed with useMemo)
+const BulkAttendanceModal = ({ 
+  showBulkAttendanceModal, 
+  closeBulkAttendanceModal,
+  events,
+  fetchTargetMembersForEvent,
+  bulkAttendanceSearch,
+  setBulkAttendanceSearch,
+  bulkAttendance,
+  handleBulkAttendanceChange,
+  saveBulkAttendance,
+  loading,
+  attendanceNotesRef,
+  getInitials
+}: {
+  showBulkAttendanceModal: string | null;
+  closeBulkAttendanceModal: () => void;
+  events: Event[];
+  fetchTargetMembersForEvent: (event: Event) => Member[];
+  bulkAttendanceSearch: string;
+  setBulkAttendanceSearch: (search: string) => void;
+  bulkAttendance: Record<string, 'present' | 'absent'>;
+  handleBulkAttendanceChange: (memberId: string, status: 'present' | 'absent') => void;
+  saveBulkAttendance: (eventId: string) => Promise<void>;
+  loading: boolean;
+  attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
+  getInitials: (name: string, surname: string) => string;
+}) => {
+  if (!showBulkAttendanceModal) return null;
+
+  const event = events.find(e => e.id === showBulkAttendanceModal);
+  if (!event) return null;
+
+  const targetMembers = fetchTargetMembersForEvent(event);
+  
+  // FIXED: Memoize filtered members calculation
+  const filteredMembers = useMemo(() => {
+    if (!bulkAttendanceSearch.trim()) return targetMembers;
+    
+    const searchLower = bulkAttendanceSearch.toLowerCase().trim();
+    
+    return targetMembers.filter(member => {
+      const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
+      return searchableText.includes(searchLower);
+    });
+  }, [targetMembers, bulkAttendanceSearch]); // Only recalculates when targetMembers or search changes
+
+  const stats = {
+    present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+    absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+    total: targetMembers.length,
+    filtered: filteredMembers.length
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <div className="min-w-0">
+            <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">
+              Bulk Attendance - {event.name}
+            </h3>
+            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1 truncate">
+              Manage attendance for all target members - {targetMembers.length} members found
+              {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
+            </p>
+          </div>
+          <button
+            onClick={closeBulkAttendanceModal}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200 flex-shrink-0 ml-2"
+          >
+            <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="p-4 sm:p-6 flex-shrink-0">
+            {/* Search Bar - Immediate filtering */}
+            <div className="mb-4">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={bulkAttendanceSearch}
+                  onChange={(e) => setBulkAttendanceSearch(e.target.value)}
+                  className="w-full px-4 py-3 pl-10 sm:pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
+                  placeholder="Search by name, surname, phone, or email..."
+                />
+                {bulkAttendanceSearch && (
+                  <button
+                    onClick={() => setBulkAttendanceSearch('')}
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                  >
+                    <X className="h-4 w-4 text-gray-500" />
+                  </button>
+                )}
+              </div>
+              {bulkAttendanceSearch && (
+                <p className="mt-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                  Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
+                <div className="text-xs sm:text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
+              </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
+                <div className="text-xs sm:text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
+                <div className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.filtered}</div>
+                <div className="text-xs sm:text-sm text-purple-700 dark:text-purple-300 font-medium">Currently Showing</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'present';
+                  });
+                  // Use functional update to ensure React batches the state update
+                  handleBulkAttendanceChange('__all__', 'present');
+                  // For immediate UI update, we need to set the state directly
+                  // Since this is a controlled component pattern, we'll handle it differently
+                  // This should be managed by parent component
+                }}
+                className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm"
+              >
+                Mark All Present
+              </button>
+              <button
+                onClick={() => {
+                  const newAttendance = { ...bulkAttendance };
+                  targetMembers.forEach(member => {
+                    newAttendance[member.id] = 'absent';
+                  });
+                  handleBulkAttendanceChange('__all__', 'absent');
+                }}
+                className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm"
+              >
+                Mark All Absent
+              </button>
+              <button
+                onClick={() => {
+                  // Clear all attendance
+                  Object.keys(bulkAttendance).forEach(memberId => {
+                    handleBulkAttendanceChange(memberId, 'present'); // Reset to default
+                  });
+                }}
+                className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
+              >
+                Clear All
+              </button>
+              {bulkAttendanceSearch && (
+                <button
+                  onClick={() => {
+                    filteredMembers.forEach(member => {
+                      handleBulkAttendanceChange(member.id, 'present');
+                    });
+                  }}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+                >
+                  Mark Filtered Present
+                </button>
+              )}
+              {bulkAttendanceSearch && (
+                <button
+                  onClick={() => {
+                    filteredMembers.forEach(member => {
+                      handleBulkAttendanceChange(member.id, 'absent');
+                    });
+                  }}
+                  className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs sm:text-sm"
+                >
+                  Mark Filtered Absent
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-4">
+            {filteredMembers.length === 0 ? (
+              <div className="text-center py-8">
+                <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
+                  {bulkAttendanceSearch 
+                    ? `No members found matching "${bulkAttendanceSearch}"` 
+                    : 'No target members found for this event.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredMembers.map((member) => (
+                  <div key={member.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
+                    <div className="flex items-center justify-between gap-3">
+                      {/* Left side - Member info */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                          {getInitials(member.name, member.surname)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                            {member.name} {member.surname}
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
+                            {member.phone && <span className="truncate">{member.phone}</span>}
+                            {member.cell_group_name && (
+                              <>
+                                <span>•</span>
+                                <span className="truncate">{member.cell_group_name}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Right side - Buttons */}
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                          className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
+                            bulkAttendance[member.id] === 'present'
+                              ? 'bg-green-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                          }`}
+                        >
+                          Present
+                        </button>
+                        <button
+                          onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                          className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
+                            bulkAttendance[member.id] === 'absent'
+                              ? 'bg-red-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                          }`}
+                        >
+                          Absent
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Notes section - only show when absent */}
+                    {bulkAttendance[member.id] === 'absent' && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                        <textarea
+                          defaultValue={attendanceNotesRef.current[member.id] || ''}
+                          onChange={(e) => {
+                            attendanceNotesRef.current[member.id] = e.target.value;
+                          }}
+                          placeholder="Reason for absence (optional)..."
+                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                          rows={1}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6 flex-shrink-0">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+              {stats.present + stats.absent} of {targetMembers.length} members marked
+            </div>
+            <div className="flex gap-3 w-full sm:w-auto">
+              <button
+                onClick={closeBulkAttendanceModal}
+                className="flex-1 sm:flex-none px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                disabled={loading || Object.keys(bulkAttendance).length === 0}
+                className="flex-1 sm:flex-none px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="h-4 w-4" />
+                    <span className="hidden sm:inline">Save Attendance</span>
+                    <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Events = () => {
   const { user, profile, isAdmin, isPastor, loading: authLoading } = useAuth();
   const [showEventForm, setShowEventForm] = useState(false);
@@ -2361,276 +2671,6 @@ const Events = () => {
     );
   }, [showSyncModal, events, getAttendanceStats, getEventAttendees, exportEventData, syncEventToCloud, loading]);
 
-  // FIXED: BulkAttendanceModal with immediate filtering and no debouncing
-  const BulkAttendanceModal = useCallback(() => {
-    if (!showBulkAttendanceModal) return null;
-
-    const event = events.find(e => e.id === showBulkAttendanceModal);
-    if (!event) return null;
-
-    const targetMembers = fetchTargetMembersForEvent(event);
-    const filteredMembers = filterTargetMembers(targetMembers, bulkAttendanceSearch);
-    
-    const stats = {
-      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
-      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
-      total: targetMembers.length,
-      filtered: filteredMembers.length
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-            <div className="min-w-0">
-              <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">
-                Bulk Attendance - {event.name}
-              </h3>
-              <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1 truncate">
-                Manage attendance for all target members - {targetMembers.length} members found
-                {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
-              </p>
-            </div>
-            <button
-              onClick={closeBulkAttendanceModal}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200 flex-shrink-0 ml-2"
-            >
-              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-            </button>
-          </div>
-          
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 sm:p-6 flex-shrink-0">
-              {/* Search Bar - Immediate filtering */}
-              <div className="mb-4">
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
-                  <input
-                    type="text"
-                    value={bulkAttendanceSearch}
-                    onChange={(e) => setBulkAttendanceSearch(e.target.value)}
-                    className="w-full px-4 py-3 pl-10 sm:pl-12 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
-                    placeholder="Search by name, surname, phone, or email..."
-                  />
-                  {bulkAttendanceSearch && (
-                    <button
-                      onClick={() => setBulkAttendanceSearch('')}
-                      className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                    >
-                      <X className="h-4 w-4 text-gray-500" />
-                    </button>
-                  )}
-                </div>
-                {bulkAttendanceSearch && (
-                  <p className="mt-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                    Found {filteredMembers.length} member{filteredMembers.length !== 1 ? 's' : ''} matching "{bulkAttendanceSearch}"
-                  </p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
-                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3 sm:p-4 text-center">
-                  <div className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
-                  <div className="text-xs sm:text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
-                </div>
-                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-3 sm:p-4 text-center">
-                  <div className="text-lg sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</div>
-                  <div className="text-xs sm:text-sm text-red-700 dark:text-red-300 font-medium">Absent</div>
-                </div>
-                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3 sm:p-4 text-center">
-                  <div className="text-lg sm:text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
-                  <div className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
-                </div>
-                <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-xl p-3 sm:p-4 text-center">
-                  <div className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.filtered}</div>
-                  <div className="text-xs sm:text-sm text-purple-700 dark:text-purple-300 font-medium">Currently Showing</div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  onClick={() => {
-                    const newAttendance = { ...bulkAttendance };
-                    targetMembers.forEach(member => {
-                      newAttendance[member.id] = 'present';
-                    });
-                    setBulkAttendance(newAttendance);
-                  }}
-                  className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm"
-                >
-                  Mark All Present
-                </button>
-                <button
-                  onClick={() => {
-                    const newAttendance = { ...bulkAttendance };
-                    targetMembers.forEach(member => {
-                      newAttendance[member.id] = 'absent';
-                    });
-                    setBulkAttendance(newAttendance);
-                  }}
-                  className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm"
-                >
-                  Mark All Absent
-                </button>
-                <button
-                  onClick={() => {
-                    setBulkAttendance({});
-                  }}
-                  className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
-                >
-                  Clear All
-                </button>
-                {bulkAttendanceSearch && (
-                  <button
-                    onClick={() => {
-                      const newAttendance = { ...bulkAttendance };
-                      filteredMembers.forEach(member => {
-                        newAttendance[member.id] = 'present';
-                      });
-                      setBulkAttendance(newAttendance);
-                    }}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
-                  >
-                    Mark Filtered Present
-                  </button>
-                )}
-                {bulkAttendanceSearch && (
-                  <button
-                    onClick={() => {
-                      const newAttendance = { ...bulkAttendance };
-                      filteredMembers.forEach(member => {
-                        newAttendance[member.id] = 'absent';
-                      });
-                      setBulkAttendance(newAttendance);
-                    }}
-                    className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs sm:text-sm"
-                  >
-                    Mark Filtered Absent
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-4">
-              {filteredMembers.length === 0 ? (
-                <div className="text-center py-8">
-                  <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
-                    {bulkAttendanceSearch 
-                      ? `No members found matching "${bulkAttendanceSearch}"` 
-                      : 'No target members found for this event.'}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {filteredMembers.map((member) => (
-                    <div key={member.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
-                      <div className="flex items-center justify-between gap-3">
-                        {/* Left side - Member info */}
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
-                            {getInitials(member.name, member.surname)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
-                              {member.name} {member.surname}
-                            </div>
-                            <div className="flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
-                              {member.phone && <span className="truncate">{member.phone}</span>}
-                              {member.cell_group_name && (
-                                <>
-                                  <span>•</span>
-                                  <span className="truncate">{member.cell_group_name}</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Right side - Buttons */}
-                        <div className="flex gap-2 flex-shrink-0">
-                          <button
-                            onClick={() => handleBulkAttendanceChange(member.id, 'present')}
-                            className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
-                              bulkAttendance[member.id] === 'present'
-                                ? 'bg-green-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            Present
-                          </button>
-                          <button
-                            onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
-                            className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
-                              bulkAttendance[member.id] === 'absent'
-                                ? 'bg-red-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
-                            }`}
-                          >
-                            Absent
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {/* Notes section - only show when absent */}
-                      {bulkAttendance[member.id] === 'absent' && (
-                        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                          <textarea
-                            defaultValue={attendanceNotesRef.current[member.id] || ''}
-                            onChange={(e) => {
-                              attendanceNotesRef.current[member.id] = e.target.value;
-                            }}
-                            placeholder="Reason for absence (optional)..."
-                            className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                            rows={1}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6 flex-shrink-0">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
-                {stats.present + stats.absent} of {targetMembers.length} members marked
-              </div>
-              <div className="flex gap-3 w-full sm:w-auto">
-                <button
-                  onClick={closeBulkAttendanceModal}
-                  className="flex-1 sm:flex-none px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
-                  disabled={loading || Object.keys(bulkAttendance).length === 0}
-                  className="flex-1 sm:flex-none px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="hidden sm:inline">Save Attendance</span>
-                      <span className="sm:hidden">Save ({Object.keys(bulkAttendance).length})</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }, [showBulkAttendanceModal, events, fetchTargetMembersForEvent, bulkAttendanceSearch, filterTargetMembers, bulkAttendance, handleBulkAttendanceChange, saveBulkAttendance, loading, closeBulkAttendanceModal]);
-
   const AttendeeModal = useCallback(() => {
     if (!showAttendeeModal) return null;
 
@@ -3548,7 +3588,23 @@ const Events = () => {
       />
 
       <PamphletModal />
-      <BulkAttendanceModal />
+      
+      {/* Use the separate BulkAttendanceModal component with useMemo optimization */}
+      <BulkAttendanceModal
+        showBulkAttendanceModal={showBulkAttendanceModal}
+        closeBulkAttendanceModal={closeBulkAttendanceModal}
+        events={events}
+        fetchTargetMembersForEvent={fetchTargetMembersForEvent}
+        bulkAttendanceSearch={bulkAttendanceSearch}
+        setBulkAttendanceSearch={setBulkAttendanceSearch}
+        bulkAttendance={bulkAttendance}
+        handleBulkAttendanceChange={handleBulkAttendanceChange}
+        saveBulkAttendance={saveBulkAttendance}
+        loading={loading}
+        attendanceNotesRef={attendanceNotesRef}
+        getInitials={getInitials}
+      />
+      
       <AttendeeModal />
       <SyncModal />
       <DeleteConfirmModal />
