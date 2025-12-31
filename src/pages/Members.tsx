@@ -15,16 +15,13 @@ interface Member {
   is_permanent_member: boolean | null;
   permanent_member_date: string | null;
   baptism: string | null;
-  cell_groups: { name: string } | null;
-  ministry_groups: { name: string } | null;
+  cell_group_name?: string | null;
   status: string | null;
   status_date: string | null;
   not_attending_reason: string | null;
   created_at: string | null;
   invited_by: string | null;
   is_hidden: boolean | null;
-  birth_date: string | null;
-  occupation: string | null;
 }
 
 interface CellGroup {
@@ -94,8 +91,6 @@ const Members = () => {
     surname: '',
     residence: '',
     phone: '',
-    birth_date: '',
-    occupation: '',
     invited_by: '',
     cell_group_id: '',
     gender: '' as 'male' | 'female' | '',
@@ -107,8 +102,6 @@ const Members = () => {
     surname: string;
     residence: string;
     phone: string;
-    birth_date: string;
-    occupation: string;
     invited_by: string;
     cell_group_id: string;
     gender: 'male' | 'female' | '';
@@ -122,8 +115,6 @@ const Members = () => {
     surname: '',
     residence: '',
     phone: '',
-    birth_date: '',
-    occupation: '',
     invited_by: '',
     cell_group_id: '',
     gender: '',
@@ -229,31 +220,15 @@ const Members = () => {
 
       const membersArray = Array.isArray(membersData) ? membersData : (membersData ? [membersData] : []);
 
-      const memberIds = membersArray?.map(m => m.id) || [];
-      let ministryGroupsMap: Record<string, { name: string }> = {};
-
-      if (memberIds.length > 0) {
-        const { data: ministryData, error: ministryError } = await supabase
-          .from('ministry_membership')
-          .select('member_id, ministry_group_name')
-          .in('member_id', memberIds);
-
-        if (!ministryError && ministryData) {
-          ministryData.forEach(item => {
-            ministryGroupsMap[item.member_id] = { name: item.ministry_group_name };
-          });
-        }
-      }
-
-      const membersWithMinistryGroups = membersArray?.map(member => ({
+      const membersWithCellGroupName = membersArray.map(member => ({
         ...member,
-        ministry_groups: ministryGroupsMap[member.id] || null
-      })) || [];
+        cell_group_name: member.cell_groups?.name || null
+      }));
 
       if (showHiddenMembers) {
-        setHiddenMembers(membersWithMinistryGroups);
+        setHiddenMembers(membersWithCellGroupName);
       } else {
-        setMembers(membersWithMinistryGroups);
+        setMembers(membersWithCellGroupName);
       }
     } catch (error: any) {
       console.error('Error fetching members:', error);
@@ -280,28 +255,12 @@ const Members = () => {
         throw membersError;
       }
 
-      const memberIds = membersData?.map(m => m.id) || [];
-      let ministryGroupsMap: Record<string, { name: string }> = {};
-
-      if (memberIds.length > 0) {
-        const { data: ministryData, error: ministryError } = await supabase
-          .from('ministry_membership')
-          .select('member_id, ministry_group_name')
-          .in('member_id', memberIds);
-
-        if (!ministryError && ministryData) {
-          ministryData.forEach(item => {
-            ministryGroupsMap[item.member_id] = { name: item.ministry_group_name };
-          });
-        }
-      }
-
-      const membersWithMinistryGroups = membersData?.map(member => ({
+      const membersWithCellGroupName = (membersData || []).map(member => ({
         ...member,
-        ministry_groups: ministryGroupsMap[member.id] || null
-      })) || [];
+        cell_group_name: member.cell_groups?.name || null
+      }));
 
-      setHiddenMembers(membersWithMinistryGroups);
+      setHiddenMembers(membersWithCellGroupName);
     } catch (error: any) {
       console.error('Error fetching hidden members:', error);
     }
@@ -359,8 +318,6 @@ const Members = () => {
         surname: formData.surname.trim(),
         residence: formData.residence.trim(),
         phone: formData.phone.trim() || null,
-        birth_date: formData.birth_date || null,
-        occupation: formData.occupation.trim() || null,
         cell_group_id: formData.cell_group_id || null,
         gender: formData.gender || null,
         invited_by: formData.invited_by.trim() || null,
@@ -433,8 +390,6 @@ const Members = () => {
       surname: member.surname,
       residence: member.residence || '',
       phone: member.phone || '',
-      birth_date: member.birth_date || '',
-      occupation: member.occupation || '',
       invited_by: member.invited_by || '',
       cell_group_id: member.cell_group_id || '',
       gender: member.gender || '',
@@ -448,7 +403,7 @@ const Members = () => {
     if (member.id) {
       try {
         const { data: ministryData, error } = await supabase
-          .from('ministry_membership')
+          .from('ministry_group_members')
           .select('ministry_group_id')
           .eq('member_id', member.id)
           .maybeSingle();
@@ -501,8 +456,6 @@ const Members = () => {
         surname: editFormData.surname.trim(),
         residence: editFormData.residence.trim(),
         phone: editFormData.phone.trim() || null,
-        birth_date: editFormData.birth_date || null,
-        occupation: editFormData.occupation.trim() || null,
         cell_group_id: editFormData.cell_group_id || null,
         gender: editFormData.gender || null,
         invited_by: editFormData.invited_by.trim() || null,
@@ -591,8 +544,6 @@ const Members = () => {
       surname: '',
       residence: '',
       phone: '',
-      birth_date: '',
-      occupation: '',
       invited_by: '',
       cell_group_id: '',
       gender: '',
@@ -725,11 +676,8 @@ const Members = () => {
         Residence: member.residence,
         Gender: member.gender,
         Status: member.status,
-        'Cell Group': member.cell_groups?.name,
-        'Ministry Group': member.ministry_groups?.name,
+        'Cell Group': member.cell_group_name,
         'Baptism Date': member.baptism,
-        'Birth Date': member.birth_date,
-        Occupation: member.occupation,
         'Invited By': member.invited_by,
         'Member Since': member.created_at,
         'Permanent Member': member.is_permanent_member ? 'Yes' : 'No',
@@ -769,9 +717,8 @@ const Members = () => {
       member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.cell_groups?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.ministry_groups?.name.toLowerCase().includes(searchQuery.toLowerCase());
+      member.cell_group_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesCellGroup = !selectedCellGroup || member.cell_group_id === selectedCellGroup;
     const matchesStatus = !selectedStatus || member.status === selectedStatus;
@@ -796,8 +743,6 @@ const Members = () => {
       surname: '', 
       residence: '', 
       phone: '', 
-      birth_date: '',
-      occupation: '',
       invited_by: '', 
       cell_group_id: '',
       gender: '',
@@ -956,26 +901,6 @@ const Members = () => {
                   className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
                   placeholder="Residence"
                   required
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                <input
-                  type="date"
-                  value={editFormData.birth_date}
-                  onChange={(e) => setEditFormData({ ...editFormData, birth_date: e.target.value })}
-                  className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                  placeholder="Birth date"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                <input
-                  type="text"
-                  value={editFormData.occupation}
-                  onChange={(e) => setEditFormData({ ...editFormData, occupation: e.target.value })}
-                  className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                  placeholder="Occupation"
                 />
               </div>
               <div className="flex items-center gap-3">
@@ -1156,24 +1081,6 @@ const Members = () => {
                       <span className="font-medium break-all">{member.residence}</span>
                     </div>
                   )}
-                  {member.birth_date && (
-                    <div className="flex items-center gap-3">
-                      <Calendar className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium">
-                        {new Date(member.birth_date).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric'
-                        })}
-                      </span>
-                    </div>
-                  )}
-                  {member.occupation && (
-                    <div className="flex items-center gap-3">
-                      <User className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium">{member.occupation}</span>
-                    </div>
-                  )}
                   {member.baptism && (
                     <div className="flex items-start gap-3">
                       <Droplets className="h-4 w-4 flex-shrink-0 mt-1" />
@@ -1188,14 +1095,8 @@ const Members = () => {
                   )}
                   <div className="flex items-center gap-3">
                     <MapPin className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium">{member.cell_groups?.name || 'No Cell Group'}</span>
+                    <span className="font-medium">{member.cell_group_name || 'No Cell Group'}</span>
                   </div>
-                  {member.ministry_groups?.name && (
-                    <div className="flex items-center gap-3">
-                      <User className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium">{member.ministry_groups.name}</span>
-                    </div>
-                  )}
                   {member.gender && (
                     <div className="flex items-center gap-3 text-sm">
                       <User className="h-4 w-4 flex-shrink-0" />
@@ -1498,29 +1399,6 @@ const Members = () => {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="Enter residence address"
                     required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Birth Date
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.birth_date}
-                    onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Occupation
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.occupation}
-                    onChange={(e) => setFormData({ ...formData, occupation: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Enter occupation"
                   />
                 </div>
                 <div className="space-y-2">
