@@ -39,7 +39,8 @@ export default function Login() {
   const isEventUpcoming = (eventDate: string, eventTime: string): boolean => {
     try {
       const now = new Date();
-      const eventDateTimeStr = `${eventDate}T${eventTime.padStart(5, '0')}:00`;
+      const formattedTime = formatTimeForComparison(eventTime);
+      const eventDateTimeStr = `${eventDate}T${formattedTime}:00`;
       const eventDateTime = new Date(eventDateTimeStr);
       
       // Check if the date string is valid
@@ -97,10 +98,8 @@ export default function Login() {
       try {
         setEventsLoading(true);
         const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-        const now = new Date();
         
         console.log('Fetching events from:', today);
-        console.log('Current time:', now.toISOString());
 
         // First, get all events from today onward that are not completed
         const { data: allEvents, error: eventsError } = await supabase
@@ -338,12 +337,11 @@ export default function Login() {
     return pamphletUrl;
   };
 
-  // Check if current event is upcoming
-  const isCurrentEventUpcoming = currentEvent ? 
-    isEventUpcoming(currentEvent.event_date, currentEvent.event_time) : false;
-
+  // Get current event safely
   const currentEvent = upcomingEvents[currentEventIndex];
   const pamphletUrl = currentEvent ? getPamphletUrl(currentEvent.pamphlet_url) : null;
+  const isCurrentEventUpcoming = currentEvent ? 
+    isEventUpcoming(currentEvent.event_date, currentEvent.event_time) : false;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 p-4">
@@ -542,9 +540,9 @@ export default function Login() {
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="text-xl font-bold text-gray-900 mb-1">
-                        {currentEvent.name}
+                        {currentEvent?.name || 'No Event'}
                       </h3>
-                      {currentEvent.topic && (
+                      {currentEvent?.topic && (
                         <p className="text-blue-600 font-medium">
                           {currentEvent.topic}
                         </p>
@@ -576,7 +574,7 @@ export default function Login() {
                       >
                         <img 
                           src={pamphletUrl} 
-                          alt={`${currentEvent.name} pamphlet`}
+                          alt={`${currentEvent?.name || 'Event'} pamphlet`}
                           className="w-full h-48 object-contain transition-transform duration-300 group-hover:scale-105"
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
@@ -599,42 +597,46 @@ export default function Login() {
                     </div>
                   )}
 
-                  <div className="space-y-3 text-gray-600">
-                    <div className="flex items-center gap-3">
-                      <Calendar className="h-5 w-5 text-blue-500" />
-                      <span className="font-medium">
-                        {formatDate(currentEvent.event_date)}
-                        {!isCurrentEventUpcoming && (
-                          <span className="ml-2 text-xs text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
-                            (Past)
+                  {currentEvent && (
+                    <>
+                      <div className="space-y-3 text-gray-600">
+                        <div className="flex items-center gap-3">
+                          <Calendar className="h-5 w-5 text-blue-500" />
+                          <span className="font-medium">
+                            {formatDate(currentEvent.event_date)}
+                            {!isCurrentEventUpcoming && (
+                              <span className="ml-2 text-xs text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                                (Past)
+                              </span>
+                            )}
                           </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Clock className="h-5 w-5 text-blue-500" />
+                          <span className="font-medium">
+                            {formatTime(currentEvent.event_time)}
+                          </span>
+                        </div>
+                        {currentEvent.location && (
+                          <div className="flex items-center gap-3">
+                            <MapPin className="h-5 w-5 text-blue-500" />
+                            <span className="font-medium">
+                              {currentEvent.location}
+                            </span>
+                          </div>
                         )}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Clock className="h-5 w-5 text-blue-500" />
-                      <span className="font-medium">
-                        {formatTime(currentEvent.event_time)}
-                      </span>
-                    </div>
-                    {currentEvent.location && (
-                      <div className="flex items-center gap-3">
-                        <MapPin className="h-5 w-5 text-blue-500" />
-                        <span className="font-medium">
-                          {currentEvent.location}
-                        </span>
                       </div>
-                    )}
-                  </div>
 
-                  <div className="mt-6 pt-4 border-t border-blue-100">
-                    <p className="text-sm text-gray-500">
-                      Event {currentEventIndex + 1} of {upcomingEvents.length}
-                      {!isCurrentEventUpcoming && (
-                        <span className="ml-2 text-red-500">(Past event shown for reference)</span>
-                      )}
-                    </p>
-                  </div>
+                      <div className="mt-6 pt-4 border-t border-blue-100">
+                        <p className="text-sm text-gray-500">
+                          Event {currentEventIndex + 1} of {upcomingEvents.length}
+                          {!isCurrentEventUpcoming && (
+                            <span className="ml-2 text-red-500">(Past event shown for reference)</span>
+                          )}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Navigation Arrows */}
@@ -679,57 +681,59 @@ export default function Login() {
               )}
 
               {/* Upcoming Events List */}
-              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                <h4 className="font-medium text-gray-900 text-sm mb-3">Events:</h4>
-                <div className="space-y-3 max-h-60 overflow-y-auto">
-                  {upcomingEvents.map((event, index) => {
-                    const eventPamphletUrl = getPamphletUrl(event.pamphlet_url);
-                    const isUpcoming = isEventUpcoming(event.event_date, event.event_time);
-                    
-                    return (
-                      <div
-                        key={event.id}
-                        onClick={() => setCurrentEventIndex(index)}
-                        className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
-                          index === currentEventIndex
-                            ? 'bg-white border border-blue-200 shadow-sm'
-                            : 'hover:bg-white hover:shadow-sm'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-gray-900 text-sm">
-                                {event.name}
-                              </span>
-                              {!isUpcoming && (
-                                <span className="text-xs text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">
-                                  Past
+              {upcomingEvents.length > 0 && (
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                  <h4 className="font-medium text-gray-900 text-sm mb-3">Events:</h4>
+                  <div className="space-y-3 max-h-60 overflow-y-auto">
+                    {upcomingEvents.map((event, index) => {
+                      const eventPamphletUrl = getPamphletUrl(event.pamphlet_url);
+                      const isUpcoming = isEventUpcoming(event.event_date, event.event_time);
+                      
+                      return (
+                        <div
+                          key={event.id}
+                          onClick={() => setCurrentEventIndex(index)}
+                          className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                            index === currentEventIndex
+                              ? 'bg-white border border-blue-200 shadow-sm'
+                              : 'hover:bg-white hover:shadow-sm'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-gray-900 text-sm">
+                                  {event.name}
                                 </span>
+                                {!isUpcoming && (
+                                  <span className="text-xs text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">
+                                    Past
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
+                                <Calendar className="h-3 w-3" />
+                                {formatDate(event.event_date)}
+                                <Clock className="h-3 w-3 ml-2" />
+                                {formatTime(event.event_time)}
+                              </div>
+                              {eventPamphletUrl && (
+                                <div className="flex items-center gap-1 mt-1">
+                                  <ImageIcon className="h-3 w-3 text-blue-500" />
+                                  <span className="text-xs text-blue-600">Has pamphlet</span>
+                                </div>
                               )}
                             </div>
-                            <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
-                              <Calendar className="h-3 w-3" />
-                              {formatDate(event.event_date)}
-                              <Clock className="h-3 w-3 ml-2" />
-                              {formatTime(event.event_time)}
-                            </div>
-                            {eventPamphletUrl && (
-                              <div className="flex items-center gap-1 mt-1">
-                                <ImageIcon className="h-3 w-3 text-blue-500" />
-                                <span className="text-xs text-blue-600">Has pamphlet</span>
-                              </div>
+                            {index === currentEventIndex && (
+                              <div className={`w-2 h-2 rounded-full ml-2 ${isUpcoming ? 'bg-green-600' : 'bg-gray-600'}`}></div>
                             )}
                           </div>
-                          {index === currentEventIndex && (
-                            <div className={`w-2 h-2 rounded-full ml-2 ${isUpcoming ? 'bg-green-600' : 'bg-gray-600'}`}></div>
-                          )}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Note about events */}
               <div className="text-center">
