@@ -35,59 +35,138 @@ export default function Login() {
     }
   }, [user, navigate]);
 
+  // Function to check if an event is truly upcoming (not past)
+  const isEventUpcoming = (eventDate: string, eventTime: string): boolean => {
+    try {
+      const now = new Date();
+      const eventDateTimeStr = `${eventDate}T${eventTime.padStart(5, '0')}:00`;
+      const eventDateTime = new Date(eventDateTimeStr);
+      
+      // Check if the date string is valid
+      if (isNaN(eventDateTime.getTime())) {
+        console.error('Invalid event date/time:', eventDate, eventTime);
+        return false;
+      }
+      
+      // Check if the event is in the future
+      return eventDateTime > now;
+    } catch (error) {
+      console.error('Error checking if event is upcoming:', error);
+      return false;
+    }
+  };
+
+  // Format time for comparison
+  const formatTimeForComparison = (timeString: string): string => {
+    if (!timeString) return '00:00';
+    
+    try {
+      // Handle different time formats
+      let hours: number, minutes: string;
+      
+      if (timeString.includes(':')) {
+        const [h, m] = timeString.split(':');
+        hours = parseInt(h) || 0;
+        minutes = m || '00';
+      } else if (timeString.length === 4) {
+        // Handle HHMM format
+        hours = parseInt(timeString.substring(0, 2)) || 0;
+        minutes = timeString.substring(2, 4) || '00';
+      } else if (timeString.length === 1 || timeString.length === 2) {
+        // Handle H or HH format
+        hours = parseInt(timeString) || 0;
+        minutes = '00';
+      } else {
+        return '00:00';
+      }
+      
+      // Ensure valid ranges
+      hours = Math.min(23, Math.max(0, hours));
+      minutes = minutes.padStart(2, '0');
+      
+      return `${hours.toString().padStart(2, '0')}:${minutes}`;
+    } catch (error) {
+      console.error('Error formatting time for comparison:', error);
+      return '00:00';
+    }
+  };
+
   // Fetch upcoming events
   useEffect(() => {
     const fetchUpcomingEvents = async () => {
       try {
         setEventsLoading(true);
         const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+        const now = new Date();
         
         console.log('Fetching events from:', today);
-        
-        // First, let's check if the events table exists and has data
-        const { count: totalEvents, error: countError } = await supabase
-          .from('events')
-          .select('*', { count: 'exact', head: true });
-        
-        if (countError) {
-          console.error('Error counting events:', countError);
-        } else {
-          console.log('Total events in database:', totalEvents);
-        }
+        console.log('Current time:', now.toISOString());
 
-        // Fetch upcoming events
-        const { data, error } = await supabase
+        // First, get all events from today onward that are not completed
+        const { data: allEvents, error: eventsError } = await supabase
           .from('events')
           .select('id, name, topic, event_date, event_time, location, pamphlet_url')
-          .gte('event_date', today)  // Get events from today onward
-          .eq('is_completed', false)  // Only get non-completed events
+          .gte('event_date', today)
+          .eq('is_completed', false)
           .order('event_date', { ascending: true })
-          .order('event_time', { ascending: true })
-          .limit(5);
+          .order('event_time', { ascending: true });
 
-        if (error) {
-          console.error('Supabase query error:', error);
-          throw error;
+        if (eventsError) {
+          console.error('Supabase query error:', eventsError);
+          throw eventsError;
         }
         
-        console.log('Fetched events:', data);
-        setUpcomingEvents(data || []);
+        console.log('All events from today:', allEvents);
+
+        // Filter to only show truly upcoming events (not past)
+        const upcomingEventsList = (allEvents || []).filter(event => {
+          const isUpcoming = isEventUpcoming(event.event_date, event.event_time);
+          console.log(`Event ${event.name} on ${event.event_date} at ${event.event_time}: ${isUpcoming ? 'UPCOMING' : 'PAST'}`);
+          return isUpcoming;
+        });
         
-        // If no upcoming events found, try to get the most recent upcoming events
-        if ((data || []).length === 0) {
-          console.log('No upcoming events found, trying alternative query...');
-          const { data: upcomingData, error: upcomingError } = await supabase
+        console.log('Upcoming events after filtering:', upcomingEventsList);
+        
+        // If we have upcoming events, set them
+        if (upcomingEventsList.length > 0) {
+          setUpcomingEvents(upcomingEventsList);
+        } else {
+          // If no upcoming events found, show the next event from the future
+          console.log('No upcoming events today, looking for future events...');
+          
+          // Get the next event from any future date
+          const { data: nextEvent, error: nextEventError } = await supabase
             .from('events')
             .select('id, name, topic, event_date, event_time, location, pamphlet_url')
+            .gt('event_date', today) // Only future dates
+            .eq('is_completed', false)
             .order('event_date', { ascending: true })
             .order('event_time', { ascending: true })
-            .limit(3);
+            .limit(1);
             
-          if (upcomingError) {
-            console.error('Alternative query error:', upcomingError);
+          if (nextEventError) {
+            console.error('Error fetching next event:', nextEventError);
+          }
+          
+          if (nextEvent && nextEvent.length > 0) {
+            console.log('Found future event:', nextEvent[0]);
+            setUpcomingEvents(nextEvent);
           } else {
-            console.log('Alternative query results:', upcomingData);
-            setUpcomingEvents(upcomingData || []);
+            // If still no events, try to get any event as fallback
+            console.log('No future events found, trying fallback...');
+            const { data: anyEvent, error: anyError } = await supabase
+              .from('events')
+              .select('id, name, topic, event_date, event_time, location, pamphlet_url')
+              .eq('is_completed', false)
+              .order('event_date', { ascending: false })
+              .limit(1);
+              
+            if (anyError) {
+              console.error('Fallback query error:', anyError);
+            } else if (anyEvent && anyEvent.length > 0) {
+              console.log('Fallback event:', anyEvent[0]);
+              setUpcomingEvents(anyEvent);
+            }
           }
         }
         
@@ -98,12 +177,17 @@ export default function Login() {
           const { data, error } = await supabase
             .from('events')
             .select('id, name, topic, event_date, event_time, location, pamphlet_url')
+            .order('event_date', { ascending: true })
             .limit(5);
             
           if (error) {
             console.error('Fallback query error:', error);
-          } else {
-            setUpcomingEvents(data || []);
+          } else if (data) {
+            // Filter for truly upcoming events
+            const filteredData = data.filter(event => 
+              isEventUpcoming(event.event_date, event.event_time)
+            );
+            setUpcomingEvents(filteredData.length > 0 ? filteredData : []);
           }
         } catch (fallbackError) {
           console.error('Fallback query also failed:', fallbackError);
@@ -162,26 +246,35 @@ export default function Login() {
     try {
       if (!timeString) return 'Time not available';
       
-      // Handle different time formats
-      let hours: number, minutes: string;
+      // Format time for display
+      const formattedTime = formatTimeForComparison(timeString);
       
-      if (timeString.includes(':')) {
-        const [h, m] = timeString.split(':');
-        hours = parseInt(h);
-        minutes = m || '00';
-      } else if (timeString.length === 4) {
-        // Handle HHMM format
-        hours = parseInt(timeString.substring(0, 2));
-        minutes = timeString.substring(2, 4);
-      } else {
-        return 'Invalid time format';
+      if (formattedTime === '00:00') {
+        // Try to parse the original time string for display
+        if (timeString.includes(':')) {
+          const [h, m] = timeString.split(':');
+          const hours = parseInt(h) || 0;
+          const minutes = m || '00';
+          const ampm = hours >= 12 ? 'PM' : 'AM';
+          const formattedHour = hours % 12 || 12;
+          return `${formattedHour}:${minutes.padStart(2, '0')} ${ampm}`;
+        } else if (timeString.length === 4) {
+          const hours = parseInt(timeString.substring(0, 2)) || 0;
+          const minutes = timeString.substring(2, 4) || '00';
+          const ampm = hours >= 12 ? 'PM' : 'AM';
+          const formattedHour = hours % 12 || 12;
+          return `${formattedHour}:${minutes} ${ampm}`;
+        }
+        return 'Time not specified';
       }
       
-      if (isNaN(hours)) return 'Invalid time';
-      
+      // Convert 24-hour format to 12-hour format for display
+      const [hours24, minutes] = formattedTime.split(':');
+      const hours = parseInt(hours24);
       const ampm = hours >= 12 ? 'PM' : 'AM';
       const formattedHour = hours % 12 || 12;
-      return `${formattedHour}:${minutes.padStart(2, '0')} ${ampm}`;
+      
+      return `${formattedHour}:${minutes} ${ampm}`;
     } catch (error) {
       console.error('Error formatting time:', error);
       return 'Invalid time';
@@ -244,6 +337,10 @@ export default function Login() {
     
     return pamphletUrl;
   };
+
+  // Check if current event is upcoming
+  const isCurrentEventUpcoming = currentEvent ? 
+    isEventUpcoming(currentEvent.event_date, currentEvent.event_time) : false;
 
   const currentEvent = upcomingEvents[currentEventIndex];
   const pamphletUrl = currentEvent ? getPamphletUrl(currentEvent.pamphlet_url) : null;
@@ -424,7 +521,7 @@ export default function Login() {
               <Calendar className="h-8 w-8 text-white" />
             </div>
             <h2 className="text-3xl font-bold text-gray-900">Upcoming Events</h2>
-            <p className="mt-2 text-gray-600">Stay informed about church activities</p>
+            <p className="mt-2 text-gray-600">Future church activities and services</p>
           </div>
 
           {eventsLoading ? (
@@ -435,10 +532,7 @@ export default function Login() {
             <div className="text-center py-12">
               <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 mb-2">No Upcoming Events</h3>
-              <p className="text-gray-500">Check back later for upcoming church events</p>
-              <p className="text-xs text-gray-400 mt-2">
-                Total events in system: {upcomingEvents.length}
-              </p>
+              <p className="text-gray-500">Check back later for future church events</p>
             </div>
           ) : (
             <div className="space-y-6">
@@ -457,9 +551,15 @@ export default function Login() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                        Coming Soon
-                      </span>
+                      {isCurrentEventUpcoming ? (
+                        <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                          Upcoming
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                          Past Event
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -504,6 +604,11 @@ export default function Login() {
                       <Calendar className="h-5 w-5 text-blue-500" />
                       <span className="font-medium">
                         {formatDate(currentEvent.event_date)}
+                        {!isCurrentEventUpcoming && (
+                          <span className="ml-2 text-xs text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                            (Past)
+                          </span>
+                        )}
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -525,6 +630,9 @@ export default function Login() {
                   <div className="mt-6 pt-4 border-t border-blue-100">
                     <p className="text-sm text-gray-500">
                       Event {currentEventIndex + 1} of {upcomingEvents.length}
+                      {!isCurrentEventUpcoming && (
+                        <span className="ml-2 text-red-500">(Past event shown for reference)</span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -551,27 +659,33 @@ export default function Login() {
               {/* Event Dots Indicator */}
               {upcomingEvents.length > 1 && (
                 <div className="flex justify-center gap-2">
-                  {upcomingEvents.map((event, index) => (
-                    <button
-                      key={event.id}
-                      onClick={() => setCurrentEventIndex(index)}
-                      className={`w-2 h-2 rounded-full transition-all duration-200 ${
-                        index === currentEventIndex
-                          ? 'bg-blue-600 w-6'
-                          : 'bg-gray-300 hover:bg-gray-400'
-                      }`}
-                      aria-label={`Go to event ${index + 1}`}
-                    />
-                  ))}
+                  {upcomingEvents.map((event, index) => {
+                    const isUpcoming = isEventUpcoming(event.event_date, event.event_time);
+                    return (
+                      <button
+                        key={event.id}
+                        onClick={() => setCurrentEventIndex(index)}
+                        className={`w-2 h-2 rounded-full transition-all duration-200 ${
+                          index === currentEventIndex
+                            ? isUpcoming ? 'bg-green-600 w-6' : 'bg-gray-600 w-6'
+                            : isUpcoming ? 'bg-green-300 hover:bg-green-400' : 'bg-gray-300 hover:bg-gray-400'
+                        }`}
+                        aria-label={`Go to event ${index + 1}`}
+                        title={isUpcoming ? 'Upcoming event' : 'Past event'}
+                      />
+                    );
+                  })}
                 </div>
               )}
 
               {/* Upcoming Events List */}
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                <h4 className="font-medium text-gray-900 text-sm mb-3">All Upcoming Events:</h4>
+                <h4 className="font-medium text-gray-900 text-sm mb-3">Events:</h4>
                 <div className="space-y-3 max-h-60 overflow-y-auto">
                   {upcomingEvents.map((event, index) => {
                     const eventPamphletUrl = getPamphletUrl(event.pamphlet_url);
+                    const isUpcoming = isEventUpcoming(event.event_date, event.event_time);
+                    
                     return (
                       <div
                         key={event.id}
@@ -584,10 +698,17 @@ export default function Login() {
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
-                            <div className="font-medium text-gray-900 text-sm">
-                              {event.name}
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-900 text-sm">
+                                {event.name}
+                              </span>
+                              {!isUpcoming && (
+                                <span className="text-xs text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">
+                                  Past
+                                </span>
+                              )}
                             </div>
-                            <div className="text-xs text-gray-500 flex items-center gap-2">
+                            <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
                               <Calendar className="h-3 w-3" />
                               {formatDate(event.event_date)}
                               <Clock className="h-3 w-3 ml-2" />
@@ -601,7 +722,7 @@ export default function Login() {
                             )}
                           </div>
                           {index === currentEventIndex && (
-                            <div className="w-2 h-2 rounded-full bg-blue-600 ml-2"></div>
+                            <div className={`w-2 h-2 rounded-full ml-2 ${isUpcoming ? 'bg-green-600' : 'bg-gray-600'}`}></div>
                           )}
                         </div>
                       </div>
@@ -613,7 +734,10 @@ export default function Login() {
               {/* Note about events */}
               <div className="text-center">
                 <p className="text-xs text-gray-500">
-                  Log in to view all events and manage attendance
+                  {upcomingEvents.some(e => isEventUpcoming(e.event_date, e.event_time)) 
+                    ? 'Log in to view all events and manage attendance'
+                    : 'No upcoming events scheduled. Check back later.'
+                  }
                 </p>
               </div>
             </div>
