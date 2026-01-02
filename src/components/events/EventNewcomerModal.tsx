@@ -66,11 +66,11 @@ const EventNewcomerModal: React.FC<EventNewcomerModalProps> = ({
         // Create new member
         const { data: newMember, error: memberError } = await supabase
           .from('members')
-          .insert({
+          .insert([{
             name: formData.name.trim(),
             surname: formData.surname.trim(),
             phone: formData.phone.trim() || null,
-            email: formData.email.trim() || null,
+            residence: 'Unknown',
             status: 'newcomer',
             first_time_visit_date: new Date().toISOString(),
             is_permanent_member: false,
@@ -79,7 +79,7 @@ const EventNewcomerModal: React.FC<EventNewcomerModalProps> = ({
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             status_date: new Date().toISOString()
-          })
+          }])
           .select('id')
           .single();
 

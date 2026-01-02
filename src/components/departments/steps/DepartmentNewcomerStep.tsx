@@ -37,8 +37,8 @@ interface Member {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
+  residence?: string | null;
   department_id?: string | null;
   department_role?: string;
   department_member_id?: string;
@@ -494,7 +494,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
     !departmentMembers.some(dm => dm.id === member.id) && (
       member.name.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
       member.surname.toLowerCase().includes(searchMemberTerm.toLowerCase()) ||
-      member.email?.toLowerCase().includes(searchMemberTerm.toLowerCase())
+      member.phone?.toLowerCase().includes(searchMemberTerm.toLowerCase())
     )
   );
 
@@ -596,7 +596,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                           </span>
                         </div>
                         <div className="text-sm text-gray-600">
-                          {member.email} • {member.phone}
+                          {member.phone || 'No phone'}
                         </div>
                       </div>
                       
@@ -703,7 +703,7 @@ const DepartmentAttendanceStep: React.FC<DepartmentAttendanceStepProps> = ({
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium text-gray-900">{member.name} {member.surname}</div>
-                        <div className="text-sm text-gray-600">{member.email} • {member.phone}</div>
+                        <div className="text-sm text-gray-600">{member.phone || 'No phone'}</div>
                       </div>
                       <button
                         onClick={() => addMemberToDepartment(member)}

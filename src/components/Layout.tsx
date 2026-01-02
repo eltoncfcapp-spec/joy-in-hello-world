@@ -66,7 +66,7 @@ const Layout = () => {
             <div className="px-4 py-3 bg-primary/10 rounded-lg border border-primary/20">
               <p className="text-sm text-muted-foreground">Logged in as</p>
               <p className="text-sm font-medium text-foreground truncate">
-                {profile?.name || profile?.email || 'User'}
+                {profile?.name || profile?.login_username || 'User'}
               </p>
             </div>
             <button

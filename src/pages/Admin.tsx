@@ -20,44 +20,30 @@ const cleanUUIDArray = (ids: string[]): string[] => {
 // Audit logging helper
 const logAuditEvent = async (
   action: string,
-  resource: string,
-  details: any,
-  userId?: string,
-  userIp?: string,
-  userAgent?: string
+  tableName: string,
+  recordId: string,
+  oldData?: any,
+  newData?: any
 ) => {
   try {
-    console.log('📝 Audit Log:', { action, resource, details, userId });
+    console.log('📝 Audit Log:', { action, tableName, recordId });
     
     const { error } = await supabase
       .from('audit_logs')
-      .insert({
-        user_id: userId,
+      .insert([{
         action,
-        resource,
-        details,
-        ip_address: userIp || '127.0.0.1',
-        user_agent: userAgent || navigator.userAgent,
+        table_name: tableName,
+        record_id: recordId,
+        old_data: oldData || null,
+        new_data: newData || null,
         created_at: new Date().toISOString()
-      });
+      }]);
 
     if (error) {
       console.error('❌ Failed to log audit event:', error);
     }
   } catch (error) {
     console.error('❌ Error logging audit event:', error);
-  }
-};
-
-// Get client IP address (simplified)
-const getClientIp = async (): Promise<string> => {
-  try {
-    const response = await fetch('https://api.ipify.org?format=json');
-    const data = await response.json();
-    return data.ip;
-  } catch (error) {
-    console.error('❌ Failed to get IP:', error);
-    return '127.0.0.1';
   }
 };
 
