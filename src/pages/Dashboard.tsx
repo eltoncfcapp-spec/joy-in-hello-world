@@ -7,7 +7,6 @@ import {
   ArrowUp, 
   ArrowDown, 
   X,
-  Plus,
   UserPlus,
   MapPin,
   ChevronDown,
@@ -23,17 +22,9 @@ import {
   BookOpen,
   PlayCircle,
   Phone,
-  MessageSquare,
   Home,
-  CheckCircle,
-  Clock,
-  User,
-  Image as ImageIcon,
-  HelpCircle,
-  Info,
-  Book,
-  Download as DownloadIcon,
-  ChevronRight
+  ChevronRight,
+  Image as ImageIcon
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,7 +40,7 @@ interface Member {
   cell_group_id: string | null;
   invited_by: string | null;
   created_at: string | null;
-  status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  status: string | null;
   is_hidden: boolean | null;
   admin_role?: string | null;
   permissions?: string[] | null;
@@ -87,8 +78,8 @@ interface Sermon {
   event_id: string | null;
   video_url: string | null;
   document_url: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
   events?: {
     name: string;
     topic: string | null;
@@ -170,7 +161,7 @@ const Dashboard = () => {
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
-  const [absentCount, setAbsentCount] = useState<number>(0);
+  const [_absentCount, setAbsentCount] = useState<number>(0);
   const [hiddenMembersCount, setHiddenMembersCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -387,7 +378,7 @@ const Dashboard = () => {
     const totalMembers = activeMembers.length;
     const hiddenMembersCount = hiddenMembers.length;
     const newcomers = activeMembers.filter(m => m.status === 'newcomer').length;
-    const signedMembers = activeMembers.filter(m => m.status === 'signed_member').length;
+    const _signedMembers = activeMembers.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     const totalSermons = allSermons.length;
     
@@ -559,22 +550,22 @@ const Dashboard = () => {
       if (eventsData.error) throw eventsData.error;
       if (sermonsData.error) throw sermonsData.error;
 
-      setMembers(membersData.data || []);
+      setMembers((membersData.data || []) as Member[]);
       setCellGroups(cellGroupsData.data || []);
       setUpcomingEvents(eventsData.data || []);
-      setSermons(sermonsData.data || []);
+      setSermons((sermonsData.data || []) as Sermon[]);
 
       // Load absent count and members in parallel
-      const [absentCount, absentMembersList] = await Promise.all([
+      const [absentCountResult, _absentMembersList] = await Promise.all([
         loadAbsentCount(),
         loadAbsentMembers()
       ]);
 
       // Calculate stats with the actual absent count
-      calculateStats(membersData.data || [], eventsData.data || [], sermonsData.data || [], absentCount);
+      calculateStats((membersData.data || []) as Member[], eventsData.data || [], (sermonsData.data || []) as Sermon[], absentCountResult);
       
       // Generate activities
-      generateRecentActivities(membersData.data || [], eventsData.data || [], sermonsData.data || []);
+      generateRecentActivities((membersData.data || []) as Member[], eventsData.data || [], (sermonsData.data || []) as Sermon[]);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -643,8 +634,8 @@ const Dashboard = () => {
       cell_group_id: 'cell_group_id' in member ? member.cell_group_id : null,
       invited_by: null,
       created_at: null,
-      status: 'status' in member ? member.status as any : null,
-      is_hidden: 'is_hidden' in member ? member.is_hidden : null,
+      status: 'status' in member ? (member.status as string | null) : null,
+      is_hidden: 'is_hidden' in member ? (member.is_hidden ?? null) : null,
       admin_role: undefined,
       permissions: undefined,
       assigned_groups: undefined,

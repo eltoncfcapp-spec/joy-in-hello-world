@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, Percent, UserCheck, Clock, Award, MapPin, Mail, Phone, Home, Download, RefreshCw, Eye, EyeOff, ChevronRight } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
@@ -15,7 +15,6 @@ interface AbsentMember {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
   last_attendance_date: string | null;
   consecutive_absences: number;
@@ -394,7 +393,7 @@ const Analytics = () => {
     const totalDepartments = departments.length;
     
     // Events in date range
-    const eventsInRange = events.length;
+    const _eventsInRange = events.length;
 
     // Calculate real attendance data
     const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
@@ -494,7 +493,7 @@ const Analytics = () => {
     });
 
     // Update main stats with real data including non-active members
-    const totalAllMembers = members.length + totalNonActive;
+    const _totalAllMembers = members.length + totalNonActive;
     setStats([
       { 
         icon: Users, 
@@ -946,7 +945,6 @@ const Analytics = () => {
             id: member.id,
             name: member.name,
             surname: member.surname,
-            email: member.email,
             phone: member.phone,
             last_attendance_date: lastAttendanceDate,
             consecutive_absences: consecutiveAbsences,
@@ -996,7 +994,6 @@ const Analytics = () => {
             id: member.id,
             name: member.name,
             surname: member.surname,
-            email: member.email,
             phone: member.phone,
             last_attendance_date: null,
             consecutive_absences: sundayAbsences,
@@ -1040,7 +1037,6 @@ const Analytics = () => {
             id: member.id,
             name: member.name,
             surname: member.surname,
-            email: member.email,
             phone: member.phone,
             last_attendance_date: null,
             consecutive_absences: totalAbsences,
