@@ -29,7 +29,6 @@ import {
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 
-
 // Types - Updated to match your database schema (NO EMAIL)
 interface Member {
   id: string;
@@ -133,7 +132,7 @@ const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [_selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedSermon, setSelectedSermon] = useState<Sermon | null>(null);
   const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
     events: true,
@@ -161,14 +160,14 @@ const Dashboard = () => {
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
-  const [_absentCount, setAbsentCount] = useState<number>(0);
+  const [absentCount, setAbsentCount] = useState<number>(0);
   const [hiddenMembersCount, setHiddenMembersCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
   // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
 
-  // Filter functions - UPDATED: Filter out hidden members by default
+  // Filter functions - Filter out hidden members by default
   const getFilteredMembers = () => {
     if (showHiddenMembers) {
       return members;
@@ -199,7 +198,8 @@ const Dashboard = () => {
   };
 
   // Format date for display
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
@@ -209,21 +209,16 @@ const Dashboard = () => {
     });
   };
 
-  // Load absent count - UPDATED: Exclude hidden members
-  const loadAbsentCount = async () => {
-    try {
-      const count = await getAbsentCountDirect();
-      setAbsentCount(count);
-      return count;
-    } catch (error) {
-      console.error('Error loading absent count:', error);
-      setAbsentCount(0);
-      return 0;
-    }
+  const formatShortDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric'
+    });
   };
 
-  // Direct method to get absent count - UPDATED: Exclude hidden members
-  const getAbsentCountDirect = async (): Promise<number> => {
+  // Load absent count - Exclude hidden members
+  const loadAbsentCount = async (): Promise<number> => {
     try {
       // Get the last 2 Sunday events
       const { data: sundayEvents, error: eventsError } = await supabase
@@ -281,21 +276,27 @@ const Dashboard = () => {
         }
       });
 
+      setAbsentCount(count);
       return count;
     } catch (error) {
-      console.error('Error in getAbsentCountDirect:', error);
+      console.error('Error in loadAbsentCount:', error);
+      setAbsentCount(0);
       return 0;
     }
   };
 
-  // Load absent members with details - UPDATED: Exclude hidden members by default
+  // Load absent members with details - Exclude hidden members by default
   const loadAbsentMembers = async () => {
     try {
-      // Get all Sunday Service events
+      // Get all Sunday Service events from the last month
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      
       const { data: sundayEvents, error: eventsError } = await supabase
         .from('events')
         .select('id, event_date, name')
         .ilike('name', '%sunday%')
+        .gte('event_date', oneMonthAgo.toISOString().split('T')[0])
         .order('event_date', { ascending: false })
         .limit(10);
 
@@ -312,7 +313,8 @@ const Dashboard = () => {
       const { data: allMembers, error: membersError } = await supabase
         .from('members')
         .select('*')
-        .eq('is_hidden', false);
+        .eq('is_hidden', false)
+        .order('created_at', { ascending: false });
 
       if (membersError) throw membersError;
       if (!allMembers || allMembers.length === 0) {
@@ -339,7 +341,7 @@ const Dashboard = () => {
         for (const sunday of lastTwoSundays) {
           const attendanceForEvent = memberAttendances.find(a => a.event_id === sunday.id);
           
-          if (!attendanceForEvent || attendanceForEvent.attendance_status === 'absent') {
+          if (!attendanceForEvent || attendanceForEvent.attendance_status !== 'present') {
             absentCount++;
           }
         }
@@ -369,16 +371,16 @@ const Dashboard = () => {
     }
   };
 
-  // Calculate stats - UPDATED: Exclude hidden members from counts
+  // Calculate stats - Exclude hidden members from counts
   const calculateStats = (allMembers: Member[], events: Event[], allSermons: Sermon[], currentAbsentCount: number) => {
-    // Filter out hidden members for stats - FIXED: properly check for true value
+    // Filter out hidden members for stats
     const activeMembers = allMembers.filter(m => m.is_hidden !== true);
     const hiddenMembers = allMembers.filter(m => m.is_hidden === true);
     
     const totalMembers = activeMembers.length;
-    const hiddenMembersCount = hiddenMembers.length;
+    const hiddenMembersCountValue = hiddenMembers.length;
     const newcomers = activeMembers.filter(m => m.status === 'newcomer').length;
-    const _signedMembers = activeMembers.filter(m => m.status === 'signed_member').length;
+    const signedMembers = activeMembers.filter(m => m.status === 'signed_member').length;
     const upcomingEventsCount = events.length;
     const totalSermons = allSermons.length;
     
@@ -389,7 +391,7 @@ const Dashboard = () => {
         icon: Users, 
         label: 'Active Members', 
         value: totalMembers.toString(), 
-        change: `${hiddenMembersCount} hidden members`, 
+        change: `${hiddenMembersCountValue} hidden members`, 
         changeType: 'info',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
@@ -448,15 +450,19 @@ const Dashboard = () => {
     ];
 
     setStats(statsData);
-    setHiddenMembersCount(hiddenMembersCount);
+    setHiddenMembersCount(hiddenMembersCountValue);
   };
 
-  // Generate recent activities - UPDATED: Only show activities for non-hidden members
+  // Generate recent activities - Only show activities for non-hidden members
   const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
     // Add recent NON-HIDDEN member joins
-    const recentActiveMembers = allMembers.filter(m => m.is_hidden !== true).slice(0, 2);
+    const recentActiveMembers = allMembers
+      .filter(m => m.is_hidden !== true && m.created_at)
+      .sort((a, b) => new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime())
+      .slice(0, 2);
+
     recentActiveMembers.forEach(member => {
       activities.push({
         id: activities.length + 1,
@@ -530,10 +536,11 @@ const Dashboard = () => {
         // Load cell groups
         supabase.from('cell_groups').select('id, name').order('name'),
         
-        // Load events
+        // Load upcoming events
         supabase.from('events').select('*')
           .gte('event_date', new Date().toISOString().split('T')[0])
-          .order('event_date', { ascending: true }),
+          .order('event_date', { ascending: true })
+          .limit(10),
         
         // Load sermons
         supabase.from('sermons').select(`
@@ -543,6 +550,7 @@ const Dashboard = () => {
             topic
           )
         `).order('sermon_date', { ascending: false })
+          .limit(10)
       ]);
 
       if (membersData.error) throw membersData.error;
@@ -550,26 +558,32 @@ const Dashboard = () => {
       if (eventsData.error) throw eventsData.error;
       if (sermonsData.error) throw sermonsData.error;
 
-      setMembers((membersData.data || []) as Member[]);
+      const membersList = (membersData.data || []) as Member[];
+      const eventsList = eventsData.data || [];
+      const sermonsList = (sermonsData.data || []) as Sermon[];
+
+      setMembers(membersList);
       setCellGroups(cellGroupsData.data || []);
-      setUpcomingEvents(eventsData.data || []);
-      setSermons((sermonsData.data || []) as Sermon[]);
+      setUpcomingEvents(eventsList);
+      setSermons(sermonsList);
 
       // Load absent count and members in parallel
-      const [absentCountResult, _absentMembersList] = await Promise.all([
+      const [absentCountResult, absentMembersList] = await Promise.all([
         loadAbsentCount(),
         loadAbsentMembers()
       ]);
 
       // Calculate stats with the actual absent count
-      calculateStats((membersData.data || []) as Member[], eventsData.data || [], (sermonsData.data || []) as Sermon[], absentCountResult);
+      calculateStats(membersList, eventsList, sermonsList, absentCountResult);
       
       // Generate activities
-      generateRecentActivities((membersData.data || []) as Member[], eventsData.data || [], (sermonsData.data || []) as Sermon[]);
+      generateRecentActivities(membersList, eventsList, sermonsList);
 
-    } catch (error) {
+      setSuccess('Dashboard data loaded successfully');
+
+    } catch (error: any) {
       console.error('Error loading dashboard data:', error);
-      setError('Failed to load dashboard data');
+      setError('Failed to load dashboard data: ' + (error.message || 'Unknown error'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -617,6 +631,8 @@ const Dashboard = () => {
     setSelectedEvent(null);
     setSelectedSermon(null);
     setError(null);
+    setSearchTerm('');
+    setSermonSearchTerm('');
     setShowAllEvents(false);
     setShowAllActivities(false);
     setShowAllSermons(false);
@@ -670,15 +686,15 @@ const Dashboard = () => {
   };
 
   const Modal = ({ children, title, size = 'max-w-md' }: { children: React.ReactNode; title: string; size?: string }) => (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className={`bg-white rounded-2xl ${size} w-full max-h-[90vh] overflow-y-auto shadow-2xl`}>
-        <div className="flex justify-between items-center p-6 border-b border-gray-200">
-          <h3 className="text-2xl font-bold text-gray-900">{title}</h3>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+      <div className={`bg-white dark:bg-gray-800 rounded-2xl ${size} w-full max-h-[90vh] overflow-y-auto shadow-2xl`}>
+        <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h3>
           <button 
             onClick={closeModal}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
           </button>
         </div>
         <div className="p-6">
@@ -688,91 +704,172 @@ const Dashboard = () => {
     </div>
   );
 
-  // Member Detail Modal Component (UPDATED - Shows hidden status)
-  const MemberDetailModal = ({ member }: { member: Member }) => (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4 mb-6">
-        <div className={`w-20 h-20 rounded-full flex items-center justify-center text-white font-semibold text-2xl ${
-          member.is_hidden === true
-            ? 'bg-gradient-to-br from-gray-500 to-gray-700' 
-            : 'bg-gradient-to-br from-blue-500 to-purple-500'
-        }`}>
-          {member.name.charAt(0)}{member.surname.charAt(0)}
+  // Member Detail Modal Component (Shows hidden status)
+  const MemberDetailModal = ({ member }: { member: Member }) => {
+    const getCellGroupName = (cellGroupId: string | null) => {
+      if (!cellGroupId) return 'Not assigned';
+      const group = cellGroups.find(g => g.id === cellGroupId);
+      return group?.name || cellGroupId;
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4 mb-6">
+          <div className={`w-20 h-20 rounded-full flex items-center justify-center text-white font-semibold text-2xl ${
+            member.is_hidden === true
+              ? 'bg-gradient-to-br from-gray-500 to-gray-700' 
+              : 'bg-gradient-to-br from-blue-500 to-purple-500'
+          }`}>
+            {member.name.charAt(0)}{member.surname.charAt(0)}
+          </div>
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{member.name} {member.surname}</h3>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-gray-600 dark:text-gray-400">{member.status ? `Status: ${member.status.replace('_', ' ')}` : 'No status'}</p>
+              {member.is_hidden === true && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
+                  <Eye className="h-3 w-3" />
+                  Hidden Member
+                </span>
+              )}
+            </div>
+          </div>
         </div>
-        <div>
-          <h3 className="text-2xl font-bold text-gray-900">{member.name} {member.surname}</h3>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-gray-600">{member.status ? `Status: ${member.status.replace('_', ' ')}` : 'No status'}</p>
-            {member.is_hidden === true && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
-                <Eye className="h-3 w-3" />
-                Hidden Member
-              </span>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <h4 className="font-semibold text-gray-900 dark:text-white">Contact Information</h4>
+            {member.phone && (
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                <Phone className="h-4 w-4" />
+                <span>{member.phone}</span>
+              </div>
+            )}
+            {member.residence && (
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                <Home className="h-4 w-4" />
+                <span>{member.residence}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="font-semibold text-gray-900 dark:text-white">Membership Details</h4>
+            {member.cell_group_id && (
+              <div className="text-gray-600 dark:text-gray-400">
+                <span className="font-medium">Cell Group:</span>{' '}
+                {getCellGroupName(member.cell_group_id)}
+              </div>
+            )}
+            {member.created_at && (
+              <div className="text-gray-600 dark:text-gray-400">
+                <span className="font-medium">Joined:</span>{' '}
+                {formatDate(member.created_at)}
+              </div>
+            )}
+            {member.login_username && (
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                <Key className="h-4 w-4" />
+                <span>Login: {member.login_username}</span>
+              </div>
             )}
           </div>
         </div>
+
+        {member.admin_role && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+            <h4 className="font-semibold text-blue-900 dark:text-blue-300 mb-2">Administrative Role</h4>
+            <p className="text-blue-700 dark:text-blue-400">{member.admin_role}</p>
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+          {member.phone && (
+            <a
+              href={`tel:${member.phone}`}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+            >
+              <Phone className="h-4 w-4" />
+              Call Member
+            </a>
+          )}
+          <button
+            onClick={closeModal}
+            className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Event Detail Modal
+  const EventDetailModal = ({ event }: { event: Event }) => (
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl p-6">
+        <h3 className="text-2xl font-bold mb-2">{event.name}</h3>
+        <p className="text-purple-100">{event.topic || 'No topic specified'}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-3">
-          <h4 className="font-semibold text-gray-900">Contact Information</h4>
-          {member.phone && (
-            <div className="flex items-center gap-2 text-gray-600">
-              <Phone className="h-4 w-4" />
-              <span>{member.phone}</span>
-            </div>
-          )}
-          {member.residence && (
-            <div className="flex items-center gap-2 text-gray-600">
-              <Home className="h-4 w-4" />
-              <span>{member.residence}</span>
+          <h4 className="font-semibold text-gray-900 dark:text-white">Event Details</h4>
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+            <Calendar className="h-4 w-4" />
+            <span>{formatDate(event.event_date)}</span>
+          </div>
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+            <span className="font-medium">Time:</span>
+            <span>{event.event_time}</span>
+          </div>
+          {event.location && (
+            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+              <MapPin className="h-4 w-4" />
+              <span>{event.location}</span>
             </div>
           )}
         </div>
 
         <div className="space-y-3">
-          <h4 className="font-semibold text-gray-900">Membership Details</h4>
-          {member.cell_group_id && (
-            <div className="text-gray-600">
-              <span className="font-medium">Cell Group:</span>{' '}
-              {cellGroups.find(g => g.id === member.cell_group_id)?.name || member.cell_group_id}
-            </div>
-          )}
-          {member.created_at && (
-            <div className="text-gray-600">
-              <span className="font-medium">Joined:</span>{' '}
-              {formatDate(member.created_at)}
-            </div>
-          )}
-          {member.login_username && (
-            <div className="flex items-center gap-2 text-gray-600">
-              <Key className="h-4 w-4" />
-              <span>Login: {member.login_username}</span>
+          <h4 className="font-semibold text-gray-900 dark:text-white">Additional Information</h4>
+          {event.created_at && (
+            <div className="text-gray-600 dark:text-gray-400">
+              <span className="font-medium">Created:</span>{' '}
+              {formatDate(event.created_at)}
             </div>
           )}
         </div>
       </div>
 
-      {member.admin_role && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <h4 className="font-semibold text-blue-900 mb-2">Administrative Role</h4>
-          <p className="text-blue-700">{member.admin_role}</p>
+      {event.pamphlet_url && (
+        <div className="space-y-3">
+          <h4 className="font-semibold text-gray-900 dark:text-white">Event Pamphlet</h4>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setViewingPamphlet(event.pamphlet_url)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+            >
+              <Eye className="h-4 w-4" />
+              View Pamphlet
+            </button>
+            <a
+              href={event.pamphlet_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+            >
+              <Download className="h-4 w-4" />
+              Download
+            </a>
+          </div>
         </div>
       )}
 
-      <div className="flex gap-3 pt-4 border-t border-gray-200">
-        {member.phone && (
-          <a
-            href={`tel:${member.phone}`}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
-          >
-            <Phone className="h-4 w-4" />
-            Call Member
-          </a>
-        )}
+      <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
         <button
           onClick={closeModal}
-          className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+          className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
         >
           Close
         </button>
@@ -802,7 +899,7 @@ const Dashboard = () => {
   const displayedSermons = showAllSermons ? filteredSermons : filteredSermons.slice(0, 3);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 animate-fadeIn">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 animate-fadeIn">
       {/* Expanded Image Modal */}
       {expandedImage && (
         <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4" onClick={() => setExpandedImage(null)}>
@@ -817,25 +914,29 @@ const Dashboard = () => {
               src={expandedImage} 
               alt="Event Pamphlet" 
               className="w-full h-auto max-h-[90vh] object-contain rounded-lg"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = 'https://via.placeholder.com/800x1000?text=Image+Not+Available';
+              }}
             />
           </div>
         </div>
       )}
 
       {/* Header */}
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div>
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
             Dashboard
           </h1>
-          <p className="text-foreground/60">
+          <p className="text-gray-600 dark:text-gray-400">
             {currentUserCanEdit 
               ? 'Welcome to your church management dashboard' 
               : `Welcome - ${profile?.admin_role || 'Member'} access`
             }
           </p>
           {!currentUserCanEdit && (
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
               View-only access - contact pastor/admin for edits
             </p>
           )}
@@ -856,10 +957,10 @@ const Dashboard = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 mb-6">
           <div className="flex items-center justify-between">
-            <p className="text-red-700 font-medium">{error}</p>
-            <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+            <p className="text-red-700 dark:text-red-300 font-medium">{error}</p>
+            <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -867,10 +968,10 @@ const Dashboard = () => {
       )}
 
       {success && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 mb-6">
           <div className="flex items-center justify-between">
-            <p className="text-green-700 font-medium">{success}</p>
-            <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700">
+            <p className="text-green-700 dark:text-green-300 font-medium">{success}</p>
+            <button onClick={() => setSuccess(null)} className="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -878,12 +979,12 @@ const Dashboard = () => {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 md:gap-6 mb-8">
         {stats.map((stat) => (
           <button
             key={stat.label}
             onClick={() => openModal(stat.action)}
-            className="group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300`} />
             
@@ -892,10 +993,10 @@ const Dashboard = () => {
                 <div className={`p-3 rounded-xl ${stat.bgColor}`}>
                   <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
                 </div>
-                <MoreVertical className="h-5 w-5 text-gray-400 cursor-pointer hover:text-gray-600 transition-colors" />
+                <MoreVertical className="h-5 w-5 text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-400 transition-colors" />
               </div>
               
-              <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+              <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
                 {stat.value}
               </h3>
               <p className="text-gray-600 dark:text-gray-400 text-sm font-medium mb-3">
@@ -918,19 +1019,19 @@ const Dashboard = () => {
       </div>
 
       {/* Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Recent Activity - Show last 3 */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
             onClick={() => toggleSection('activity')}
-            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+            className="w-full flex justify-between items-center p-4 md:p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
           >
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Recent Activity</h2>
+            <h2 className="text-lg md:text-xl font-bold text-gray-900 dark:text-white">Recent Activity</h2>
             {expandedSections.activity ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
           </button>
           
           {expandedSections.activity && (
-            <div className="p-6 pt-0">
+            <div className="p-4 md:p-6 pt-0">
               <div className="space-y-4">
                 {displayedActivities.map((activity) => (
                   <button
@@ -967,14 +1068,6 @@ const Dashboard = () => {
                   <ChevronRight className={`h-4 w-4 transition-transform ${showAllActivities ? 'rotate-90' : ''}`} />
                 </button>
               )}
-              
-              {/* Always show "View All Activity" link to open modal */}
-              <button 
-                onClick={() => openModal('viewMembers')}
-                className="w-full text-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 text-sm transition-colors py-2"
-              >
-                Open All Activity
-              </button>
             </div>
           )}
         </div>
@@ -983,14 +1076,14 @@ const Dashboard = () => {
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
             onClick={() => toggleSection('events')}
-            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+            className="w-full flex justify-between items-center p-4 md:p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
           >
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Upcoming Events</h2>
+            <h2 className="text-lg md:text-xl font-bold text-gray-900 dark:text-white">Upcoming Events</h2>
             {expandedSections.events ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
           </button>
           
           {expandedSections.events && (
-            <div className="p-6 pt-0">
+            <div className="p-4 md:p-6 pt-0">
               <div className="space-y-4">
                 {displayedEvents.map((event) => (
                   <div
@@ -1001,8 +1094,8 @@ const Dashboard = () => {
                       <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                         {event.name}
                       </h3>
-                      <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
-                        {event.event_date}
+                      <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full whitespace-nowrap">
+                        {formatShortDate(event.event_date)}
                       </span>
                     </div>
                     <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">
@@ -1020,10 +1113,10 @@ const Dashboard = () => {
                         <div className="mb-2">
                           <div className="flex items-center gap-2 mb-2">
                             <ImageIcon className="h-4 w-4 text-blue-500" />
-                            <span className="text-sm font-medium text-gray-700">Event Pamphlet</span>
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Event Pamphlet</span>
                           </div>
                           <div 
-                            className="relative group cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white"
+                            className="relative group cursor-pointer overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                             onClick={() => setExpandedImage(event.pamphlet_url)}
                           >
                             <img 
@@ -1033,6 +1126,15 @@ const Dashboard = () => {
                               onError={(e) => {
                                 const target = e.target as HTMLImageElement;
                                 target.style.display = 'none';
+                                const parent = target.parentElement;
+                                if (parent) {
+                                  parent.innerHTML = `
+                                    <div class="w-full h-32 flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-700">
+                                      <FileText class="h-8 w-8 text-gray-400 mb-2" />
+                                      <span class="text-sm text-gray-500">Pamphlet not available</span>
+                                    </div>
+                                  `;
+                                }
                               }}
                             />
                             <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-300 flex items-center justify-center">
@@ -1041,19 +1143,19 @@ const Dashboard = () => {
                               </div>
                             </div>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1 text-center">Click image to view full size</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">Click image to view full size</p>
                         </div>
                         
                         {/* Action Buttons */}
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4 text-green-600" />
-                            <span className="text-xs text-green-600 font-medium">Pamphlet Available</span>
+                            <FileText className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            <span className="text-xs text-green-600 dark:text-green-400 font-medium">Pamphlet Available</span>
                           </div>
                           <div className="flex gap-1">
                             <button
                               onClick={() => openQuickView(event)}
-                              className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
+                              className="p-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
                               title="Quick View"
                             >
                               <Eye className="h-3 w-3" />
@@ -1063,7 +1165,7 @@ const Dashboard = () => {
                               href={event.pamphlet_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="p-1.5 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
+                              className="p-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-600 dark:text-green-400 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
                               title="Download"
                             >
                               <Download className="h-3 w-3" />
@@ -1090,14 +1192,6 @@ const Dashboard = () => {
                   <ChevronRight className={`h-4 w-4 transition-transform ${showAllEvents ? 'rotate-90' : ''}`} />
                 </button>
               )}
-              
-              {/* Always show "View Calendar" link to open modal */}
-              <button 
-                onClick={() => openModal('viewEvents')}
-                className="w-full text-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 text-sm transition-colors py-2"
-              >
-                Open Calendar
-              </button>
             </div>
           )}
         </div>
@@ -1106,14 +1200,14 @@ const Dashboard = () => {
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl hover:shadow-lg transition-all duration-300">
           <button 
             onClick={() => toggleSection('sermons')}
-            className="w-full flex justify-between items-center p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
+            className="w-full flex justify-between items-center p-4 md:p-6 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors rounded-t-2xl"
           >
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Recent Sermons</h2>
+            <h2 className="text-lg md:text-xl font-bold text-gray-900 dark:text-white">Recent Sermons</h2>
             {expandedSections.sermons ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
           </button>
           
           {expandedSections.sermons && (
-            <div className="p-6 pt-0">
+            <div className="p-4 md:p-6 pt-0">
               <div className="space-y-4">
                 {displayedSermons.map((sermon) => (
                   <div
@@ -1131,14 +1225,14 @@ const Dashboard = () => {
                     </p>
                     <p className="text-gray-500 dark:text-gray-400 text-xs flex items-center gap-1 mb-2">
                       <Calendar className="h-3 w-3" />
-                      {formatDate(sermon.sermon_date)}
+                      {formatShortDate(sermon.sermon_date)}
                     </p>
                     
                     {/* Sermon Files Section */}
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                       <div className="flex items-center gap-2">
-                        <BookOpen className="h-4 w-4 text-orange-600" />
-                        <span className="text-xs text-orange-600 font-medium">Sermon Available</span>
+                        <BookOpen className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                        <span className="text-xs text-orange-600 dark:text-orange-400 font-medium">Sermon Available</span>
                       </div>
                       <div className="flex gap-1">
                         {sermon.document_url && (
@@ -1146,7 +1240,7 @@ const Dashboard = () => {
                             href={sermon.document_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="p-1.5 bg-green-100 hover:bg-green-200 text-green-600 rounded-lg transition-colors duration-200"
+                            className="p-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-600 dark:text-green-400 rounded-lg transition-colors duration-200"
                             title="Download Notes"
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -1158,7 +1252,7 @@ const Dashboard = () => {
                             href={sermon.video_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="p-1.5 bg-purple-100 hover:bg-purple-200 text-purple-600 rounded-lg transition-colors duration-200"
+                            className="p-1.5 bg-purple-100 dark:bg-purple-900/30 hover:bg-purple-200 dark:hover:bg-purple-800 text-purple-600 dark:text-purple-400 rounded-lg transition-colors duration-200"
                             title="Watch Video"
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -1170,7 +1264,7 @@ const Dashboard = () => {
                             e.stopPropagation();
                             openSermonDetail(sermon);
                           }}
-                          className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-lg transition-colors duration-200"
+                          className="p-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors duration-200"
                           title="View Details"
                         >
                           <Eye className="h-3 w-3" />
@@ -1194,14 +1288,6 @@ const Dashboard = () => {
                   <ChevronRight className={`h-4 w-4 transition-transform ${showAllSermons ? 'rotate-90' : ''}`} />
                 </button>
               )}
-              
-              {/* Always show "View All Sermons" link to open modal */}
-              <button 
-                onClick={() => openModal('viewSermons')}
-                className="w-full text-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 text-sm transition-colors py-2"
-              >
-                Open All Sermons
-              </button>
             </div>
           )}
         </div>
@@ -1209,24 +1295,24 @@ const Dashboard = () => {
 
       {/* Quick View Pamphlet Modal - Optimized for mobile */}
       {quickViewEvent && quickViewEvent.pamphlet_url && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-gray-200">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="max-w-[70%]">
-                <h3 className="text-lg font-bold text-gray-900 truncate">{quickViewEvent.name}</h3>
-                <p className="text-sm text-gray-600 truncate">Event Pamphlet</p>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white truncate">{quickViewEvent.name}</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 truncate">Event Pamphlet</p>
               </div>
               <div className="flex items-center gap-1">
                 <button
                   onClick={closeQuickView}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
                 >
-                  <X className="h-5 w-5 text-gray-500" />
+                  <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
                 </button>
               </div>
             </div>
             <div className="p-2 sm:p-4 h-[70vh]">
-              <div className="w-full h-full rounded-lg border border-gray-200 overflow-auto">
+              <div className="w-full h-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
                 <iframe
                   src={quickViewEvent.pamphlet_url}
                   className="w-full h-full min-h-[500px]"
@@ -1234,9 +1320,9 @@ const Dashboard = () => {
                 />
               </div>
             </div>
-            <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50">
+            <div className="p-3 sm:p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                <div className="text-sm text-gray-600 space-y-1">
+                <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
                   <p><strong>Date:</strong> {quickViewEvent.event_date}</p>
                   <p><strong>Time:</strong> {quickViewEvent.event_time}</p>
                   {quickViewEvent.location && <p className="truncate"><strong>Location:</strong> {quickViewEvent.location}</p>}
@@ -1259,6 +1345,13 @@ const Dashboard = () => {
                     <Download className="h-4 w-4" />
                     <span className="hidden xs:inline">Download</span>
                   </a>
+                  <button
+                    onClick={closeQuickView}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl transition-all duration-200 font-medium text-sm"
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="hidden xs:inline">Close</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1276,22 +1369,22 @@ const Dashboard = () => {
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {filteredAbsentMembers.map((member) => (
-                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-red-200 rounded-xl bg-red-50">
+                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-red-200 dark:border-red-800 rounded-xl bg-red-50 dark:bg-red-900/20">
                   <div className="flex items-center gap-4 mb-3 sm:mb-0">
                     <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
                       {member.name.charAt(0)}{member.surname.charAt(0)}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500">
+                      <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
                         <Phone className="h-3 w-3 inline mr-1" />
                         {member.phone || 'No phone number'}
                       </p>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 dark:text-gray-500">
                         <Home className="h-3 w-3 inline mr-1" />
                         {member.residence || 'No residence'}
                       </p>
-                      <p className="text-xs text-red-600 mt-1">
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
                         <AlertTriangle className="h-3 w-3 inline mr-1" />
                         Absent for {member.consecutiveAbsences} consecutive Sundays
                       </p>
@@ -1321,15 +1414,15 @@ const Dashboard = () => {
               ))}
               {filteredAbsentMembers.length === 0 && (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="h-8 w-8 text-green-600" />
+                  <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="h-8 w-8 text-green-600 dark:text-green-400" />
                   </div>
-                  <h4 className="text-lg font-semibold text-gray-900 mb-2">Great News!</h4>
-                  <p className="text-gray-600">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Great News!</h4>
+                  <p className="text-gray-600 dark:text-gray-400">
                     All active members have attended at least one of the last 2 Sunday services.
                   </p>
                   {hiddenMembersCount > 0 && (
-                    <p className="text-sm text-gray-500 mt-2">
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
                       Note: {hiddenMembersCount} hidden members are excluded from this count.
                     </p>
                   )}
@@ -1347,6 +1440,13 @@ const Dashboard = () => {
         </Modal>
       )}
 
+      {/* Event Detail Modal */}
+      {activeModal === 'eventDetail' && selectedEvent && (
+        <Modal title="Event Details" size="max-w-md">
+          <EventDetailModal event={selectedEvent} />
+        </Modal>
+      )}
+
       {/* Sermons Modal */}
       {activeModal === 'viewSermons' && (
         <Modal title="All Sermons" size="max-w-4xl">
@@ -1356,13 +1456,13 @@ const Dashboard = () => {
             </p>
             
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
               <input
                 type="text"
                 placeholder="Search sermons by title, pastor, or content..."
                 value={sermonSearchTerm}
                 onChange={(e) => setSermonSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
 
@@ -1370,27 +1470,27 @@ const Dashboard = () => {
               {filteredSermons.map((sermon) => (
                 <div 
                   key={sermon.id}
-                  className="border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors duration-200 cursor-pointer"
+                  className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors duration-200 cursor-pointer"
                   onClick={() => openSermonDetail(sermon)}
                 >
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-3 gap-2">
                     <div className="flex-1">
-                      <h4 className="font-bold text-lg text-gray-900 mb-1">{sermon.title}</h4>
-                      <p className="text-orange-600 font-medium text-sm">
+                      <h4 className="font-bold text-lg text-gray-900 dark:text-white mb-1">{sermon.title}</h4>
+                      <p className="text-orange-600 dark:text-orange-400 font-medium text-sm">
                         {sermon.events?.name || 'Standalone Sermon'}
                       </p>
                     </div>
-                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full self-start sm:self-auto">
-                      {formatDate(sermon.sermon_date)}
+                    <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full self-start sm:self-auto">
+                      {formatShortDate(sermon.sermon_date)}
                     </span>
                   </div>
                   
                   <div className="space-y-2 mb-3">
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                       <Users className="h-3 w-3" />
                       <span>By {sermon.pastor_name}</span>
                     </div>
-                    <p className="text-gray-600 text-sm line-clamp-2">
+                    <p className="text-gray-600 dark:text-gray-400 text-sm line-clamp-2">
                       {sermon.summary}
                     </p>
                   </div>
@@ -1401,7 +1501,7 @@ const Dashboard = () => {
                         href={sermon.document_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-sm transition-colors duration-200"
+                        className="flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-700 dark:text-green-400 rounded-lg text-sm transition-colors duration-200"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Download className="h-3 w-3" />
@@ -1413,7 +1513,7 @@ const Dashboard = () => {
                         href={sermon.video_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg text-sm transition-colors duration-200"
+                        className="flex items-center gap-1 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 hover:bg-purple-200 dark:hover:bg-purple-800 text-purple-700 dark:text-purple-400 rounded-lg text-sm transition-colors duration-200"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <PlayCircle className="h-3 w-3" />
@@ -1425,7 +1525,7 @@ const Dashboard = () => {
                         e.stopPropagation();
                         openSermonDetail(sermon);
                       }}
-                      className="flex items-center gap-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm transition-colors duration-200"
+                      className="flex items-center gap-1 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-400 rounded-lg text-sm transition-colors duration-200"
                     >
                       <Eye className="h-3 w-3" />
                       View Details
@@ -1447,9 +1547,9 @@ const Dashboard = () => {
       {activeModal === 'sermonDetail' && selectedSermon && (
         <Modal title="Sermon Details" size="max-w-2xl">
           <div className="space-y-6">
-            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">{selectedSermon.title}</h3>
-              <div className="space-y-2 text-sm text-gray-600">
+            <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4">
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{selectedSermon.title}</h3>
+              <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4" />
                   <span><strong>Pastor:</strong> {selectedSermon.pastor_name}</span>
@@ -1468,12 +1568,12 @@ const Dashboard = () => {
             </div>
 
             <div>
-              <h4 className="font-semibold text-gray-900 mb-2">Sermon Summary</h4>
-              <p className="text-gray-600 leading-relaxed">{selectedSermon.summary}</p>
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Sermon Summary</h4>
+              <p className="text-gray-600 dark:text-gray-400 leading-relaxed">{selectedSermon.summary}</p>
             </div>
 
             <div>
-              <h4 className="font-semibold text-gray-900 mb-3">Available Resources</h4>
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Available Resources</h4>
               <div className="flex flex-wrap gap-3">
                 {selectedSermon.document_url && (
                   <a
@@ -1498,7 +1598,7 @@ const Dashboard = () => {
                   </a>
                 )}
                 {!selectedSermon.document_url && !selectedSermon.video_url && (
-                  <p className="text-gray-500">No additional resources available for this sermon.</p>
+                  <p className="text-gray-500 dark:text-gray-400">No additional resources available for this sermon.</p>
                 )}
               </div>
             </div>
@@ -1521,7 +1621,7 @@ const Dashboard = () => {
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium ${
                   showHiddenMembers
                     ? 'bg-gray-600 hover:bg-gray-700 text-white'
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
+                    : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200'
                 }`}
               >
                 <Eye className="h-4 w-4" />
@@ -1530,13 +1630,13 @@ const Dashboard = () => {
             </div>
             
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
               <input
                 type="text"
                 placeholder="Search members by name, phone, or residence..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
@@ -1548,10 +1648,10 @@ const Dashboard = () => {
                   (member.residence && member.residence.toLowerCase().includes(searchTerm.toLowerCase()))
                 )
                 .map(member => (
-                <div key={member.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-xl hover:bg-gray-50 transition-colors ${
+                <div key={member.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
                   member.is_hidden === true
-                    ? 'border-gray-300 bg-gray-100' 
-                    : 'border-gray-200 bg-white'
+                    ? 'border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800' 
+                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
                 }`}>
                   <div className="flex items-center gap-4 mb-3 sm:mb-0">
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold ${
@@ -1563,22 +1663,22 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="font-medium text-gray-900">{member.name} {member.surname}</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
                         {member.is_hidden === true && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs">
                             <Eye className="h-3 w-3" />
                             Hidden
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-500">{member.phone || 'No phone'}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{member.phone || 'No phone'}</p>
                       {member.residence && (
-                        <p className="text-xs text-gray-600 mt-1">
+                        <p className="text-xs text-gray-600 dark:text-gray-500 mt-1">
                           Residence: {member.residence}
                         </p>
                       )}
                       {member.login_username && (
-                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1">
                           <Key className="h-3 w-3" />
                           Login: {member.login_username}
                         </p>
@@ -1608,36 +1708,36 @@ const Dashboard = () => {
 
       {/* Pamphlet Viewer Modal */}
       {viewingPamphlet && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-xl font-bold text-gray-900">Event Pamphlet</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Event Pamphlet</h3>
               <button
                 onClick={closePamphletModal}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200"
               >
-                <X className="h-5 w-5 text-gray-500" />
+                <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
               </button>
             </div>
             <div className="p-6 max-h-[70vh] overflow-auto">
               <iframe
                 src={viewingPamphlet}
-                className="w-full h-96 rounded-lg border border-gray-200"
+                className="w-full h-96 rounded-lg border border-gray-200 dark:border-gray-700"
                 title="Event Pamphlet"
               />
-              <div className="mt-4 flex justify-between items-center">
+              <div className="mt-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                 <a
                   href={viewingPamphlet}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200"
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium"
                 >
                   <FileText className="h-4 w-4" />
                   Open in New Tab
                 </a>
                 <button
                   onClick={closePamphletModal}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200"
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200"
                 >
                   Close
                 </button>
