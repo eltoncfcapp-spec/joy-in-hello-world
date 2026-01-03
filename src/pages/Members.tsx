@@ -185,49 +185,46 @@ const Members = () => {
       setLoading(true);
       setError(null);
       
-      // Fetch active members (is_hidden = false)
-      let activeQuery = supabase
-        .from('members')
-        .select(`
-          *,
-          cell_groups!fk_cell_group(name)
-        `);
-
       const visibleFilter = getVisibleMembers();
       
-      if (visibleFilter) {
-        if (isMember()) {
-          activeQuery = activeQuery.eq('id', visibleFilter);
-        } else if (isGroupLeader()) {
-          activeQuery = activeQuery.eq('cell_group_id', visibleFilter);
+      // Fetch active members (is_hidden = false)
+      if (visibleFilter || canViewAllMembers()) {
+        let activeQuery = supabase
+          .from('members')
+          .select(`
+            *,
+            cell_groups!fk_cell_group(name)
+          `);
+
+        if (visibleFilter) {
+          if (isMember()) {
+            activeQuery = activeQuery.eq('id', visibleFilter);
+          } else if (isGroupLeader()) {
+            activeQuery = activeQuery.eq('cell_group_id', visibleFilter);
+          }
         }
-      } else if (!canViewAllMembers()) {
+
+        const { data: activeMembersData, error: activeMembersError } = await activeQuery
+          .eq('is_hidden', false)
+          .order('created_at', { ascending: false });
+
+        if (activeMembersError) {
+          throw activeMembersError;
+        }
+
+        const activeMembersArray = Array.isArray(activeMembersData) ? activeMembersData : (activeMembersData ? [activeMembersData] : []);
+        const activeMembersWithCellGroupName = activeMembersArray.map(member => ({
+          ...member,
+          cell_group_name: member.cell_groups?.name || null
+        }));
+
+        setMembers(activeMembersWithCellGroupName);
+      } else {
         setMembers([]);
-        setHiddenMembers([]);
-        setLoading(false);
-        return;
       }
-
-      // Fetch active members
-      const { data: activeMembersData, error: activeMembersError } = await activeQuery
-        .eq('is_hidden', false)
-        .order('created_at', { ascending: false });
-
-      if (activeMembersError) {
-        throw activeMembersError;
-      }
-
-      const activeMembersArray = Array.isArray(activeMembersData) ? activeMembersData : (activeMembersData ? [activeMembersData] : []);
-      const activeMembersWithCellGroupName = activeMembersArray.map(member => ({
-        ...member,
-        cell_group_name: member.cell_groups?.name || null
-      }));
-
-      setMembers(activeMembersWithCellGroupName);
 
       // Fetch hidden members (is_hidden = true) - only if user has permission
-      if (canViewHiddenMembers()) {
-        // Reset query for hidden members
+      if (canViewHiddenMembers() && (visibleFilter || canViewAllMembers())) {
         let hiddenQuery = supabase
           .from('members')
           .select(`
@@ -249,6 +246,7 @@ const Members = () => {
 
         if (hiddenMembersError) {
           console.error('Error fetching hidden members:', hiddenMembersError);
+          setHiddenMembers([]);
         } else {
           const hiddenMembersArray = Array.isArray(hiddenMembersData) ? hiddenMembersData : (hiddenMembersData ? [hiddenMembersData] : []);
           const hiddenMembersWithCellGroupName = hiddenMembersArray.map(member => ({
@@ -258,6 +256,8 @@ const Members = () => {
 
           setHiddenMembers(hiddenMembersWithCellGroupName);
         }
+      } else {
+        setHiddenMembers([]);
       }
     } catch (error: any) {
       console.error('Error fetching members:', error);
@@ -1322,6 +1322,8 @@ const Members = () => {
               <button
                 onClick={() => {
                   setShowHiddenMembers(!showHiddenMembers);
+                  // Force a re-render by fetching members again
+                  fetchMembers();
                 }}
                 className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
               >
@@ -1601,10 +1603,17 @@ const Members = () => {
           </div>
         </div>
 
-        {loading && members.length === 0 && (
+        {loading && members.length === 0 && !showHiddenMembers && (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
             <p className="mt-4 text-gray-600 dark:text-gray-400">Loading members...</p>
+          </div>
+        )}
+
+        {loading && hiddenMembers.length === 0 && showHiddenMembers && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading hidden members...</p>
           </div>
         )}
 
@@ -1627,7 +1636,7 @@ const Members = () => {
                 </div>
               </div>
               
-              {filteredHiddenMembers.length === 0 ? (
+              {!loading && filteredHiddenMembers.length === 0 ? (
                 <div className="text-center py-12">
                   <EyeOff className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-2">
