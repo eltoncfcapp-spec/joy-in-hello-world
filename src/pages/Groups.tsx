@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Settings, Trash2, Edit } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -13,8 +13,8 @@ interface CellGroup {
   leader_id: string | null;
   description?: string | null;
   memberCount?: number;
-  created_at?: string;
-  updated_at?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
   leader_name?: string | null;
   leader_residence?: string | null;
   leader_phone?: string | null;
@@ -45,8 +45,8 @@ interface Member {
   admin_role?: string | null;
   invited_by?: string | null;
   first_time_visit_date?: string | null;
-  is_permanent_member?: boolean;
-  is_leader?: boolean;
+  is_permanent_member?: boolean | null;
+  is_leader?: boolean | null;
   status_date?: string | null;
 }
 
@@ -67,17 +67,6 @@ interface GroupReport {
   action_items: string | null;
   next_meeting_date: string | null;
   created_at: string | null;
-}
-
-interface AuditLog {
-  id: string;
-  table_name: string;
-  record_id: string;
-  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC';
-  old_data: any;
-  new_data: any;
-  user_id: string | null;
-  created_at: string;
 }
 
 // Audit Log Functions
@@ -119,7 +108,7 @@ interface CreateGroupModalProps {
 }
 
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
-  const { profile, isAdmin, isPastor } = useAuth();
+  const { isAdmin, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -147,7 +136,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
         .order('name');
 
       if (error) throw error;
-      setAvailableMembers(data || []);
+      setAvailableMembers((data || []) as Member[]);
     } catch (error: any) {
       console.error('Failed to load members:', error);
       onError('Failed to load church members');
@@ -494,7 +483,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
         .order('name');
 
       if (error) throw error;
-      setAvailableMembers(data || []);
+      setAvailableMembers((data || []) as Member[]);
     } catch (error: any) {
       console.error('Failed to load members:', error);
       onError('Failed to load church members');
@@ -764,11 +753,11 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
                 <option 
                   key={member.id} 
                   value={member.id}
-                  disabled={member.cell_group_id && member.cell_group_id !== group.id}
+                  disabled={!!(member.cell_group_id && member.cell_group_id !== group?.id)}
                 >
                   {member.name} {member.surname} 
                   {member.admin_role ? ` (${member.admin_role})` : ''}
-                  {member.cell_group_id && member.cell_group_id !== group.id ? ' - Already in another group' : ''}
+                  {member.cell_group_id && member.cell_group_id !== group?.id ? ' - Already in another group' : ''}
                 </option>
               ))}
             </select>
@@ -823,10 +812,11 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
 
   const checkMemberCount = async () => {
     try {
+      if (!group?.id) return;
       const { count } = await supabase
         .from('members')
         .select('*', { count: 'exact', head: true })
-        .eq('cell_group_id', group?.id);
+        .eq('cell_group_id', group.id);
 
       setMemberCount(count || 0);
     } catch (error) {
@@ -1865,13 +1855,18 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       }
 
       let memberId;
-      let memberData;
       
       if (existingMember) {
         // Use existing member
         memberId = existingMember.id;
         // Update member status and group assignment
-        const updatedMember = {
+        const updatedMember: {
+          status: 'newcomer';
+          cell_group_id: string;
+          invited_by: string | null;
+          first_time_visit_date: string;
+          updated_at: string;
+        } = {
           status: 'newcomer',
           cell_group_id: group.id,
           invited_by: formData.invited_by || null,
@@ -1887,7 +1882,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .single();
 
         if (updateError) throw updateError;
-        memberData = updatedData;
+        console.log('Updated member:', updatedData);
 
         // Log audit event for existing member update
         await logAuditEvent('members', memberId, 'UPDATE', existingMember, updatedData, profile?.id || null);
@@ -1924,7 +1919,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           throw memberError;
         }
         memberId = newMemberData.id;
-        memberData = newMemberData;
+        console.log('Created new member:', newMemberData);
 
         // Log audit event for new member creation
         await logAuditEvent('members', memberId, 'INSERT', null, newMemberData, profile?.id || null);
@@ -2322,7 +2317,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       };
 
       let error;
-      let reportId;
       
       if (existingReport) {
         // Get old report data for audit log
@@ -2337,7 +2331,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           .update(reportPayload)
           .eq('id', existingReport.id);
         error = updateError;
-        reportId = existingReport.id;
 
         // Log audit event for report update
         await logAuditEvent('meeting_reports', existingReport.id, 'UPDATE', oldReportData, {
@@ -2352,7 +2345,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           .select()
           .single();
         error = insertError;
-        reportId = newReport?.id;
 
         // Log audit event for new report creation
         if (newReport) {
@@ -3138,7 +3130,7 @@ const Groups = () => {
       }
       // Administrators and Pastors can see all groups (no filtering)
 
-      setGroups(filteredGroups);
+      setGroups(filteredGroups as CellGroup[]);
     } catch (error: any) {
       console.error('Error loading groups:', error);
       setError('Failed to load groups: ' + error.message);
@@ -3165,7 +3157,7 @@ const Groups = () => {
         .eq('id', memberData.cell_group_id)
         .single();
       
-      return groupData;
+      return groupData as CellGroup | null;
     } catch (error) {
       console.error('Failed to get user group:', error);
       return null;
@@ -3314,29 +3306,14 @@ const Groups = () => {
     return isAdmin() || isPastor();
   };
 
-  const canEditGroup = (group: CellGroup) => {
+  const canEditGroup = (_group: CellGroup) => {
     // Only admin and pastor can edit groups
     return isAdmin() || isPastor();
   };
 
-  const canDeleteGroup = (group: CellGroup) => {
+  const canDeleteGroup = (_group: CellGroup) => {
     // Only admin and pastor can delete groups
     return isAdmin() || isPastor();
-  };
-
-  const canViewGroupDetails = (group: CellGroup) => {
-    if (isAdmin() || isPastor()) {
-      return true; // Admins & Pastors can view all groups
-    }
-    if (isGroupLeader()) {
-      return group.leader_id === profile?.id; // Leaders can view only their own group
-    }
-    if (isMember()) {
-      // Members can view only their own group
-      // This assumes members have a cell_group_id in their profile
-      return true; // We'll filter this in loadGroups
-    }
-    return false;
   };
 
   const getUserRoleDisplay = () => {

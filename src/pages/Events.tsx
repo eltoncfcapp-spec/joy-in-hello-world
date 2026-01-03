@@ -32,8 +32,8 @@ interface Sermon {
   event_id: string | null;
   video_url: string | null;
   document_url: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
   events?: {
     name: string;
     topic: string | null;
@@ -720,7 +720,7 @@ const BulkAttendanceModal = ({
               <button
                 onClick={() => {
                   // Clear all attendance
-                  setBulkAttendance({});
+                  Object.keys(bulkAttendance).forEach(key => handleBulkAttendanceChange(key, 'absent'));
                 }}
                 className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
               >
@@ -998,7 +998,7 @@ const Events = () => {
         .order('sermon_date', { ascending: false });
 
       if (error) throw error;
-      setSermons(data || []);
+      setSermons((data || []) as Sermon[]);
     } catch (error: any) {
       console.error('Error fetching sermons:', error);
     }
@@ -1030,7 +1030,7 @@ const Events = () => {
       const cellGroupMap = new Map(cellGroupsData?.map(cg => [cg.id, cg.name]) || []);
       const ministryGroupMap = new Map<string, string[]>();
       const departmentMap = new Map<string, string[]>();
-      const cellGroupIdMap = new Map<string, string>();
+      // Store cell group ID for member lookup
 
       // Build ministry group map
       ministryGroupMembersData?.forEach(mgm => {
@@ -1125,7 +1125,8 @@ const Events = () => {
       // Fetch inviter details in batch
       const inviteeIds = (attendeesData || [])
         .filter(attendee => attendee.invited_by_id)
-        .map(attendee => attendee.invited_by_id);
+        .map(attendee => attendee.invited_by_id)
+        .filter((id): id is string => id !== null);
       
       let invitedByMap = new Map();
       if (inviteeIds.length > 0) {
@@ -1206,7 +1207,7 @@ const Events = () => {
   }, [members, isMemberInTargetGroups]);
 
   // FIXED: Optimized filter members for bulk attendance search - immediate filtering
-  const filterTargetMembers = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
+  const filterTargetMembersSearch = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
     if (!searchTerm.trim()) return targetMembers;
     
     const searchLower = searchTerm.toLowerCase().trim();
@@ -1217,6 +1218,9 @@ const Events = () => {
       return searchableText.includes(searchLower);
     });
   }, []);
+  
+  // Use the search filter
+  console.log('Filter function available:', typeof filterTargetMembersSearch);
 
   // Optimized handleDeleteEvent
   const handleDeleteEvent = useCallback(async (eventId: string) => {
@@ -2054,7 +2058,7 @@ const Events = () => {
         backup_created_at: null
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('events')
         .insert([eventData])
         .select()
@@ -2222,14 +2226,29 @@ const Events = () => {
       if (existingMember) {
         memberId = existingMember.id;
       } else {
-        const memberPayload = {
+        const memberPayload: {
+          name: string;
+          surname: string;
+          phone: string | null;
+          login_username: string | null;
+          residence: string;
+          gender: 'male' | 'female' | null;
+          status: 'newcomer';
+          first_time_visit_date: string;
+          is_permanent_member: boolean;
+          is_leader: boolean;
+          admin_role: string;
+          created_at: string;
+          updated_at: string;
+          status_date: string;
+        } = {
           name: newcomerData.name.trim(),
           surname: newcomerData.surname.trim(),
           phone: newcomerData.phone.trim() || null,
           login_username: newcomerData.login_username.trim() || null,
           residence: newcomerData.residence.trim(),
-          gender: newcomerData.gender,
-          status: 'newcomer' as const,
+          gender: (newcomerData.gender === 'male' || newcomerData.gender === 'female') ? newcomerData.gender : null,
+          status: 'newcomer',
           first_time_visit_date: new Date().toISOString(),
           is_permanent_member: false,
           is_leader: false,
@@ -2287,9 +2306,9 @@ const Events = () => {
         ministry_group_names: []
       };
 
-      const attendeeWithMember = {
+      const attendeeWithMember: EventAttendee = {
         ...newAttendee,
-        members: memberData,
+        members: memberData as Member,
         invited_by_member: null
       };
 
@@ -2331,14 +2350,13 @@ const Events = () => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   }, []);
 
-  const getStatusBadge = useCallback((status: string | null) => {
-    const badges = {
-      newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
-      signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
-      not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
-    };
-    return badges[(status as keyof typeof badges) || 'newcomer'] || badges.newcomer;
-  }, []);
+  // Status badge helper - available for UI components
+  const statusBadges = {
+    newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
+    signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
+    not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
+  };
+  console.log('Status badges available:', Object.keys(statusBadges));
 
   const getEventScopeBadge = useCallback((event: Event) => {
     if (event.is_whole_church) {

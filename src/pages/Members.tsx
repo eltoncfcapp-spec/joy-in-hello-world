@@ -1,4 +1,4 @@
-import { Search, Plus, Phone, User, Check, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key } from 'lucide-react';
+import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -313,13 +313,27 @@ const Members = () => {
     }
 
     try {
-      const newMemberData = {
+      const newMemberData: {
+        name: string;
+        surname: string;
+        residence: string;
+        phone: string | null;
+        cell_group_id: string | null;
+        gender: 'male' | 'female' | null;
+        invited_by: string | null;
+        baptism: string | null;
+        status: 'newcomer';
+        status_date: string;
+        is_permanent_member: boolean;
+        is_hidden: boolean;
+        not_attending_reason: null;
+      } = {
         name: formData.name.trim(),
         surname: formData.surname.trim(),
         residence: formData.residence.trim(),
         phone: formData.phone.trim() || null,
         cell_group_id: formData.cell_group_id || null,
-        gender: formData.gender || null,
+        gender: (formData.gender === 'male' || formData.gender === 'female') ? formData.gender : null,
         invited_by: formData.invited_by.trim() || null,
         baptism: formData.baptism || null,
         status: 'newcomer',
@@ -576,7 +590,12 @@ const Members = () => {
         .eq('id', memberId)
         .single();
 
-      const updateData = { 
+      const updateData: {
+        is_hidden: boolean;
+        status: 'newcomer';
+        status_date: string;
+        not_attending_reason: null;
+      } = {
         is_hidden: false,
         status: 'newcomer',
         status_date: new Date().toISOString(),

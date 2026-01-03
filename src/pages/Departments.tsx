@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit, Settings } from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
 
 // Interfaces
 interface Department {
@@ -13,8 +13,8 @@ interface Department {
   leader_id: string | null;
   description?: string | null;
   memberCount?: number;
-  created_at?: string;
-  updated_at?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
   leader_name?: string | null;
   leader_residence?: string | null;
   leader_phone?: string | null;
@@ -76,7 +76,7 @@ interface CreateDepartmentModalProps {
 }
 
 const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
-  const { profile, isAdmin, isPastor } = useAuth();
+  const { isAdmin, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -161,7 +161,7 @@ const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({ isOpen, o
         updated_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('departments')
         .insert([newDepartment])
         .select()
@@ -711,10 +711,11 @@ const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, d
 
   const checkMemberCount = async () => {
     try {
+      if (!department?.id) return;
       const { count } = await supabase
         .from('department_members')
         .select('*', { count: 'exact', head: true })
-        .eq('department_id', department?.id);
+        .eq('department_id', department.id);
 
       setMemberCount(count || 0);
     } catch (error) {
@@ -2897,7 +2898,7 @@ const Departments = () => {
       }
       // Administrators and Pastors can see all departments (no filtering)
 
-      setDepartments(filteredDepartments);
+      setDepartments(filteredDepartments as Department[]);
     } catch (error: any) {
       console.error('Error loading departments:', error);
       setError('Failed to load departments: ' + error.message);
@@ -2924,7 +2925,7 @@ const Departments = () => {
         .select('*')
         .in('id', departmentIds);
       
-      return departmentData || [];
+      return (departmentData || []) as Department[];
     } catch (error) {
       console.error('Failed to get user departments:', error);
       return [];
@@ -3073,28 +3074,14 @@ const Departments = () => {
     return isAdmin() || isPastor();
   };
 
-  const canEditDepartment = (department: Department) => {
+  const canEditDepartment = (_department: Department) => {
     // Only admin and pastor can edit departments
     return isAdmin() || isPastor();
   };
 
-  const canDeleteDepartment = (department: Department) => {
+  const canDeleteDepartment = (_department: Department) => {
     // Only admin and pastor can delete departments
     return isAdmin() || isPastor();
-  };
-
-  const canViewDepartmentDetails = (department: Department) => {
-    if (isAdmin() || isPastor()) {
-      return true; // Admins & Pastors can view all departments
-    }
-    if (isDepartmentLeader()) {
-      return department.leader_id === profile?.id; // Leaders can view only their own department
-    }
-    if (isMember()) {
-      // Members can view only departments they belong to
-      return true; // We'll filter this in loadDepartments
-    }
-    return false;
   };
 
   const getUserRoleDisplay = () => {
