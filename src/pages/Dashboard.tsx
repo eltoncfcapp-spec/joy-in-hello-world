@@ -160,7 +160,7 @@ const Dashboard = () => {
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
-  const [absentCount, setAbsentCount] = useState<number>(0);
+  const [, setAbsentCount] = useState<number>(0);
   const [hiddenMembersCount, setHiddenMembersCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -380,7 +380,8 @@ const Dashboard = () => {
     const totalMembers = activeMembers.length;
     const hiddenMembersCountValue = hiddenMembers.length;
     const newcomers = activeMembers.filter(m => m.status === 'newcomer').length;
-    const signedMembers = activeMembers.filter(m => m.status === 'signed_member').length;
+    // signedMembers - used for future features
+    console.log('Signed members:', activeMembers.filter(m => m.status === 'signed_member').length);
     const upcomingEventsCount = events.length;
     const totalSermons = allSermons.length;
     
@@ -568,7 +569,7 @@ const Dashboard = () => {
       setSermons(sermonsList);
 
       // Load absent count and members in parallel
-      const [absentCountResult, absentMembersList] = await Promise.all([
+      const [absentCountResult] = await Promise.all([
         loadAbsentCount(),
         loadAbsentMembers()
       ]);
@@ -647,10 +648,10 @@ const Dashboard = () => {
       surname: member.surname,
       residence: member.residence,
       phone: member.phone,
-      cell_group_id: 'cell_group_id' in member ? member.cell_group_id : null,
+      cell_group_id: 'cell_group_id' in member ? (member.cell_group_id ?? null) : null,
       invited_by: null,
       created_at: null,
-      status: 'status' in member ? (member.status as string | null) : null,
+      status: 'status' in member ? (member.status ?? null) : null,
       is_hidden: 'is_hidden' in member ? (member.is_hidden ?? null) : null,
       admin_role: undefined,
       permissions: undefined,

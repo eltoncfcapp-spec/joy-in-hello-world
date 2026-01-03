@@ -125,7 +125,6 @@ interface NonActiveMember {
   id: string;
   name: string;
   surname: string;
-  email: string | null;
   phone: string | null;
   last_attendance_date: string | null;
   cell_group_name: string | null;
@@ -393,7 +392,8 @@ const Analytics = () => {
     const totalDepartments = departments.length;
     
     // Events in date range
-    const _eventsInRange = events.length;
+    const eventsInRange = events.length;
+    console.log('Events in range:', eventsInRange);
 
     // Calculate real attendance data
     const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
@@ -468,7 +468,6 @@ const Analytics = () => {
         id: member.id,
         name: member.name,
         surname: member.surname,
-        email: member.email,
         phone: member.phone,
         last_attendance_date: member.status_date,
         cell_group_name: member.cell_groups?.name || null,
@@ -493,7 +492,8 @@ const Analytics = () => {
     });
 
     // Update main stats with real data including non-active members
-    const _totalAllMembers = members.length + totalNonActive;
+    const totalAllMembers = members.length + totalNonActive;
+    console.log('Total members including non-active:', totalAllMembers);
     setStats([
       { 
         icon: Users, 

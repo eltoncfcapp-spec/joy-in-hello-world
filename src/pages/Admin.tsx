@@ -138,13 +138,13 @@ interface SecuritySettings {
 
 interface AuditLog {
   id: string;
-  user_id: string;
-  action: string;
-  resource: string;
-  details: any;
-  ip_address: string;
-  user_agent: string;
-  created_at: string;
+  user_id: string | null;
+  action: string | null;
+  table_name: string;
+  record_id: string;
+  old_data: any;
+  new_data: any;
+  created_at: string | null;
   user_name?: string;
   user_surname?: string;
 }
@@ -486,8 +486,7 @@ const cloudService = {
       await logAuditEvent(
         'UPDATE',
         'system_config',
-        { configId: data?.id || 'new', changes: config },
-        (window as any).currentUserId
+        (data as any)?.id || 'new'
       );
       
       return data as any;
@@ -580,8 +579,7 @@ const cloudService = {
       await logAuditEvent(
         'UPDATE',
         'security_settings',
-        { settingsId: data?.id || 'new', changes: settings },
-        (window as any).currentUserId
+        (data as any)?.id || 'new'
       );
       
       return data as any;
@@ -606,7 +604,16 @@ const cloudService = {
         return [];
       }
 
-      const logs = (logsData || []) as AuditLog[];
+      const logs = (logsData || []).map(log => ({
+        ...log,
+        user_id: log.user_id,
+        action: log.action,
+        table_name: log.table_name,
+        record_id: log.record_id,
+        old_data: log.old_data,
+        new_data: log.new_data,
+        created_at: log.created_at
+      })) as AuditLog[];
       
       // Get user names for each log
       const logsWithUserNames = await Promise.all(
@@ -657,8 +664,7 @@ const cloudService = {
       await logAuditEvent(
         'EXPORT',
         'members',
-        { format: _format, includeSensitive: _includeSensitive, recordCount: data?.length || 0 },
-        (window as any).currentUserId
+        `export-${Date.now()}`
       );
       
       return new Blob([csvContent], { type: 'text/csv' });
@@ -914,14 +920,7 @@ const cloudService = {
             await logAuditEvent(
               'IMPORT',
               'members',
-              { 
-                fileName: file.name, 
-                fileSize: file.size, 
-                successCount: success, 
-                errorCount: errors,
-                options: options 
-              },
-              (window as any).currentUserId
+              `import-${Date.now()}`
             );
           }
 
@@ -956,8 +955,7 @@ const cloudService = {
       await logAuditEvent(
         'BACKUP',
         'system',
-        { type: 'manual', timestamp: new Date().toISOString() },
-        (window as any).currentUserId
+        `backup-${Date.now()}`
       );
       
     } catch (error) {
@@ -1064,8 +1062,7 @@ const cloudService = {
         await logAuditEvent(
           'CLEANUP',
           'members',
-          { deletedCount: count, cutoffDate: oneYearAgo.toISOString() },
-          (window as any).currentUserId
+          `cleanup-${Date.now()}`
         );
       }
 
@@ -1146,7 +1143,7 @@ const Admin = () => {
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
   // State for administrative sections
-  const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
+  const [, setSystemConfig] = useState<SystemConfig | null>(null);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [systemStats, setSystemStats] = useState<any>(null);
@@ -1323,7 +1320,6 @@ const Admin = () => {
         await logAuditEvent(
           'ACCESS',
           'admin_panel',
-          { action: 'loaded_data', itemsLoaded: membersData.length },
           profile.id
         );
       }
@@ -1467,8 +1463,7 @@ const Admin = () => {
     await logAuditEvent(
       'VIEW',
       'modal',
-      { modalType, userId: user?.id || 'none' },
-      profile.id
+      user?.id || 'none'
     );
 
     if (user) {
@@ -1695,7 +1690,7 @@ const Admin = () => {
             // Create new member
             const { error: insertError } = await supabase
               .from('members')
-              .insert(memberData);
+              .insert([memberData as any]);
 
             if (!insertError) {
               success++;
@@ -1726,14 +1721,7 @@ const Admin = () => {
         await logAuditEvent(
           'IMPORT',
           'members',
-          { 
-            fileName: importFile.name, 
-            fileSize: importFile.size, 
-            successCount: success, 
-            errorCount: errors,
-            options: importOptions 
-          },
-          (window as any).currentUserId
+          `import-${Date.now()}`
         );
       }
 
@@ -2059,8 +2047,7 @@ const Admin = () => {
       await logAuditEvent(
         'GENERATE_CREDENTIALS',
         'member',
-        { memberId: selectedUser.id, memberName: `${selectedUser.name} ${selectedUser.surname}` },
-        profile!.id
+        selectedUser.id
       );
       
       await loadData();
@@ -2161,17 +2148,7 @@ const Admin = () => {
       await logAuditEvent(
         'UPDATE',
         'member',
-        { 
-          memberId: selectedUser.id, 
-          memberName: `${selectedUser.name} ${selectedUser.surname}`,
-          changes: {
-            roles: userFormData.roles,
-            permissions: userFormData.permissions,
-            assigned_groups: cleanedAssignedGroups,
-            assigned_departments: cleanedAssignedDepartments
-          }
-        },
-        profile.id
+        selectedUser.id
       );
 
       setMembers(prev => prev.map(m => 
@@ -2388,17 +2365,18 @@ const Admin = () => {
     switch (auditLogFilter) {
       case 'today':
         filtered = filtered.filter(log => {
+          if (!log.created_at) return false;
           const logDate = new Date(log.created_at);
           return logDate.toDateString() === now.toDateString();
         });
         break;
       case 'week':
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        filtered = filtered.filter(log => new Date(log.created_at) >= weekAgo);
+        filtered = filtered.filter(log => log.created_at ? new Date(log.created_at) >= weekAgo : false);
         break;
       case 'month':
         const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        filtered = filtered.filter(log => new Date(log.created_at) >= monthAgo);
+        filtered = filtered.filter(log => log.created_at ? new Date(log.created_at) >= monthAgo : false);
         break;
     }
 
@@ -2406,11 +2384,11 @@ const Admin = () => {
     if (searchAuditTerm) {
       const searchLower = searchAuditTerm.toLowerCase();
       filtered = filtered.filter(log =>
-        log.action.toLowerCase().includes(searchLower) ||
-        log.resource.toLowerCase().includes(searchLower) ||
+        (log.action || '').toLowerCase().includes(searchLower) ||
+        (log.table_name || '').toLowerCase().includes(searchLower) ||
         log.user_name?.toLowerCase().includes(searchLower) ||
         log.user_surname?.toLowerCase().includes(searchLower) ||
-        JSON.stringify(log.details).toLowerCase().includes(searchLower)
+        JSON.stringify(log.new_data).toLowerCase().includes(searchLower)
       );
     }
 
@@ -3085,8 +3063,8 @@ const Admin = () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Table</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Record ID</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
                       </tr>
                     </thead>
@@ -3094,8 +3072,8 @@ const Admin = () => {
                       {filteredAuditLogs.map((log) => (
                         <tr key={log.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <div>{new Date(log.created_at).toLocaleDateString()}</div>
-                            <div className="text-xs">{new Date(log.created_at).toLocaleTimeString()}</div>
+                            <div>{log.created_at ? new Date(log.created_at).toLocaleDateString() : 'N/A'}</div>
+                            <div className="text-xs">{log.created_at ? new Date(log.created_at).toLocaleTimeString() : ''}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">
@@ -3109,28 +3087,28 @@ const Admin = () => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                              log.action === 'CREATE' ? 'bg-green-100 text-green-800' :
+                              log.action === 'CREATE' || log.action === 'INSERT' ? 'bg-green-100 text-green-800' :
                               log.action === 'UPDATE' ? 'bg-blue-100 text-blue-800' :
                               log.action === 'DELETE' ? 'bg-red-100 text-red-800' :
-                              log.action === 'LOGIN' ? 'bg-purple-100 text-purple-800' :
+                              log.action === 'LOGIN' || log.action === 'ACCESS' ? 'bg-purple-100 text-purple-800' :
                               'bg-gray-100 text-gray-800'
                             }`}>
-                              {log.action}
+                              {log.action || 'UNKNOWN'}
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {log.resource}
+                            {log.table_name}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {log.ip_address}
+                            {log.record_id ? log.record_id.substring(0, 8) + '...' : 'N/A'}
                           </td>
                           <td className="px-6 py-4">
                             <div className="text-sm text-gray-900 max-w-xs truncate">
-                              {JSON.stringify(log.details)}
+                              {JSON.stringify(log.new_data || log.old_data || {})}
                             </div>
                             <button
                               onClick={() => {
-                                alert(JSON.stringify(log.details, null, 2));
+                                alert(JSON.stringify({ old_data: log.old_data, new_data: log.new_data }, null, 2));
                               }}
                               className="text-xs text-blue-600 hover:text-blue-800 mt-1"
                             >
