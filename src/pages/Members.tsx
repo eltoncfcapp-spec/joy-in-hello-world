@@ -176,7 +176,7 @@ const Members = () => {
       fetchCellGroups();
       fetchMinistryGroups();
     }
-  }, [profile, showHiddenMembers]);
+  }, [profile]); // Removed showHiddenMembers from dependencies
 
   const fetchMembers = async () => {
     if (!profile) return;
@@ -185,7 +185,8 @@ const Members = () => {
       setLoading(true);
       setError(null);
       
-      let query = supabase
+      // Fetch active members (is_hidden = false)
+      let activeQuery = supabase
         .from('members')
         .select(`
           *,
@@ -196,9 +197,9 @@ const Members = () => {
       
       if (visibleFilter) {
         if (isMember()) {
-          query = query.eq('id', visibleFilter);
+          activeQuery = activeQuery.eq('id', visibleFilter);
         } else if (isGroupLeader()) {
-          query = query.eq('cell_group_id', visibleFilter);
+          activeQuery = activeQuery.eq('cell_group_id', visibleFilter);
         }
       } else if (!canViewAllMembers()) {
         setMembers([]);
@@ -207,62 +208,62 @@ const Members = () => {
         return;
       }
 
-      if (!showHiddenMembers) {
-        query = query.eq('is_hidden', false);
-      }
-
-      const { data: membersData, error: membersError } = await query
+      // Fetch active members
+      const { data: activeMembersData, error: activeMembersError } = await activeQuery
+        .eq('is_hidden', false)
         .order('created_at', { ascending: false });
 
-      if (membersError) {
-        throw membersError;
+      if (activeMembersError) {
+        throw activeMembersError;
       }
 
-      const membersArray = Array.isArray(membersData) ? membersData : (membersData ? [membersData] : []);
-
-      const membersWithCellGroupName = membersArray.map(member => ({
+      const activeMembersArray = Array.isArray(activeMembersData) ? activeMembersData : (activeMembersData ? [activeMembersData] : []);
+      const activeMembersWithCellGroupName = activeMembersArray.map(member => ({
         ...member,
         cell_group_name: member.cell_groups?.name || null
       }));
 
-      if (showHiddenMembers) {
-        setHiddenMembers(membersWithCellGroupName);
-      } else {
-        setMembers(membersWithCellGroupName);
+      setMembers(activeMembersWithCellGroupName);
+
+      // Fetch hidden members (is_hidden = true) - only if user has permission
+      if (canViewHiddenMembers()) {
+        // Reset query for hidden members
+        let hiddenQuery = supabase
+          .from('members')
+          .select(`
+            *,
+            cell_groups!fk_cell_group(name)
+          `);
+
+        if (visibleFilter) {
+          if (isMember()) {
+            hiddenQuery = hiddenQuery.eq('id', visibleFilter);
+          } else if (isGroupLeader()) {
+            hiddenQuery = hiddenQuery.eq('cell_group_id', visibleFilter);
+          }
+        }
+
+        const { data: hiddenMembersData, error: hiddenMembersError } = await hiddenQuery
+          .eq('is_hidden', true)
+          .order('created_at', { ascending: false });
+
+        if (hiddenMembersError) {
+          console.error('Error fetching hidden members:', hiddenMembersError);
+        } else {
+          const hiddenMembersArray = Array.isArray(hiddenMembersData) ? hiddenMembersData : (hiddenMembersData ? [hiddenMembersData] : []);
+          const hiddenMembersWithCellGroupName = hiddenMembersArray.map(member => ({
+            ...member,
+            cell_group_name: member.cell_groups?.name || null
+          }));
+
+          setHiddenMembers(hiddenMembersWithCellGroupName);
+        }
       }
     } catch (error: any) {
       console.error('Error fetching members:', error);
       setError(error.message || 'Failed to load members.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchHiddenMembers = async () => {
-    if (!canViewHiddenMembers()) return;
-
-    try {
-      const { data: membersData, error: membersError } = await supabase
-        .from('members')
-        .select(`
-          *,
-          cell_groups!fk_cell_group(name)
-        `)
-        .eq('is_hidden', true)
-        .order('created_at', { ascending: false });
-
-      if (membersError) {
-        throw membersError;
-      }
-
-      const membersWithCellGroupName = (membersData || []).map(member => ({
-        ...member,
-        cell_group_name: member.cell_groups?.name || null
-      }));
-
-      setHiddenMembers(membersWithCellGroupName);
-    } catch (error: any) {
-      console.error('Error fetching hidden members:', error);
     }
   };
 
@@ -381,7 +382,6 @@ const Members = () => {
       resetForm();
       setSuccess('Member added successfully as a newcomer!');
       fetchMembers();
-      fetchHiddenMembers();
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -540,7 +540,6 @@ const Members = () => {
       
       setSuccess(message);
       fetchMembers();
-      fetchHiddenMembers();
       
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
@@ -615,7 +614,6 @@ const Members = () => {
       
       setSuccess('Member restored successfully as a newcomer!');
       fetchMembers();
-      fetchHiddenMembers();
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error restoring member:', error);
@@ -672,7 +670,6 @@ const Members = () => {
       
       setSuccess('Member permanently deleted.');
       fetchMembers();
-      fetchHiddenMembers();
       setTimeout(() => setSuccess(null), 3000);
     } catch (error: any) {
       console.error('Error deleting member:', error);
@@ -746,11 +743,21 @@ const Members = () => {
     return matchesSearch && matchesCellGroup && matchesStatus && matchesGender;
   });
 
-  const filteredHiddenMembers = hiddenMembers.filter(
-    (member) =>
+  const filteredHiddenMembers = hiddenMembers.filter((member) => {
+    const matchesSearch = 
       member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.surname.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      member.surname.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.residence?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.cell_group_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      member.baptism?.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesCellGroup = !selectedCellGroup || member.cell_group_id === selectedCellGroup;
+    const matchesStatus = !selectedStatus || member.status === selectedStatus;
+    const matchesGender = !selectedGender || member.gender === selectedGender;
+
+    return matchesSearch && matchesCellGroup && matchesStatus && matchesGender;
+  });
 
   const getInitials = (name: string, surname: string) => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
@@ -797,6 +804,7 @@ const Members = () => {
   const getStatusCounts = () => {
     const counts: Record<string, number> = {};
     
+    // Count statuses for active members
     members.forEach(member => {
       const status = member.status || 'No Status';
       counts[status] = (counts[status] || 0) + 1;
@@ -806,7 +814,7 @@ const Members = () => {
       total: members.length,
       ...counts,
       baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
-      hidden: hiddenMembers.length,
+      hidden: hiddenMembers.length, // This will now have the actual count
     };
   };
 
