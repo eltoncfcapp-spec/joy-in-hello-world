@@ -126,12 +126,13 @@ const SermonModal = ({
   uploadingSermonFile,
   handleSermonSubmit 
 }: SermonModalProps) => {
-  // ✅ ALL HOOKS MUST BE AT THE TOP, BEFORE ANY RETURNS
   const modalTitle = useMemo(() => {
     if (editingSermon) return 'Edit Sermon';
     if (showSermonModal === 'new') return 'Add New Sermon';
     return 'Add Sermon to Event';
   }, [editingSermon, showSermonModal]);
+
+  if (!showSermonModal) return null;
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -149,9 +150,6 @@ const SermonModal = ({
     e.preventDefault();
     await handleSermonSubmit(e);
   }, [handleSermonSubmit]);
-
-  // ✅ NOW the conditional return comes AFTER all hooks
-  if (!showSermonModal) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -378,7 +376,6 @@ const NewcomerModal = ({
   loading,
   eventName 
 }: NewcomerModalProps) => {
-  // ✅ Move hooks to the top
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
     surname: '',
@@ -404,6 +401,8 @@ const NewcomerModal = ({
     }
   }, [showNewcomerModal]);
 
+  if (!showNewcomerModal) return null;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setNewcomerFormData(prev => ({
@@ -414,11 +413,8 @@ const NewcomerModal = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await handleNewcomerSubmit(newcomerFormData, showNewcomerModal!);
+    await handleNewcomerSubmit(newcomerFormData, showNewcomerModal);
   };
-
-  // ✅ Conditional return after all hooks
-  if (!showNewcomerModal) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -575,7 +571,7 @@ const NewcomerModal = ({
   );
 };
 
-// BulkAttendanceModal Component - FIXED with all hooks at the top
+// BulkAttendanceModal Component (Fixed with useMemo and default to "all absent")
 const BulkAttendanceModal = ({ 
   showBulkAttendanceModal, 
   closeBulkAttendanceModal,
@@ -603,17 +599,14 @@ const BulkAttendanceModal = ({
   attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
   getInitials: (name: string, surname: string) => string;
 }) => {
-  // ✅ MOVE ALL HOOKS TO THE TOP - Calculate everything first
-  const event = useMemo(() => 
-    events.find(e => e.id === showBulkAttendanceModal), 
-    [events, showBulkAttendanceModal]
-  );
+  if (!showBulkAttendanceModal) return null;
+
+  const event = events.find(e => e.id === showBulkAttendanceModal);
+  if (!event) return null;
+
+  const targetMembers = fetchTargetMembersForEvent(event);
   
-  const targetMembers = useMemo(() => 
-    event ? fetchTargetMembersForEvent(event) : [],
-    [event, fetchTargetMembersForEvent]
-  );
-  
+  // FIXED: Memoize filtered members calculation
   const filteredMembers = useMemo(() => {
     if (!bulkAttendanceSearch.trim()) return targetMembers;
     
@@ -623,18 +616,14 @@ const BulkAttendanceModal = ({
       const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
       return searchableText.includes(searchLower);
     });
-  }, [targetMembers, bulkAttendanceSearch]);
+  }, [targetMembers, bulkAttendanceSearch]); // Only recalculates when targetMembers or search changes
 
-  const stats = useMemo(() => ({
+  const stats = {
     present: Object.values(bulkAttendance).filter(status => status === 'present').length,
     absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
     total: targetMembers.length,
     filtered: filteredMembers.length
-  }), [bulkAttendance, targetMembers.length, filteredMembers.length]);
-
-  // ✅ NOW do conditional returns AFTER all hooks
-  if (!showBulkAttendanceModal) return null;
-  if (!event) return null;
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
