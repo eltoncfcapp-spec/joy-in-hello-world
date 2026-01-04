@@ -1,10 +1,12 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, UsersRound, Shield, Menu, X, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, UsersRound, Shield, Menu, X, LogOut, Bell } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { NotificationSettings } from './notifications/NotificationSettings';
 
 const Layout = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const { logout, profile } = useAuth();
   const navigate = useNavigate();
 
@@ -63,6 +65,21 @@ const Layout = () => {
           </nav>
 
           <div className="absolute bottom-6 left-6 right-6 space-y-3">
+            {/* Notification Settings Toggle */}
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-foreground/70 hover:bg-primary/10 hover:text-foreground transition-all duration-200"
+            >
+              <Bell className="h-5 w-5" />
+              <span>Notifications</span>
+            </button>
+
+            {showNotifications && (
+              <div className="p-2">
+                <NotificationSettings memberId={profile?.id} />
+              </div>
+            )}
+
             <div className="px-4 py-3 bg-primary/10 rounded-lg border border-primary/20">
               <p className="text-sm text-muted-foreground">Logged in as</p>
               <p className="text-sm font-medium text-foreground truncate">
