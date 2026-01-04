@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Send, Bell, Users, Calendar } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '../../integrations/supabase/client';
 
 interface SendNotificationModalProps {
   isOpen: boolean;

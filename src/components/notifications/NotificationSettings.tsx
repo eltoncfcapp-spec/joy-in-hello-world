@@ -1,5 +1,5 @@
 import { Bell, BellOff, CheckCircle, AlertCircle } from 'lucide-react';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useNotifications } from '../../hooks/useNotifications';
 
 interface NotificationSettingsProps {
   memberId?: string;
