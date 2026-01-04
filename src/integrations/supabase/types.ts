@@ -1122,6 +1122,44 @@ export type Database = {
           },
         ]
       }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          id: string
+          member_id: string | null
+          p256dh: string
+          updated_at: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          member_id?: string | null
+          p256dh: string
+          updated_at?: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          member_id?: string | null
+          p256dh?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       security_settings: {
         Row: {
           access_controls: Json | null
@@ -1424,6 +1462,9 @@ export type Database = {
         | "stopped_attending"
         | "not_attending"
         | "left"
+        | "signed member"
+        | "stopped attending"
+        | "not attending"
       user_role:
         | "pastor"
         | "administrator"
@@ -1578,6 +1619,9 @@ export const Constants = {
         "stopped_attending",
         "not_attending",
         "left",
+        "signed member",
+        "stopped attending",
+        "not attending",
       ],
       user_role: [
         "pastor",
