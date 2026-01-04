@@ -575,7 +575,7 @@ const NewcomerModal = ({
   );
 };
 
-// BulkAttendanceModal Component (Fixed with useMemo and default to "all absent")
+// BulkAttendanceModal Component - FIXED with all hooks at the top
 const BulkAttendanceModal = ({ 
   showBulkAttendanceModal, 
   closeBulkAttendanceModal,
@@ -603,15 +603,17 @@ const BulkAttendanceModal = ({
   attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
   getInitials: (name: string, surname: string) => string;
 }) => {
-  // ✅ Conditional return at the beginning (no hooks after this)
-  if (!showBulkAttendanceModal) return null;
-
-  const event = events.find(e => e.id === showBulkAttendanceModal);
-  if (!event) return null;
-
-  const targetMembers = fetchTargetMembersForEvent(event);
+  // ✅ MOVE ALL HOOKS TO THE TOP - Calculate everything first
+  const event = useMemo(() => 
+    events.find(e => e.id === showBulkAttendanceModal), 
+    [events, showBulkAttendanceModal]
+  );
   
-  // FIXED: Memoize filtered members calculation
+  const targetMembers = useMemo(() => 
+    event ? fetchTargetMembersForEvent(event) : [],
+    [event, fetchTargetMembersForEvent]
+  );
+  
   const filteredMembers = useMemo(() => {
     if (!bulkAttendanceSearch.trim()) return targetMembers;
     
@@ -621,14 +623,18 @@ const BulkAttendanceModal = ({
       const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
       return searchableText.includes(searchLower);
     });
-  }, [targetMembers, bulkAttendanceSearch]); // Only recalculates when targetMembers or search changes
+  }, [targetMembers, bulkAttendanceSearch]);
 
-  const stats = {
+  const stats = useMemo(() => ({
     present: Object.values(bulkAttendance).filter(status => status === 'present').length,
     absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
     total: targetMembers.length,
     filtered: filteredMembers.length
-  };
+  }), [bulkAttendance, targetMembers.length, filteredMembers.length]);
+
+  // ✅ NOW do conditional returns AFTER all hooks
+  if (!showBulkAttendanceModal) return null;
+  if (!event) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
