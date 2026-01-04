@@ -126,13 +126,12 @@ const SermonModal = ({
   uploadingSermonFile,
   handleSermonSubmit 
 }: SermonModalProps) => {
+  // ✅ ALL HOOKS MUST BE AT THE TOP, BEFORE ANY RETURNS
   const modalTitle = useMemo(() => {
     if (editingSermon) return 'Edit Sermon';
     if (showSermonModal === 'new') return 'Add New Sermon';
     return 'Add Sermon to Event';
   }, [editingSermon, showSermonModal]);
-
-  if (!showSermonModal) return null;
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -150,6 +149,9 @@ const SermonModal = ({
     e.preventDefault();
     await handleSermonSubmit(e);
   }, [handleSermonSubmit]);
+
+  // ✅ NOW the conditional return comes AFTER all hooks
+  if (!showSermonModal) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -376,6 +378,7 @@ const NewcomerModal = ({
   loading,
   eventName 
 }: NewcomerModalProps) => {
+  // ✅ Move hooks to the top
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
     surname: '',
@@ -401,8 +404,6 @@ const NewcomerModal = ({
     }
   }, [showNewcomerModal]);
 
-  if (!showNewcomerModal) return null;
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setNewcomerFormData(prev => ({
@@ -413,8 +414,11 @@ const NewcomerModal = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await handleNewcomerSubmit(newcomerFormData, showNewcomerModal);
+    await handleNewcomerSubmit(newcomerFormData, showNewcomerModal!);
   };
+
+  // ✅ Conditional return after all hooks
+  if (!showNewcomerModal) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -599,6 +603,7 @@ const BulkAttendanceModal = ({
   attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
   getInitials: (name: string, surname: string) => string;
 }) => {
+  // ✅ Conditional return at the beginning (no hooks after this)
   if (!showBulkAttendanceModal) return null;
 
   const event = events.find(e => e.id === showBulkAttendanceModal);
