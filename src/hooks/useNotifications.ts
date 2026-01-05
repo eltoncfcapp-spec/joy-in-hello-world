@@ -1,11 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../integrations/supabase/client';
 
+// VAPID public key for push subscriptions
+const VAPID_PUBLIC_KEY = 'BGsjSHlYAj8OQGFiZScr0QJLc2yduNZ9UmLeXYf4dbEqfRQfvmMktRazaYySHSZHSQhsarql1PKPXayRvEU8n0I';
+
 interface NotificationState {
   isSupported: boolean;
   permission: NotificationPermission;
   isSubscribed: boolean;
   isLoading: boolean;
+}
+
+// Convert base64 to Uint8Array for VAPID key
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }
 
 export function useNotifications(memberId?: string) {
@@ -18,7 +33,7 @@ export function useNotifications(memberId?: string) {
 
   // Check if notifications are supported
   useEffect(() => {
-    const isSupported = 'Notification' in window && 'serviceWorker' in navigator;
+    const isSupported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
     setState(prev => ({
       ...prev,
       isSupported,
@@ -48,15 +63,24 @@ export function useNotifications(memberId?: string) {
       }
 
       try {
+        // Check both database and actual push subscription
         const { data } = await supabase
           .from('push_subscriptions')
-          .select('id')
+          .select('id, endpoint')
           .eq('member_id', memberId)
           .maybeSingle();
 
+        // Also check if browser has active subscription
+        let hasActiveSubscription = false;
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+          const registration = await navigator.serviceWorker.ready;
+          const subscription = await registration.pushManager.getSubscription();
+          hasActiveSubscription = !!subscription;
+        }
+
         setState(prev => ({
           ...prev,
-          isSubscribed: !!data,
+          isSubscribed: !!data && hasActiveSubscription,
           isLoading: false
         }));
       } catch (error) {
@@ -82,7 +106,7 @@ export function useNotifications(memberId?: string) {
     }
   }, [state.isSupported]);
 
-  // Subscribe to notifications
+  // Subscribe to push notifications
   const subscribe = useCallback(async (): Promise<boolean> => {
     if (!memberId || !state.isSupported) return false;
 
@@ -94,43 +118,64 @@ export function useNotifications(memberId?: string) {
       // Get service worker registration
       const registration = await navigator.serviceWorker.ready;
       
-      // Create a simple subscription record
-      const subscriptionData = {
-        member_id: memberId,
-        endpoint: `browser-${memberId}-${Date.now()}`,
-        p256dh: 'browser-notification',
-        auth: 'enabled'
-      };
+      // Subscribe to push notifications with VAPID key
+      const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey.buffer as ArrayBuffer
+      });
 
+      console.log('Push subscription created:', subscription);
+
+      // Extract subscription details
+      const subscriptionJSON = subscription.toJSON();
+      const endpoint = subscriptionJSON.endpoint || '';
+      const p256dh = subscriptionJSON.keys?.p256dh || '';
+      const auth = subscriptionJSON.keys?.auth || '';
+
+      // Save to database
       const { error } = await supabase
         .from('push_subscriptions')
-        .upsert(subscriptionData, { onConflict: 'endpoint' });
+        .upsert({
+          member_id: memberId,
+          endpoint,
+          p256dh,
+          auth
+        }, { onConflict: 'endpoint' });
 
       if (error) throw error;
 
       setState(prev => ({ ...prev, isSubscribed: true }));
       
       // Show confirmation notification
-      if (registration.showNotification) {
-        registration.showNotification('Notifications Enabled', {
-          body: 'You will now receive event reminders and announcements.',
-          icon: '/church-icon-192.png',
-          tag: 'subscription-confirmed'
-        });
-      }
+      registration.showNotification('Notifications Enabled', {
+        body: 'You will now receive event reminders and announcements even when the app is closed.',
+        icon: '/church-icon-192.png',
+        tag: 'subscription-confirmed'
+      });
 
       return true;
     } catch (error) {
-      console.error('Error subscribing:', error);
+      console.error('Error subscribing to push:', error);
       return false;
     }
   }, [memberId, state.isSupported, requestPermission]);
 
-  // Unsubscribe from notifications
+  // Unsubscribe from push notifications
   const unsubscribe = useCallback(async (): Promise<boolean> => {
     if (!memberId) return false;
 
     try {
+      // Unsubscribe from push manager
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          await subscription.unsubscribe();
+        }
+      }
+
+      // Remove from database
       const { error } = await supabase
         .from('push_subscriptions')
         .delete()
