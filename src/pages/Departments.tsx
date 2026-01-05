@@ -2177,6 +2177,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
             .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
+            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; }
             @media print { 
               body { padding: 20px; }
               .page-break { page-break-before: always; }
@@ -2223,27 +2224,29 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
           <div class="page-break"></div>
 
-          ${reportData.report_text ? `
+          <!-- Meeting Report Section -->
           <div class="report-section">
             <h3>📝 Meeting Report</h3>
-            <div style="white-space: pre-wrap; line-height: 1.6;">${reportData.report_text}</div>
+            <div class="section-content">${reportData.report_text || 'No report text recorded'}</div>
           </div>
-          ` : ''}
 
+          <!-- Decisions Made Section -->
           ${reportData.decisions_made ? `
           <div class="report-section">
             <h3>✅ Decisions Made</h3>
-            <div style="white-space: pre-wrap; line-height: 1.6;">${reportData.decisions_made}</div>
+            <div class="section-content">${reportData.decisions_made}</div>
           </div>
           ` : ''}
 
+          <!-- Action Items Section -->
           ${reportData.action_items ? `
           <div class="report-section">
             <h3>📌 Action Items</h3>
-            <div style="white-space: pre-wrap; line-height: 1.6;">${reportData.action_items}</div>
+            <div class="section-content">${reportData.action_items}</div>
           </div>
           ` : ''}
 
+          <!-- Next Meeting Section -->
           ${reportData.next_meeting_date ? `
           <div class="report-section">
             <h3>📅 Next Meeting</h3>
@@ -2256,10 +2259,11 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
           </div>
           ` : ''}
 
+          <!-- Additional Notes Section -->
           ${reportData.additional_notes ? `
           <div class="report-section">
             <h3>📝 Additional Notes</h3>
-            <div style="white-space: pre-wrap; line-height: 1.6;">${reportData.additional_notes}</div>
+            <div class="section-content">${reportData.additional_notes}</div>
           </div>
           ` : ''}
 
@@ -2297,7 +2301,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
           <div class="page-break"></div>
           <div class="report-section">
             <h3>📋 Meeting Notes</h3>
-            <div style="white-space: pre-wrap; line-height: 1.6;">${selectedMeeting.notes}</div>
+            <div class="section-content">${selectedMeeting.notes}</div>
           </div>
           ` : ''}
 
