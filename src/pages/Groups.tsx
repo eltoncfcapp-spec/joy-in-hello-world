@@ -2408,7 +2408,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .stat-value { font-size: 28px; font-weight: bold; color: #111827; }
             .stat-label { font-size: 12px; color: #6b7280; margin-top: 5px; }
             .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 15px 0; }
-            .report-section h3 { margin-top: 0; color: #1f2937; }
+            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
             .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
             .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; }
             .attendance-table th { background: #f3f4f6; font-weight: 600; }
@@ -2416,19 +2416,29 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
             .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
-            @media print { body { padding: 20px; } }
+            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; }
+            @media print { 
+              body { padding: 20px; }
+              .page-break { page-break-before: always; }
+            }
           </style>
         </head>
         <body>
           <h1>📋 Group Meeting Report</h1>
           <div class="header-info">
             <p><strong>Group:</strong> ${group.name}</p>
-            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'}</p>
+            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            }) : 'N/A'}</p>
             <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
             <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
             <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
             <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-            ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` : ''}
+            ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
+              `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` : ''}
           </div>
 
           <h2>📊 Attendance Summary</h2>
@@ -2451,40 +2461,52 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             </div>
           </div>
 
-          ${reportData.report_text ? `
+          <div class="page-break"></div>
+
+          <!-- Meeting Report Section -->
           <div class="report-section">
             <h3>📝 Meeting Report</h3>
-            <p>${reportData.report_text.replace(/\n/g, '<br>')}</p>
+            <div class="section-content">${reportData.report_text || 'No report text recorded'}</div>
           </div>
-          ` : ''}
 
+          <!-- Decisions Made Section -->
           ${reportData.decisions_made ? `
           <div class="report-section">
             <h3>✅ Decisions Made</h3>
-            <p>${reportData.decisions_made.replace(/\n/g, '<br>')}</p>
+            <div class="section-content">${reportData.decisions_made}</div>
           </div>
           ` : ''}
 
+          <!-- Action Items Section -->
           ${reportData.action_items ? `
           <div class="report-section">
             <h3>📌 Action Items</h3>
-            <p>${reportData.action_items.replace(/\n/g, '<br>')}</p>
+            <div class="section-content">${reportData.action_items}</div>
           </div>
           ` : ''}
 
+          <!-- Next Meeting Section -->
           ${reportData.next_meeting_date ? `
           <div class="report-section">
             <h3>📅 Next Meeting</h3>
-            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString()}</p>
+            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}</p>
           </div>
           ` : ''}
 
+          <!-- Additional Notes Section -->
           ${reportData.additional_notes ? `
           <div class="report-section">
             <h3>📝 Additional Notes</h3>
-            <p>${reportData.additional_notes.replace(/\n/g, '<br>')}</p>
+            <div class="section-content">${reportData.additional_notes}</div>
           </div>
           ` : ''}
+
+          <div class="page-break"></div>
 
           <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
           ${attendance.length > 0 ? `
@@ -2515,15 +2537,24 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           ` : '<p>No attendance records available.</p>'}
 
           ${selectedMeeting?.notes ? `
+          <div class="page-break"></div>
           <div class="report-section">
             <h3>📋 Meeting Notes</h3>
-            <p>${selectedMeeting.notes.replace(/\n/g, '<br>')}</p>
+            <div class="section-content">${selectedMeeting.notes}</div>
           </div>
           ` : ''}
 
           <div class="footer">
-            <p>Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-            <p>Church Management System • ${group.name}</p>
+            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })} at ${new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            <p>Church Management System • ${group.name} Group</p>
           </div>
         </body>
         </html>
@@ -2532,54 +2563,103 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       printWindow.print();
     }
   };
+
   const downloadReport = () => {
     const stats = attendanceStats;
     const reportContent = `
-GROUP MEETING REPORT
+==================================================================
+                    GROUP MEETING REPORT
+==================================================================
 
 Group: ${group.name}
-Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString() : 'N/A'}
+Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    }) : 'N/A'}
 Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
 Location: ${selectedMeeting?.location || group.location || 'N/A'}
 Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
 Status: ${selectedMeeting?.status || 'N/A'}
 
-${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? `CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
+${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
+`CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
 
-ATTENDANCE SUMMARY
+==================================================================
+                    ATTENDANCE SUMMARY
+==================================================================
 Total Members: ${stats.total}
 Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
 Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
 Absent with Notes: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
 Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
 
-MEETING REPORT
+==================================================================
+                    MEETING REPORT
+==================================================================
 ${reportData.report_text || 'No report text recorded'}
 
-DECISIONS MADE
+==================================================================
+                    DECISIONS MADE
+==================================================================
 ${reportData.decisions_made || 'No decisions recorded'}
 
-ACTION ITEMS
+==================================================================
+                    ACTION ITEMS
+==================================================================
 ${reportData.action_items || 'No action items recorded'}
 
-NEXT MEETING
-${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString()}` : 'No next meeting date set'}
+==================================================================
+                    NEXT MEETING
+==================================================================
+${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })}` : 'No next meeting date set'}
 
-ADDITIONAL NOTES
+==================================================================
+                    ADDITIONAL NOTES
+==================================================================
 ${reportData.additional_notes || 'No additional notes'}
 
-DETAILED ATTENDANCE
+==================================================================
+                    DETAILED ATTENDANCE
+==================================================================
 ${attendance.length > 0 ? attendance.map(record => 
-  `${record.members?.name || ''} ${record.members?.surname || ''} | ${record.members?.residence || 'No residence'} | ${record.members?.phone || 'No phone'} | ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` | Notes: ${record.notes}` : ''}`
-).join('\n') : 'No attendance records available.'}
+`• ${record.members?.name || ''} ${record.members?.surname || ''}
+  Residence: ${record.members?.residence || 'No residence'}
+  Phone: ${record.members?.phone || 'No phone'}
+  Status: ${(record.status || 'unknown').toUpperCase()}
+  ${record.notes ? `Notes: ${record.notes}` : ''}
+  ${'-'.repeat(60)}`
+).join('\n\n') : 'No attendance records available.'}
 
 ${selectedMeeting?.notes ? `
-MEETING NOTES
+==================================================================
+                    MEETING NOTES
+==================================================================
 ${selectedMeeting.notes}
 ` : ''}
 
-Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-Church Management System • ${group.name}
+==================================================================
+                    REPORT INFORMATION
+==================================================================
+Generated on: ${new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })}
+Generated at: ${new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    })}
+Church Management System
+${group.name} Group
+==================================================================
     `.trim();
 
     const blob = new Blob([reportContent], { type: 'text/plain' });
