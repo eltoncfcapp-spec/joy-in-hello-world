@@ -27,6 +27,7 @@ const Trends = lazy(() => import('./pages/Trends'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Admin = lazy(() => import('./pages/Admin'));
 const Login = lazy(() => import('./pages/Login'));
+const Install = lazy(() => import('./pages/Install'));
 
 // Loading spinner for lazy-loaded pages
 const PageLoader = () => (
@@ -202,6 +203,7 @@ function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/install" element={<Install />} />
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="members" element={<Members />} />
