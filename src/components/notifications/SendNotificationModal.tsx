@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Send, Bell, Users, Calendar } from 'lucide-react';
 import { supabase } from '../../integrations/supabase/client';
 
@@ -17,7 +17,7 @@ export function SendNotificationModal({ isOpen, onClose }: SendNotificationModal
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
 
   // Load groups and departments on mount
-  useState(() => {
+  useEffect(() => {
     const loadData = async () => {
       const [groupsRes, deptsRes] = await Promise.all([
         supabase.from('cell_groups').select('id, name').order('name'),
@@ -27,49 +27,40 @@ export function SendNotificationModal({ isOpen, onClose }: SendNotificationModal
       if (deptsRes.data) setDepartments(deptsRes.data);
     };
     loadData();
-  });
+  }, []);
 
   const handleSend = async () => {
     if (!title.trim() || !body.trim()) return;
 
     setIsLoading(true);
     try {
-      // Get subscribed members based on target
-      let query = supabase
-        .from('push_subscriptions')
-        .select('member_id, members!inner(id, name, cell_group_id, assigned_departments)');
-
-      if (targetType === 'group' && targetId) {
-        query = query.eq('members.cell_group_id', targetId);
-      } else if (targetType === 'department' && targetId) {
-        query = query.contains('members.assigned_departments', [targetId]);
-      }
-
-      const { data: subscriptions } = await query;
-
-      if (!subscriptions?.length) {
-        alert('No subscribers found for the selected target.');
-        setIsLoading(false);
-        return;
-      }
-
-      // For browser notifications, we trigger them client-side
-      // In a real scenario, you'd use a backend service
-      // Here we'll use the Notification API directly for demo
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const registration = await navigator.serviceWorker.ready;
-        await registration.showNotification(title, {
+      // Call the edge function to send push notifications
+      const { data, error } = await supabase.functions.invoke('send-push-notification', {
+        body: {
+          title,
           body,
-          icon: '/church-icon-192.png',
-          badge: '/church-icon-72.png',
-          tag: `announcement-${Date.now()}`
-        });
-      }
+          targetType,
+          targetId: targetType !== 'all' ? targetId : undefined,
+          url: '/'
+        }
+      });
 
-      alert(`Notification sent to ${subscriptions.length} subscriber(s)!`);
-      setTitle('');
-      setBody('');
-      onClose();
+      if (error) throw error;
+
+      const result = data as { success: boolean; sent: number; failed: number; total: number; message?: string };
+      
+      if (result.success) {
+        if (result.sent > 0) {
+          alert(`Notification sent to ${result.sent} subscriber(s)!`);
+        } else {
+          alert(result.message || 'No subscribers found for the selected target.');
+        }
+        setTitle('');
+        setBody('');
+        onClose();
+      } else {
+        throw new Error('Failed to send notification');
+      }
     } catch (error) {
       console.error('Error sending notification:', error);
       alert('Failed to send notification. Please try again.');
@@ -86,7 +77,7 @@ export function SendNotificationModal({ isOpen, onClose }: SendNotificationModal
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Bell className="h-5 w-5 text-primary" />
-            <h2 className="text-lg font-semibold text-foreground">Send Notification</h2>
+            <h2 className="text-lg font-semibold text-foreground">Send Push Notification</h2>
           </div>
           <button
             onClick={onClose}
@@ -97,6 +88,11 @@ export function SendNotificationModal({ isOpen, onClose }: SendNotificationModal
         </div>
 
         <div className="p-4 space-y-4">
+          {/* Info Banner */}
+          <div className="bg-primary/10 text-primary text-sm p-3 rounded-lg">
+            📲 Notifications will be delivered even when the app is closed!
+          </div>
+
           {/* Target Selection */}
           <div>
             <label className="block text-sm font-medium text-foreground mb-2">
