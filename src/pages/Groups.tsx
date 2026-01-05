@@ -2427,6 +2427,8 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
             <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
             <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
+            <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
+            ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` : ''}
           </div>
 
           <h2>📊 Attendance Summary</h2>
@@ -2477,12 +2479,21 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           </div>
           ` : ''}
 
+          ${reportData.additional_notes ? `
+          <div class="report-section">
+            <h3>📝 Additional Notes</h3>
+            <p>${reportData.additional_notes.replace(/\n/g, '<br>')}</p>
+          </div>
+          ` : ''}
+
           <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
+          ${attendance.length > 0 ? `
           <table class="attendance-table">
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Residence</th>
+                <th>Phone</th>
                 <th>Status</th>
                 <th>Notes</th>
               </tr>
@@ -2492,6 +2503,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
                 <tr>
                   <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
                   <td>${record.members?.residence || ''}</td>
+                  <td>${record.members?.phone || ''}</td>
                   <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
                     ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
                   </td>
@@ -2500,10 +2512,18 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
               `).join('')}
             </tbody>
           </table>
+          ` : '<p>No attendance records available.</p>'}
+
+          ${selectedMeeting?.notes ? `
+          <div class="report-section">
+            <h3>📋 Meeting Notes</h3>
+            <p>${selectedMeeting.notes.replace(/\n/g, '<br>')}</p>
+          </div>
+          ` : ''}
 
           <div class="footer">
             <p>Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-            <p>Church Management System</p>
+            <p>Church Management System • ${group.name}</p>
           </div>
         </body>
         </html>
@@ -2512,7 +2532,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       printWindow.print();
     }
   };
-
   const downloadReport = () => {
     const stats = attendanceStats;
     const reportContent = `
@@ -2525,7 +2544,7 @@ Location: ${selectedMeeting?.location || group.location || 'N/A'}
 Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
 Status: ${selectedMeeting?.status || 'N/A'}
 
-${selectedMeeting?.status === 'cancelled' ? `CANCELLATION REASON: ${selectedMeeting.cancellation_reason || 'No reason provided'}\n` : ''}
+${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? `CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
 
 ATTENDANCE SUMMARY
 Total Members: ${stats.total}
@@ -2550,9 +2569,9 @@ ADDITIONAL NOTES
 ${reportData.additional_notes || 'No additional notes'}
 
 DETAILED ATTENDANCE
-${attendance.map(record => 
-  `${record.members?.name} ${record.members?.surname} (${record.members?.residence || 'No residence'}) - ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` (Notes: ${record.notes})` : ''}`
-).join('\n')}
+${attendance.length > 0 ? attendance.map(record => 
+  `${record.members?.name || ''} ${record.members?.surname || ''} | ${record.members?.residence || 'No residence'} | ${record.members?.phone || 'No phone'} | ${(record.status || 'unknown').toUpperCase()}${record.notes ? ` | Notes: ${record.notes}` : ''}`
+).join('\n') : 'No attendance records available.'}
 
 ${selectedMeeting?.notes ? `
 MEETING NOTES
@@ -2560,6 +2579,7 @@ ${selectedMeeting.notes}
 ` : ''}
 
 Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
+Church Management System • ${group.name}
     `.trim();
 
     const blob = new Blob([reportContent], { type: 'text/plain' });
@@ -2572,7 +2592,6 @@ Report Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTim
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
   return (
     <div className="space-y-6">
       <div>
