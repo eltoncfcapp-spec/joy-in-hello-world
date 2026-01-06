@@ -62,6 +62,27 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
     }));
   };
 
+  const sendReportNotification = async () => {
+    try {
+      const { error } = await supabase.functions.invoke('send-push-notification', {
+        body: {
+          title: `📋 Department Report: ${department?.name || 'Department'}`,
+          body: `A new meeting report has been created for ${new Date(selectedMeeting.meeting_date).toLocaleDateString()}`,
+          targetType: 'department',
+          targetId: department?.id,
+          url: '/departments',
+          tag: `dept-report-${selectedMeeting.id}`
+        }
+      });
+
+      if (error) {
+        console.error('Failed to send report notification:', error);
+      }
+    } catch (err) {
+      console.error('Error sending report notification:', err);
+    }
+  };
+
   const generateReport = async () => {
     if (!selectedMeeting) {
       onError('Please select a meeting first');
@@ -89,6 +110,9 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
         .from('department_meetings')
         .update({ status: 'completed' })
         .eq('id', selectedMeeting.id);
+
+      // Send notification about the new report
+      await sendReportNotification();
 
       onReportCreated();
     } catch (error: any) {

@@ -11,6 +11,7 @@ interface ReportStepProps {
 }
 
 const ReportStep: React.FC<ReportStepProps> = ({
+  group,
   selectedMeeting,
   onReportCreated,
   onError
@@ -23,6 +24,27 @@ const ReportStep: React.FC<ReportStepProps> = ({
     action_items: '',
     next_meeting_date: ''
   });
+
+  const sendReportNotification = async () => {
+    try {
+      const { error } = await supabase.functions.invoke('send-push-notification', {
+        body: {
+          title: `📋 Meeting Report: ${group?.name || 'Cell Group'}`,
+          body: `A new meeting report has been created for ${new Date(selectedMeeting.meeting_date).toLocaleDateString()}`,
+          targetType: 'group',
+          targetId: group?.id,
+          url: '/groups',
+          tag: `report-${selectedMeeting.id}`
+        }
+      });
+
+      if (error) {
+        console.error('Failed to send report notification:', error);
+      }
+    } catch (err) {
+      console.error('Error sending report notification:', err);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +73,9 @@ const ReportStep: React.FC<ReportStepProps> = ({
         });
 
       if (error) throw error;
+
+      // Send notification about the new report
+      await sendReportNotification();
 
       setFormData({
         report_text: '',
