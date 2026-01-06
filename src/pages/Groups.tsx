@@ -2395,166 +2395,489 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         <head>
           <title>Group Meeting Report - ${group.name}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
-            h1 { color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
-            h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            .header-info p { margin: 8px 0; }
-            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
-            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
-            .stat-box.present { background: #dcfce7; border-color: #86efac; }
-            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
-            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
-            .stat-value { font-size: 28px; font-weight: bold; color: #111827; }
-            .stat-label { font-size: 12px; color: #6b7280; margin-top: 5px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 15px 0; }
-            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; }
-            .attendance-table th { background: #f3f4f6; font-weight: 600; }
-            .status-present { color: #059669; font-weight: 600; }
-            .status-absent { color: #dc2626; font-weight: 600; }
-            .status-with-reason { color: #d97706; font-weight: 600; }
-            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
-            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; }
-            @media print { 
-              body { padding: 20px; }
-              .page-break { page-break-before: always; }
+            body { 
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+              padding: 20px; 
+              max-width: 900px; 
+              margin: 0 auto;
+              line-height: 1.6;
+              color: #333;
+              background: #fff;
+            }
+            
+            @page {
+              size: A4;
+              margin: 0.5in;
+            }
+            
+            .page-break {
+              page-break-before: always;
+            }
+            
+            .print-header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 3px solid #1e3a5f;
+            }
+            
+            .print-header h1 {
+              color: #1e3a5f;
+              margin: 0 0 10px 0;
+              font-size: 28px;
+            }
+            
+            .print-header .subtitle {
+              color: #4b5563;
+              font-size: 16px;
+              font-weight: 500;
+            }
+            
+            .meeting-info-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+              gap: 15px;
+              margin: 25px 0;
+              padding: 20px;
+              background: #f8fafc;
+              border-radius: 8px;
+              border: 1px solid #e2e8f0;
+            }
+            
+            .info-item {
+              margin-bottom: 8px;
+            }
+            
+            .info-label {
+              font-weight: 600;
+              color: #475569;
+              font-size: 14px;
+              display: block;
+            }
+            
+            .info-value {
+              color: #1e293b;
+              font-size: 15px;
+            }
+            
+            .stats-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 15px;
+              margin: 25px 0;
+            }
+            
+            .stat-box {
+              padding: 20px;
+              border-radius: 8px;
+              text-align: center;
+              border: 2px solid transparent;
+            }
+            
+            .stat-box.present {
+              background: #dcfce7;
+              border-color: #86efac;
+            }
+            
+            .stat-box.absent {
+              background: #fee2e2;
+              border-color: #fca5a5;
+            }
+            
+            .stat-box.with-reason {
+              background: #fef3c7;
+              border-color: #fcd34d;
+            }
+            
+            .stat-box.total {
+              background: #dbeafe;
+              border-color: #93c5fd;
+            }
+            
+            .stat-value {
+              font-size: 32px;
+              font-weight: 700;
+              margin: 10px 0;
+            }
+            
+            .stat-label {
+              font-size: 14px;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            
+            .attendance-rate {
+              text-align: center;
+              font-size: 20px;
+              font-weight: 700;
+              color: #1e3a5f;
+              margin: 15px 0;
+              padding: 10px;
+              background: #f0f9ff;
+              border-radius: 6px;
+            }
+            
+            .section-title {
+              color: #1e3a5f;
+              font-size: 20px;
+              font-weight: 700;
+              margin: 30px 0 15px 0;
+              padding-bottom: 8px;
+              border-bottom: 2px solid #e2e8f0;
+            }
+            
+            .report-section {
+              margin: 25px 0;
+              padding: 20px;
+              background: #f8fafc;
+              border-radius: 8px;
+              border: 1px solid #e2e8f0;
+            }
+            
+            .section-content {
+              white-space: pre-wrap;
+              margin-top: 15px;
+              line-height: 1.8;
+            }
+            
+            .attendance-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 20px 0;
+              font-size: 14px;
+            }
+            
+            .attendance-table th {
+              background: #1e3a5f;
+              color: white;
+              padding: 12px;
+              text-align: left;
+              font-weight: 600;
+            }
+            
+            .attendance-table td {
+              padding: 10px 12px;
+              border-bottom: 1px solid #e2e8f0;
+            }
+            
+            .attendance-table tr:nth-child(even) {
+              background: #f8fafc;
+            }
+            
+            .status-badge {
+              display: inline-block;
+              padding: 4px 12px;
+              border-radius: 20px;
+              font-size: 12px;
+              font-weight: 600;
+              text-transform: uppercase;
+            }
+            
+            .status-present {
+              background: #dcfce7;
+              color: #166534;
+            }
+            
+            .status-absent {
+              background: #fee2e2;
+              color: #991b1b;
+            }
+            
+            .status-with-reason {
+              background: #fef3c7;
+              color: #92400e;
+            }
+            
+            .notes-cell {
+              font-style: italic;
+              color: #6b7280;
+            }
+            
+            .footer {
+              margin-top: 40px;
+              padding-top: 20px;
+              border-top: 1px solid #e2e8f0;
+              text-align: center;
+              color: #6b7280;
+              font-size: 12px;
+            }
+            
+            .footer p {
+              margin: 5px 0;
+            }
+            
+            .print-date {
+              font-weight: 600;
+              color: #4b5563;
+            }
+            
+            @media print {
+              body {
+                padding: 0;
+                font-size: 12pt;
+              }
+              
+              .page-break {
+                page-break-before: always;
+              }
+              
+              .no-print {
+                display: none !important;
+              }
+              
+              .print-header {
+                margin-top: 0;
+              }
+              
+              .stat-value {
+                font-size: 24pt;
+              }
             }
           </style>
         </head>
         <body>
-          <h1>📋 Group Meeting Report</h1>
-          <div class="header-info">
-            <p><strong>Group:</strong> ${group.name}</p>
-            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            }) : 'N/A'}</p>
-            <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
-            <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
-            <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
-            <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-            ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
-              `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` : ''}
+          <!-- Header Section -->
+          <div class="print-header">
+            <h1>📋 COMPREHENSIVE GROUP MEETING REPORT</h1>
+            <div class="subtitle">${group.name} • Church Cell Group</div>
+            <div style="margin-top: 10px; color: #6b7280; font-size: 14px;">
+              Meeting Summary Report - ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              }) : 'N/A'}
+            </div>
           </div>
 
-          <h2>📊 Attendance Summary</h2>
+          <!-- Meeting Information -->
+          <div class="meeting-info-grid">
+            <div class="info-item">
+              <span class="info-label">📅 Meeting Date</span>
+              <span class="info-value">
+                ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                }) : 'N/A'}
+              </span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">⏰ Meeting Time</span>
+              <span class="info-value">${selectedMeeting?.meeting_time || 'Not specified'}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">📍 Location</span>
+              <span class="info-value">${selectedMeeting?.location || group.location || 'Not specified'}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">📝 Topic/Agenda</span>
+              <span class="info-value">${selectedMeeting?.topic || 'General Group Meeting'}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">👥 Group Leader</span>
+              <span class="info-value">${group.leader_name || 'Not assigned'}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">📊 Meeting Status</span>
+              <span class="info-value" style="font-weight: 600; color: ${
+                selectedMeeting?.status === 'completed' ? '#059669' :
+                selectedMeeting?.status === 'cancelled' ? '#dc2626' : '#3b82f6'
+              }">
+                ${selectedMeeting?.status?.toUpperCase() || 'N/A'}
+              </span>
+            </div>
+          </div>
+
+          <!-- Attendance Statistics -->
+          <h2 class="section-title">📊 ATTENDANCE STATISTICS</h2>
           <div class="stats-grid">
             <div class="stat-box present">
-              <div class="stat-value">${stats.present}</div>
               <div class="stat-label">Present</div>
+              <div class="stat-value">${stats.present}</div>
+              <div style="font-size: 12px; color: #166534;">
+                ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}% of total
+              </div>
             </div>
             <div class="stat-box absent">
-              <div class="stat-value">${stats.absent}</div>
               <div class="stat-label">Absent</div>
+              <div class="stat-value">${stats.absent}</div>
+              <div style="font-size: 12px; color: #991b1b;">
+                ${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}% of total
+              </div>
             </div>
             <div class="stat-box with-reason">
+              <div class="stat-label">Absent with Notes</div>
               <div class="stat-value">${stats.absentWithReason}</div>
-              <div class="stat-label">Absent with Reason</div>
+              <div style="font-size: 12px; color: #92400e;">
+                ${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}% of total
+              </div>
             </div>
-            <div class="stat-box">
-              <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
-              <div class="stat-label">Attendance Rate</div>
+            <div class="stat-box total">
+              <div class="stat-label">Total Members</div>
+              <div class="stat-value">${stats.total}</div>
+              <div style="font-size: 12px; color: #1e3a5f;">
+                Group Size
+              </div>
+            </div>
+          </div>
+
+          <div class="attendance-rate">
+            Overall Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
+          </div>
+
+          <!-- Meeting Report Summary -->
+          <h2 class="section-title">📝 MEETING REPORT SUMMARY</h2>
+          <div class="report-section">
+            <div style="margin-bottom: 15px;">
+              <strong style="color: #1e3a5f; font-size: 16px;">Summary of Discussion:</strong>
+            </div>
+            <div class="section-content">
+              ${reportData.report_text || 'No meeting report summary was recorded.'}
             </div>
           </div>
 
           <div class="page-break"></div>
 
-          <!-- Meeting Report Section -->
+          <!-- Decisions Made -->
+          <h2 class="section-title">✅ DECISIONS MADE</h2>
           <div class="report-section">
-            <h3>📝 Meeting Report</h3>
-            <div class="section-content">${reportData.report_text || 'No report text recorded'}</div>
+            <div class="section-content">
+              ${reportData.decisions_made || 'No decisions were recorded during this meeting.'}
+            </div>
           </div>
 
-          <!-- Decisions Made Section -->
-          ${reportData.decisions_made ? `
+          <!-- Action Items -->
+          <h2 class="section-title">📌 ACTION ITEMS & FOLLOW-UPS</h2>
           <div class="report-section">
-            <h3>✅ Decisions Made</h3>
-            <div class="section-content">${reportData.decisions_made}</div>
+            <div class="section-content">
+              ${reportData.action_items || 'No action items were assigned during this meeting.'}
+            </div>
           </div>
-          ` : ''}
 
-          <!-- Action Items Section -->
-          ${reportData.action_items ? `
-          <div class="report-section">
-            <h3>📌 Action Items</h3>
-            <div class="section-content">${reportData.action_items}</div>
-          </div>
-          ` : ''}
-
-          <!-- Next Meeting Section -->
+          <!-- Next Meeting -->
           ${reportData.next_meeting_date ? `
+          <h2 class="section-title">📅 NEXT MEETING SCHEDULE</h2>
           <div class="report-section">
-            <h3>📅 Next Meeting</h3>
-            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}</p>
-          </div>
-          ` : ''}
-
-          <!-- Additional Notes Section -->
-          ${reportData.additional_notes ? `
-          <div class="report-section">
-            <h3>📝 Additional Notes</h3>
-            <div class="section-content">${reportData.additional_notes}</div>
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+              <div style="font-size: 24px;">📅</div>
+              <div>
+                <div style="font-size: 18px; font-weight: 700; color: #1e3a5f;">
+                  ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </div>
+                <div style="color: #6b7280; font-size: 14px;">
+                  Next Group Meeting
+                </div>
+              </div>
+            </div>
           </div>
           ` : ''}
 
           <div class="page-break"></div>
 
-          <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-          ${attendance.length > 0 ? `
+          <!-- Detailed Attendance -->
+          <h2 class="section-title">👥 DETAILED ATTENDANCE RECORDS</h2>
+          <p style="color: #6b7280; margin-bottom: 15px;">
+            Total Members in Attendance: ${stats.present} | Absent: ${stats.absent} | Absent with Notes: ${stats.absentWithReason}
+          </p>
+          
           <table class="attendance-table">
             <thead>
               <tr>
-                <th>Name</th>
+                <th>#</th>
+                <th>Member Name</th>
                 <th>Residence</th>
-                <th>Phone</th>
                 <th>Status</th>
                 <th>Notes</th>
               </tr>
             </thead>
             <tbody>
-              ${attendance.map(record => `
+              ${attendance.length > 0 ? attendance.map((record, index) => `
                 <tr>
-                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
-                  <td>${record.members?.residence || ''}</td>
-                  <td>${record.members?.phone || ''}</td>
-                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-                    ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
+                  <td>${index + 1}</td>
+                  <td>
+                    <strong>${record.members?.name || ''} ${record.members?.surname || ''}</strong>
+                    ${record.members?.admin_role === 'group_leader' ? '<br><span style="font-size: 11px; color: #92400e;">(Group Leader)</span>' : ''}
                   </td>
-                  <td>${record.notes || '-'}</td>
+                  <td>${record.members?.residence || 'Not specified'}</td>
+                  <td>
+                    <span class="status-badge ${
+                      record.status === 'present' ? 'status-present' :
+                      record.status === 'absent' ? 'status-absent' :
+                      'status-with-reason'
+                    }">
+                      ${record.status === 'present' ? 'Present' :
+                        record.status === 'absent' ? 'Absent' :
+                        'Absent with Notes'}
+                    </span>
+                  </td>
+                  <td class="notes-cell">
+                    ${record.notes || '-'}
+                  </td>
                 </tr>
-              `).join('')}
+              `).join('') : `
+              <tr>
+                <td colspan="5" style="text-align: center; padding: 40px; color: #9ca3af;">
+                  No attendance records available for this meeting.
+                </td>
+              </tr>
+              `}
             </tbody>
           </table>
-          ` : '<p>No attendance records available.</p>'}
 
-          ${selectedMeeting?.notes ? `
+          <!-- Additional Notes -->
+          ${reportData.additional_notes ? `
           <div class="page-break"></div>
+          <h2 class="section-title">📋 ADDITIONAL NOTES</h2>
           <div class="report-section">
-            <h3>📋 Meeting Notes</h3>
-            <div class="section-content">${selectedMeeting.notes}</div>
+            <div class="section-content">
+              ${reportData.additional_notes}
+            </div>
           </div>
           ` : ''}
 
+          <!-- Meeting Notes -->
+          ${selectedMeeting?.notes ? `
+          <div class="page-break"></div>
+          <h2 class="section-title">📝 MEETING NOTES</h2>
+          <div class="report-section">
+            <div class="section-content">
+              ${selectedMeeting.notes}
+            </div>
+          </div>
+          ` : ''}
+
+          <!-- Footer -->
           <div class="footer">
-            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })} at ${new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}</p>
-            <p>Church Management System • ${group.name} Group</p>
+            <div style="margin-bottom: 15px; border-top: 1px solid #e2e8f0; padding-top: 15px;">
+              <p><strong>Report Generated:</strong> <span class="print-date">
+                ${new Date().toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })} at ${new Date().toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </span></p>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="text-align: left;">
+                <p style="font-weight: 600; color: #1e3a5f; margin-bottom: 5px;">Church Management System</p>
+                <p style="font-size: 11px; color: #6b7280;">${group.name} Cell Group Report</p>
+              </div>
+              <div style="text-align: right;">
+                <p style="font-size: 11px; color: #6b7280;">Page 1 of ${reportData.next_meeting_date || reportData.additional_notes || selectedMeeting?.notes ? '3' : '2'}</p>
+              </div>
+            </div>
           </div>
         </body>
         </html>
@@ -2568,10 +2891,13 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
     const stats = attendanceStats;
     const reportContent = `
 ==================================================================
-                    GROUP MEETING REPORT
+                    COMPREHENSIVE GROUP MEETING REPORT
 ==================================================================
 
+GROUP INFORMATION
+==================================================================
 Group: ${group.name}
+Leader: ${group.leader_name || 'Not assigned'}
 Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -2580,85 +2906,90 @@ Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocal
     }) : 'N/A'}
 Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
 Location: ${selectedMeeting?.location || group.location || 'N/A'}
-Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
-Status: ${selectedMeeting?.status || 'N/A'}
+Topic/Agenda: ${selectedMeeting?.topic || 'General Group Meeting'}
+Status: ${selectedMeeting?.status?.toUpperCase() || 'N/A'}
 
 ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
-`CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
+`CANCELLATION REASON: ${selectedMeeting.cancellation_reason}` : ''}
 
 ==================================================================
-                    ATTENDANCE SUMMARY
+                    ATTENDANCE STATISTICS
 ==================================================================
 Total Members: ${stats.total}
-Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
-Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
-Absent with Notes: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
-Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
+┌─────────────────┬─────────┬──────────────┐
+│ Status          │ Count   │ Percentage   │
+├─────────────────┼─────────┼──────────────┤
+│ Present         │ ${stats.present.toString().padEnd(7)} │ ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100).toString().padEnd(12)}% │
+│ Absent          │ ${stats.absent.toString().padEnd(7)} │ ${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100).toString().padEnd(12)}% │
+│ Absent w/ Notes │ ${stats.absentWithReason.toString().padEnd(7)} │ ${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100).toString().padEnd(12)}% │
+└─────────────────┴─────────┴──────────────┘
+
+Overall Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
 
 ==================================================================
-                    MEETING REPORT
+                    MEETING REPORT SUMMARY
 ==================================================================
-${reportData.report_text || 'No report text recorded'}
+${reportData.report_text || 'No meeting report summary was recorded.'}
 
 ==================================================================
                     DECISIONS MADE
 ==================================================================
-${reportData.decisions_made || 'No decisions recorded'}
+${reportData.decisions_made || 'No decisions were recorded during this meeting.'}
 
 ==================================================================
-                    ACTION ITEMS
+                    ACTION ITEMS & FOLLOW-UPS
 ==================================================================
-${reportData.action_items || 'No action items recorded'}
+${reportData.action_items || 'No action items were assigned during this meeting.'}
 
 ==================================================================
                     NEXT MEETING
 ==================================================================
-${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+${reportData.next_meeting_date ? 
+`Scheduled: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
-    })}` : 'No next meeting date set'}
+    })}` 
+: 'No next meeting date has been set.'}
+
+==================================================================
+                    DETAILED ATTENDANCE RECORDS
+==================================================================
+Total Records: ${attendance.length}
+${attendance.length > 0 ? attendance.map((record, index) => 
+`${index + 1}. ${record.members?.name || ''} ${record.members?.surname || ''}
+   Residence: ${record.members?.residence || 'Not specified'}
+   Status: ${(record.status || 'unknown').toUpperCase()} ${record.status === 'absent_with_reason' ? '(With Notes)' : ''}
+   ${record.members?.admin_role === 'group_leader' ? 'Role: Group Leader' : ''}
+   ${record.notes ? `Notes: ${record.notes}` : 'Notes: None'}
+   ${'-'.repeat(70)}`
+).join('\n\n') : 'No attendance records available for this meeting.'}
 
 ==================================================================
                     ADDITIONAL NOTES
 ==================================================================
-${reportData.additional_notes || 'No additional notes'}
+${reportData.additional_notes || 'No additional notes provided.'}
 
-==================================================================
-                    DETAILED ATTENDANCE
-==================================================================
-${attendance.length > 0 ? attendance.map(record => 
-`• ${record.members?.name || ''} ${record.members?.surname || ''}
-  Residence: ${record.members?.residence || 'No residence'}
-  Phone: ${record.members?.phone || 'No phone'}
-  Status: ${(record.status || 'unknown').toUpperCase()}
-  ${record.notes ? `Notes: ${record.notes}` : ''}
-  ${'-'.repeat(60)}`
-).join('\n\n') : 'No attendance records available.'}
-
-${selectedMeeting?.notes ? `
 ==================================================================
                     MEETING NOTES
 ==================================================================
-${selectedMeeting.notes}
-` : ''}
+${selectedMeeting?.notes || 'No meeting notes recorded.'}
 
 ==================================================================
                     REPORT INFORMATION
 ==================================================================
-Generated on: ${new Date().toLocaleDateString('en-US', {
+Generated: ${new Date().toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
-    })}
-Generated at: ${new Date().toLocaleTimeString('en-US', {
+    })} at ${new Date().toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit'
     })}
-Church Management System
-${group.name} Group
+Generated By: Church Management System
+Group: ${group.name}
 ==================================================================
     `.trim();
 
@@ -2838,7 +3169,7 @@ ${group.name} Group
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     <Printer className="h-4 w-4" />
-                    Print
+                    Print Report
                   </button>
                 </div>
               </div>
@@ -2885,14 +3216,14 @@ ${group.name} Group
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report Summary *</label>
                     <textarea
                       name="report_text"
                       value={reportData.report_text}
                       onChange={handleReportChange}
                       rows={4}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Detailed report of what was discussed and accomplished..."
+                      placeholder="Detailed summary of what was discussed and accomplished..."
                       required
                     />
                   </div>
@@ -2910,7 +3241,7 @@ ${group.name} Group
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items & Follow-ups</label>
                     <textarea
                       name="action_items"
                       value={reportData.action_items}
@@ -3754,18 +4085,28 @@ const Groups = () => {
 
         {showReportModal && selectedMeetingForReport && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
-            <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none">
-              <div className="flex justify-between items-center mb-6 print:mb-8">
-                <h3 className="text-2xl font-bold text-gray-900 print:text-black">
-                  Group Meeting Report
-                </h3>
+            <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none print:p-0">
+              <div className="flex justify-between items-center mb-6 print:mb-4 print:px-8 print:pt-8">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900 print:text-black print:text-3xl">
+                    Comprehensive Group Meeting Report
+                  </h3>
+                  <p className="text-gray-600 print:text-gray-700 print:text-lg">
+                    {group.name} • ${selectedMeetingForReport ? new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    }) : 'N/A'}
+                  </p>
+                </div>
                 <div className="flex gap-2 print:hidden">
                   <button
                     onClick={handlePrintReport}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
                   >
                     <Printer className="h-4 w-4" />
-                    Print Report
+                    Print Comprehensive Report
                   </button>
                   <button
                     onClick={closeAllModals}
@@ -3776,208 +4117,175 @@ const Groups = () => {
                 </div>
               </div>
 
-              <div className="mb-8 pb-6 border-b-2 border-gray-300 print:border-black">
-                <div className="text-center mb-4">
-                  <h1 className="text-3xl font-bold text-gray-900 print:text-black mb-2">
-                    {selectedGroup.name}
-                  </h1>
-                  <p className="text-lg text-gray-600 print:text-black">Group Meeting Attendance Report</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Date</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Time</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {selectedMeetingForReport.meeting_time || 'Not specified'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Location</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {selectedMeetingForReport.location || selectedGroup.location || 'Not specified'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Topic</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {selectedMeetingForReport.topic || 'Not specified'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mb-8">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Attendance Summary</h4>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-blue-50 print:bg-blue-50 border border-blue-200 print:border-blue-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
+              <div className="space-y-8 print:space-y-12 print:px-8 print:pb-8">
+                {/* Meeting Information Grid */}
+                <div className="bg-white border border-gray-200 rounded-2xl p-6 print:border-0 print:shadow-none print:p-0">
+                  <h4 className="text-xl font-bold text-gray-900 print:text-2xl print:text-black print:mb-4">Meeting Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 print:grid-cols-3">
+                    <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl print:bg-blue-100">
+                      <Calendar className="h-6 w-6 text-blue-600 print:text-blue-800" />
                       <div>
-                        <p className="text-sm text-blue-600 print:text-blue-700 font-medium">Total Members</p>
-                        <p className="text-3xl font-bold text-blue-700 print:text-blue-900">
-                          {getAttendanceStats().total}
+                        <p className="text-sm text-blue-700 print:text-blue-900 font-medium">Date</p>
+                        <p className="font-semibold text-blue-900 print:text-black">
+                          {new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
                         </p>
                       </div>
-                      <Users className="h-10 w-10 text-blue-400 print:text-blue-600" />
                     </div>
-                  </div>
-                  <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 p-4 bg-green-50 rounded-xl print:bg-green-100">
+                      <Clock className="h-6 w-6 text-green-600 print:text-green-800" />
                       <div>
-                        <p className="text-sm text-green-600 print:text-green-700 font-medium">Attended</p>
-                        <p className="text-3xl font-bold text-green-700 print:text-green-900">
-                          {getAttendanceStats().attended}
+                        <p className="text-sm text-green-700 print:text-green-900 font-medium">Time</p>
+                        <p className="font-semibold text-green-900 print:text-black">
+                          {selectedMeetingForReport.meeting_time || 'Not specified'}
                         </p>
                       </div>
-                      <CheckCircle className="h-10 w-10 text-green-400 print:text-green-600" />
                     </div>
-                    <p className="text-xs text-green-600 print:text-green-700 mt-2">
-                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%` : '0%'}
-                    </p>
-                  </div>
-                  <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 p-4 bg-purple-50 rounded-xl print:bg-purple-100">
+                      <MapPin className="h-6 w-6 text-purple-600 print:text-purple-800" />
                       <div>
-                        <p className="text-sm text-red-600 print:text-red-700 font-medium">Absent</p>
-                        <p className="text-3xl font-bold text-red-700 print:text-red-900">
-                          {getAttendanceStats().absent}
+                        <p className="text-sm text-purple-700 print:text-purple-900 font-medium">Location</p>
+                        <p className="font-semibold text-purple-900 print:text-black">
+                          {selectedMeetingForReport.location || selectedGroup.location || 'Not specified'}
                         </p>
                       </div>
-                      <X className="h-10 w-10 text-red-400 print:text-red-600" />
                     </div>
-                    <p className="text-xs text-red-600 print:text-red-700 mt-2">
-                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%` : '0%'}
-                    </p>
-                  </div>
-                  <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-yellow-600 print:text-yellow-700 font-medium">Absent w/ Reason</p>
-                        <p className="text-3xl font-bold text-yellow-700 print:text-yellow-900">
-                          {getAttendanceStats().absentWithReason}
-                        </p>
-                      </div>
-                      <AlertCircle className="h-10 w-10 text-yellow-400 print:text-yellow-600" />
-                    </div>
-                    <p className="text-xs text-yellow-600 print:text-yellow-700 mt-2">
-                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%` : '0%'}
-                    </p>
                   </div>
                 </div>
-              </div>
 
-              <div className="mb-6">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Detailed Attendance</h4>
-                {attendanceRecords.length === 0 ? (
-                  <div className="text-center py-8 bg-gray-50 print:bg-gray-50 rounded-lg">
-                    <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 print:text-gray-700">No attendance records found</p>
+                {/* Attendance Statistics */}
+                <div className="bg-white border border-gray-200 rounded-2xl p-6 print:border-0 print:p-0">
+                  <h4 className="text-xl font-bold text-gray-900 print:text-2xl print:text-black print:mb-6">Attendance Statistics</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 print:grid-cols-4">
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 text-center print:from-blue-600 print:to-blue-800">
+                      <div className="text-4xl font-bold mb-2">{getAttendanceStats().total}</div>
+                      <div className="text-lg font-medium">Total Members</div>
+                    </div>
+                    <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-6 text-center print:from-green-600 print:to-green-800">
+                      <div className="text-4xl font-bold mb-2">{getAttendanceStats().attended}</div>
+                      <div className="text-lg font-medium">Present</div>
+                      <div className="text-sm opacity-90 mt-2">
+                        {getAttendanceStats().total > 0 ? Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100) : 0}%
+                      </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-red-500 to-red-600 text-white rounded-xl p-6 text-center print:from-red-600 print:to-red-800">
+                      <div className="text-4xl font-bold mb-2">{getAttendanceStats().absent}</div>
+                      <div className="text-lg font-medium">Absent</div>
+                      <div className="text-sm opacity-90 mt-2">
+                        {getAttendanceStats().total > 0 ? Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100) : 0}%
+                      </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 text-white rounded-xl p-6 text-center print:from-yellow-600 print:to-yellow-800">
+                      <div className="text-4xl font-bold mb-2">{getAttendanceStats().absentWithReason}</div>
+                      <div className="text-lg font-medium">Absent with Notes</div>
+                      <div className="text-sm opacity-90 mt-2">
+                        {getAttendanceStats().total > 0 ? Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100) : 0}%
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <>
-                    {getAttendanceStats().attended > 0 && (
-                      <div className="mb-6">
-                        <h5 className="text-lg font-semibold text-green-700 print:text-green-800 mb-3 flex items-center gap-2">
-                          <CheckCircle className="h-5 w-5" />
-                          Present ({getAttendanceStats().attended})
-                        </h5>
-                        <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'present')
-                              .map((record) => (
-                                <div key={record.id} className="flex items-center gap-2">
-                                  <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-                                  <span className="text-gray-900 print:text-black">
-                                    {record.members?.name} {record.members?.surname}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                  
+                  <div className="mt-8 p-6 bg-gradient-to-r from-gray-800 to-gray-900 text-white rounded-xl text-center print:from-black print:to-gray-900">
+                    <div className="text-5xl font-bold mb-2">
+                      {getAttendanceStats().total > 0 ? Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100) : 0}%
+                    </div>
+                    <div className="text-xl font-medium">Overall Attendance Rate</div>
+                  </div>
+                </div>
 
-                    {getAttendanceStats().absent > 0 && (
-                      <div className="mb-6">
-                        <h5 className="text-lg font-semibold text-red-700 print:text-red-800 mb-3 flex items-center gap-2">
-                          <X className="h-5 w-5" />
-                          Absent ({getAttendanceStats().absent})
-                        </h5>
-                        <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'absent')
-                              .map((record) => (
-                                <div key={record.id} className="flex items-center gap-2">
-                                  <div className="w-2 h-2 bg-red-600 rounded-full"></div>
-                                  <span className="text-gray-900 print:text-black">
-                                    {record.members?.name} {record.members?.surname}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {getAttendanceStats().absentWithReason > 0 && (
-                      <div className="mb-6">
-                        <h5 className="text-lg font-semibold text-yellow-700 print:text-yellow-800 mb-3 flex items-center gap-2">
-                          <AlertCircle className="h-5 w-5" />
-                          Absent with Notes ({getAttendanceStats().absentWithReason})
-                        </h5>
-                        <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
-                          <div className="space-y-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'absent_with_reason')
-                              .map((record) => (
-                                <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
-                                  <div className="flex-1">
-                                    <span className="text-gray-900 print:text-black font-medium">
-                                      {record.members?.name} {record.members?.surname}
+                {/* Detailed Attendance Table */}
+                <div className="bg-white border border-gray-200 rounded-2xl p-6 print:border-0 print:p-0">
+                  <h4 className="text-xl font-bold text-gray-900 print:text-2xl print:text-black print:mb-6">Detailed Attendance Records</h4>
+                  {attendanceRecords.length === 0 ? (
+                    <div className="text-center py-12 bg-gray-50 rounded-xl print:bg-gray-100">
+                      <Users className="h-16 w-16 text-gray-400 mx-auto mb-3 print:text-gray-600" />
+                      <p className="text-gray-600 print:text-gray-700">No attendance records found</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto print:overflow-visible">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="bg-gray-800 text-white print:bg-black">
+                            <th className="px-4 py-3 text-left print:px-2 print:py-2">#</th>
+                            <th className="px-4 py-3 text-left print:px-2 print:py-2">Member Name</th>
+                            <th className="px-4 py-3 text-left print:px-2 print:py-2">Residence</th>
+                            <th className="px-4 py-3 text-left print:px-2 print:py-2">Status</th>
+                            <th className="px-4 py-3 text-left print:px-2 print:py-2">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {attendanceRecords.map((record, index) => (
+                            <tr key={record.id} className="border-b border-gray-200 hover:bg-gray-50 print:border-gray-300">
+                              <td className="px-4 py-3 print:px-2 print:py-2">{index + 1}</td>
+                              <td className="px-4 py-3 print:px-2 print:py-2">
+                                <div className="font-medium text-gray-900 print:text-black">
+                                  {record.members?.name} {record.members?.surname}
+                                  {record.members?.admin_role === 'group_leader' && (
+                                    <span className="ml-2 inline-flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium print:bg-yellow-200">
+                                      Leader
                                     </span>
-                                    {record.notes && (
-                                      <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
-                                        Notes: {record.notes}
-                                      </p>
-                                    )}
-                                  </div>
+                                  )}
                                 </div>
-                              ))}
-                          </div>
+                              </td>
+                              <td className="px-4 py-3 print:px-2 print:py-2 text-gray-700 print:text-gray-800">
+                                {record.members?.residence || 'Not specified'}
+                              </td>
+                              <td className="px-4 py-3 print:px-2 print:py-2">
+                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                                  record.status === 'present' 
+                                    ? 'bg-green-100 text-green-800 print:bg-green-200' 
+                                    : record.status === 'absent'
+                                    ? 'bg-red-100 text-red-800 print:bg-red-200'
+                                    : 'bg-yellow-100 text-yellow-800 print:bg-yellow-200'
+                                }`}>
+                                  {record.status === 'present' ? 'Present' : 
+                                   record.status === 'absent' ? 'Absent' : 
+                                   'Absent with Notes'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 print:px-2 print:py-2 text-gray-600 print:text-gray-700">
+                                {record.notes || '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Meeting Notes */}
+                {selectedMeetingForReport.notes && (
+                  <div className="bg-white border border-gray-200 rounded-2xl p-6 print:border-0 print:p-0">
+                    <h4 className="text-xl font-bold text-gray-900 print:text-2xl print:text-black print:mb-4">Meeting Notes</h4>
+                    <div className="bg-gray-50 rounded-xl p-6 print:bg-gray-100">
+                      <div className="prose max-w-none">
+                        <div className="whitespace-pre-wrap text-gray-700 print:text-gray-900">
+                          {selectedMeetingForReport.notes}
                         </div>
                       </div>
-                    )}
-                  </>
+                    </div>
+                  </div>
                 )}
-              </div>
 
-              {selectedMeetingForReport.notes && (
-                <div className="mb-6">
-                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">Meeting Notes</h4>
-                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-lg p-4">
-                    <p className="text-gray-700 print:text-black whitespace-pre-wrap">
-                      {selectedMeetingForReport.notes}
-                    </p>
+                {/* Footer */}
+                <div className="border-t border-gray-200 pt-6 print:border-t-2 print:border-black">
+                  <div className="text-center text-gray-600 print:text-gray-800">
+                    <p className="font-medium">Report Generated: {new Date().toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })} at {new Date().toLocaleTimeString('en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}</p>
+                    <p className="mt-2 text-sm">Church Management System • {selectedGroup.name} Group Report</p>
                   </div>
                 </div>
-              )}
-
-              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
-                <p className="text-sm text-gray-600 text-center">
-                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
-                </p>
               </div>
             </div>
           </div>
@@ -4020,9 +4328,10 @@ const Groups = () => {
           body {
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
+            background: white !important;
           }
           @page {
-            margin: 1cm;
+            margin: 0.5in;
             size: A4;
           }
           .print\\:hidden {
@@ -4033,6 +4342,20 @@ const Groups = () => {
           }
           .print\\:p-0 {
             padding: 0 !important;
+          }
+          .print\\:px-8 {
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+          }
+          .print\\:py-8 {
+            padding-top: 2rem !important;
+            padding-bottom: 2rem !important;
+          }
+          .print\\:pt-8 {
+            padding-top: 2rem !important;
+          }
+          .print\\:pb-8 {
+            padding-bottom: 2rem !important;
           }
           .print\\:bg-white {
             background-color: white !important;
@@ -4048,6 +4371,99 @@ const Groups = () => {
           }
           .print\\:shadow-none {
             box-shadow: none !important;
+          }
+          .print\\:border-0 {
+            border: 0 !important;
+          }
+          .print\\:text-2xl {
+            font-size: 1.5rem !important;
+            line-height: 2rem !important;
+          }
+          .print\\:text-3xl {
+            font-size: 1.875rem !important;
+            line-height: 2.25rem !important;
+          }
+          .print\\:text-lg {
+            font-size: 1.125rem !important;
+            line-height: 1.75rem !important;
+          }
+          .print\\:text-sm {
+            font-size: 0.875rem !important;
+            line-height: 1.25rem !important;
+          }
+          .print\\:space-y-12 > * + * {
+            margin-top: 3rem !important;
+          }
+          .print\\:grid-cols-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+          .print\\:grid-cols-4 {
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+          }
+          .page-break {
+            page-break-before: always;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print\\:from-blue-600 {
+            --tw-gradient-from: #1d4ed8 !important;
+            --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(29 78 216 / 0)) !important;
+          }
+          .print\\:to-blue-800 {
+            --tw-gradient-to: #1e40af !important;
+          }
+          .print\\:from-green-600 {
+            --tw-gradient-from: #059669 !important;
+            --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(5 150 105 / 0)) !important;
+          }
+          .print\\:to-green-800 {
+            --tw-gradient-to: #065f46 !important;
+          }
+          .print\\:from-red-600 {
+            --tw-gradient-from: #dc2626 !important;
+            --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(220 38 38 / 0)) !important;
+          }
+          .print\\:to-red-800 {
+            --tw-gradient-to: #991b1b !important;
+          }
+          .print\\:from-yellow-600 {
+            --tw-gradient-from: #ca8a04 !important;
+            --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(202 138 4 / 0)) !important;
+          }
+          .print\\:to-yellow-800 {
+            --tw-gradient-to: #854d0e !important;
+          }
+          .print\\:from-black {
+            --tw-gradient-from: #000000 !important;
+            --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(0 0 0 / 0)) !important;
+          }
+          .print\\:to-gray-900 {
+            --tw-gradient-to: #111827 !important;
+          }
+          .print\\:bg-blue-100 {
+            background-color: #dbeafe !important;
+          }
+          .print\\:bg-green-100 {
+            background-color: #dcfce7 !important;
+          }
+          .print\\:bg-purple-100 {
+            background-color: #f3e8ff !important;
+          }
+          .print\\:bg-gray-100 {
+            background-color: #f3f4f6 !important;
+          }
+          .print\\:bg-yellow-200 {
+            background-color: #fef08a !important;
+          }
+          .print\\:bg-green-200 {
+            background-color: #bbf7d0 !important;
+          }
+          .print\\:bg-red-200 {
+            background-color: #fecaca !important;
+          }
+          .print\\:border-gray-300 {
+            border-color: #d1d5db !important;
           }
         }
       `}</style>
