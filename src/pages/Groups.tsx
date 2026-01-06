@@ -4092,7 +4092,7 @@ const Groups = () => {
                     Comprehensive Group Meeting Report
                   </h3>
                   <p className="text-gray-600 print:text-gray-700 print:text-lg">
-                    {group.name} • ${selectedMeetingForReport ? new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
+                    {selectedGroup.name} • ${selectedMeetingForReport ? new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
                       weekday: 'long',
                       year: 'numeric',
                       month: 'long',
@@ -4283,7 +4283,7 @@ const Groups = () => {
                       hour: '2-digit',
                       minute: '2-digit'
                     })}</p>
-                    <p className="mt-2 text-sm">Church Management System • {selectedGroup.name} Group Report</p>
+                    <p className="mt-2 text-sm">Church Management System • ${selectedGroup.name} Group Report</p>
                   </div>
                 </div>
               </div>
@@ -4295,7 +4295,7 @@ const Groups = () => {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900">Manage {selectedGroup.name}</h3>
+                <h3 className="text-2xl font-bold text-gray-900">Manage ${selectedGroup.name}</h3>
                 <button
                   onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
