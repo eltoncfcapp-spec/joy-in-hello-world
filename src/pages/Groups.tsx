@@ -2175,7 +2175,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   );
 };
 
-// Group Report Step Component
+// Enhanced Group Report Step Component with A4 print formatting
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2203,6 +2203,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
     absentWithReason: 0,
     total: 0
   });
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
 
   useEffect(() => {
     if (selectedMeeting) {
@@ -2235,7 +2236,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .select(`
           *,
           members:member_id (
-            id, name, surname, residence, phone
+            id, name, surname, residence, phone, admin_role
           )
         `)
         .eq('meeting_id', selectedMeeting.id);
@@ -2246,7 +2247,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         return;
       }
       
-      console.log('Loaded attendance data:', data); // Debug log
+      console.log('Loaded attendance data:', data);
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2386,233 +2387,68 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   };
 
   const handlePrint = () => {
-    const stats = attendanceStats;
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Group Meeting Report - ${group.name}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
-            h1 { color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
-            h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            .header-info p { margin: 8px 0; }
-            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
-            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
-            .stat-box.present { background: #dcfce7; border-color: #86efac; }
-            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
-            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
-            .stat-value { font-size: 28px; font-weight: bold; color: #111827; }
-            .stat-label { font-size: 12px; color: #6b7280; margin-top: 5px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 15px 0; }
-            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; }
-            .attendance-table th { background: #f3f4f6; font-weight: 600; }
-            .status-present { color: #059669; font-weight: 600; }
-            .status-absent { color: #dc2626; font-weight: 600; }
-            .status-with-reason { color: #d97706; font-weight: 600; }
-            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
-            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; }
-            @media print { 
-              body { padding: 20px; }
-              .page-break { page-break-before: always; }
-            }
-          </style>
-        </head>
-        <body>
-          <h1>📋 Group Meeting Report</h1>
-          <div class="header-info">
-            <p><strong>Group:</strong> ${group.name}</p>
-            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            }) : 'N/A'}</p>
-            <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
-            <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
-            <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
-            <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-            ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
-              `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` : ''}
-          </div>
-
-          <h2>📊 Attendance Summary</h2>
-          <div class="stats-grid">
-            <div class="stat-box present">
-              <div class="stat-value">${stats.present}</div>
-              <div class="stat-label">Present</div>
-            </div>
-            <div class="stat-box absent">
-              <div class="stat-value">${stats.absent}</div>
-              <div class="stat-label">Absent</div>
-            </div>
-            <div class="stat-box with-reason">
-              <div class="stat-value">${stats.absentWithReason}</div>
-              <div class="stat-label">Absent with Reason</div>
-            </div>
-            <div class="stat-box">
-              <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
-              <div class="stat-label">Attendance Rate</div>
-            </div>
-          </div>
-
-          <div class="page-break"></div>
-
-          <!-- Meeting Report Section -->
-          <div class="report-section">
-            <h3>📝 Meeting Report</h3>
-            <div class="section-content">${reportData.report_text || 'No report text recorded'}</div>
-          </div>
-
-          <!-- Decisions Made Section -->
-          ${reportData.decisions_made ? `
-          <div class="report-section">
-            <h3>✅ Decisions Made</h3>
-            <div class="section-content">${reportData.decisions_made}</div>
-          </div>
-          ` : ''}
-
-          <!-- Action Items Section -->
-          ${reportData.action_items ? `
-          <div class="report-section">
-            <h3>📌 Action Items</h3>
-            <div class="section-content">${reportData.action_items}</div>
-          </div>
-          ` : ''}
-
-          <!-- Next Meeting Section -->
-          ${reportData.next_meeting_date ? `
-          <div class="report-section">
-            <h3>📅 Next Meeting</h3>
-            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}</p>
-          </div>
-          ` : ''}
-
-          <!-- Additional Notes Section -->
-          ${reportData.additional_notes ? `
-          <div class="report-section">
-            <h3>📝 Additional Notes</h3>
-            <div class="section-content">${reportData.additional_notes}</div>
-          </div>
-          ` : ''}
-
-          <div class="page-break"></div>
-
-          <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-          ${attendance.length > 0 ? `
-          <table class="attendance-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Residence</th>
-                <th>Phone</th>
-                <th>Status</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${attendance.map(record => `
-                <tr>
-                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
-                  <td>${record.members?.residence || ''}</td>
-                  <td>${record.members?.phone || ''}</td>
-                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-                    ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
-                  </td>
-                  <td>${record.notes || '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          ` : '<p>No attendance records available.</p>'}
-
-          ${selectedMeeting?.notes ? `
-          <div class="page-break"></div>
-          <div class="report-section">
-            <h3>📋 Meeting Notes</h3>
-            <div class="section-content">${selectedMeeting.notes}</div>
-          </div>
-          ` : ''}
-
-          <div class="footer">
-            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })} at ${new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}</p>
-            <p>Church Management System • ${group.name} Group</p>
-          </div>
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    }
+    setShowPrintPreview(true);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => setShowPrintPreview(false), 100);
+    }, 100);
   };
 
   const downloadReport = () => {
     const stats = attendanceStats;
+    const dateStr = new Date(selectedMeeting?.meeting_date || '').toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).replace(/\//g, '-');
+    
     const reportContent = `
-==================================================================
-                    GROUP MEETING REPORT
-==================================================================
+================================================================================
+                         CHURCH CELL GROUP MEETING REPORT
+================================================================================
 
-Group: ${group.name}
-Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+GROUP: ${group.name}
+MEETING DATE: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     }) : 'N/A'}
-Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
-Location: ${selectedMeeting?.location || group.location || 'N/A'}
-Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
-Status: ${selectedMeeting?.status || 'N/A'}
+MEETING TIME: ${selectedMeeting?.meeting_time || 'Not specified'}
+LOCATION: ${selectedMeeting?.location || group.location || 'Not specified'}
+TOPIC: ${selectedMeeting?.topic || 'General Group Meeting'}
+STATUS: ${selectedMeeting?.status || 'N/A'}
 
 ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
 `CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
 
-==================================================================
-                    ATTENDANCE SUMMARY
-==================================================================
+================================================================================
+                              ATTENDANCE SUMMARY
+================================================================================
 Total Members: ${stats.total}
 Present: ${stats.present} (${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%)
 Absent: ${stats.absent} (${stats.total > 0 ? Math.round((stats.absent / stats.total) * 100) : 0}%)
 Absent with Notes: ${stats.absentWithReason} (${stats.total > 0 ? Math.round((stats.absentWithReason / stats.total) * 100) : 0}%)
 Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%
 
-==================================================================
-                    MEETING REPORT
-==================================================================
-${reportData.report_text || 'No report text recorded'}
+================================================================================
+                          MEETING SUMMARY WITH ALL DETAILS
+================================================================================
+${reportData.report_text || 'No meeting summary recorded'}
 
-==================================================================
-                    DECISIONS MADE
-==================================================================
+================================================================================
+                              DECISIONS MADE
+================================================================================
 ${reportData.decisions_made || 'No decisions recorded'}
 
-==================================================================
-                    ACTION ITEMS
-==================================================================
+================================================================================
+                         ACTION ITEMS & FOLLOW-UPS
+================================================================================
 ${reportData.action_items || 'No action items recorded'}
 
-==================================================================
-                    NEXT MEETING
-==================================================================
+================================================================================
+                              NEXT MEETING DATE
+================================================================================
 ${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -2620,33 +2456,36 @@ ${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meet
       day: 'numeric'
     })}` : 'No next meeting date set'}
 
-==================================================================
-                    ADDITIONAL NOTES
-==================================================================
-${reportData.additional_notes || 'No additional notes'}
-
-==================================================================
-                    DETAILED ATTENDANCE
-==================================================================
+================================================================================
+                         DETAILED ATTENDANCE WITH NOTES
+================================================================================
 ${attendance.length > 0 ? attendance.map(record => 
 `• ${record.members?.name || ''} ${record.members?.surname || ''}
+  Role: ${record.members?.admin_role || 'Member'}
   Residence: ${record.members?.residence || 'No residence'}
   Phone: ${record.members?.phone || 'No phone'}
   Status: ${(record.status || 'unknown').toUpperCase()}
   ${record.notes ? `Notes: ${record.notes}` : ''}
-  ${'-'.repeat(60)}`
+  ${'-'.repeat(78)}`
 ).join('\n\n') : 'No attendance records available.'}
 
 ${selectedMeeting?.notes ? `
-==================================================================
-                    MEETING NOTES
-==================================================================
+================================================================================
+                              MEETING NOTES
+================================================================================
 ${selectedMeeting.notes}
 ` : ''}
 
-==================================================================
-                    REPORT INFORMATION
-==================================================================
+${reportData.additional_notes ? `
+================================================================================
+                           ADDITIONAL NOTES
+================================================================================
+${reportData.additional_notes}
+` : ''}
+
+================================================================================
+                              REPORT INFORMATION
+================================================================================
 Generated on: ${new Date().toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -2657,21 +2496,218 @@ Generated at: ${new Date().toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit'
     })}
+Report ID: ${existingReport?.id || 'New Report'}
 Church Management System
-${group.name} Group
-==================================================================
+${group.name} Cell Group
+================================================================================
     `.trim();
 
     const blob = new Blob([reportContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${selectedMeeting?.meeting_date || 'unknown'}.txt`;
+    a.download = `${group.name.replace(/\s+/g, '-')}-Meeting-Report-${dateStr}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  // Print Preview Component
+  const PrintPreview = () => {
+    if (!showPrintPreview) return null;
+
+    return (
+      <div className="fixed inset-0 bg-white z-[100] p-8 hidden print:block">
+        <div className="max-w-[210mm] mx-auto min-h-[297mm] p-12 bg-white text-black">
+          {/* Header */}
+          <div className="text-center mb-8 border-b-2 border-gray-800 pb-6">
+            <h1 className="text-3xl font-bold mb-2">CHURCH CELL GROUP MEETING REPORT</h1>
+            <div className="text-lg font-medium text-gray-700">
+              {group.name} - Professional A4 Format
+            </div>
+          </div>
+
+          {/* Meeting Information */}
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">MEETING INFORMATION</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="font-semibold">Group Name:</p>
+                <p className="mb-2">{group.name}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Meeting Date:</p>
+                <p className="mb-2">
+                  {selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  }) : 'N/A'}
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold">Meeting Time:</p>
+                <p className="mb-2">{selectedMeeting?.meeting_time || 'Not specified'}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Location:</p>
+                <p className="mb-2">{selectedMeeting?.location || group.location || 'Not specified'}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Topic:</p>
+                <p className="mb-2">{selectedMeeting?.topic || 'General Group Meeting'}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Status:</p>
+                <p className="mb-2">{selectedMeeting?.status || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Attendance Summary */}
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">ATTENDANCE SUMMARY</h2>
+            <div className="grid grid-cols-4 gap-4">
+              <div className="text-center p-4 border border-gray-300">
+                <div className="text-3xl font-bold">{attendanceStats.total}</div>
+                <div className="text-sm">Total Members</div>
+              </div>
+              <div className="text-center p-4 border border-gray-300 bg-green-50">
+                <div className="text-3xl font-bold text-green-700">{attendanceStats.present}</div>
+                <div className="text-sm">Present</div>
+                <div className="text-xs mt-1">
+                  ({attendanceStats.total > 0 ? Math.round((attendanceStats.present / attendanceStats.total) * 100) : 0}%)
+                </div>
+              </div>
+              <div className="text-center p-4 border border-gray-300 bg-red-50">
+                <div className="text-3xl font-bold text-red-700">{attendanceStats.absent}</div>
+                <div className="text-sm">Absent</div>
+                <div className="text-xs mt-1">
+                  ({attendanceStats.total > 0 ? Math.round((attendanceStats.absent / attendanceStats.total) * 100) : 0}%)
+                </div>
+              </div>
+              <div className="text-center p-4 border border-gray-300 bg-yellow-50">
+                <div className="text-3xl font-bold text-yellow-700">{attendanceStats.absentWithReason}</div>
+                <div className="text-sm">Absent with Notes</div>
+                <div className="text-xs mt-1">
+                  ({attendanceStats.total > 0 ? Math.round((attendanceStats.absentWithReason / attendanceStats.total) * 100) : 0}%)
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 text-center">
+              <div className="text-xl font-bold">
+                Overall Attendance Rate: {attendanceStats.total > 0 ? Math.round((attendanceStats.present / attendanceStats.total) * 100) : 0}%
+              </div>
+            </div>
+          </div>
+
+          {/* Meeting Summary */}
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">MEETING SUMMARY WITH ALL DETAILS</h2>
+            <div className="p-4 border border-gray-200 bg-gray-50 min-h-[100px] whitespace-pre-wrap">
+              {reportData.report_text || 'No meeting summary recorded'}
+            </div>
+          </div>
+
+          {/* Decisions Made */}
+          {reportData.decisions_made && (
+            <div className="mb-8">
+              <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">DECISIONS MADE</h2>
+              <div className="p-4 border border-gray-200 bg-blue-50 min-h-[80px] whitespace-pre-wrap">
+                {reportData.decisions_made}
+              </div>
+            </div>
+          )}
+
+          {/* Action Items */}
+          {reportData.action_items && (
+            <div className="mb-8">
+              <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">ACTION ITEMS & FOLLOW-UPS</h2>
+              <div className="p-4 border border-gray-200 bg-green-50 min-h-[80px] whitespace-pre-wrap">
+                {reportData.action_items}
+              </div>
+            </div>
+          )}
+
+          {/* Next Meeting */}
+          {reportData.next_meeting_date && (
+            <div className="mb-8">
+              <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">NEXT MEETING DATE</h2>
+              <div className="p-4 border border-gray-200 bg-purple-50">
+                <p className="text-lg font-semibold">
+                  Scheduled for: {new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Detailed Attendance */}
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 border-b border-gray-300 pb-2">DETAILED ATTENDANCE WITH NOTES ({attendance.length} members)</h2>
+            <table className="w-full border-collapse border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border border-gray-300 p-2 text-left">Name</th>
+                  <th className="border border-gray-300 p-2 text-left">Role</th>
+                  <th className="border border-gray-300 p-2 text-left">Residence</th>
+                  <th className="border border-gray-300 p-2 text-left">Status</th>
+                  <th className="border border-gray-300 p-2 text-left">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendance.map((record, index) => (
+                  <tr key={record.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="border border-gray-300 p-2">
+                      {record.members?.name} {record.members?.surname}
+                    </td>
+                    <td className="border border-gray-300 p-2">
+                      {record.members?.admin_role || 'Member'}
+                    </td>
+                    <td className="border border-gray-300 p-2">
+                      {record.members?.residence || '-'}
+                    </td>
+                    <td className={`border border-gray-300 p-2 font-semibold ${
+                      record.status === 'present' ? 'text-green-700' :
+                      record.status === 'absent' ? 'text-red-700' :
+                      'text-yellow-700'
+                    }`}>
+                      {(record.status || '').replace('_', ' ').toUpperCase()}
+                    </td>
+                    <td className="border border-gray-300 p-2">
+                      {record.notes || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Footer */}
+          <div className="mt-12 pt-4 border-t border-gray-300 text-center text-sm text-gray-600">
+            <p>Report Generated: {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })} at {new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            <p className="mt-1">Church Management System • {group.name} Cell Group</p>
+            <p className="mt-1">Report ID: {existingReport?.id || 'New Report'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -2823,22 +2859,22 @@ ${group.name} Group
                   </div>
                 )}
 
-                <div className="flex gap-2 mt-4 print:hidden">
+                <div className="flex gap-2 mt-4">
                   <button
                     onClick={downloadReport}
                     disabled={!canCreateGroupReports(group.id)}
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     <Download className="h-4 w-4" />
-                    Download
+                    Download TXT
                   </button>
                   <button
                     onClick={handlePrint}
                     disabled={!canCreateGroupReports(group.id)}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
                     <Printer className="h-4 w-4" />
-                    Print
+                    Print A4
                   </button>
                 </div>
               </div>
@@ -2853,7 +2889,12 @@ ${group.name} Group
                           <div className="font-medium text-gray-900">
                             {record.members?.name} {record.members?.surname}
                           </div>
-                          <div className="text-sm text-gray-600">{record.members?.residence}</div>
+                          <div className="text-sm text-gray-600">
+                            <span className="inline-block px-2 py-1 bg-gray-100 rounded text-xs mr-2">
+                              {record.members?.admin_role || 'Member'}
+                            </span>
+                            {record.members?.residence}
+                          </div>
                           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
                             record.status === 'present' ? 'bg-green-100 text-green-800' :
                             record.status === 'absent' ? 'bg-red-100 text-red-800' :
@@ -2885,14 +2926,14 @@ ${group.name} Group
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Summary with All Details *</label>
                     <textarea
                       name="report_text"
                       value={reportData.report_text}
                       onChange={handleReportChange}
                       rows={4}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Detailed report of what was discussed and accomplished..."
+                      placeholder="Detailed report of what was discussed and accomplished during the meeting..."
                       required
                     />
                   </div>
@@ -2905,19 +2946,19 @@ ${group.name} Group
                       onChange={handleReportChange}
                       rows={3}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Important decisions, approvals, or resolutions..."
+                      placeholder="Important decisions, approvals, or resolutions made during the meeting..."
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items & Follow-ups</label>
                     <textarea
                       name="action_items"
                       value={reportData.action_items}
                       onChange={handleReportChange}
                       rows={3}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Tasks assigned, follow-ups, or next steps..."
+                      placeholder="Tasks assigned, follow-ups, or next steps to be taken..."
                     />
                   </div>
 
@@ -2929,8 +2970,15 @@ ${group.name} Group
                         name="next_meeting_date"
                         value={reportData.next_meeting_date}
                         onChange={handleReportChange}
+                        min={new Date().toISOString().split('T')[0]}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Status</label>
+                      <div className="px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                        <span className="font-medium">{selectedMeeting.status}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -2942,7 +2990,7 @@ ${group.name} Group
                       onChange={handleReportChange}
                       rows={2}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Any other relevant information..."
+                      placeholder="Any other relevant information about the meeting..."
                     />
                   </div>
                 </div>
@@ -2971,6 +3019,9 @@ ${group.name} Group
           </div>
         </>
       )}
+
+      {/* Print Preview */}
+      <PrintPreview />
     </div>
   );
 };
@@ -3146,7 +3197,6 @@ const Groups = () => {
   const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
   const [showMeetingsModal, setShowMeetingsModal] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
-  const [showReportModal, setShowReportModal] = useState(false);
 
   const [meetings, setMeetings] = useState<GroupMeeting[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -3164,7 +3214,6 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -3172,16 +3221,13 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
-      // Get leader information for each group
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
-          // Get member count
           const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
-          // Get leader information if leader_id exists
           let leaderInfo = null;
           if (group.leader_id) {
             const { data: leaderData } = await supabase
@@ -3193,7 +3239,6 @@ const Groups = () => {
             leaderInfo = leaderData;
           }
           
-          // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
@@ -3207,27 +3252,22 @@ const Groups = () => {
         })
       );
 
-      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
       if (!isAdmin() && !isPastor()) {
         if (isGroupLeader()) {
-          // Group Leaders can see only their own group
           filteredGroups = groupsWithDetails.filter(group => 
             group.leader_id === profile?.id
           );
         } else if (isMember()) {
-          // Members can see only their own group
           const userGroup = await getUserGroup();
           filteredGroups = groupsWithDetails.filter(group => 
             group.id === userGroup?.id
           );
         } else {
-          // No role - no access
           filteredGroups = [];
         }
       }
-      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups as CellGroup[]);
     } catch (error: any) {
@@ -3292,42 +3332,6 @@ const Groups = () => {
     }
   };
 
-  const loadAttendanceForMeeting = async (meetingId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('meeting_attendance')
-        .select(`
-          *,
-          members:member_id (
-            id, name, surname, residence, phone
-          )
-        `)
-        .eq('meeting_id', meetingId);
-
-      if (error) {
-        console.error('Error loading attendance:', error);
-        setError('Failed to load attendance: ' + error.message);
-        return;
-      }
-      
-      console.log('Loaded attendance records:', data); // Debug log
-      setAttendanceRecords(data || []);
-    } catch (error: any) {
-      console.error('Failed to load attendance:', error);
-      setError('Failed to load attendance: ' + error.message);
-    }
-  };
-
-  const openReportModal = async (meeting: GroupMeeting) => {
-    setSelectedMeetingForReport(meeting);
-    await loadAttendanceForMeeting(meeting.id);
-    setShowReportModal(true);
-  };
-
-  const handlePrintReport = () => {
-    window.print();
-  };
-
   const openMeetingsModal = async (group: CellGroup) => {
     if (!canViewGroup(group.id)) {
       setError('You do not have permission to view this group');
@@ -3351,7 +3355,6 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to edit groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can edit groups');
       return;
@@ -3361,7 +3364,6 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to delete groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete groups');
       return;
@@ -3376,10 +3378,7 @@ const Groups = () => {
     setShowDeleteGroupModal(false);
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
-    setShowReportModal(false);
     setSelectedGroup(null);
-    setSelectedMeetingForReport(null);
-    setAttendanceRecords([]);
   };
 
   const handleGroupCreated = () => {
@@ -3400,18 +3399,15 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Permission functions
   const canCreateGroups = () => {
     return isAdmin() || isPastor();
   };
 
   const canEditGroup = (_group: CellGroup) => {
-    // Only admin and pastor can edit groups
     return isAdmin() || isPastor();
   };
 
   const canDeleteGroup = (_group: CellGroup) => {
-    // Only admin and pastor can delete groups
     return isAdmin() || isPastor();
   };
 
@@ -3425,15 +3421,6 @@ const Groups = () => {
     if (roles.includes('group_leader')) return 'Group Leader';
     if (roles.includes('member')) return 'Member';
     return 'Guest';
-  };
-
-  const getAttendanceStats = () => {
-    const attended = attendanceRecords.filter(r => r.status === 'present').length;
-    const absent = attendanceRecords.filter(r => r.status === 'absent').length;
-    const absentWithReason = attendanceRecords.filter(r => r.status === 'absent_with_reason').length;
-    const total = attendanceRecords.length;
-
-    return { attended, absent, absentWithReason, total };
   };
 
   return (
@@ -3733,251 +3720,11 @@ const Groups = () => {
                           }`}>
                             {meeting.status}
                           </span>
-                          {meeting.status === 'completed' && (
-                            <button
-                              onClick={() => openReportModal(meeting)}
-                              className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
-                            >
-                              <Printer className="h-3 w-3" />
-                              View Report
-                            </button>
-                          )}
                         </div>
                       </div>
                     </div>
                   ))
                 )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showReportModal && selectedMeetingForReport && selectedGroup && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
-            <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto print:max-h-none print:rounded-none print:shadow-none">
-              <div className="flex justify-between items-center mb-6 print:mb-8">
-                <h3 className="text-2xl font-bold text-gray-900 print:text-black">
-                  Group Meeting Report
-                </h3>
-                <div className="flex gap-2 print:hidden">
-                  <button
-                    onClick={handlePrintReport}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                  >
-                    <Printer className="h-4 w-4" />
-                    Print Report
-                  </button>
-                  <button
-                    onClick={closeAllModals}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="mb-8 pb-6 border-b-2 border-gray-300 print:border-black">
-                <div className="text-center mb-4">
-                  <h1 className="text-3xl font-bold text-gray-900 print:text-black mb-2">
-                    {selectedGroup.name}
-                  </h1>
-                  <p className="text-lg text-gray-600 print:text-black">Group Meeting Attendance Report</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Date</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {new Date(selectedMeetingForReport.meeting_date).toLocaleDateString('en-US', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Time</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {selectedMeetingForReport.meeting_time || 'Not specified'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Location</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {selectedMeetingForReport.location || selectedGroup.location || 'Not specified'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 print:text-gray-700">Topic</p>
-                    <p className="font-semibold text-gray-900 print:text-black">
-                      {selectedMeetingForReport.topic || 'Not specified'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mb-8">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Attendance Summary</h4>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-blue-50 print:bg-blue-50 border border-blue-200 print:border-blue-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-blue-600 print:text-blue-700 font-medium">Total Members</p>
-                        <p className="text-3xl font-bold text-blue-700 print:text-blue-900">
-                          {getAttendanceStats().total}
-                        </p>
-                      </div>
-                      <Users className="h-10 w-10 text-blue-400 print:text-blue-600" />
-                    </div>
-                  </div>
-                  <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-green-600 print:text-green-700 font-medium">Attended</p>
-                        <p className="text-3xl font-bold text-green-700 print:text-green-900">
-                          {getAttendanceStats().attended}
-                        </p>
-                      </div>
-                      <CheckCircle className="h-10 w-10 text-green-400 print:text-green-600" />
-                    </div>
-                    <p className="text-xs text-green-600 print:text-green-700 mt-2">
-                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100)}%` : '0%'}
-                    </p>
-                  </div>
-                  <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-red-600 print:text-red-700 font-medium">Absent</p>
-                        <p className="text-3xl font-bold text-red-700 print:text-red-900">
-                          {getAttendanceStats().absent}
-                        </p>
-                      </div>
-                      <X className="h-10 w-10 text-red-400 print:text-red-600" />
-                    </div>
-                    <p className="text-xs text-red-600 print:text-red-700 mt-2">
-                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absent / getAttendanceStats().total) * 100)}%` : '0%'}
-                    </p>
-                  </div>
-                  <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-yellow-600 print:text-yellow-700 font-medium">Absent w/ Reason</p>
-                        <p className="text-3xl font-bold text-yellow-700 print:text-yellow-900">
-                          {getAttendanceStats().absentWithReason}
-                        </p>
-                      </div>
-                      <AlertCircle className="h-10 w-10 text-yellow-400 print:text-yellow-600" />
-                    </div>
-                    <p className="text-xs text-yellow-600 print:text-yellow-700 mt-2">
-                      {getAttendanceStats().total > 0 ? `${Math.round((getAttendanceStats().absentWithReason / getAttendanceStats().total) * 100)}%` : '0%'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Detailed Attendance</h4>
-                {attendanceRecords.length === 0 ? (
-                  <div className="text-center py-8 bg-gray-50 print:bg-gray-50 rounded-lg">
-                    <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 print:text-gray-700">No attendance records found</p>
-                  </div>
-                ) : (
-                  <>
-                    {getAttendanceStats().attended > 0 && (
-                      <div className="mb-6">
-                        <h5 className="text-lg font-semibold text-green-700 print:text-green-800 mb-3 flex items-center gap-2">
-                          <CheckCircle className="h-5 w-5" />
-                          Present ({getAttendanceStats().attended})
-                        </h5>
-                        <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'present')
-                              .map((record) => (
-                                <div key={record.id} className="flex items-center gap-2">
-                                  <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-                                  <span className="text-gray-900 print:text-black">
-                                    {record.members?.name} {record.members?.surname}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {getAttendanceStats().absent > 0 && (
-                      <div className="mb-6">
-                        <h5 className="text-lg font-semibold text-red-700 print:text-red-800 mb-3 flex items-center gap-2">
-                          <X className="h-5 w-5" />
-                          Absent ({getAttendanceStats().absent})
-                        </h5>
-                        <div className="bg-red-50 print:bg-red-50 border border-red-200 print:border-red-300 rounded-lg p-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'absent')
-                              .map((record) => (
-                                <div key={record.id} className="flex items-center gap-2">
-                                  <div className="w-2 h-2 bg-red-600 rounded-full"></div>
-                                  <span className="text-gray-900 print:text-black">
-                                    {record.members?.name} {record.members?.surname}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {getAttendanceStats().absentWithReason > 0 && (
-                      <div className="mb-6">
-                        <h5 className="text-lg font-semibold text-yellow-700 print:text-yellow-800 mb-3 flex items-center gap-2">
-                          <AlertCircle className="h-5 w-5" />
-                          Absent with Notes ({getAttendanceStats().absentWithReason})
-                        </h5>
-                        <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-lg p-4">
-                          <div className="space-y-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'absent_with_reason')
-                              .map((record) => (
-                                <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
-                                  <div className="flex-1">
-                                    <span className="text-gray-900 print:text-black font-medium">
-                                      {record.members?.name} {record.members?.surname}
-                                    </span>
-                                    {record.notes && (
-                                      <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
-                                        Notes: {record.notes}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {selectedMeetingForReport.notes && (
-                <div className="mb-6">
-                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">Meeting Notes</h4>
-                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-lg p-4">
-                    <p className="text-gray-700 print:text-black whitespace-pre-wrap">
-                      {selectedMeetingForReport.notes}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
-                <p className="text-sm text-gray-600 text-center">
-                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
-                </p>
               </div>
             </div>
           </div>
@@ -4022,32 +3769,14 @@ const Groups = () => {
             -webkit-print-color-adjust: exact;
           }
           @page {
-            margin: 1cm;
             size: A4;
+            margin: 20mm;
           }
           .print\\:hidden {
             display: none !important;
           }
           .print\\:block {
             display: block !important;
-          }
-          .print\\:p-0 {
-            padding: 0 !important;
-          }
-          .print\\:bg-white {
-            background-color: white !important;
-          }
-          .print\\:text-black {
-            color: black !important;
-          }
-          .print\\:max-h-none {
-            max-height: none !important;
-          }
-          .print\\:rounded-none {
-            border-radius: 0 !important;
-          }
-          .print\\:shadow-none {
-            box-shadow: none !important;
           }
         }
       `}</style>
