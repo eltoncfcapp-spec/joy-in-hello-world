@@ -2195,7 +2195,8 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
     decisions_made: '',
     action_items: '',
     next_meeting_date: '',
-    additional_notes: ''
+    additional_notes: '',
+    meeting_status: 'completed'
   });
   const [attendanceStats, setAttendanceStats] = useState({
     present: 0,
@@ -2273,15 +2274,18 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           decisions_made: data.decisions_made || '',
           action_items: data.action_items || '',
           next_meeting_date: data.next_meeting_date || '',
-          additional_notes: ''
+          additional_notes: '',
+          meeting_status: 'completed'
         });
       } else {
+        setExistingReport(null);
         setReportData({
           report_text: '',
           decisions_made: '',
           action_items: '',
           next_meeting_date: '',
-          additional_notes: ''
+          additional_notes: '',
+          meeting_status: 'completed'
         });
       }
     } catch (error: any) {
@@ -2387,6 +2391,56 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
 
   const handlePrint = () => {
     const stats = attendanceStats;
+    const meetingNotes = selectedMeeting?.notes || '';
+    const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
+      ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
+      : '';
+    
+    const meetingNotesSection = meetingNotes 
+      ? `<div class="report-section">
+           <h3>📋 Original Meeting Notes</h3>
+           <div class="section-content">${meetingNotes}</div>
+         </div>` 
+      : '';
+    
+    const additionalNotesSection = reportData.additional_notes 
+      ? `<div class="report-section">
+           <h3>📝 Additional Notes</h3>
+           <div class="section-content">${reportData.additional_notes}</div>
+         </div>` 
+      : '';
+    
+    const attendanceRows = attendance.map((record, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+        <td>${record.members?.residence || '-'}</td>
+        <td>${record.members?.phone || '-'}</td>
+        <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+          ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+        </td>
+        <td>${record.notes || '-'}</td>
+      </tr>
+    `).join('');
+    
+    const attendanceTable = attendance.length > 0 
+      ? `<table class="attendance-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Residence</th>
+              <th>Phone</th>
+              <th>Status</th>
+              <th>Notes/Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${attendanceRows}
+          </tbody>
+        </table>` 
+      : '<p>No attendance records available.</p>';
+    
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
@@ -2417,6 +2471,9 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .status-with-reason { color: #d97706; font-weight: 600; }
             .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
             .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; }
+            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; padding: 15px; border-radius: 8px; margin: 10px 0; }
+            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
+            .actions-box { background: #fefce8; border: 2px solid #eab308; }
             @media print { 
               body { padding: 20px; }
               .page-break { page-break-before: always; }
@@ -2427,6 +2484,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           <h1>📋 Group Meeting Report</h1>
           <div class="header-info">
             <p><strong>Group:</strong> ${group.name}</p>
+            <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
             <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
               weekday: 'long',
               year: 'numeric',
@@ -2437,8 +2495,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
             <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
             <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-            ${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
-              `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` : ''}
+            ${cancellationReason}
           </div>
 
           <h2>📊 Attendance Summary</h2>
@@ -2461,88 +2518,42 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             </div>
           </div>
 
-          <div class="page-break"></div>
-
-          <!-- Meeting Report Section -->
-          <div class="report-section">
-            <h3>📝 Meeting Report</h3>
-            <div class="section-content">${reportData.report_text || 'No report text recorded'}</div>
+          <!-- Meeting Summary/Report Section -->
+          <div class="report-section highlight-box">
+            <h3>📝 Meeting Summary</h3>
+            <div class="section-content">${reportData.report_text || 'No summary recorded'}</div>
           </div>
 
           <!-- Decisions Made Section -->
-          ${reportData.decisions_made ? `
-          <div class="report-section">
+          <div class="report-section decisions-box">
             <h3>✅ Decisions Made</h3>
-            <div class="section-content">${reportData.decisions_made}</div>
+            <div class="section-content">${reportData.decisions_made || 'No decisions recorded'}</div>
           </div>
-          ` : ''}
 
           <!-- Action Items Section -->
-          ${reportData.action_items ? `
-          <div class="report-section">
-            <h3>📌 Action Items</h3>
-            <div class="section-content">${reportData.action_items}</div>
+          <div class="report-section actions-box">
+            <h3>📌 Action Items & Follow-ups</h3>
+            <div class="section-content">${reportData.action_items || 'No action items recorded'}</div>
           </div>
-          ` : ''}
 
           <!-- Next Meeting Section -->
-          ${reportData.next_meeting_date ? `
           <div class="report-section">
-            <h3>📅 Next Meeting</h3>
-            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+            <h3>📅 Next Meeting Date</h3>
+            <p>${reportData.next_meeting_date ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
               weekday: 'long',
               year: 'numeric',
               month: 'long',
               day: 'numeric'
-            })}</p>
+            }) : 'Not scheduled'}</p>
           </div>
-          ` : ''}
 
-          <!-- Additional Notes Section -->
-          ${reportData.additional_notes ? `
-          <div class="report-section">
-            <h3>📝 Additional Notes</h3>
-            <div class="section-content">${reportData.additional_notes}</div>
-          </div>
-          ` : ''}
+          ${meetingNotesSection}
+          ${additionalNotesSection}
 
           <div class="page-break"></div>
 
           <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-          ${attendance.length > 0 ? `
-          <table class="attendance-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Residence</th>
-                <th>Phone</th>
-                <th>Status</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${attendance.map(record => `
-                <tr>
-                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
-                  <td>${record.members?.residence || ''}</td>
-                  <td>${record.members?.phone || ''}</td>
-                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-                    ${record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'Absent with Reason'}
-                  </td>
-                  <td>${record.notes || '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          ` : '<p>No attendance records available.</p>'}
-
-          ${selectedMeeting?.notes ? `
-          <div class="page-break"></div>
-          <div class="report-section">
-            <h3>📋 Meeting Notes</h3>
-            <div class="section-content">${selectedMeeting.notes}</div>
-          </div>
-          ` : ''}
+          ${attendanceTable}
 
           <div class="footer">
             <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
@@ -2873,26 +2884,74 @@ ${group.name} Group
             </div>
 
             <div className="lg:col-span-2">
+              {/* Existing Report Preview */}
+              {existingReport && (
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6 mb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-lg font-semibold text-green-800 flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5" />
+                      Existing Report Preview
+                    </h4>
+                    <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                      ✓ Report Saved
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Meeting Summary</h5>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap line-clamp-4">{reportData.report_text || 'Not provided'}</p>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Decisions Made</h5>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap line-clamp-4">{reportData.decisions_made || 'No decisions recorded'}</p>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Action Items & Follow-ups</h5>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap line-clamp-4">{reportData.action_items || 'No action items recorded'}</p>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Next Meeting Date</h5>
+                      <p className="text-gray-900 text-sm">
+                        {reportData.next_meeting_date 
+                          ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })
+                          : 'Not scheduled'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-lg font-semibold text-gray-900">Group Meeting Report</h4>
+                  <h4 className="text-lg font-semibold text-gray-900">
+                    {existingReport ? 'Edit Meeting Report' : 'Create Meeting Report'}
+                  </h4>
                   {existingReport && (
-                    <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                      Report Exists
+                    <span className="text-sm text-gray-500">
+                      Last updated: {existingReport.created_at ? new Date(existingReport.created_at).toLocaleString() : 'Unknown'}
                     </span>
                   )}
                 </div>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Report *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Meeting Summary with All Details *
+                    </label>
                     <textarea
                       name="report_text"
                       value={reportData.report_text}
                       onChange={handleReportChange}
-                      rows={4}
+                      rows={5}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Detailed report of what was discussed and accomplished..."
+                      placeholder="Provide a detailed summary of all discussions, topics covered, and key points from the meeting..."
                       required
                     />
                   </div>
@@ -2905,19 +2964,19 @@ ${group.name} Group
                       onChange={handleReportChange}
                       rows={3}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Important decisions, approvals, or resolutions..."
+                      placeholder="List all important decisions, approvals, or resolutions made during the meeting..."
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items & Follow-ups</label>
                     <textarea
                       name="action_items"
                       value={reportData.action_items}
                       onChange={handleReportChange}
                       rows={3}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Tasks assigned, follow-ups, or next steps..."
+                      placeholder="Tasks assigned, responsibilities, deadlines, and next steps..."
                     />
                   </div>
 
@@ -2932,6 +2991,13 @@ ${group.name} Group
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Status</label>
+                      <div className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                        <span className="text-gray-900">completed</span>
+                      </div>
+                    </div>
                   </div>
 
                   <div>
@@ -2942,7 +3008,7 @@ ${group.name} Group
                       onChange={handleReportChange}
                       rows={2}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Any other relevant information..."
+                      placeholder="Any other relevant information about the meeting..."
                     />
                   </div>
                 </div>
@@ -2954,14 +3020,14 @@ ${group.name} Group
                     className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium flex items-center justify-center gap-2"
                   >
                     <FileDown className="h-4 w-4" />
-                    {loading ? 'Generating Report...' : existingReport ? 'Update Group Report' : 'Generate Group Report'}
+                    {loading ? 'Saving Report...' : existingReport ? 'Update Report' : 'Save Report'}
                   </button>
                 </div>
               </div>
 
               {selectedMeeting.notes && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-6 mt-4">
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Meeting Notes</h4>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Original Meeting Notes</h4>
                   <div className="bg-gray-50 rounded-lg p-4">
                     <p className="text-gray-700 whitespace-pre-wrap">{selectedMeeting.notes}</p>
                   </div>
