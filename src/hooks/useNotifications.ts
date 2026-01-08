@@ -41,48 +41,114 @@ export function useNotifications(memberId?: string) {
     }));
   }, []);
 
-  // Register service worker
+  // Register service worker and auto-subscribe if permission granted
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then((registration) => {
-          console.log('Service Worker registered:', registration.scope);
-        })
-        .catch((error) => {
-          console.error('Service Worker registration failed:', error);
-        });
-    }
+    const initServiceWorker = async () => {
+      if (!('serviceWorker' in navigator)) return;
+      
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        console.log('Service Worker registered:', registration.scope);
+        
+        // Auto-subscribe if permission already granted
+        if (Notification.permission === 'granted') {
+          await autoSubscribe(registration);
+        }
+      } catch (error) {
+        console.error('Service Worker registration failed:', error);
+      }
+    };
+
+    initServiceWorker();
   }, []);
+
+  // Auto subscribe function - works without memberId
+  const autoSubscribe = async (registration: ServiceWorkerRegistration) => {
+    try {
+      // Check if already subscribed
+      const existingSubscription = await registration.pushManager.getSubscription();
+      
+      if (existingSubscription) {
+        // Verify it's in database
+        const subscriptionJSON = existingSubscription.toJSON();
+        const endpoint = subscriptionJSON.endpoint || '';
+        
+        const { data } = await supabase
+          .from('push_subscriptions')
+          .select('id')
+          .eq('endpoint', endpoint)
+          .maybeSingle();
+        
+        if (data) {
+          setState(prev => ({ ...prev, isSubscribed: true, isLoading: false }));
+          return;
+        }
+      }
+
+      // Create new subscription
+      const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey.buffer as ArrayBuffer
+      });
+
+      const subscriptionJSON = subscription.toJSON();
+      const endpoint = subscriptionJSON.endpoint || '';
+      const p256dh = subscriptionJSON.keys?.p256dh || '';
+      const auth = subscriptionJSON.keys?.auth || '';
+
+      // Save to database (member_id is optional now)
+      const { error } = await supabase
+        .from('push_subscriptions')
+        .upsert({
+          member_id: memberId || null,
+          endpoint,
+          p256dh,
+          auth
+        }, { onConflict: 'endpoint' });
+
+      if (error) {
+        console.error('Error saving subscription:', error);
+      } else {
+        console.log('Push subscription saved to database');
+        setState(prev => ({ ...prev, isSubscribed: true, isLoading: false }));
+      }
+    } catch (error) {
+      console.error('Auto-subscribe error:', error);
+      setState(prev => ({ ...prev, isLoading: false }));
+    }
+  };
 
   // Check subscription status
   useEffect(() => {
     const checkSubscription = async () => {
-      if (!memberId) {
-        setState(prev => ({ ...prev, isLoading: false }));
-        return;
-      }
-
       try {
-        // Check both database and actual push subscription
-        const { data } = await supabase
-          .from('push_subscriptions')
-          .select('id, endpoint')
-          .eq('member_id', memberId)
-          .maybeSingle();
-
-        // Also check if browser has active subscription
-        let hasActiveSubscription = false;
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
-          const registration = await navigator.serviceWorker.ready;
-          const subscription = await registration.pushManager.getSubscription();
-          hasActiveSubscription = !!subscription;
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+          setState(prev => ({ ...prev, isLoading: false }));
+          return;
         }
 
-        setState(prev => ({
-          ...prev,
-          isSubscribed: !!data && hasActiveSubscription,
-          isLoading: false
-        }));
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        
+        if (subscription) {
+          const subscriptionJSON = subscription.toJSON();
+          const endpoint = subscriptionJSON.endpoint || '';
+          
+          const { data } = await supabase
+            .from('push_subscriptions')
+            .select('id')
+            .eq('endpoint', endpoint)
+            .maybeSingle();
+          
+          setState(prev => ({
+            ...prev,
+            isSubscribed: !!data,
+            isLoading: false
+          }));
+        } else {
+          setState(prev => ({ ...prev, isLoading: false }));
+        }
       } catch (error) {
         console.error('Error checking subscription:', error);
         setState(prev => ({ ...prev, isLoading: false }));
@@ -90,66 +156,42 @@ export function useNotifications(memberId?: string) {
     };
 
     checkSubscription();
-  }, [memberId]);
+  }, []);
 
-  // Request notification permission
+  // Request notification permission and auto-subscribe
   const requestPermission = useCallback(async (): Promise<boolean> => {
     if (!state.isSupported) return false;
 
     try {
       const permission = await Notification.requestPermission();
       setState(prev => ({ ...prev, permission }));
+      
+      if (permission === 'granted') {
+        const registration = await navigator.serviceWorker.ready;
+        await autoSubscribe(registration);
+      }
+      
       return permission === 'granted';
     } catch (error) {
       console.error('Error requesting permission:', error);
       return false;
     }
-  }, [state.isSupported]);
+  }, [state.isSupported, memberId]);
 
   // Subscribe to push notifications
   const subscribe = useCallback(async (): Promise<boolean> => {
-    if (!memberId || !state.isSupported) return false;
+    if (!state.isSupported) return false;
 
     try {
-      // Request permission first
       const granted = await requestPermission();
       if (!granted) return false;
 
-      // Get service worker registration
       const registration = await navigator.serviceWorker.ready;
-      
-      // Subscribe to push notifications with VAPID key
-      const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: applicationServerKey.buffer as ArrayBuffer
-      });
-
-      console.log('Push subscription created:', subscription);
-
-      // Extract subscription details
-      const subscriptionJSON = subscription.toJSON();
-      const endpoint = subscriptionJSON.endpoint || '';
-      const p256dh = subscriptionJSON.keys?.p256dh || '';
-      const auth = subscriptionJSON.keys?.auth || '';
-
-      // Save to database
-      const { error } = await supabase
-        .from('push_subscriptions')
-        .upsert({
-          member_id: memberId,
-          endpoint,
-          p256dh,
-          auth
-        }, { onConflict: 'endpoint' });
-
-      if (error) throw error;
-
-      setState(prev => ({ ...prev, isSubscribed: true }));
+      await autoSubscribe(registration);
       
       // Show confirmation notification
       registration.showNotification('Notifications Enabled', {
-        body: 'You will now receive event reminders and announcements even when the app is closed.',
+        body: 'You will receive event reminders and updates.',
         icon: '/church-icon-192.png',
         tag: 'subscription-confirmed'
       });
@@ -159,29 +201,28 @@ export function useNotifications(memberId?: string) {
       console.error('Error subscribing to push:', error);
       return false;
     }
-  }, [memberId, state.isSupported, requestPermission]);
+  }, [state.isSupported, requestPermission]);
 
   // Unsubscribe from push notifications
   const unsubscribe = useCallback(async (): Promise<boolean> => {
-    if (!memberId) return false;
-
     try {
-      // Unsubscribe from push manager
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         const registration = await navigator.serviceWorker.ready;
         const subscription = await registration.pushManager.getSubscription();
+        
         if (subscription) {
+          const subscriptionJSON = subscription.toJSON();
+          const endpoint = subscriptionJSON.endpoint || '';
+          
           await subscription.unsubscribe();
+          
+          // Remove from database by endpoint
+          await supabase
+            .from('push_subscriptions')
+            .delete()
+            .eq('endpoint', endpoint);
         }
       }
-
-      // Remove from database
-      const { error } = await supabase
-        .from('push_subscriptions')
-        .delete()
-        .eq('member_id', memberId);
-
-      if (error) throw error;
 
       setState(prev => ({ ...prev, isSubscribed: false }));
       return true;
@@ -189,9 +230,9 @@ export function useNotifications(memberId?: string) {
       console.error('Error unsubscribing:', error);
       return false;
     }
-  }, [memberId]);
+  }, []);
 
-  // Send local notification (for testing/immediate notifications)
+  // Send local notification (for immediate notifications)
   const sendLocalNotification = useCallback(async (title: string, options?: NotificationOptions) => {
     if (!state.isSupported || state.permission !== 'granted') return false;
 

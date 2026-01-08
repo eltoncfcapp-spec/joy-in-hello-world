@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useNotifications } from '../../../hooks/useNotifications';
 import { FileText, Calendar, CheckCircle, List } from 'lucide-react';
 
 interface ReportStepProps {
@@ -17,6 +18,7 @@ const ReportStep: React.FC<ReportStepProps> = ({
   onError
 }) => {
   const { profile } = useAuth();
+  const { sendLocalNotification, permission } = useNotifications();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     report_text: '',
@@ -26,23 +28,13 @@ const ReportStep: React.FC<ReportStepProps> = ({
   });
 
   const sendReportNotification = async () => {
-    try {
-      const { error } = await supabase.functions.invoke('send-push-notification', {
-        body: {
-          title: `📋 Meeting Report: ${group?.name || 'Cell Group'}`,
-          body: `A new meeting report has been created for ${new Date(selectedMeeting.meeting_date).toLocaleDateString()}`,
-          targetType: 'group',
-          targetId: group?.id,
-          url: '/groups',
-          tag: `report-${selectedMeeting.id}`
-        }
+    // Send local notification - simple message
+    if (permission === 'granted') {
+      await sendLocalNotification(`${group?.name || 'Group'} Report Finalized`, {
+        body: 'Meeting report has been submitted.',
+        tag: `report-${selectedMeeting?.id}`,
+        data: { url: '/groups' }
       });
-
-      if (error) {
-        console.error('Failed to send report notification:', error);
-      }
-    } catch (err) {
-      console.error('Error sending report notification:', err);
     }
   };
 

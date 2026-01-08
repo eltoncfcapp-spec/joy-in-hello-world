@@ -2,3 +2,6 @@ project_id = "zvwotqerxmohasszzybs"
 
 [functions.send-push-notification]
 verify_jwt = false
+
+[functions.event-reminders]
+verify_jwt = false

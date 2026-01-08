@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../integrations/supabase/client';
+import { useNotifications } from '../../../hooks/useNotifications';
 import { FileText, Users, CheckCircle, XCircle, AlertCircle, Download, Printer, Calendar, MapPin, Clock } from 'lucide-react';
 
 interface DepartmentReportStepProps {
@@ -19,6 +20,7 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   onReportCreated,
   onError
 }) => {
+  const { sendLocalNotification, permission } = useNotifications();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<any[]>([]);
   const [reportData, setReportData] = useState({
@@ -63,23 +65,13 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
   };
 
   const sendReportNotification = async () => {
-    try {
-      const { error } = await supabase.functions.invoke('send-push-notification', {
-        body: {
-          title: `📋 Department Report: ${department?.name || 'Department'}`,
-          body: `A new meeting report has been created for ${new Date(selectedMeeting.meeting_date).toLocaleDateString()}`,
-          targetType: 'department',
-          targetId: department?.id,
-          url: '/departments',
-          tag: `dept-report-${selectedMeeting.id}`
-        }
+    // Send local notification - simple message
+    if (permission === 'granted') {
+      await sendLocalNotification(`${department?.name || 'Department'} Report Finalized`, {
+        body: 'Meeting report has been submitted.',
+        tag: `dept-report-${selectedMeeting?.id}`,
+        data: { url: '/departments' }
       });
-
-      if (error) {
-        console.error('Failed to send report notification:', error);
-      }
-    } catch (err) {
-      console.error('Error sending report notification:', err);
     }
   };
 
