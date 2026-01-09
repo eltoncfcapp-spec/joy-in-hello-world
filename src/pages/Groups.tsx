@@ -3293,6 +3293,7 @@ const Groups = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
+  const [meetingReport, setMeetingReport] = useState<GroupReport | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -3459,14 +3460,207 @@ const Groups = () => {
     }
   };
 
+  const loadMeetingReport = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('meeting_reports')
+        .select('*')
+        .eq('meeting_id', meetingId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading report:', error);
+        return;
+      }
+      
+      setMeetingReport(data || null);
+    } catch (error: any) {
+      console.error('Failed to load meeting report:', error);
+    }
+  };
+
   const openReportModal = async (meeting: GroupMeeting) => {
     setSelectedMeetingForReport(meeting);
     await loadAttendanceForMeeting(meeting.id);
+    await loadMeetingReport(meeting.id);
     setShowReportModal(true);
   };
 
   const handlePrintReport = () => {
-    window.print();
+    const stats = getAttendanceStats();
+    const meeting = selectedMeetingForReport;
+    const group = selectedGroup;
+    
+    if (!meeting || !group) return;
+
+    // Get report data
+    const reportText = meetingReport?.report_text || 'No report available';
+    const decisionsMade = meetingReport?.decisions_made || 'No decisions recorded';
+    const actionItems = meetingReport?.action_items || 'No action items recorded';
+    const nextMeetingDate = meetingReport?.next_meeting_date || 'Not scheduled';
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Group Meeting Report - ${group.name}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 12px; }
+            h1 { color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-size: 22px; margin-bottom: 20px; }
+            h2 { color: #374151; margin-top: 25px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 18px; }
+            h3 { color: #4b5563; margin-top: 20px; font-size: 16px; }
+            .header-info { background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0; }
+            .header-info p { margin: 5px 0; font-size: 12px; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 15px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; text-align: center; }
+            .stat-box.present { background: #dcfce7; border-color: #86efac; }
+            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
+            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
+            .stat-value { font-size: 24px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 11px; color: #6b7280; margin-top: 4px; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin: 12px 0; }
+            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 15px; }
+            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; font-size: 12px; }
+            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; }
+            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
+            .actions-box { background: #fefce8; border: 2px solid #eab308; }
+            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
+            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 11px; }
+            .status-present { color: #059669; font-weight: 600; }
+            .status-absent { color: #dc2626; font-weight: 600; }
+            .status-with-reason { color: #d97706; font-weight: 600; }
+            .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 11px; }
+            @media print { 
+              body { padding: 15px; font-size: 11px; }
+              .page-break { page-break-before: always; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>📋 Group Meeting Report</h1>
+          <div class="header-info">
+            <p><strong>Group:</strong> ${group.name}</p>
+            <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
+            <p><strong>Meeting Date:</strong> ${new Date(meeting.meeting_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}</p>
+            <p><strong>Meeting Time:</strong> ${meeting.meeting_time || 'Not specified'}</p>
+            <p><strong>Location:</strong> ${meeting.location || group.location || 'Not specified'}</p>
+            <p><strong>Topic:</strong> ${meeting.topic || 'General Group Meeting'}</p>
+            <p><strong>Status:</strong> ${meeting.status || 'N/A'}</p>
+          </div>
+
+          <h2>📊 Attendance Summary</h2>
+          <div class="stats-grid">
+            <div class="stat-box present">
+              <div class="stat-value">${stats.attended}</div>
+              <div class="stat-label">Present</div>
+            </div>
+            <div class="stat-box absent">
+              <div class="stat-value">${stats.absent}</div>
+              <div class="stat-label">Absent</div>
+            </div>
+            <div class="stat-box with-reason">
+              <div class="stat-value">${stats.absentWithReason}</div>
+              <div class="stat-label">Absent with Notes</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value">${stats.total > 0 ? Math.round((stats.attended / stats.total) * 100) : 0}%</div>
+              <div class="stat-label">Attendance Rate</div>
+            </div>
+          </div>
+
+          <h2>📝 Meeting Report</h2>
+          
+          <div class="report-section highlight-box">
+            <h3>📋 Meeting Summary</h3>
+            <div class="section-content">${reportText}</div>
+          </div>
+
+          <div class="report-section decisions-box">
+            <h3>✅ Decisions Made</h3>
+            <div class="section-content">${decisionsMade}</div>
+          </div>
+
+          <div class="report-section actions-box">
+            <h3>📌 Action Items & Follow-ups</h3>
+            <div class="section-content">${actionItems}</div>
+          </div>
+
+          <div class="report-section">
+            <h3>📅 Next Meeting Date</h3>
+            <p>${nextMeetingDate !== 'Not scheduled' ? new Date(nextMeetingDate).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            }) : 'Not scheduled'}</p>
+          </div>
+
+          ${meeting.notes ? `
+          <div class="report-section">
+            <h3>📋 Original Meeting Notes</h3>
+            <div class="section-content">${meeting.notes}</div>
+          </div>
+          ` : ''}
+
+          <div class="page-break"></div>
+
+          <h2>👥 Detailed Attendance (${attendanceRecords.length} members)</h2>
+          ${attendanceRecords.length > 0 ? `
+          <table class="attendance-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Residence</th>
+                <th>Phone</th>
+                <th>Status</th>
+                <th>Notes/Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${attendanceRecords.map((record, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+                  <td>${record.members?.residence || '-'}</td>
+                  <td>${record.members?.phone || '-'}</td>
+                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+                    ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+                  </td>
+                  <td>${record.notes || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p>No attendance records available.</p>'}
+
+          <div class="footer">
+            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })} at ${new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            <p>Church Management System • ${group.name} Group</p>
+          </div>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.print();
+    }
   };
 
   const openMeetingsModal = async (group: CellGroup) => {
@@ -3521,6 +3715,7 @@ const Groups = () => {
     setSelectedGroup(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
+    setMeetingReport(null);
   };
 
   const handleGroupCreated = () => {
@@ -3922,7 +4117,7 @@ const Groups = () => {
                   <h1 className="text-3xl font-bold text-gray-900 print:text-black mb-2">
                     {selectedGroup.name}
                   </h1>
-                  <p className="text-lg text-gray-600 print:text-black">Group Meeting Attendance Report</p>
+                  <p className="text-lg text-gray-600 print:text-black">Group Meeting Report</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4">
                   <div>
@@ -4015,6 +4210,43 @@ const Groups = () => {
                   </div>
                 </div>
               </div>
+
+              {meetingReport && (
+                <div className="mb-8">
+                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Meeting Report Details</h4>
+                  <div className="space-y-6">
+                    <div className="bg-blue-50 print:bg-blue-50 border border-blue-200 print:border-blue-300 rounded-xl p-6">
+                      <h5 className="text-lg font-semibold text-blue-800 print:text-blue-900 mb-3">📋 Meeting Summary</h5>
+                      <p className="text-gray-800 print:text-black whitespace-pre-wrap">{meetingReport.report_text}</p>
+                    </div>
+                    
+                    <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-xl p-6">
+                      <h5 className="text-lg font-semibold text-green-800 print:text-green-900 mb-3">✅ Decisions Made</h5>
+                      <p className="text-gray-800 print:text-black whitespace-pre-wrap">{meetingReport.decisions_made || 'No decisions recorded'}</p>
+                    </div>
+                    
+                    <div className="bg-yellow-50 print:bg-yellow-50 border border-yellow-200 print:border-yellow-300 rounded-xl p-6">
+                      <h5 className="text-lg font-semibold text-yellow-800 print:text-yellow-900 mb-3">📌 Action Items & Follow-ups</h5>
+                      <p className="text-gray-800 print:text-black whitespace-pre-wrap">{meetingReport.action_items || 'No action items recorded'}</p>
+                    </div>
+                    
+                    <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-xl p-6">
+                      <h5 className="text-lg font-semibold text-gray-800 print:text-gray-900 mb-3">📅 Next Meeting Date</h5>
+                      <p className="text-gray-800 print:text-black">
+                        {meetingReport.next_meeting_date 
+                          ? new Date(meetingReport.next_meeting_date).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })
+                          : 'Not scheduled'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="mb-6">
                 <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Detailed Attendance</h4>
