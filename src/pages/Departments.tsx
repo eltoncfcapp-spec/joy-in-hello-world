@@ -2171,6 +2171,43 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
   const handlePrint = () => {
     const stats = attendanceStats;
+    
+    // Build existing report preview section for print
+    const existingReportPreview = existingReport ? `
+      <div class="existing-report-preview">
+        <div class="preview-header">
+          <span class="preview-title">✓ Existing Report Preview</span>
+          <span class="preview-badge">Report Saved</span>
+        </div>
+        <div class="preview-grid">
+          <div class="preview-item">
+            <h5>Meeting Summary</h5>
+            <p>${reportData.report_text || 'Not provided'}</p>
+          </div>
+          <div class="preview-item">
+            <h5>Decisions Made</h5>
+            <p>${reportData.decisions_made || 'No decisions recorded'}</p>
+          </div>
+          <div class="preview-item">
+            <h5>Action Items & Follow-ups</h5>
+            <p>${reportData.action_items || 'No action items recorded'}</p>
+          </div>
+          <div class="preview-item">
+            <h5>Next Meeting Date</h5>
+            <p>${reportData.next_meeting_date 
+              ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })
+              : 'Not scheduled'
+            }</p>
+          </div>
+        </div>
+      </div>
+    ` : '';
+    
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
@@ -2179,31 +2216,41 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
         <head>
           <title>Department Meeting Report - ${department.name}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
-            h1 { color: #1e3a5f; border-bottom: 3px solid #7c3aed; padding-bottom: 10px; }
-            h2 { color: #374151; margin-top: 30px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .header-info { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            .header-info p { margin: 8px 0; }
-            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
-            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; text-align: center; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 11px; }
+            h1 { color: #1e3a5f; border-bottom: 2px solid #7c3aed; padding-bottom: 8px; font-size: 18px; margin-bottom: 15px; }
+            h2 { color: #374151; margin-top: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 14px; }
+            .header-info { background: #f3f4f6; padding: 12px; border-radius: 6px; margin: 12px 0; }
+            .header-info p { margin: 4px 0; font-size: 11px; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; border-radius: 6px; text-align: center; }
             .stat-box.present { background: #dcfce7; border-color: #86efac; }
             .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
             .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
-            .stat-value { font-size: 28px; font-weight: bold; color: #111827; }
-            .stat-label { font-size: 12px; color: #6b7280; margin-top: 5px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 15px 0; }
-            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
-            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; }
-            .attendance-table th { background: #f3f4f6; font-weight: 600; }
+            .stat-value { font-size: 20px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 9px; color: #6b7280; margin-top: 3px; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; }
+            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 12px; }
+            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: left; }
+            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 9px; }
             .status-present { color: #059669; font-weight: 600; }
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
-            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px; }
-            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; }
+            .footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 9px; }
+            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; }
+            .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; }
+            .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+            .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
+            .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
+            .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; }
+            .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
+            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; }
             @media print { 
-              body { padding: 20px; }
+              body { padding: 15px; font-size: 10px; }
               .page-break { page-break-before: always; }
+              .existing-report-preview { break-inside: avoid; }
             }
           </style>
         </head>
@@ -2244,6 +2291,8 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
               <div class="stat-label">Attendance Rate</div>
             </div>
           </div>
+
+          ${existingReportPreview}
 
           <div class="page-break"></div>
 
@@ -2657,12 +2706,58 @@ ${department.name} Department
             </div>
 
             <div className="lg:col-span-2">
+              {/* Existing Report Preview */}
+              {existingReport && (
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6 mb-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-lg font-semibold text-green-800 flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5" />
+                      Existing Report Preview
+                    </h4>
+                    <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                      ✓ Report Saved
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Meeting Summary</h5>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap line-clamp-4">{reportData.report_text || 'Not provided'}</p>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Decisions Made</h5>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap line-clamp-4">{reportData.decisions_made || 'No decisions recorded'}</p>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Action Items & Follow-ups</h5>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap line-clamp-4">{reportData.action_items || 'No action items recorded'}</p>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-4">
+                      <h5 className="text-sm font-medium text-gray-700 mb-2">Next Meeting Date</h5>
+                      <p className="text-gray-900 text-sm">
+                        {reportData.next_meeting_date 
+                          ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })
+                          : 'Not scheduled'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-lg font-semibold text-gray-900">Department Meeting Report</h4>
+                  <h4 className="text-lg font-semibold text-gray-900">
+                    {existingReport ? 'Edit Department Report' : 'Create Department Report'}
+                  </h4>
                   {existingReport && (
-                    <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                      Report Exists
+                    <span className="text-sm text-gray-500">
+                      Last updated: {existingReport.created_at ? new Date(existingReport.created_at).toLocaleString() : 'Unknown'}
                     </span>
                   )}
                 </div>
