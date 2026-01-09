@@ -702,10 +702,12 @@ interface DeleteDepartmentModalProps {
 const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, department, onClose, onConfirm, onError, canDelete }) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
+  const [confirmationName, setConfirmationName] = useState('');
 
   useEffect(() => {
     if (isOpen && department) {
       checkMemberCount();
+      setConfirmationName('');
     }
   }, [isOpen, department]);
 
@@ -723,6 +725,8 @@ const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, d
     }
   };
 
+  const isConfirmationValid = confirmationName.trim().toLowerCase() === department?.name?.trim().toLowerCase();
+
   const handleDelete = async () => {
     if (!department?.id) {
       onError('Department not found');
@@ -734,24 +738,30 @@ const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, d
       return;
     }
 
-    if (memberCount > 0) {
-      onError(`Cannot delete department with ${memberCount} member(s). Please reassign or remove members first.`);
+    if (!isConfirmationValid) {
+      onError('Please type the department name correctly to confirm deletion');
       return;
     }
 
     try {
       setLoading(true);
+
+      // If there are members, remove them from department_members junction table
+      if (memberCount > 0) {
+        await supabase
+          .from('department_members')
+          .delete()
+          .eq('department_id', department.id);
+      }
       
       // Remove leader assignment if exists
       if (department.leader_id) {
-        // Get leader's current role
         const { data: leader } = await supabase
           .from('members')
           .select('admin_role')
           .eq('id', department.leader_id)
           .single();
         
-        // Revert to 'member' role if they were a department leader
         let newRole = leader?.admin_role || 'member';
         if (newRole === 'department_leader') {
           newRole = 'member';
@@ -832,17 +842,30 @@ const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, d
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
                 <p className="text-sm text-yellow-800">
-                  This department has {memberCount} member(s). You must remove all members before deleting the department.
+                  This department has {memberCount} member(s). They will be unassigned from this department upon deletion.
                 </p>
               </div>
             </div>
           )}
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Type "<span className="text-red-600 font-semibold">{department.name}</span>" to confirm deletion:
+            </label>
+            <input
+              type="text"
+              value={confirmationName}
+              onChange={(e) => setConfirmationName(e.target.value)}
+              placeholder="Enter department name..."
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+            />
+          </div>
         </div>
 
         <div className="flex gap-3">
           <button
             onClick={handleDelete}
-            disabled={loading || memberCount > 0 || !canDelete}
+            disabled={loading || !isConfirmationValid || !canDelete}
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
           >
             <Trash2 className="h-4 w-4" />

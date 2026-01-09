@@ -802,11 +802,13 @@ interface DeleteGroupModalProps {
 const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
+  const [confirmationName, setConfirmationName] = useState('');
   const { profile } = useAuth();
 
   useEffect(() => {
     if (isOpen && group) {
       checkMemberCount();
+      setConfirmationName('');
     }
   }, [isOpen, group]);
 
@@ -824,6 +826,8 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
     }
   };
 
+  const isConfirmationValid = confirmationName.trim().toLowerCase() === group?.name?.trim().toLowerCase();
+
   const handleDelete = async () => {
     if (!group?.id) {
       onError('Group not found');
@@ -835,8 +839,8 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
       return;
     }
 
-    if (memberCount > 0) {
-      onError(`Cannot delete group with ${memberCount} member(s). Please reassign or remove members first.`);
+    if (!isConfirmationValid) {
+      onError('Please type the group name correctly to confirm deletion');
       return;
     }
 
@@ -850,16 +854,28 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
         .eq('id', group.id)
         .single();
 
+      // If there are members, remove their cell_group_id first
+      if (memberCount > 0) {
+        await supabase
+          .from('members')
+          .update({ cell_group_id: null, updated_at: new Date().toISOString() })
+          .eq('cell_group_id', group.id);
+
+        // Also remove from cell_group_members junction table
+        await supabase
+          .from('cell_group_members')
+          .delete()
+          .eq('cell_group_id', group.id);
+      }
+
       // Remove leader assignment if exists
       if (group.leader_id) {
-        // Get leader's current role
         const { data: leader } = await supabase
           .from('members')
           .select('*')
           .eq('id', group.leader_id)
           .single();
         
-        // Revert to 'member' role if they were a group leader
         let newRole = leader?.admin_role || 'member';
         if (newRole === 'group_leader') {
           newRole = 'member';
@@ -876,7 +892,6 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
           .update(updatedLeader)
           .eq('id', group.leader_id);
 
-        // Log leader update
         await logAuditEvent('members', group.leader_id, 'UPDATE', leader, {
           ...leader,
           ...updatedLeader
@@ -891,7 +906,6 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
 
       if (error) throw error;
 
-      // Log group deletion
       await logAuditEvent('cell_groups', group.id, 'DELETE', groupData, null, profile?.id || null);
 
       onConfirm();
@@ -952,17 +966,30 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
                 <p className="text-sm text-yellow-800">
-                  This group has {memberCount} member(s). You must remove all members before deleting the group.
+                  This group has {memberCount} member(s). They will be unassigned from this group upon deletion.
                 </p>
               </div>
             </div>
           )}
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Type "<span className="text-red-600 font-semibold">{group.name}</span>" to confirm deletion:
+            </label>
+            <input
+              type="text"
+              value={confirmationName}
+              onChange={(e) => setConfirmationName(e.target.value)}
+              placeholder="Enter group name..."
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+            />
+          </div>
         </div>
 
         <div className="flex gap-3">
           <button
             onClick={handleDelete}
-            disabled={loading || memberCount > 0 || !canDelete}
+            disabled={loading || !isConfirmationValid || !canDelete}
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
           >
             <Trash2 className="h-4 w-4" />
