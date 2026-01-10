@@ -2591,10 +2591,10 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             
             /* Section Content - FIXED TEXT WRAPPING */
             .section-content {
-              white-space: pre-wrap; /* Preserve line breaks from formatTextForPrint */
+              white-space: pre-wrap;
               word-wrap: break-word;
-              word-break: break-word;
-              overflow-wrap: break-word;
+              word-break: break-all;
+              overflow-wrap: anywhere;
               font-size: 9pt;
               line-height: 1.4;
               margin-top: 8px;
@@ -2602,9 +2602,10 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
               background: #f8f9fa;
               border-radius: 3px;
               border: 1px solid #e9ecef;
-              max-height: 200px; /* Limit height */
-              overflow-y: auto; /* Scroll if needed */
-              font-family: 'Courier New', monospace; /* Monospace for better line control */
+              max-width: 100%;
+              width: 100%;
+              overflow: hidden;
+              font-family: Arial, Helvetica, sans-serif;
             }
             
             .scrollable-content {
@@ -2736,8 +2737,12 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
               .section-content {
                 font-size: 8pt !important;
                 line-height: 1.3 !important;
-                max-height: 180px !important; /* Reduced for print */
                 padding: 6px !important;
+                word-break: break-all !important;
+                overflow-wrap: anywhere !important;
+                max-width: 100% !important;
+                width: 100% !important;
+                overflow: hidden !important;
               }
               
               .scrollable-content {
