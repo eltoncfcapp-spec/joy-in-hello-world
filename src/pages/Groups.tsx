@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+on this code when i press view report button please remove the printing option that its currently calling call the report that is on the Create Group Report import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
@@ -3296,6 +3296,7 @@ const Groups = () => {
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<GroupMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<GroupAttendanceRecord[]>([]);
   const [meetingReport, setMeetingReport] = useState<GroupReport | null>(null);
+  const [showCreateReportModal, setShowCreateReportModal] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -3486,6 +3487,14 @@ const Groups = () => {
     await loadAttendanceForMeeting(meeting.id);
     await loadMeetingReport(meeting.id);
     setShowReportModal(true);
+  };
+
+  const openCreateReportModal = async (meeting: GroupMeeting) => {
+    setSelectedGroup(groups.find(g => g.id === meeting.group_id) || null);
+    setSelectedMeetingForReport(meeting);
+    await loadAttendanceForMeeting(meeting.id);
+    await loadMeetingReport(meeting.id);
+    setShowCreateReportModal(true);
   };
 
   const handlePrintReport = () => {
@@ -3714,6 +3723,7 @@ const Groups = () => {
     setShowMeetingsModal(false);
     setShowWorkflowModal(false);
     setShowReportModal(false);
+    setShowCreateReportModal(false);
     setSelectedGroup(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
@@ -3735,6 +3745,14 @@ const Groups = () => {
   const handleGroupDeleted = () => {
     loadGroups();
     setSuccess('Group deleted successfully!');
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  const handleReportCreated = () => {
+    if (selectedMeetingForReport) {
+      loadMeetingReport(selectedMeetingForReport.id);
+    }
+    setSuccess('Report created successfully!');
     setTimeout(() => setSuccess(null), 3000);
   };
 
@@ -4073,11 +4091,11 @@ const Groups = () => {
                           </span>
                           {meeting.status === 'completed' && (
                             <button
-                              onClick={() => openReportModal(meeting)}
+                              onClick={() => openCreateReportModal(meeting)}
                               className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs font-medium flex items-center gap-1"
                             >
-                              <Printer className="h-3 w-3" />
-                              View Report
+                              <FileText className="h-3 w-3" />
+                              View/Create Report
                             </button>
                           )}
                         </div>
@@ -4086,6 +4104,37 @@ const Groups = () => {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {showCreateReportModal && selectedGroup && selectedMeetingForReport && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900">Create/Edit Meeting Report</h3>
+                <button
+                  onClick={closeAllModals}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <GroupReportStep
+                group={selectedGroup}
+                meetings={meetings}
+                selectedMeeting={selectedMeetingForReport}
+                onMeetingSelect={() => {}}
+                onReportCreated={() => {
+                  handleReportCreated();
+                  closeAllModals();
+                }}
+                onError={(message) => {
+                  setError(message);
+                  setTimeout(() => setError(null), 3000);
+                }}
+              />
             </div>
           </div>
         )}
@@ -4104,6 +4153,13 @@ const Groups = () => {
                   >
                     <Printer className="h-4 w-4" />
                     Print Report
+                  </button>
+                  <button
+                    onClick={() => openCreateReportModal(selectedMeetingForReport)}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                  >
+                    <Edit className="h-4 w-4" />
+                    Edit Report
                   </button>
                   <button
                     onClick={closeAllModals}
