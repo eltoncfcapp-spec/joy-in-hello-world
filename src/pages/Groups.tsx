@@ -2415,241 +2415,507 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       setLoading(false);
     }
   };
-
-  const handlePrint = () => {
-    const stats = attendanceStats;
-    const meetingNotes = selectedMeeting?.notes || '';
-    const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
-      ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
-      : '';
-    
-    const meetingNotesSection = meetingNotes 
-      ? `<div class="report-section">
-           <h3>📋 Original Meeting Notes</h3>
-           <div class="section-content">${meetingNotes}</div>
-         </div>` 
-      : '';
-    
-    const additionalNotesSection = reportData.additional_notes 
-      ? `<div class="report-section">
-           <h3>📝 Additional Notes</h3>
-           <div class="section-content">${reportData.additional_notes}</div>
-         </div>` 
-      : '';
-    
-    const attendanceRows = attendance.map((record, index) => `
-      <tr>
-        <td>${index + 1}</td>
-        <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
-        <td>${record.members?.residence || '-'}</td>
-        <td>${record.members?.phone || '-'}</td>
-        <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-          ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
-        </td>
-        <td>${record.notes || '-'}</td>
-      </tr>
-    `).join('');
-    
-    const attendanceTable = attendance.length > 0 
-      ? `<table class="attendance-table">
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+const handlePrint = () => {
+  const stats = attendanceStats;
+  const meetingNotes = selectedMeeting?.notes || '';
+  const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
+    ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
+    : '';
+  
+  const meetingNotesSection = meetingNotes 
+    ? `<div class="report-section">
+         <h3>📋 Original Meeting Notes</h3>
+         <div class="section-content notes-content">${meetingNotes}</div>
+       </div>` 
+    : '';
+  
+  const additionalNotesSection = reportData.additional_notes 
+    ? `<div class="report-section">
+         <h3>📝 Additional Notes</h3>
+         <div class="section-content notes-content">${reportData.additional_notes}</div>
+       </div>` 
+    : '';
+  
+  // Function to truncate long text and add ellipsis
+  const truncateText = (text: string, maxLength: number) => {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  };
+  
+  const attendanceRows = attendance.map((record, index) => `
+    <tr>
+      <td style="width: 30px;">${index + 1}</td>
+      <td style="min-width: 120px; max-width: 150px; word-break: break-word;">${(record.members?.name || '') + ' ' + (record.members?.surname || '')}</td>
+      <td style="min-width: 100px; max-width: 120px; word-break: break-word;">${record.members?.residence || '-'}</td>
+      <td style="width: 90px;">${record.members?.phone || '-'}</td>
+      <td style="width: 120px;" class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+        ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+      </td>
+      <td style="min-width: 100px; max-width: 150px; word-break: break-word;">${truncateText(record.notes || '-', 50)}</td>
+    </tr>
+  `).join('');
+  
+  const attendanceTable = attendance.length > 0 
+    ? `<div style="overflow-x: auto; margin: 10px 0;">
+        <table class="attendance-table">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Name</th>
-              <th>Residence</th>
-              <th>Phone</th>
-              <th>Status</th>
-              <th>Notes/Reason</th>
+              <th style="width: 30px;">#</th>
+              <th style="min-width: 120px; max-width: 150px;">Name</th>
+              <th style="min-width: 100px; max-width: 120px;">Residence</th>
+              <th style="width: 90px;">Phone</th>
+              <th style="width: 120px;">Status</th>
+              <th style="min-width: 100px; max-width: 150px;">Notes/Reason</th>
             </tr>
           </thead>
           <tbody>
             ${attendanceRows}
           </tbody>
-        </table>` 
-      : '<p>No attendance records available.</p>';
-    
-    // Build existing report preview section for print
-    const existingReportPreview = existingReport ? `
-      <div class="existing-report-preview">
-        <div class="preview-header">
-          <span class="preview-title">✓ Existing Report Preview</span>
-          <span class="preview-badge">Report Saved</span>
-        </div>
-        <div class="preview-grid">
-          <div class="preview-item">
-            <h5>Meeting Summary</h5>
-            <p>${reportData.report_text || 'Not provided'}</p>
-          </div>
-          <div class="preview-item">
-            <h5>Decisions Made</h5>
-            <p>${reportData.decisions_made || 'No decisions recorded'}</p>
-          </div>
-          <div class="preview-item">
-            <h5>Action Items & Follow-ups</h5>
-            <p>${reportData.action_items || 'No action items recorded'}</p>
-          </div>
-          <div class="preview-item">
-            <h5>Next Meeting Date</h5>
-            <p>${reportData.next_meeting_date 
-              ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })
-              : 'Not scheduled'
-            }</p>
-          </div>
-        </div>
-      </div>
-    ` : '';
-    
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Group Meeting Report - ${group.name}</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 11px; }
-            h1 { color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; font-size: 18px; margin-bottom: 15px; }
-            h2 { color: #374151; margin-top: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 14px; }
-            .header-info { background: #f3f4f6; padding: 12px; border-radius: 6px; margin: 12px 0; }
-            .header-info p { margin: 4px 0; font-size: 11px; }
-            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
-            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; border-radius: 6px; text-align: center; }
-            .stat-box.present { background: #dcfce7; border-color: #86efac; }
-            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
-            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
-            .stat-value { font-size: 20px; font-weight: bold; color: #111827; }
-            .stat-label { font-size: 9px; color: #6b7280; margin-top: 3px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; overflow: hidden; }
-            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 12px; }
-            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
-            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: left; }
-            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 9px; }
-            .status-present { color: #059669; font-weight: 600; }
-            .status-absent { color: #dc2626; font-weight: 600; }
-            .status-with-reason { color: #d97706; font-weight: 600; }
-            .footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 9px; }
-            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
-            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; padding: 12px; border-radius: 6px; margin: 8px 0; }
-            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
-            .actions-box { background: #fefce8; border: 2px solid #eab308; }
-            .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; }
-            .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-            .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
-            .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
-            .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; }
-            .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
-            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
-            @media print { 
-              body { padding: 15px; font-size: 10px; }
-              .page-break { page-break-before: always; }
-              .existing-report-preview { break-inside: avoid; }
+        </table>
+      </div>` 
+    : '<p>No attendance records available.</p>';
+  
+  // Truncate long report text for print
+  const truncatedReportText = truncateText(reportData.report_text || 'No summary recorded', 2000);
+  const truncatedDecisions = truncateText(reportData.decisions_made || 'No decisions recorded', 1000);
+  const truncatedActions = truncateText(reportData.action_items || 'No action items recorded', 1000);
+  
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Group Meeting Report - ${group.name}</title>
+        <style>
+          * { 
+            box-sizing: border-box; 
+            margin: 0;
+            padding: 0;
+          }
+          
+          body { 
+            font-family: Arial, sans-serif; 
+            padding: 15px; 
+            max-width: 100%; 
+            margin: 0 auto; 
+            font-size: 10px;
+            line-height: 1.3;
+          }
+          
+          .print-container {
+            max-width: 100%;
+            overflow: hidden;
+          }
+          
+          h1 { 
+            color: #1e3a5f; 
+            border-bottom: 2px solid #3b82f6; 
+            padding-bottom: 6px; 
+            font-size: 16px; 
+            margin-bottom: 12px;
+            word-break: break-word;
+          }
+          
+          h2 { 
+            color: #374151; 
+            margin-top: 15px; 
+            border-bottom: 1px solid #e5e7eb; 
+            padding-bottom: 4px; 
+            font-size: 13px;
+            word-break: break-word;
+          }
+          
+          h3 {
+            color: #1f2937;
+            margin: 8px 0 4px 0;
+            font-size: 11px;
+            word-break: break-word;
+          }
+          
+          .header-info { 
+            background: #f3f4f6; 
+            padding: 10px; 
+            border-radius: 5px; 
+            margin: 10px 0;
+            border: 1px solid #e5e7eb;
+            max-width: 100%;
+            overflow: hidden;
+          }
+          
+          .header-info p { 
+            margin: 3px 0; 
+            font-size: 9px;
+            word-break: break-word;
+          }
+          
+          .stats-grid { 
+            display: grid; 
+            grid-template-columns: repeat(4, 1fr); 
+            gap: 6px; 
+            margin: 10px 0;
+            max-width: 100%;
+          }
+          
+          .stat-box { 
+            background: #f9fafb; 
+            border: 1px solid #e5e7eb; 
+            padding: 8px; 
+            border-radius: 5px; 
+            text-align: center;
+            max-width: 100%;
+            overflow: hidden;
+          }
+          
+          .stat-box.present { 
+            background: #dcfce7; 
+            border-color: #86efac; 
+          }
+          
+          .stat-box.absent { 
+            background: #fee2e2; 
+            border-color: #fca5a5; 
+          }
+          
+          .stat-box.with-reason { 
+            background: #fef3c7; 
+            border-color: #fcd34d; 
+          }
+          
+          .stat-value { 
+            font-size: 16px; 
+            font-weight: bold; 
+            color: #111827; 
+            word-break: break-all;
+          }
+          
+          .stat-label { 
+            font-size: 8px; 
+            color: #6b7280; 
+            margin-top: 2px;
+            word-break: break-word;
+          }
+          
+          .report-section { 
+            background: #ffffff; 
+            border: 1px solid #e5e7eb; 
+            padding: 10px; 
+            border-radius: 5px; 
+            margin: 8px 0; 
+            max-width: 100%;
+            overflow: hidden;
+            page-break-inside: avoid;
+          }
+          
+          .section-content { 
+            white-space: pre-wrap; 
+            line-height: 1.3; 
+            margin-top: 6px; 
+            font-size: 9px; 
+            word-wrap: break-word; 
+            overflow-wrap: break-word; 
+            max-width: 100%;
+            overflow: hidden;
+          }
+          
+          .notes-content {
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 5px;
+            background: #f9fafb;
+            border-radius: 3px;
+            border: 1px solid #e5e7eb;
+          }
+          
+          .highlight-box { 
+            background: #eff6ff; 
+            border: 2px solid #3b82f6; 
+          }
+          
+          .decisions-box { 
+            background: #f0fdf4; 
+            border: 2px solid #22c55e; 
+          }
+          
+          .actions-box { 
+            background: #fefce8; 
+            border: 2px solid #eab308; 
+          }
+          
+          .attendance-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 8px; 
+            font-size: 8px;
+            table-layout: fixed;
+            max-width: 100%;
+          }
+          
+          .attendance-table th, 
+          .attendance-table td { 
+            border: 1px solid #e5e7eb; 
+            padding: 4px; 
+            text-align: left; 
+            word-break: break-word;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          
+          .attendance-table th { 
+            background: #f3f4f6; 
+            font-weight: 600; 
+            font-size: 8px;
+          }
+          
+          .status-present { 
+            color: #059669; 
+            font-weight: 600; 
+            font-size: 8px;
+          }
+          
+          .status-absent { 
+            color: #dc2626; 
+            font-weight: 600;
+            font-size: 8px;
+          }
+          
+          .status-with-reason { 
+            color: #d97706; 
+            font-weight: 600;
+            font-size: 8px;
+          }
+          
+          .footer { 
+            margin-top: 15px; 
+            padding-top: 8px; 
+            border-top: 1px solid #e5e7eb; 
+            text-align: center; 
+            color: #6b7280; 
+            font-size: 8px;
+            word-break: break-word;
+          }
+          
+          .page-break { 
+            page-break-before: always; 
+            margin-top: 20px;
+          }
+          
+          /* Force content to stay within bounds */
+          .content-wrapper {
+            max-width: 100%;
+            overflow: hidden;
+            word-wrap: break-word;
+          }
+          
+          .compact-text {
+            font-size: 9px;
+            line-height: 1.2;
+            margin: 4px 0;
+          }
+          
+          /* Print-specific adjustments */
+          @media print { 
+            body { 
+              padding: 10px; 
+              font-size: 9px;
+              max-width: 100%;
+              margin: 0;
             }
-          </style>
-        </head>
-        <body>
-          <h1>📋 Group Meeting Report</h1>
-          <div class="header-info">
-            <p><strong>Group:</strong> ${group.name}</p>
-            <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
-            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            }) : 'N/A'}</p>
-            <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
-            <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
-            <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
-            <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-            ${cancellationReason}
-          </div>
-
-          <h2>📊 Attendance Summary</h2>
-          <div class="stats-grid">
-            <div class="stat-box present">
-              <div class="stat-value">${stats.present}</div>
-              <div class="stat-label">Present</div>
+            
+            .print-container {
+              max-width: 100%;
+              padding: 0;
+            }
+            
+            h1 { 
+              font-size: 14px;
+              margin-bottom: 8px;
+            }
+            
+            h2 { 
+              font-size: 12px;
+              margin-top: 12px;
+            }
+            
+            h3 {
+              font-size: 10px;
+            }
+            
+            .report-section {
+              margin: 6px 0;
+              padding: 8px;
+            }
+            
+            .section-content {
+              font-size: 8px;
+            }
+            
+            .attendance-table {
+              font-size: 7px;
+            }
+            
+            .attendance-table th,
+            .attendance-table td {
+              padding: 3px;
+            }
+            
+            .stat-box {
+              padding: 6px;
+            }
+            
+            .stat-value {
+              font-size: 14px;
+            }
+            
+            .stat-label {
+              font-size: 7px;
+            }
+            
+            /* Prevent content from overflowing */
+            * {
+              max-width: 100% !important;
+              overflow-wrap: break-word !important;
+              word-wrap: break-word !important;
+              hyphens: auto;
+            }
+            
+            table {
+              page-break-inside: avoid;
+            }
+            
+            tr {
+              page-break-inside: avoid;
+              page-break-after: auto;
+            }
+            
+            /* Ensure content stays on one page when possible */
+            .no-break {
+              page-break-inside: avoid;
+            }
+          }
+          
+          /* Mobile/tablet adjustments */
+          @media screen and (max-width: 768px) {
+            body {
+              padding: 10px;
+              font-size: 9px;
+            }
+            
+            .stats-grid {
+              grid-template-columns: repeat(2, 1fr);
+              gap: 8px;
+            }
+            
+            .attendance-table {
+              font-size: 7px;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="print-container">
+          <div class="content-wrapper">
+            <h1>📋 Group Meeting Report</h1>
+            <div class="header-info">
+              <p><strong>Group:</strong> ${group.name}</p>
+              <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
+              <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+              }) : 'N/A'}</p>
+              <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
+              <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
+              <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
+              <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
+              ${cancellationReason}
             </div>
-            <div class="stat-box absent">
-              <div class="stat-value">${stats.absent}</div>
-              <div class="stat-label">Absent</div>
+
+            <h2>📊 Attendance Summary</h2>
+            <div class="stats-grid">
+              <div class="stat-box present">
+                <div class="stat-value">${stats.present}</div>
+                <div class="stat-label">Present</div>
+              </div>
+              <div class="stat-box absent">
+                <div class="stat-value">${stats.absent}</div>
+                <div class="stat-label">Absent</div>
+              </div>
+              <div class="stat-box with-reason">
+                <div class="stat-value">${stats.absentWithReason}</div>
+                <div class="stat-label">Absent with Notes</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
+                <div class="stat-label">Attendance Rate</div>
+              </div>
             </div>
-            <div class="stat-box with-reason">
-              <div class="stat-value">${stats.absentWithReason}</div>
-              <div class="stat-label">Absent with Reason</div>
+
+            <!-- Meeting Summary/Report Section -->
+            <div class="report-section highlight-box no-break">
+              <h3>📝 Meeting Summary</h3>
+              <div class="section-content">${truncatedReportText}</div>
             </div>
-            <div class="stat-box">
-              <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
-              <div class="stat-label">Attendance Rate</div>
+
+            <!-- Decisions Made Section -->
+            <div class="report-section decisions-box no-break">
+              <h3>✅ Decisions Made</h3>
+              <div class="section-content">${truncatedDecisions}</div>
+            </div>
+
+            <!-- Action Items Section -->
+            <div class="report-section actions-box no-break">
+              <h3>📌 Action Items & Follow-ups</h3>
+              <div class="section-content">${truncatedActions}</div>
+            </div>
+
+            <!-- Next Meeting Section -->
+            <div class="report-section no-break">
+              <h3>📅 Next Meeting Date</h3>
+              <p class="compact-text">${reportData.next_meeting_date 
+                ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })
+                : 'Not scheduled'
+              }</p>
+            </div>
+
+            ${meetingNotesSection}
+            ${additionalNotesSection}
+
+            <div class="page-break"></div>
+
+            <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
+            ${attendanceTable}
+
+            <div class="footer">
+              <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+              })} at ${new Date().toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
+              })}</p>
+              <p>Church Management System • ${group.name} Group</p>
             </div>
           </div>
-
-          ${existingReportPreview}
-
-          <!-- Meeting Summary/Report Section -->
-          <div class="report-section highlight-box">
-            <h3>📝 Meeting Summary</h3>
-            <div class="section-content">${reportData.report_text || 'No summary recorded'}</div>
-          </div>
-
-          <!-- Decisions Made Section -->
-          <div class="report-section decisions-box">
-            <h3>✅ Decisions Made</h3>
-            <div class="section-content">${reportData.decisions_made || 'No decisions recorded'}</div>
-          </div>
-
-          <!-- Action Items Section -->
-          <div class="report-section actions-box">
-            <h3>📌 Action Items & Follow-ups</h3>
-            <div class="section-content">${reportData.action_items || 'No action items recorded'}</div>
-          </div>
-
-          <!-- Next Meeting Section -->
-          <div class="report-section">
-            <h3>📅 Next Meeting Date</h3>
-            <p>${reportData.next_meeting_date ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            }) : 'Not scheduled'}</p>
-          </div>
-
-          ${meetingNotesSection}
-          ${additionalNotesSection}
-
-          <div class="page-break"></div>
-
-          <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-          ${attendanceTable}
-
-          <div class="footer">
-            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })} at ${new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}</p>
-            <p>Church Management System • ${group.name} Group</p>
-          </div>
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    }
-  };
-
+        </div>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  }
+};
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   const downloadReport = () => {
     const stats = attendanceStats;
     const reportContent = `
