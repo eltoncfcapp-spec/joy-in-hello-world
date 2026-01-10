@@ -3137,8 +3137,7 @@ interface GroupWorkflowProps {
   onError: (message: string) => void;
 }
 
-const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
-  const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
 
@@ -3431,18 +3430,19 @@ const Groups = () => {
     }
   };
 
-  const loadMeetings = async (groupId: string) => {
+  const loadMeetings = async () => {
     try {
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
-        .eq('group_id', groupId)
+        .eq('group_id', group.id)
         .order('meeting_date', { ascending: false });
 
       if (error) throw error;
+      
       setMeetings(data || []);
     } catch (error: any) {
-      setError('Failed to load meetings: ' + error.message);
+      console.error('Failed to load meetings:', error);
     }
   };
 
