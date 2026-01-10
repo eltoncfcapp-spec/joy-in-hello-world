@@ -2229,8 +2229,11 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
             .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
             .stat-value { font-size: 20px; font-weight: bold; color: #111827; }
             .stat-label { font-size: 9px; color: #6b7280; margin-top: 3px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; overflow: hidden; }
             .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 12px; }
+            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; padding: 12px; border-radius: 6px; margin: 8px 0; }
+            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
+            .actions-box { background: #fefce8; border: 2px solid #eab308; }
             .attendance-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
             .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: left; }
             .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 9px; }
@@ -2238,15 +2241,15 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
             .footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 9px; }
-            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; }
+            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; }
             .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
             .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
             .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
             .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; }
+            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; }
             .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
-            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; }
+            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             @media print { 
               body { padding: 15px; font-size: 10px; }
               .page-break { page-break-before: always; }
@@ -2296,40 +2299,37 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
 
           <div class="page-break"></div>
 
-          <!-- Meeting Report Section -->
-          <div class="report-section">
-            <h3>📝 Meeting Report</h3>
-            <div class="section-content">${reportData.report_text || 'No report text recorded'}</div>
+          <!-- Meeting Summary/Report Section -->
+          <div class="report-section highlight-box">
+            <h3>📝 Meeting Summary</h3>
+            <div class="section-content">${reportData.report_text || 'No summary recorded'}</div>
           </div>
 
           <!-- Decisions Made Section -->
-          ${reportData.decisions_made ? `
-          <div class="report-section">
+          <div class="report-section decisions-box">
             <h3>✅ Decisions Made</h3>
-            <div class="section-content">${reportData.decisions_made}</div>
+            <div class="section-content">${reportData.decisions_made || 'No decisions recorded'}</div>
           </div>
-          ` : ''}
 
           <!-- Action Items Section -->
-          ${reportData.action_items ? `
-          <div class="report-section">
-            <h3>📌 Action Items</h3>
-            <div class="section-content">${reportData.action_items}</div>
+          <div class="report-section actions-box">
+            <h3>🎯 Action Items & Follow-ups</h3>
+            <div class="section-content">${reportData.action_items || 'No action items recorded'}</div>
           </div>
-          ` : ''}
 
           <!-- Next Meeting Section -->
-          ${reportData.next_meeting_date ? `
           <div class="report-section">
             <h3>📅 Next Meeting</h3>
-            <p>Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}</p>
+            <p>${reportData.next_meeting_date 
+              ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}`
+              : 'Not scheduled yet'
+            }</p>
           </div>
-          ` : ''}
 
           <!-- Additional Notes Section -->
           ${reportData.additional_notes ? `
