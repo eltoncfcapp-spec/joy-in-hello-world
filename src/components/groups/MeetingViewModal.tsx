@@ -169,9 +169,19 @@ const MeetingViewModal: React.FC<MeetingViewModalProps> = ({
                 padding: 12px; 
                 border-radius: 4px;
                 border-left: 4px solid #3b82f6;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+                overflow: hidden;
               }
               .decisions { border-left-color: #10b981; }
               .actions { border-left-color: #f59e0b; }
+              .section {
+                overflow: hidden;
+              }
+              .section p {
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+              }
               @media print {
                 body { margin: 0; }
               }
@@ -431,41 +441,41 @@ const MeetingViewModal: React.FC<MeetingViewModalProps> = ({
             {/* Meeting Report Section */}
             {report && (
               <div className="mb-8 space-y-4">
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 overflow-hidden">
                   <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                     <ClipboardList className="h-5 w-5 text-blue-600" />
                     Meeting Summary
                   </h3>
-                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{report.report_text}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words overflow-wrap-anywhere">{report.report_text}</p>
                 </div>
 
                 {report.decisions_made && (
-                  <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 overflow-hidden">
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                       <CheckCircle className="h-5 w-5 text-green-600" />
                       Decisions Made
                     </h3>
-                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{report.decisions_made}</p>
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words overflow-wrap-anywhere">{report.decisions_made}</p>
                   </div>
                 )}
 
                 {report.action_items && (
-                  <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
+                  <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800 overflow-hidden">
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                       <FileText className="h-5 w-5 text-orange-600" />
                       Action Items
                     </h3>
-                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{report.action_items}</p>
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words overflow-wrap-anywhere">{report.action_items}</p>
                   </div>
                 )}
 
                 {report.next_meeting_date && (
-                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800 overflow-hidden">
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                       <Calendar className="h-5 w-5 text-purple-600" />
                       Next Meeting
                     </h3>
-                    <p className="text-gray-700 dark:text-gray-300">
+                    <p className="text-gray-700 dark:text-gray-300 break-words">
                       Scheduled for: {new Date(report.next_meeting_date).toLocaleDateString()}
                     </p>
                   </div>
