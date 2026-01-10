@@ -4522,8 +4522,7 @@ const Groups = () => {
                         </h5>
                         <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {attendanceRecords
-                              .filter(record => record.status === 'present')
+                            {attendanceRecords.filter(record => record.status === 'present')
                               .map((record) => (
                                 <div key={record.id} className="flex items-center gap-2">
                                   <div className="w-2 h-2 bg-green-600 rounded-full"></div>
