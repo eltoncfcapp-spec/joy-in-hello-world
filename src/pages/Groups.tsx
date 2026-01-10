@@ -1083,7 +1083,6 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
       // Log audit event
       await logAuditEvent('meetings', meetingData.id, 'INSERT', null, newMeeting, profile?.id || null);
 
-      // Reset form
       setFormData({
         meeting_date: '',
         meeting_time: '',
@@ -1091,16 +1090,8 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         topic: '',
         notes: ''
       });
-      
-      // Load recent meetings to refresh the list
       await loadRecentMeetings();
-      
-      // Call the success callback AFTER the reload completes
       onMeetingCreated();
-      
-      // Show success message
-      onError('Group meeting scheduled successfully!');
-      
     } catch (error: any) {
       onError('Failed to create group meeting: ' + error.message);
     } finally {
@@ -3137,7 +3128,8 @@ interface GroupWorkflowProps {
   onError: (message: string) => void;
 }
 
-const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
+  const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
 
@@ -3430,19 +3422,18 @@ const Groups = () => {
     }
   };
 
-  const loadMeetings = async () => {
+  const loadMeetings = async (groupId: string) => {
     try {
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
-        .eq('group_id', group.id)
+        .eq('group_id', groupId)
         .order('meeting_date', { ascending: false });
 
       if (error) throw error;
-      
       setMeetings(data || []);
     } catch (error: any) {
-      console.error('Failed to load meetings:', error);
+      setError('Failed to load meetings: ' + error.message);
     }
   };
 
@@ -3702,7 +3693,6 @@ const Groups = () => {
 
     setSelectedGroup(group);
     setShowWorkflowModal(true);
-    // Load meetings for this group
     await loadMeetings(group.id);
   };
 
