@@ -129,7 +129,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
   const loadAllMembers = async () => {
     try {
-      // Get ALL members, not just those with leadership roles
       const { data, error } = await supabase
         .from('members')
         .select('*')
@@ -161,7 +160,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
       return;
     }
 
-    // Check if user has permission to create groups (only admin and pastor)
     if (!isAdmin() && !isPastor()) {
       onError('Only administrators and pastors can create new groups');
       return;
@@ -170,7 +168,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
     try {
       setLoading(true);
       
-      // Check if group with same name already exists
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -201,10 +198,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
 
       if (error) throw error;
 
-      // Log audit event
       await logAuditEvent('cell_groups', data.id, 'INSERT', null, newGroup, userId);
 
-      // If a leader was selected, update their group assignment and role
       if (formData.leader_id) {
         const { data: oldLeaderData } = await supabase
           .from('members')
@@ -221,7 +216,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
           })
           .eq('id', formData.leader_id);
 
-        // Log leader update
         if (oldLeaderData) {
           const newLeaderData = {
             ...oldLeaderData,
@@ -516,14 +510,12 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
     try {
       setLoading(true);
       
-      // Get old group data for audit log
       const { data: oldGroupData } = await supabase
         .from('cell_groups')
         .select('*')
         .eq('id', group.id)
         .single();
 
-      // Check if group with same name already exists (excluding current group)
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -553,21 +545,16 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
 
       if (error) throw error;
 
-      // Log audit event
       await logAuditEvent('cell_groups', group.id, 'UPDATE', oldGroupData, updatedGroup, profile?.id || null);
 
-      // Handle leader assignment changes
       if (previousLeaderId !== formData.leader_id) {
-        // Remove previous leader's group assignment and revert role
         if (previousLeaderId) {
-          // Get previous leader's current role
           const { data: previousLeader } = await supabase
             .from('members')
             .select('*')
             .eq('id', previousLeaderId)
             .single();
           
-          // Revert to 'member' role if they were a group leader
           let newRole = previousLeader?.admin_role || 'member';
           if (newRole === 'group_leader') {
             newRole = 'member';
@@ -584,16 +571,13 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .update(updatedPreviousLeader)
             .eq('id', previousLeaderId);
 
-          // Log previous leader update
           await logAuditEvent('members', previousLeaderId, 'UPDATE', previousLeader, {
             ...previousLeader,
             ...updatedPreviousLeader
           }, profile?.id || null);
         }
 
-        // Assign new leader
         if (formData.leader_id) {
-          // Check if new leader is already in another group
           const { data: newLeader } = await supabase
             .from('members')
             .select('*')
@@ -616,7 +600,6 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
             .update(updatedNewLeader)
             .eq('id', formData.leader_id);
 
-          // Log new leader update
           await logAuditEvent('members', formData.leader_id, 'UPDATE', newLeader, {
             ...newLeader,
             ...updatedNewLeader
@@ -847,28 +830,24 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
     try {
       setLoading(true);
       
-      // Get group data for audit log
       const { data: groupData } = await supabase
         .from('cell_groups')
         .select('*')
         .eq('id', group.id)
         .single();
 
-      // If there are members, remove their cell_group_id first
       if (memberCount > 0) {
         await supabase
           .from('members')
           .update({ cell_group_id: null, updated_at: new Date().toISOString() })
           .eq('cell_group_id', group.id);
 
-        // Also remove from cell_group_members junction table
         await supabase
           .from('cell_group_members')
           .delete()
           .eq('cell_group_id', group.id);
       }
 
-      // Remove leader assignment if exists
       if (group.leader_id) {
         const { data: leader } = await supabase
           .from('members')
@@ -898,7 +877,6 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
         }, profile?.id || null);
       }
 
-      // Delete the group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -1054,7 +1032,6 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
       return;
     }
 
-    // Check permission
     if (!canCreateGroupMeetings(group.id)) {
       onError('You do not have permission to create meetings for this group');
       return;
@@ -1080,7 +1057,6 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
 
       if (error) throw error;
 
-      // Log audit event
       await logAuditEvent('meetings', meetingData.id, 'INSERT', null, newMeeting, profile?.id || null);
 
       setFormData({
@@ -1262,7 +1238,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   }, [selectedMeeting]);
 
   useEffect(() => {
-    // Update stats whenever attendance changes
     const presentCount = Object.values(attendance).filter(status => status === 'present').length;
     const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
     const absentWithReasonCount = Object.values(attendance).filter(status => status === 'absent_with_reason').length;
@@ -1288,7 +1263,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       
       setGroupMembers(data || []);
       
-      // Only initialize as present if we don't have existing attendance loaded
       if (!initialLoadComplete) {
         const initialAttendance: Record<string, 'present'> = {};
         data?.forEach(member => {
@@ -1371,7 +1345,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         return;
       }
 
-      // Get old member data for audit log
       const { data: oldMemberData } = await supabase
         .from('members')
         .select('*')
@@ -1390,13 +1363,11 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (error) throw error;
 
-      // Log audit event
       await logAuditEvent('members', member.id, 'UPDATE', oldMemberData, {
         ...oldMemberData,
         ...updatedMember
       }, profile?.id || null);
 
-      // Add member to local state immediately
       const newMember = {
         ...member,
         cell_group_id: group.id,
@@ -1422,7 +1393,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       return;
     }
 
-    // Check permission
     if (!canManageGroupAttendance(group.id)) {
       onError('You do not have permission to manage attendance for this group');
       return;
@@ -1431,7 +1401,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
     try {
       setLoading(true);
       
-      // Get existing attendance for audit logging
       const { data: existingAttendance } = await supabase
         .from('meeting_attendance')
         .select('*')
@@ -1444,7 +1413,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
-      // First, delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('meeting_attendance')
         .delete()
@@ -1452,14 +1420,12 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (deleteError) throw deleteError;
 
-      // Log deletion of old attendance records
       if (existingAttendance && existingAttendance.length > 0) {
         for (const record of existingAttendance) {
           await logAuditEvent('meeting_attendance', record.id, 'DELETE', record, null, profile?.id || null);
         }
       }
 
-      // Then insert new attendance records
       const { data: newAttendance, error: insertError } = await supabase
         .from('meeting_attendance')
         .insert(attendanceRecords)
@@ -1467,14 +1433,12 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       if (insertError) throw insertError;
 
-      // Log creation of new attendance records
       if (newAttendance) {
         for (const record of newAttendance) {
           await logAuditEvent('meeting_attendance', record.id, 'INSERT', null, record, profile?.id || null);
         }
       }
 
-      // Update the meeting status to completed
       const { data: oldMeetingData } = await supabase
         .from('meetings')
         .select('*')
@@ -1491,16 +1455,13 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
         .update(updatedMeeting)
         .eq('id', selectedMeeting.id);
 
-      // Log meeting update
       await logAuditEvent('meetings', selectedMeeting.id, 'UPDATE', oldMeetingData, {
         ...oldMeetingData,
         ...updatedMeeting
       }, profile?.id || null);
 
-      // Reload attendance data after saving to ensure state is synced
       await loadExistingAttendance();
 
-      // Call the success callback AFTER the reload completes
       onAttendanceSaved();
       onError('Attendance saved successfully!');
     } catch (error: any) {
@@ -1570,7 +1531,6 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
 
       {selectedMeeting && (
         <>
-          {/* Attendance Summary */}
           <div className="bg-white border border-gray-200 rounded-2xl p-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1843,7 +1803,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    // Reset submitted state when user starts typing
     if (submitted) setSubmitted(false);
   };
 
@@ -1861,7 +1820,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       return;
     }
 
-    // Check permission
     if (!canAddGroupNewcomers(group.id)) {
       onError('You do not have permission to add newcomers to this group');
       return;
@@ -1870,7 +1828,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
     try {
       setLoading(true);
       
-      // Check if member already exists with same phone
       let existingMember = null;
       if (formData.phone.trim()) {
         const { data: phoneMatch } = await supabase
@@ -1884,9 +1841,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
       let memberId;
       
       if (existingMember) {
-        // Use existing member
         memberId = existingMember.id;
-        // Update member status and group assignment
         const updatedMember: {
           status: 'newcomer';
           cell_group_id: string;
@@ -1911,10 +1866,8 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         if (updateError) throw updateError;
         console.log('Updated member:', updatedData);
 
-        // Log audit event for existing member update
         await logAuditEvent('members', memberId, 'UPDATE', existingMember, updatedData, profile?.id || null);
       } else {
-        // Create new member
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
@@ -1948,11 +1901,9 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         memberId = newMemberData.id;
         console.log('Created new member:', newMemberData);
 
-        // Log audit event for new member creation
         await logAuditEvent('members', memberId, 'INSERT', null, newMemberData, profile?.id || null);
       }
 
-      // Record attendance for selected meeting
       if (selectedMeeting) {
         const attendancePayload = {
           meeting_id: selectedMeeting.id,
@@ -1970,17 +1921,14 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
         if (attendanceError) {
           console.error('Failed to record attendance:', attendanceError);
         } else {
-          // Log attendance record
           await logAuditEvent('meeting_attendance', attendanceData.id, 'INSERT', null, attendanceData, profile?.id || null);
         }
       }
 
-      // Reset form and show success
       setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
       setSubmitted(true);
       onNewcomerAdded();
       
-      // Don't show success message immediately - let the user see the form reset
       setTimeout(() => {
         setSubmitted(false);
         setShowForm(false);
@@ -2240,7 +2188,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   }, [selectedMeeting]);
 
   useEffect(() => {
-    // Update stats whenever attendance changes
     const presentCount = attendance.filter(a => a.status === 'present').length;
     const absentCount = attendance.filter(a => a.status === 'absent').length;
     const absentWithReasonCount = attendance.filter(a => a.status === 'absent_with_reason').length;
@@ -2274,7 +2221,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         return;
       }
       
-      console.log('Loaded attendance data:', data); // Debug log
+      console.log('Loaded attendance data:', data);
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2331,7 +2278,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       return;
     }
 
-    // Check permission
     if (!canCreateGroupReports(group.id)) {
       onError('You do not have permission to create reports for this group');
       return;
@@ -2350,7 +2296,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       let error;
       
       if (existingReport) {
-        // Get old report data for audit log
         const { data: oldReportData } = await supabase
           .from('meeting_reports')
           .select('*')
@@ -2363,7 +2308,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           .eq('id', existingReport.id);
         error = updateError;
 
-        // Log audit event for report update
         await logAuditEvent('meeting_reports', existingReport.id, 'UPDATE', oldReportData, {
           ...oldReportData,
           ...reportPayload,
@@ -2377,7 +2321,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           .single();
         error = insertError;
 
-        // Log audit event for new report creation
         if (newReport) {
           await logAuditEvent('meeting_reports', newReport.id, 'INSERT', null, newReport, profile?.id || null);
         }
@@ -2385,7 +2328,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
 
       if (error) throw error;
 
-      // Get old meeting data for audit log
       const { data: oldMeetingData } = await supabase
         .from('meetings')
         .select('*')
@@ -2402,7 +2344,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .update(updatedMeeting)
         .eq('id', selectedMeeting.id);
 
-      // Log meeting update
       await logAuditEvent('meetings', selectedMeeting.id, 'UPDATE', oldMeetingData, {
         ...oldMeetingData,
         ...updatedMeeting
@@ -2415,507 +2356,580 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       setLoading(false);
     }
   };
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-const handlePrint = () => {
-  const stats = attendanceStats;
-  const meetingNotes = selectedMeeting?.notes || '';
-  const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
-    ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
-    : '';
-  
-  const meetingNotesSection = meetingNotes 
-    ? `<div class="report-section">
-         <h3>📋 Original Meeting Notes</h3>
-         <div class="section-content notes-content">${meetingNotes}</div>
-       </div>` 
-    : '';
-  
-  const additionalNotesSection = reportData.additional_notes 
-    ? `<div class="report-section">
-         <h3>📝 Additional Notes</h3>
-         <div class="section-content notes-content">${reportData.additional_notes}</div>
-       </div>` 
-    : '';
-  
-  // Function to truncate long text and add ellipsis
-  const truncateText = (text: string, maxLength: number) => {
-    if (!text) return '';
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
-  };
-  
-  const attendanceRows = attendance.map((record, index) => `
-    <tr>
-      <td style="width: 30px;">${index + 1}</td>
-      <td style="min-width: 120px; max-width: 150px; word-break: break-word;">${(record.members?.name || '') + ' ' + (record.members?.surname || '')}</td>
-      <td style="min-width: 100px; max-width: 120px; word-break: break-word;">${record.members?.residence || '-'}</td>
-      <td style="width: 90px;">${record.members?.phone || '-'}</td>
-      <td style="width: 120px;" class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-        ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
-      </td>
-      <td style="min-width: 100px; max-width: 150px; word-break: break-word;">${truncateText(record.notes || '-', 50)}</td>
-    </tr>
-  `).join('');
-  
-  const attendanceTable = attendance.length > 0 
-    ? `<div style="overflow-x: auto; margin: 10px 0;">
-        <table class="attendance-table">
-          <thead>
-            <tr>
-              <th style="width: 30px;">#</th>
-              <th style="min-width: 120px; max-width: 150px;">Name</th>
-              <th style="min-width: 100px; max-width: 120px;">Residence</th>
-              <th style="width: 90px;">Phone</th>
-              <th style="width: 120px;">Status</th>
-              <th style="min-width: 100px; max-width: 150px;">Notes/Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${attendanceRows}
-          </tbody>
-        </table>
-      </div>` 
-    : '<p>No attendance records available.</p>';
-  
-  // Truncate long report text for print
-  const truncatedReportText = truncateText(reportData.report_text || 'No summary recorded', 2000);
-  const truncatedDecisions = truncateText(reportData.decisions_made || 'No decisions recorded', 1000);
-  const truncatedActions = truncateText(reportData.action_items || 'No action items recorded', 1000);
-  
-  const printWindow = window.open('', '_blank');
-  if (printWindow) {
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Group Meeting Report - ${group.name}</title>
-        <style>
-          * { 
-            box-sizing: border-box; 
-            margin: 0;
-            padding: 0;
-          }
-          
-          body { 
-            font-family: Arial, sans-serif; 
-            padding: 15px; 
-            max-width: 100%; 
-            margin: 0 auto; 
-            font-size: 10px;
-            line-height: 1.3;
-          }
-          
-          .print-container {
-            max-width: 100%;
-            overflow: hidden;
-          }
-          
-          h1 { 
-            color: #1e3a5f; 
-            border-bottom: 2px solid #3b82f6; 
-            padding-bottom: 6px; 
-            font-size: 16px; 
-            margin-bottom: 12px;
-            word-break: break-word;
-          }
-          
-          h2 { 
-            color: #374151; 
-            margin-top: 15px; 
-            border-bottom: 1px solid #e5e7eb; 
-            padding-bottom: 4px; 
-            font-size: 13px;
-            word-break: break-word;
-          }
-          
-          h3 {
-            color: #1f2937;
-            margin: 8px 0 4px 0;
-            font-size: 11px;
-            word-break: break-word;
-          }
-          
-          .header-info { 
-            background: #f3f4f6; 
-            padding: 10px; 
-            border-radius: 5px; 
-            margin: 10px 0;
-            border: 1px solid #e5e7eb;
-            max-width: 100%;
-            overflow: hidden;
-          }
-          
-          .header-info p { 
-            margin: 3px 0; 
-            font-size: 9px;
-            word-break: break-word;
-          }
-          
-          .stats-grid { 
-            display: grid; 
-            grid-template-columns: repeat(4, 1fr); 
-            gap: 6px; 
-            margin: 10px 0;
-            max-width: 100%;
-          }
-          
-          .stat-box { 
-            background: #f9fafb; 
-            border: 1px solid #e5e7eb; 
-            padding: 8px; 
-            border-radius: 5px; 
-            text-align: center;
-            max-width: 100%;
-            overflow: hidden;
-          }
-          
-          .stat-box.present { 
-            background: #dcfce7; 
-            border-color: #86efac; 
-          }
-          
-          .stat-box.absent { 
-            background: #fee2e2; 
-            border-color: #fca5a5; 
-          }
-          
-          .stat-box.with-reason { 
-            background: #fef3c7; 
-            border-color: #fcd34d; 
-          }
-          
-          .stat-value { 
-            font-size: 16px; 
-            font-weight: bold; 
-            color: #111827; 
-            word-break: break-all;
-          }
-          
-          .stat-label { 
-            font-size: 8px; 
-            color: #6b7280; 
-            margin-top: 2px;
-            word-break: break-word;
-          }
-          
-          .report-section { 
-            background: #ffffff; 
-            border: 1px solid #e5e7eb; 
-            padding: 10px; 
-            border-radius: 5px; 
-            margin: 8px 0; 
-            max-width: 100%;
-            overflow: hidden;
-            page-break-inside: avoid;
-          }
-          
-          .section-content { 
-            white-space: pre-wrap; 
-            line-height: 1.3; 
-            margin-top: 6px; 
-            font-size: 9px; 
-            word-wrap: break-word; 
-            overflow-wrap: break-word; 
-            max-width: 100%;
-            overflow: hidden;
-          }
-          
-          .notes-content {
-            max-height: 150px;
-            overflow-y: auto;
-            padding: 5px;
-            background: #f9fafb;
-            border-radius: 3px;
-            border: 1px solid #e5e7eb;
-          }
-          
-          .highlight-box { 
-            background: #eff6ff; 
-            border: 2px solid #3b82f6; 
-          }
-          
-          .decisions-box { 
-            background: #f0fdf4; 
-            border: 2px solid #22c55e; 
-          }
-          
-          .actions-box { 
-            background: #fefce8; 
-            border: 2px solid #eab308; 
-          }
-          
-          .attendance-table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin-top: 8px; 
-            font-size: 8px;
-            table-layout: fixed;
-            max-width: 100%;
-          }
-          
-          .attendance-table th, 
-          .attendance-table td { 
-            border: 1px solid #e5e7eb; 
-            padding: 4px; 
-            text-align: left; 
-            word-break: break-word;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          
-          .attendance-table th { 
-            background: #f3f4f6; 
-            font-weight: 600; 
-            font-size: 8px;
-          }
-          
-          .status-present { 
-            color: #059669; 
-            font-weight: 600; 
-            font-size: 8px;
-          }
-          
-          .status-absent { 
-            color: #dc2626; 
-            font-weight: 600;
-            font-size: 8px;
-          }
-          
-          .status-with-reason { 
-            color: #d97706; 
-            font-weight: 600;
-            font-size: 8px;
-          }
-          
-          .footer { 
-            margin-top: 15px; 
-            padding-top: 8px; 
-            border-top: 1px solid #e5e7eb; 
-            text-align: center; 
-            color: #6b7280; 
-            font-size: 8px;
-            word-break: break-word;
-          }
-          
-          .page-break { 
-            page-break-before: always; 
-            margin-top: 20px;
-          }
-          
-          /* Force content to stay within bounds */
-          .content-wrapper {
-            max-width: 100%;
-            overflow: hidden;
-            word-wrap: break-word;
-          }
-          
-          .compact-text {
-            font-size: 9px;
-            line-height: 1.2;
-            margin: 4px 0;
-          }
-          
-          /* Print-specific adjustments */
-          @media print { 
-            body { 
-              padding: 10px; 
-              font-size: 9px;
-              max-width: 100%;
+
+  const handlePrint = () => {
+    const stats = attendanceStats;
+    const meetingNotes = selectedMeeting?.notes || '';
+    const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
+      ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
+      : '';
+    
+    const meetingNotesSection = meetingNotes 
+      ? `<div class="report-section">
+           <h3>📋 Original Meeting Notes</h3>
+           <div class="section-content notes-content">${meetingNotes}</div>
+         </div>` 
+      : '';
+    
+    const additionalNotesSection = reportData.additional_notes 
+      ? `<div class="report-section">
+           <h3>📝 Additional Notes</h3>
+           <div class="section-content notes-content">${reportData.additional_notes}</div>
+         </div>` 
+      : '';
+    
+    const truncateText = (text: string, maxLength: number) => {
+      if (!text) return '';
+      if (text.length <= maxLength) return text;
+      return text.substring(0, maxLength) + '...';
+    };
+    
+    const attendanceRows = attendance.map((record, index) => `
+      <tr>
+        <td style="width: 30px;">${index + 1}</td>
+        <td style="min-width: 120px; max-width: 150px; word-break: break-word;">${(record.members?.name || '') + ' ' + (record.members?.surname || '')}</td>
+        <td style="min-width: 100px; max-width: 120px; word-break: break-word;">${record.members?.residence || '-'}</td>
+        <td style="width: 90px;">${record.members?.phone || '-'}</td>
+        <td style="width: 120px;" class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+          ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+        </td>
+        <td style="min-width: 100px; max-width: 150px; word-break: break-word;">${truncateText(record.notes || '-', 50)}</td>
+      </tr>
+    `).join('');
+    
+    const attendanceTable = attendance.length > 0 
+      ? `<div class="attendance-table-container">
+          <table class="attendance-table">
+            <thead>
+              <tr>
+                <th style="width: 30px;">#</th>
+                <th style="min-width: 120px; max-width: 150px;">Name</th>
+                <th style="min-width: 100px; max-width: 120px;">Residence</th>
+                <th style="width: 90px;">Phone</th>
+                <th style="width: 120px;">Status</th>
+                <th style="min-width: 100px; max-width: 150px;">Notes/Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${attendanceRows}
+            </tbody>
+          </table>
+        </div>` 
+      : '<p>No attendance records available.</p>';
+    
+    const truncatedReportText = truncateText(reportData.report_text || 'No summary recorded', 2000);
+    const truncatedDecisions = truncateText(reportData.decisions_made || 'No decisions recorded', 1000);
+    const truncatedActions = truncateText(reportData.action_items || 'No action items recorded', 1000);
+    
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Group Meeting Report - ${group.name}</title>
+          <style>
+            @page {
+              margin: 15mm;
+              size: A4;
+            }
+            
+            * { 
+              box-sizing: border-box; 
               margin: 0;
+              padding: 0;
+              word-wrap: break-word !important;
+              word-break: break-word !important;
+              overflow-wrap: break-word !important;
+            }
+            
+            body { 
+              font-family: Arial, sans-serif; 
+              padding: 0; 
+              max-width: 100%; 
+              margin: 0 auto; 
+              font-size: 10pt;
+              line-height: 1.3;
+              print-color-adjust: exact;
+              -webkit-print-color-adjust: exact;
             }
             
             .print-container {
-              max-width: 100%;
+              max-width: 100% !important;
+              width: 100% !important;
+              overflow: visible !important;
               padding: 0;
             }
             
             h1 { 
-              font-size: 14px;
-              margin-bottom: 8px;
+              color: #1e3a5f; 
+              border-bottom: 2px solid #3b82f6; 
+              padding-bottom: 8px; 
+              font-size: 16pt; 
+              margin-bottom: 15px;
+              word-break: break-word;
             }
             
             h2 { 
-              font-size: 12px;
-              margin-top: 12px;
+              color: #374151; 
+              margin-top: 20px; 
+              border-bottom: 1px solid #e5e7eb; 
+              padding-bottom: 6px; 
+              font-size: 14pt;
+              word-break: break-word;
             }
             
             h3 {
-              font-size: 10px;
+              color: #1f2937;
+              margin: 12px 0 6px 0;
+              font-size: 12pt;
+              word-break: break-word;
             }
             
-            .report-section {
-              margin: 6px 0;
-              padding: 8px;
+            .header-info { 
+              background: #f3f4f6; 
+              padding: 12px; 
+              border-radius: 5px; 
+              margin: 15px 0;
+              border: 1px solid #e5e7eb;
+              max-width: 100%;
+              overflow: hidden;
+              page-break-inside: avoid;
             }
             
-            .section-content {
-              font-size: 8px;
+            .header-info p { 
+              margin: 4px 0; 
+              font-size: 9pt;
+              word-break: break-word;
+              white-space: normal !important;
             }
             
-            .attendance-table {
-              font-size: 7px;
+            .stats-grid { 
+              display: grid; 
+              grid-template-columns: repeat(4, 1fr); 
+              gap: 8px; 
+              margin: 15px 0;
+              max-width: 100%;
+              page-break-inside: avoid;
             }
             
-            .attendance-table th,
-            .attendance-table td {
-              padding: 3px;
+            .stat-box { 
+              background: #f9fafb; 
+              border: 1px solid #e5e7eb; 
+              padding: 10px; 
+              border-radius: 5px; 
+              text-align: center;
+              max-width: 100%;
+              overflow: hidden;
+              page-break-inside: avoid;
             }
             
-            .stat-box {
-              padding: 6px;
+            .stat-box.present { 
+              background: #dcfce7; 
+              border-color: #86efac; 
             }
             
-            .stat-value {
-              font-size: 14px;
+            .stat-box.absent { 
+              background: #fee2e2; 
+              border-color: #fca5a5; 
             }
             
-            .stat-label {
-              font-size: 7px;
+            .stat-box.with-reason { 
+              background: #fef3c7; 
+              border-color: #fcd34d; 
             }
             
-            /* Prevent content from overflowing */
-            * {
-              max-width: 100% !important;
-              overflow-wrap: break-word !important;
+            .stat-value { 
+              font-size: 18pt; 
+              font-weight: bold; 
+              color: #111827; 
+              word-break: break-all;
+              line-height: 1.2;
+            }
+            
+            .stat-label { 
+              font-size: 8pt; 
+              color: #6b7280; 
+              margin-top: 3px;
+              word-break: break-word;
+            }
+            
+            .report-section { 
+              background: #ffffff; 
+              border: 1px solid #e5e7eb; 
+              padding: 12px; 
+              border-radius: 5px; 
+              margin: 10px 0; 
+              max-width: 100%;
+              overflow: hidden;
+              page-break-inside: avoid;
+            }
+            
+            .section-content { 
+              white-space: pre-wrap !important; 
               word-wrap: break-word !important;
+              word-break: break-word !important;
+              overflow-wrap: break-word !important;
               hyphens: auto;
+              font-size: 9pt;
+              line-height: 1.4; 
+              margin-top: 8px; 
+              padding: 8px;
+              background: #f8f9fa;
+              border-radius: 3px;
+              border: 1px solid #e9ecef;
+              max-height: 150px;
+              overflow-y: auto;
+              max-width: 100% !important;
+              overflow: hidden !important;
+              font-family: 'Courier New', monospace;
             }
             
-            table {
+            .notes-content {
+              white-space: pre-wrap !important;
+              word-wrap: break-word !important;
+              word-break: break-word !important;
+              overflow-wrap: break-word !important;
+              hyphens: auto;
+              max-width: 100% !important;
+              overflow: hidden !important;
+              max-height: 120px;
+              overflow-y: auto;
+              padding: 6px;
+              background: #f9fafb;
+              border-radius: 3px;
+              border: 1px solid #e5e7eb;
+              font-size: 9pt;
+              line-height: 1.4;
+            }
+            
+            .highlight-box { 
+              background: #eff6ff; 
+              border: 2px solid #3b82f6; 
+            }
+            
+            .decisions-box { 
+              background: #f0fdf4; 
+              border: 2px solid #22c55e; 
+            }
+            
+            .actions-box { 
+              background: #fefce8; 
+              border: 2px solid #eab308; 
+            }
+            
+            .attendance-table-container {
+              max-width: 100%;
+              overflow-x: auto;
+              margin: 15px 0;
               page-break-inside: avoid;
             }
             
-            tr {
+            .attendance-table { 
+              width: 100%; 
+              border-collapse: collapse; 
+              margin-top: 10px; 
+              font-size: 8pt;
+              table-layout: fixed;
+              word-break: break-word;
               page-break-inside: avoid;
-              page-break-after: auto;
             }
             
-            /* Ensure content stays on one page when possible */
-            .no-break {
-              page-break-inside: avoid;
-            }
-          }
-          
-          /* Mobile/tablet adjustments */
-          @media screen and (max-width: 768px) {
-            body {
-              padding: 10px;
-              font-size: 9px;
-            }
-            
-            .stats-grid {
-              grid-template-columns: repeat(2, 1fr);
-              gap: 8px;
+            .attendance-table th, 
+            .attendance-table td { 
+              border: 1px solid #e5e7eb; 
+              padding: 6px; 
+              text-align: left; 
+              vertical-align: top;
+              word-break: break-word;
+              overflow-wrap: break-word;
+              hyphens: auto;
+              max-width: 120px;
+              min-width: 60px;
             }
             
-            .attendance-table {
-              font-size: 7px;
+            .attendance-table th { 
+              background: #f3f4f6; 
+              font-weight: 600; 
+              font-size: 8pt;
+              white-space: normal;
+              word-break: break-word;
             }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="print-container">
-          <div class="content-wrapper">
-            <h1>📋 Group Meeting Report</h1>
-            <div class="header-info">
-              <p><strong>Group:</strong> ${group.name}</p>
-              <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
-              <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-              }) : 'N/A'}</p>
-              <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
-              <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
-              <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
-              <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-              ${cancellationReason}
-            </div>
-
-            <h2>📊 Attendance Summary</h2>
-            <div class="stats-grid">
-              <div class="stat-box present">
-                <div class="stat-value">${stats.present}</div>
-                <div class="stat-label">Present</div>
+            
+            .attendance-table td:nth-child(1) { width: 40px; }
+            .attendance-table td:nth-child(2) { width: 140px; }
+            .attendance-table td:nth-child(3) { width: 120px; }
+            .attendance-table td:nth-child(4) { width: 100px; }
+            .attendance-table td:nth-child(5) { width: 90px; }
+            .attendance-table td:nth-child(6) { width: 150px; }
+            
+            .status-present { 
+              color: #059669; 
+              font-weight: 600; 
+              font-size: 8pt;
+            }
+            
+            .status-absent { 
+              color: #dc2626; 
+              font-weight: 600;
+              font-size: 8pt;
+            }
+            
+            .status-with-reason { 
+              color: #d97706; 
+              font-weight: 600;
+              font-size: 8pt;
+            }
+            
+            .footer { 
+              margin-top: 20px; 
+              padding-top: 10px; 
+              border-top: 1px solid #e5e7eb; 
+              text-align: center; 
+              color: #6b7280; 
+              font-size: 8pt;
+              word-break: break-word;
+              page-break-before: avoid;
+            }
+            
+            .page-break { 
+              page-break-before: always; 
+              margin-top: 20px;
+            }
+            
+            .content-wrapper {
+              max-width: 100% !important;
+              overflow: hidden !important;
+              word-wrap: break-word !important;
+              word-break: break-word !important;
+            }
+            
+            .compact-text {
+              font-size: 9pt;
+              line-height: 1.2;
+              margin: 6px 0;
+              word-break: break-word;
+            }
+            
+            @media print {
+              * {
+                word-wrap: break-word !important;
+                word-break: break-word !important;
+                overflow-wrap: break-word !important;
+                hyphens: auto !important;
+                max-width: 100% !important;
+                overflow: visible !important;
+              }
+              
+              body { 
+                padding: 0 !important;
+                margin: 0 !important;
+                font-size: 9pt !important;
+                max-width: 100% !important;
+                width: 100% !important;
+              }
+              
+              .print-container {
+                max-width: 100% !important;
+                width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+              }
+              
+              h1 { 
+                font-size: 14pt !important;
+                margin-bottom: 12px !important;
+                page-break-after: avoid;
+              }
+              
+              h2 { 
+                font-size: 12pt !important;
+                margin-top: 16px !important;
+                page-break-after: avoid;
+              }
+              
+              h3 {
+                font-size: 11pt !important;
+                page-break-after: avoid;
+              }
+              
+              .report-section {
+                margin: 8px 0 !important;
+                padding: 10px !important;
+                page-break-inside: avoid;
+                page-break-before: auto;
+              }
+              
+              .section-content {
+                font-size: 8pt !important;
+                max-height: none !important;
+                overflow: visible !important;
+                page-break-inside: avoid;
+              }
+              
+              .attendance-table {
+                font-size: 7pt !important;
+                page-break-inside: avoid;
+              }
+              
+              .attendance-table th,
+              .attendance-table td {
+                padding: 4px !important;
+                page-break-inside: avoid;
+              }
+              
+              .stat-box {
+                padding: 8px !important;
+              }
+              
+              .stat-value {
+                font-size: 16pt !important;
+              }
+              
+              .stat-label {
+                font-size: 7pt !important;
+              }
+              
+              table {
+                page-break-inside: avoid !important;
+              }
+              
+              tr {
+                page-break-inside: avoid !important;
+                page-break-after: auto !important;
+              }
+              
+              td {
+                page-break-inside: avoid !important;
+              }
+              
+              .force-wrap {
+                word-break: break-all !important;
+                hyphens: auto !important;
+                overflow-wrap: break-word !important;
+              }
+              
+              .no-overflow {
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+              }
+            }
+            
+            @media screen and (max-width: 768px) {
+              body {
+                padding: 10px;
+                font-size: 9pt;
+              }
+              
+              .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+              }
+              
+              .attendance-table {
+                font-size: 7pt;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-container">
+            <div class="content-wrapper">
+              <h1>📋 Group Meeting Report</h1>
+              <div class="header-info">
+                <p><strong>Group:</strong> ${group.name}</p>
+                <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
+                <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                }) : 'N/A'}</p>
+                <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
+                <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
+                <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
+                <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
+                ${cancellationReason}
               </div>
-              <div class="stat-box absent">
-                <div class="stat-value">${stats.absent}</div>
-                <div class="stat-label">Absent</div>
+
+              <h2>📊 Attendance Summary</h2>
+              <div class="stats-grid">
+                <div class="stat-box present">
+                  <div class="stat-value">${stats.present}</div>
+                  <div class="stat-label">Present</div>
+                </div>
+                <div class="stat-box absent">
+                  <div class="stat-value">${stats.absent}</div>
+                  <div class="stat-label">Absent</div>
+                </div>
+                <div class="stat-box with-reason">
+                  <div class="stat-value">${stats.absentWithReason}</div>
+                  <div class="stat-label">Absent with Notes</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
+                  <div class="stat-label">Attendance Rate</div>
+                </div>
               </div>
-              <div class="stat-box with-reason">
-                <div class="stat-value">${stats.absentWithReason}</div>
-                <div class="stat-label">Absent with Notes</div>
+
+              <div class="report-section highlight-box no-break">
+                <h3>📝 Meeting Summary</h3>
+                <div class="section-content">${truncatedReportText}</div>
               </div>
-              <div class="stat-box">
-                <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
-                <div class="stat-label">Attendance Rate</div>
+
+              <div class="report-section decisions-box no-break">
+                <h3>✅ Decisions Made</h3>
+                <div class="section-content">${truncatedDecisions}</div>
               </div>
-            </div>
 
-            <!-- Meeting Summary/Report Section -->
-            <div class="report-section highlight-box no-break">
-              <h3>📝 Meeting Summary</h3>
-              <div class="section-content">${truncatedReportText}</div>
-            </div>
+              <div class="report-section actions-box no-break">
+                <h3>📌 Action Items & Follow-ups</h3>
+                <div class="section-content">${truncatedActions}</div>
+              </div>
 
-            <!-- Decisions Made Section -->
-            <div class="report-section decisions-box no-break">
-              <h3>✅ Decisions Made</h3>
-              <div class="section-content">${truncatedDecisions}</div>
-            </div>
+              <div class="report-section no-break">
+                <h3>📅 Next Meeting Date</h3>
+                <p class="compact-text">${reportData.next_meeting_date 
+                  ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })
+                  : 'Not scheduled'
+                }</p>
+              </div>
 
-            <!-- Action Items Section -->
-            <div class="report-section actions-box no-break">
-              <h3>📌 Action Items & Follow-ups</h3>
-              <div class="section-content">${truncatedActions}</div>
-            </div>
+              ${meetingNotesSection}
+              ${additionalNotesSection}
 
-            <!-- Next Meeting Section -->
-            <div class="report-section no-break">
-              <h3>📅 Next Meeting Date</h3>
-              <p class="compact-text">${reportData.next_meeting_date 
-                ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })
-                : 'Not scheduled'
-              }</p>
-            </div>
+              <div class="page-break"></div>
 
-            ${meetingNotesSection}
-            ${additionalNotesSection}
+              <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
+              ${attendanceTable}
 
-            <div class="page-break"></div>
-
-            <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-            ${attendanceTable}
-
-            <div class="footer">
-              <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-              })} at ${new Date().toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit'
-              })}</p>
-              <p>Church Management System • ${group.name} Group</p>
+              <div class="footer">
+                <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                })} at ${new Date().toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}</p>
+                <p>Church Management System • ${group.name} Group</p>
+              </div>
             </div>
           </div>
-        </div>
-      </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
-  }
-};
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  };
+
   const downloadReport = () => {
     const stats = attendanceStats;
     const reportContent = `
@@ -3225,7 +3239,6 @@ ${group.name} Group
             </div>
 
             <div className="lg:col-span-2">
-              {/* Existing Report Preview */}
               {existingReport && (
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6 mb-4">
                   <div className="flex items-center justify-between mb-4">
@@ -3425,7 +3438,6 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
 
   return (
     <div className="space-y-6">
-      {/* Progress Steps */}
       <div className="flex justify-between items-center">
         {steps.map((step) => (
           <div key={step.number} className="flex-1 text-center">
@@ -3446,7 +3458,6 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
         ))}
       </div>
 
-      {/* Step Content */}
       <div className="bg-gray-50 rounded-xl p-6 min-h-[400px]">
         {currentStep === 1 && (
           <GroupMeetingCreationStep
@@ -3500,7 +3511,6 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
         )}
       </div>
 
-      {/* Navigation Buttons */}
       <div className="flex justify-between pt-6 border-t border-gray-200">
         <button
           onClick={() => setCurrentStep(prev => prev - 1)}
@@ -3574,7 +3584,6 @@ const Groups = () => {
     try {
       setLoading(true);
       
-      // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -3582,16 +3591,13 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
-      // Get leader information for each group
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
-          // Get member count
           const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
-          // Get leader information if leader_id exists
           let leaderInfo = null;
           if (group.leader_id) {
             const { data: leaderData } = await supabase
@@ -3603,7 +3609,6 @@ const Groups = () => {
             leaderInfo = leaderData;
           }
           
-          // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
@@ -3617,27 +3622,22 @@ const Groups = () => {
         })
       );
 
-      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
       if (!isAdmin() && !isPastor()) {
         if (isGroupLeader()) {
-          // Group Leaders can see only their own group
           filteredGroups = groupsWithDetails.filter(group => 
             group.leader_id === profile?.id
           );
         } else if (isMember()) {
-          // Members can see only their own group
           const userGroup = await getUserGroup();
           filteredGroups = groupsWithDetails.filter(group => 
             group.id === userGroup?.id
           );
         } else {
-          // No role - no access
           filteredGroups = [];
         }
       }
-      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups as CellGroup[]);
     } catch (error: any) {
@@ -3720,7 +3720,7 @@ const Groups = () => {
         return;
       }
       
-      console.log('Loaded attendance records:', data); // Debug log
+      console.log('Loaded attendance records:', data);
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -3761,7 +3761,6 @@ const Groups = () => {
     
     if (!meeting || !group) return;
 
-    // Get report data
     const reportText = meetingReport?.report_text || 'No report available';
     const decisionsMade = meetingReport?.decisions_made || 'No decisions recorded';
     const actionItems = meetingReport?.action_items || 'No action items recorded';
@@ -3954,7 +3953,6 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to edit groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can edit groups');
       return;
@@ -3964,7 +3962,6 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
-    // Only allow admin and pastor to delete groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete groups');
       return;
@@ -4004,18 +4001,15 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Permission functions
   const canCreateGroups = () => {
     return isAdmin() || isPastor();
   };
 
   const canEditGroup = (_group: CellGroup) => {
-    // Only admin and pastor can edit groups
     return isAdmin() || isPastor();
   };
 
   const canDeleteGroup = (_group: CellGroup) => {
-    // Only admin and pastor can delete groups
     return isAdmin() || isPastor();
   };
 
@@ -4043,7 +4037,6 @@ const Groups = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
           <p className="text-lg text-gray-600">
@@ -4051,7 +4044,6 @@ const Groups = () => {
           </p>
         </div>
 
-        {/* Search and Create Group Bar */}
         <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
@@ -4075,7 +4067,6 @@ const Groups = () => {
           )}
         </div>
 
-        {/* Error/Success Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
@@ -4104,7 +4095,6 @@ const Groups = () => {
           </div>
         )}
 
-        {/* Groups Grid */}
         {!profile ? (
           <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
             <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -4261,7 +4251,6 @@ const Groups = () => {
           </div>
         )}
 
-        {/* Modals */}
         <CreateGroupModal
           isOpen={showCreateGroupModal}
           onClose={() => setShowCreateGroupModal(false)}
@@ -4582,20 +4571,22 @@ const Groups = () => {
                             {attendanceRecords
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
-                                <div key={record.id} className="flex items-start gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
-                                  <div className="flex-1">
-                                    <span className="text-gray-900 print:text-black font-medium">
-                                      {record.members?.name} {record.members?.surname}
-                                    </span>
-                                    {record.notes && (
-                                      <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
-                                        Notes: {record.notes}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                                <div key={record                                .filter(record => record.status === 'absent_with_reason')
+                                .map((record) => (
+                                    <div key={record.id} className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-yellow-600 rounded-full"></div>
+                                        <div>
+                                            <span className="text-gray-900 print:text-black">
+                                                {record.members?.name} {record.members?.surname}
+                                            </span>
+                                            {record.notes && (
+                                                <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
+                                                    Notes: {record.notes}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
                           </div>
                         </div>
                       </div>
@@ -4604,20 +4595,34 @@ const Groups = () => {
                 )}
               </div>
 
-              {selectedMeetingForReport.notes && (
-                <div className="mb-6">
-                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">Meeting Notes</h4>
-                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-lg p-4">
-                    <p className="text-gray-700 print:text-black whitespace-pre-wrap">
-                      {selectedMeetingForReport.notes}
-                    </p>
+              <div className="mb-8">
+                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Meeting Notes</h4>
+                {selectedMeetingForReport.notes ? (
+                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-xl p-6">
+                    <p className="text-gray-800 print:text-black whitespace-pre-wrap">{selectedMeetingForReport.notes}</p>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center py-6 bg-gray-50 print:bg-gray-50 rounded-lg">
+                    <FileText className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600 print:text-gray-700">No meeting notes available</p>
+                  </div>
+                )}
+              </div>
 
-              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
-                <p className="text-sm text-gray-600 text-center">
-                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
+              <div className="footer print:mt-8 print:pt-6 print:border-t print:border-gray-300">
+                <p className="text-center text-sm text-gray-500 print:text-gray-700">
+                  Report generated on {new Date().toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })} at {new Date().toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </p>
+                <p className="text-center text-xs text-gray-400 print:text-gray-600 mt-2">
+                  Church Management System • {selectedGroup.name} Group
                 </p>
               </div>
             </div>
@@ -4626,9 +4631,11 @@ const Groups = () => {
 
         {showWorkflowModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900">Manage {selectedGroup.name}</h3>
+                <h3 className="text-2xl font-bold text-gray-900">
+                  Manage {selectedGroup.name}
+                </h3>
                 <button
                   onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -4636,7 +4643,7 @@ const Groups = () => {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-
+              
               <GroupManagementWorkflow
                 group={selectedGroup}
                 meetings={meetings}
@@ -4645,6 +4652,7 @@ const Groups = () => {
                 onSuccess={(message) => {
                   setSuccess(message);
                   setTimeout(() => setSuccess(null), 3000);
+                  loadMeetings(selectedGroup.id);
                 }}
                 onError={(message) => {
                   setError(message);
@@ -4655,45 +4663,9 @@ const Groups = () => {
           </div>
         )}
       </div>
-
-      <style>{`
-        @media print {
-          body {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-          @page {
-            margin: 1cm;
-            size: A4;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          .print\\:block {
-            display: block !important;
-          }
-          .print\\:p-0 {
-            padding: 0 !important;
-          }
-          .print\\:bg-white {
-            background-color: white !important;
-          }
-          .print\\:text-black {
-            color: black !important;
-          }
-          .print\\:max-h-none {
-            max-height: none !important;
-          }
-          .print\\:rounded-none {
-            border-radius: 0 !important;
-          }
-          .print\\:shadow-none {
-            box-shadow: none !important;
-          }
-        }
-      `}</style>
     </div>
   );
 };
 
+// Export the component
 export default Groups;
