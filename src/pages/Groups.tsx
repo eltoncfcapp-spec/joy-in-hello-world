@@ -1569,7 +1569,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       </div>
 
       {selectedMeeting && (
-        <div className="space-y-6">
+        <>
           {/* Attendance Summary */}
           <div className="bg-white border border-gray-200 rounded-2xl p-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
@@ -1737,7 +1737,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
               </div>
             </>
           )}
-        </div>
+        </>
       )}
 
       {showAddAttendeeModal && (
@@ -2758,6 +2758,7 @@ ${group.name} Group
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
   return (
     <div className="space-y-6">
       <div>
@@ -2939,7 +2940,6 @@ ${group.name} Group
                           <div className="font-medium text-gray-900">
                             {record.members?.name} {record.members?.surname}
                           </div>
-                          <div className="text-sm text-gray-600">{record.members?.residence}</div>
                           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs mt-1 ${
                             record.status === 'present' ? 'bg-green-100 text-green-800' :
                             record.status === 'absent' ? 'bg-red-100 text-red-800' :
@@ -3016,10 +3016,10 @@ ${group.name} Group
                 </div>
 
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Meeting Summary with All Details *
-                    </label>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">
+                      📝 Meeting Summary *
+                    </h5>
                     <textarea
                       name="report_text"
                       value={reportData.report_text}
@@ -3031,8 +3031,8 @@ ${group.name} Group
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Decisions Made</label>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">✅ Decisions Made</h5>
                     <textarea
                       name="decisions_made"
                       value={reportData.decisions_made}
@@ -3043,8 +3043,8 @@ ${group.name} Group
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Action Items & Follow-ups</label>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">📌 Action Items & Follow-ups</h5>
                     <textarea
                       name="action_items"
                       value={reportData.action_items}
@@ -3055,28 +3055,30 @@ ${group.name} Group
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Next Meeting Date</label>
-                      <input
-                        type="date"
-                        name="next_meeting_date"
-                        value={reportData.next_meeting_date}
-                        onChange={handleReportChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Status</label>
-                      <div className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
-                        <CheckCircle className="h-5 w-5 text-green-600" />
-                        <span className="text-gray-900">completed</span>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <h5 className="text-sm font-medium text-gray-700 mb-2">📅 Next Meeting Date</h5>
+                        <input
+                          type="date"
+                          name="next_meeting_date"
+                          value={reportData.next_meeting_date}
+                          onChange={handleReportChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-medium text-gray-700 mb-2">Meeting Status</h5>
+                        <div className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="text-gray-900">completed</span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes</label>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">📝 Additional Notes</h5>
                     <textarea
                       name="additional_notes"
                       value={reportData.additional_notes}
