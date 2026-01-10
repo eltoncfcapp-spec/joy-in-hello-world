@@ -1,11 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, 
-  CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, 
-  Phone, Download, FileDown, Plus, Trash2, Edit 
-} from 'lucide-react';
+import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -111,13 +107,7 @@ interface CreateGroupModalProps {
   userId: string | null;
 }
 
-const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ 
-  isOpen, 
-  onClose, 
-  onSuccess, 
-  onError, 
-  userId 
-}) => {
+const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
   const { isAdmin, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -139,6 +129,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   const loadAllMembers = async () => {
     try {
+      // Get ALL members, not just those with leadership roles
       const { data, error } = await supabase
         .from('members')
         .select('*')
@@ -170,6 +161,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       return;
     }
 
+    // Check if user has permission to create groups (only admin and pastor)
     if (!isAdmin() && !isPastor()) {
       onError('Only administrators and pastors can create new groups');
       return;
@@ -178,6 +170,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     try {
       setLoading(true);
       
+      // Check if group with same name already exists
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -208,8 +201,10 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
       if (error) throw error;
 
+      // Log audit event
       await logAuditEvent('cell_groups', data.id, 'INSERT', null, newGroup, userId);
 
+      // If a leader was selected, update their group assignment and role
       if (formData.leader_id) {
         const { data: oldLeaderData } = await supabase
           .from('members')
@@ -226,6 +221,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           })
           .eq('id', formData.leader_id);
 
+        // Log leader update
         if (oldLeaderData) {
           const newLeaderData = {
             ...oldLeaderData,
@@ -450,14 +446,7 @@ interface EditGroupModalProps {
   canEdit: boolean;
 }
 
-const EditGroupModal: React.FC<EditGroupModalProps> = ({ 
-  isOpen, 
-  group, 
-  onClose, 
-  onSuccess, 
-  onError, 
-  canEdit 
-}) => {
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -527,12 +516,14 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
     try {
       setLoading(true);
       
+      // Get old group data for audit log
       const { data: oldGroupData } = await supabase
         .from('cell_groups')
         .select('*')
         .eq('id', group.id)
         .single();
 
+      // Check if group with same name already exists (excluding current group)
       const { data: existingGroup } = await supabase
         .from('cell_groups')
         .select('id')
@@ -562,16 +553,21 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
 
       if (error) throw error;
 
+      // Log audit event
       await logAuditEvent('cell_groups', group.id, 'UPDATE', oldGroupData, updatedGroup, profile?.id || null);
 
+      // Handle leader assignment changes
       if (previousLeaderId !== formData.leader_id) {
+        // Remove previous leader's group assignment and revert role
         if (previousLeaderId) {
+          // Get previous leader's current role
           const { data: previousLeader } = await supabase
             .from('members')
             .select('*')
             .eq('id', previousLeaderId)
             .single();
           
+          // Revert to 'member' role if they were a group leader
           let newRole = previousLeader?.admin_role || 'member';
           if (newRole === 'group_leader') {
             newRole = 'member';
@@ -588,13 +584,16 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
             .update(updatedPreviousLeader)
             .eq('id', previousLeaderId);
 
+          // Log previous leader update
           await logAuditEvent('members', previousLeaderId, 'UPDATE', previousLeader, {
             ...previousLeader,
             ...updatedPreviousLeader
           }, profile?.id || null);
         }
 
+        // Assign new leader
         if (formData.leader_id) {
+          // Check if new leader is already in another group
           const { data: newLeader } = await supabase
             .from('members')
             .select('*')
@@ -617,6 +616,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({
             .update(updatedNewLeader)
             .eq('id', formData.leader_id);
 
+          // Log new leader update
           await logAuditEvent('members', formData.leader_id, 'UPDATE', newLeader, {
             ...newLeader,
             ...updatedNewLeader
@@ -799,14 +799,7 @@ interface DeleteGroupModalProps {
   canDelete: boolean;
 }
 
-const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ 
-  isOpen, 
-  group, 
-  onClose, 
-  onConfirm, 
-  onError, 
-  canDelete 
-}) => {
+const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
   const [confirmationName, setConfirmationName] = useState('');
@@ -854,24 +847,28 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({
     try {
       setLoading(true);
       
+      // Get group data for audit log
       const { data: groupData } = await supabase
         .from('cell_groups')
         .select('*')
         .eq('id', group.id)
         .single();
 
+      // If there are members, remove their cell_group_id first
       if (memberCount > 0) {
         await supabase
           .from('members')
           .update({ cell_group_id: null, updated_at: new Date().toISOString() })
           .eq('cell_group_id', group.id);
 
+        // Also remove from cell_group_members junction table
         await supabase
           .from('cell_group_members')
           .delete()
           .eq('cell_group_id', group.id);
       }
 
+      // Remove leader assignment if exists
       if (group.leader_id) {
         const { data: leader } = await supabase
           .from('members')
@@ -901,6 +898,7 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({
         }, profile?.id || null);
       }
 
+      // Delete the group
       const { error } = await supabase
         .from('cell_groups')
         .delete()
@@ -1011,17 +1009,7 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({
 };
 
 // Group Meeting Creation Step
-interface GroupMeetingCreationStepProps {
-  group: CellGroup;
-  onMeetingCreated: () => void;
-  onError: (message: string) => void;
-}
-
-const GroupMeetingCreationStep: React.FC<GroupMeetingCreationStepProps> = ({ 
-  group, 
-  onMeetingCreated, 
-  onError 
-}) => {
+const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
   const { canCreateGroupMeetings, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -1066,6 +1054,7 @@ const GroupMeetingCreationStep: React.FC<GroupMeetingCreationStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canCreateGroupMeetings(group.id)) {
       onError('You do not have permission to create meetings for this group');
       return;
@@ -1091,6 +1080,7 @@ const GroupMeetingCreationStep: React.FC<GroupMeetingCreationStepProps> = ({
 
       if (error) throw error;
 
+      // Log audit event
       await logAuditEvent('meetings', meetingData.id, 'INSERT', null, newMeeting, profile?.id || null);
 
       setFormData({
@@ -1243,14 +1233,7 @@ interface GroupAttendanceStepProps {
   onError: (message: string) => void;
 }
 
-const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ 
-  group, 
-  meetings, 
-  selectedMeeting, 
-  onMeetingSelect, 
-  onAttendanceSaved, 
-  onError 
-}) => {
+const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
   const { canManageGroupAttendance, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
@@ -1279,6 +1262,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
   }, [selectedMeeting]);
 
   useEffect(() => {
+    // Update stats whenever attendance changes
     const presentCount = Object.values(attendance).filter(status => status === 'present').length;
     const absentCount = Object.values(attendance).filter(status => status === 'absent').length;
     const absentWithReasonCount = Object.values(attendance).filter(status => status === 'absent_with_reason').length;
@@ -1304,6 +1288,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
       
       setGroupMembers(data || []);
       
+      // Only initialize as present if we don't have existing attendance loaded
       if (!initialLoadComplete) {
         const initialAttendance: Record<string, 'present'> = {};
         data?.forEach(member => {
@@ -1386,6 +1371,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
         return;
       }
 
+      // Get old member data for audit log
       const { data: oldMemberData } = await supabase
         .from('members')
         .select('*')
@@ -1404,11 +1390,13 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       if (error) throw error;
 
+      // Log audit event
       await logAuditEvent('members', member.id, 'UPDATE', oldMemberData, {
         ...oldMemberData,
         ...updatedMember
       }, profile?.id || null);
 
+      // Add member to local state immediately
       const newMember = {
         ...member,
         cell_group_id: group.id,
@@ -1434,6 +1422,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canManageGroupAttendance(group.id)) {
       onError('You do not have permission to manage attendance for this group');
       return;
@@ -1442,6 +1431,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
     try {
       setLoading(true);
       
+      // Get existing attendance for audit logging
       const { data: existingAttendance } = await supabase
         .from('meeting_attendance')
         .select('*')
@@ -1454,6 +1444,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
         notes: attendance[member.id] === 'absent_with_reason' ? notes[member.id] || null : null
       }));
 
+      // First, delete existing attendance for this meeting
       const { error: deleteError } = await supabase
         .from('meeting_attendance')
         .delete()
@@ -1461,12 +1452,14 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       if (deleteError) throw deleteError;
 
+      // Log deletion of old attendance records
       if (existingAttendance && existingAttendance.length > 0) {
         for (const record of existingAttendance) {
           await logAuditEvent('meeting_attendance', record.id, 'DELETE', record, null, profile?.id || null);
         }
       }
 
+      // Then insert new attendance records
       const { data: newAttendance, error: insertError } = await supabase
         .from('meeting_attendance')
         .insert(attendanceRecords)
@@ -1474,12 +1467,14 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       if (insertError) throw insertError;
 
+      // Log creation of new attendance records
       if (newAttendance) {
         for (const record of newAttendance) {
           await logAuditEvent('meeting_attendance', record.id, 'INSERT', null, record, profile?.id || null);
         }
       }
 
+      // Update the meeting status to completed
       const { data: oldMeetingData } = await supabase
         .from('meetings')
         .select('*')
@@ -1496,13 +1491,16 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
         .update(updatedMeeting)
         .eq('id', selectedMeeting.id);
 
+      // Log meeting update
       await logAuditEvent('meetings', selectedMeeting.id, 'UPDATE', oldMeetingData, {
         ...oldMeetingData,
         ...updatedMeeting
       }, profile?.id || null);
 
+      // Reload attendance data after saving to ensure state is synced
       await loadExistingAttendance();
 
+      // Call the success callback AFTER the reload completes
       onAttendanceSaved();
       onError('Attendance saved successfully!');
     } catch (error: any) {
@@ -1572,6 +1570,7 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({
 
       {selectedMeeting && (
         <>
+          {/* Attendance Summary */}
           <div className="bg-white border border-gray-200 rounded-2xl p-6">
             <h4 className="text-lg font-semibold text-gray-900 mb-4">Attendance Summary</h4>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1807,12 +1806,7 @@ interface GroupNewcomerStepProps {
   onError: (message: string) => void;
 }
 
-const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ 
-  group, 
-  selectedMeeting, 
-  onNewcomerAdded, 
-  onError 
-}) => {
+const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
   const { canAddGroupNewcomers, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -1849,6 +1843,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    // Reset submitted state when user starts typing
     if (submitted) setSubmitted(false);
   };
 
@@ -1866,6 +1861,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canAddGroupNewcomers(group.id)) {
       onError('You do not have permission to add newcomers to this group');
       return;
@@ -1874,6 +1870,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
     try {
       setLoading(true);
       
+      // Check if member already exists with same phone
       let existingMember = null;
       if (formData.phone.trim()) {
         const { data: phoneMatch } = await supabase
@@ -1887,7 +1884,9 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
       let memberId;
       
       if (existingMember) {
+        // Use existing member
         memberId = existingMember.id;
+        // Update member status and group assignment
         const updatedMember: {
           status: 'newcomer';
           cell_group_id: string;
@@ -1910,9 +1909,12 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
           .single();
 
         if (updateError) throw updateError;
+        console.log('Updated member:', updatedData);
 
+        // Log audit event for existing member update
         await logAuditEvent('members', memberId, 'UPDATE', existingMember, updatedData, profile?.id || null);
       } else {
+        // Create new member
         const memberPayload = {
           name: formData.name.trim(),
           surname: formData.surname.trim(),
@@ -1944,10 +1946,13 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
           throw memberError;
         }
         memberId = newMemberData.id;
+        console.log('Created new member:', newMemberData);
 
+        // Log audit event for new member creation
         await logAuditEvent('members', memberId, 'INSERT', null, newMemberData, profile?.id || null);
       }
 
+      // Record attendance for selected meeting
       if (selectedMeeting) {
         const attendancePayload = {
           meeting_id: selectedMeeting.id,
@@ -1965,14 +1970,17 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({
         if (attendanceError) {
           console.error('Failed to record attendance:', attendanceError);
         } else {
+          // Log attendance record
           await logAuditEvent('meeting_attendance', attendanceData.id, 'INSERT', null, attendanceData, profile?.id || null);
         }
       }
 
+      // Reset form and show success
       setFormData({ name: '', surname: '', phone: '', residence: '', notes: '', invited_by: '' });
       setSubmitted(true);
       onNewcomerAdded();
       
+      // Don't show success message immediately - let the user see the form reset
       setTimeout(() => {
         setSubmitted(false);
         setShowForm(false);
@@ -2204,14 +2212,7 @@ interface GroupReportStepProps {
   onError: (message: string) => void;
 }
 
-const GroupReportStep: React.FC<GroupReportStepProps> = ({ 
-  group, 
-  meetings, 
-  selectedMeeting, 
-  onMeetingSelect, 
-  onReportCreated, 
-  onError 
-}) => {
+const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
   const { canCreateGroupReports, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
@@ -2239,6 +2240,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
   }, [selectedMeeting]);
 
   useEffect(() => {
+    // Update stats whenever attendance changes
     const presentCount = attendance.filter(a => a.status === 'present').length;
     const absentCount = attendance.filter(a => a.status === 'absent').length;
     const absentWithReasonCount = attendance.filter(a => a.status === 'absent_with_reason').length;
@@ -2272,6 +2274,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
         return;
       }
       
+      console.log('Loaded attendance data:', data); // Debug log
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2328,6 +2331,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
       return;
     }
 
+    // Check permission
     if (!canCreateGroupReports(group.id)) {
       onError('You do not have permission to create reports for this group');
       return;
@@ -2346,6 +2350,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
       let error;
       
       if (existingReport) {
+        // Get old report data for audit log
         const { data: oldReportData } = await supabase
           .from('meeting_reports')
           .select('*')
@@ -2358,6 +2363,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
           .eq('id', existingReport.id);
         error = updateError;
 
+        // Log audit event for report update
         await logAuditEvent('meeting_reports', existingReport.id, 'UPDATE', oldReportData, {
           ...oldReportData,
           ...reportPayload,
@@ -2371,6 +2377,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
           .single();
         error = insertError;
 
+        // Log audit event for new report creation
         if (newReport) {
           await logAuditEvent('meeting_reports', newReport.id, 'INSERT', null, newReport, profile?.id || null);
         }
@@ -2378,6 +2385,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
 
       if (error) throw error;
 
+      // Get old meeting data for audit log
       const { data: oldMeetingData } = await supabase
         .from('meetings')
         .select('*')
@@ -2394,6 +2402,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
         .update(updatedMeeting)
         .eq('id', selectedMeeting.id);
 
+      // Log meeting update
       await logAuditEvent('meetings', selectedMeeting.id, 'UPDATE', oldMeetingData, {
         ...oldMeetingData,
         ...updatedMeeting
@@ -2409,8 +2418,91 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
 
   const handlePrint = () => {
     const stats = attendanceStats;
-    const meeting = selectedMeeting;
-    const meetingNotes = meeting?.notes || '';
+    const meetingNotes = selectedMeeting?.notes || '';
+    const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
+      ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
+      : '';
+    
+    const meetingNotesSection = meetingNotes 
+      ? `<div class="report-section">
+           <h3>📋 Original Meeting Notes</h3>
+           <div class="section-content">${meetingNotes}</div>
+         </div>` 
+      : '';
+    
+    const additionalNotesSection = reportData.additional_notes 
+      ? `<div class="report-section">
+           <h3>📝 Additional Notes</h3>
+           <div class="section-content">${reportData.additional_notes}</div>
+         </div>` 
+      : '';
+    
+    const attendanceRows = attendance.map((record, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+        <td>${record.members?.residence || '-'}</td>
+        <td>${record.members?.phone || '-'}</td>
+        <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+          ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+        </td>
+        <td>${record.notes || '-'}</td>
+      </tr>
+    `).join('');
+    
+    const attendanceTable = attendance.length > 0 
+      ? `<table class="attendance-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Residence</th>
+              <th>Phone</th>
+              <th>Status</th>
+              <th>Notes/Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${attendanceRows}
+          </tbody>
+        </table>` 
+      : '<p>No attendance records available.</p>';
+    
+    // Build existing report preview section for print
+    const existingReportPreview = existingReport ? `
+      <div class="existing-report-preview">
+        <div class="preview-header">
+          <span class="preview-title">✓ Existing Report Preview</span>
+          <span class="preview-badge">Report Saved</span>
+        </div>
+        <div class="preview-grid">
+          <div class="preview-item">
+            <h5>Meeting Summary</h5>
+            <p>${reportData.report_text || 'Not provided'}</p>
+          </div>
+          <div class="preview-item">
+            <h5>Decisions Made</h5>
+            <p>${reportData.decisions_made || 'No decisions recorded'}</p>
+          </div>
+          <div class="preview-item">
+            <h5>Action Items & Follow-ups</h5>
+            <p>${reportData.action_items || 'No action items recorded'}</p>
+          </div>
+          <div class="preview-item">
+            <h5>Next Meeting Date</h5>
+            <p>${reportData.next_meeting_date 
+              ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })
+              : 'Not scheduled'
+            }</p>
+          </div>
+        </div>
+      </div>
+    ` : '';
     
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -2421,35 +2513,43 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
           <title>Group Meeting Report - ${group.name}</title>
           <style>
             * { box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 12px; }
-            h1 { color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-size: 22px; margin-bottom: 20px; }
-            h2 { color: #374151; margin-top: 25px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 18px; }
-            h3 { color: #4b5563; margin-top: 20px; font-size: 16px; }
-            .header-info { background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0; }
-            .header-info p { margin: 5px 0; font-size: 12px; }
-            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 15px 0; }
-            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; text-align: center; }
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 11px; }
+            h1 { color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; font-size: 18px; margin-bottom: 15px; }
+            h2 { color: #374151; margin-top: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 14px; }
+            .header-info { background: #f3f4f6; padding: 12px; border-radius: 6px; margin: 12px 0; }
+            .header-info p { margin: 4px 0; font-size: 11px; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; border-radius: 6px; text-align: center; }
             .stat-box.present { background: #dcfce7; border-color: #86efac; }
             .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
             .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
-            .stat-value { font-size: 24px; font-weight: bold; color: #111827; }
-            .stat-label { font-size: 11px; color: #6b7280; margin-top: 4px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin: 12px 0; }
-            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 15px; }
-            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; font-size: 12px; }
-            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; }
-            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
-            .actions-box { background: #fefce8; border: 2px solid #eab308; }
-            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
-            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
-            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 11px; }
+            .stat-value { font-size: 20px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 9px; color: #6b7280; margin-top: 3px; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; overflow: hidden; }
+            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 12px; }
+            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: left; }
+            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 9px; }
             .status-present { color: #059669; font-weight: 600; }
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
-            .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 11px; }
+            .footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 9px; }
+            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
+            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; padding: 12px; border-radius: 6px; margin: 8px 0; }
+            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
+            .actions-box { background: #fefce8; border: 2px solid #eab308; }
+            .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; }
+            .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+            .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
+            .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
+            .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; }
+            .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
+            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             @media print { 
-              body { padding: 15px; font-size: 11px; }
+              body { padding: 15px; font-size: 10px; }
               .page-break { page-break-before: always; }
+              .existing-report-preview { break-inside: avoid; }
             }
           </style>
         </head>
@@ -2458,16 +2558,17 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
           <div class="header-info">
             <p><strong>Group:</strong> ${group.name}</p>
             <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
-            <p><strong>Meeting Date:</strong> ${meeting ? new Date(meeting.meeting_date).toLocaleDateString('en-US', {
+            <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
               weekday: 'long',
               year: 'numeric',
               month: 'long',
               day: 'numeric'
             }) : 'N/A'}</p>
-            <p><strong>Meeting Time:</strong> ${meeting?.meeting_time || 'Not specified'}</p>
-            <p><strong>Location:</strong> ${meeting?.location || group.location || 'Not specified'}</p>
-            <p><strong>Topic:</strong> ${meeting?.topic || 'General Group Meeting'}</p>
-            <p><strong>Status:</strong> ${meeting?.status || 'N/A'}</p>
+            <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
+            <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
+            <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
+            <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
+            ${cancellationReason}
           </div>
 
           <h2>📊 Attendance Summary</h2>
@@ -2482,7 +2583,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
             </div>
             <div class="stat-box with-reason">
               <div class="stat-value">${stats.absentWithReason}</div>
-              <div class="stat-label">Absent with Notes</div>
+              <div class="stat-label">Absent with Reason</div>
             </div>
             <div class="stat-box">
               <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
@@ -2490,26 +2591,30 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
             </div>
           </div>
 
-          <h2>📝 Meeting Report</h2>
-          
+          ${existingReportPreview}
+
+          <!-- Meeting Summary/Report Section -->
           <div class="report-section highlight-box">
-            <h3>📋 Meeting Summary</h3>
-            <div class="section-content">${reportData.report_text}</div>
+            <h3>📝 Meeting Summary</h3>
+            <div class="section-content">${reportData.report_text || 'No summary recorded'}</div>
           </div>
 
+          <!-- Decisions Made Section -->
           <div class="report-section decisions-box">
             <h3>✅ Decisions Made</h3>
-            <div class="section-content">${reportData.decisions_made}</div>
+            <div class="section-content">${reportData.decisions_made || 'No decisions recorded'}</div>
           </div>
 
+          <!-- Action Items Section -->
           <div class="report-section actions-box">
             <h3>📌 Action Items & Follow-ups</h3>
-            <div class="section-content">${reportData.action_items}</div>
+            <div class="section-content">${reportData.action_items || 'No action items recorded'}</div>
           </div>
 
+          <!-- Next Meeting Section -->
           <div class="report-section">
             <h3>📅 Next Meeting Date</h3>
-            <p>${reportData.next_meeting_date !== 'Not scheduled' ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+            <p>${reportData.next_meeting_date ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
               weekday: 'long',
               year: 'numeric',
               month: 'long',
@@ -2517,44 +2622,13 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
             }) : 'Not scheduled'}</p>
           </div>
 
-          ${meetingNotes ? `
-          <div class="report-section">
-            <h3>📋 Original Meeting Notes</h3>
-            <div class="section-content">${meetingNotes}</div>
-          </div>
-          ` : ''}
+          ${meetingNotesSection}
+          ${additionalNotesSection}
 
           <div class="page-break"></div>
 
           <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-          ${attendance.length > 0 ? `
-          <table class="attendance-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Name</th>
-                <th>Residence</th>
-                <th>Phone</th>
-                <th>Status</th>
-                <th>Notes/Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${attendance.map((record, index) => `
-                <tr>
-                  <td>${index + 1}</td>
-                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
-                  <td>${record.members?.residence || '-'}</td>
-                  <td>${record.members?.phone || '-'}</td>
-                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-                    ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
-                  </td>
-                  <td>${record.notes || '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          ` : '<p>No attendance records available.</p>'}
+          ${attendanceTable}
 
           <div class="footer">
             <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
@@ -2578,26 +2652,25 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({
 
   const downloadReport = () => {
     const stats = attendanceStats;
-    const meeting = selectedMeeting;
     const reportContent = `
 ==================================================================
                     GROUP MEETING REPORT
 ==================================================================
 
 Group: ${group.name}
-Meeting Date: ${meeting ? new Date(meeting.meeting_date).toLocaleDateString('en-US', {
+Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     }) : 'N/A'}
-Meeting Time: ${meeting?.meeting_time || 'N/A'}
-Location: ${meeting?.location || group.location || 'N/A'}
-Topic: ${meeting?.topic || 'General Group Meeting'}
-Status: ${meeting?.status || 'N/A'}
+Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
+Location: ${selectedMeeting?.location || group.location || 'N/A'}
+Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
+Status: ${selectedMeeting?.status || 'N/A'}
 
-${meeting?.status === 'cancelled' && meeting?.cancellation_reason ? 
-`CANCELLATION REASON: ${meeting.cancellation_reason}\n` : ''}
+${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
+`CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
 
 ==================================================================
                     ATTENDANCE SUMMARY
@@ -2650,11 +2723,11 @@ ${attendance.length > 0 ? attendance.map(record =>
   ${'-'.repeat(60)}`
 ).join('\n\n') : 'No attendance records available.'}
 
-${meeting?.notes ? `
+${selectedMeeting?.notes ? `
 ==================================================================
                     MEETING NOTES
 ==================================================================
-${meeting.notes}
+${selectedMeeting.notes}
 ` : ''}
 
 ==================================================================
@@ -2679,7 +2752,7 @@ ${group.name} Group
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${meeting?.meeting_date || 'unknown'}.txt`;
+    a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${selectedMeeting?.meeting_date || 'unknown'}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2886,6 +2959,7 @@ ${group.name} Group
             </div>
 
             <div className="lg:col-span-2">
+              {/* Existing Report Preview */}
               {existingReport && (
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6 mb-4">
                   <div className="flex items-center justify-between mb-4">
@@ -3054,14 +3128,7 @@ interface GroupWorkflowProps {
   onError: (message: string) => void;
 }
 
-const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ 
-  group, 
-  meetings, 
-  members: _members, 
-  onClose, 
-  onSuccess, 
-  onError 
-}) => {
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
   const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
@@ -3092,6 +3159,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Progress Steps */}
       <div className="flex justify-between items-center">
         {steps.map((step) => (
           <div key={step.number} className="flex-1 text-center">
@@ -3112,6 +3180,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({
         ))}
       </div>
 
+      {/* Step Content */}
       <div className="bg-gray-50 rounded-xl p-6 min-h-[400px]">
         {currentStep === 1 && (
           <GroupMeetingCreationStep
@@ -3165,6 +3234,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({
         )}
       </div>
 
+      {/* Navigation Buttons */}
       <div className="flex justify-between pt-6 border-t border-gray-200">
         <button
           onClick={() => setCurrentStep(prev => prev - 1)}
@@ -3238,6 +3308,7 @@ const Groups = () => {
     try {
       setLoading(true);
       
+      // First, load all groups
       const { data: groupsData, error: groupsError } = await supabase
         .from('cell_groups')
         .select('*')
@@ -3245,13 +3316,16 @@ const Groups = () => {
 
       if (groupsError) throw groupsError;
 
+      // Get leader information for each group
       const groupsWithDetails = await Promise.all(
         (groupsData || []).map(async (group) => {
+          // Get member count
           const { count } = await supabase
             .from('members')
             .select('*', { count: 'exact', head: true })
             .eq('cell_group_id', group.id);
           
+          // Get leader information if leader_id exists
           let leaderInfo = null;
           if (group.leader_id) {
             const { data: leaderData } = await supabase
@@ -3263,6 +3337,7 @@ const Groups = () => {
             leaderInfo = leaderData;
           }
           
+          // Check if current user is the leader of this group
           const isCurrentUserLeader = group.leader_id === profile?.id;
           
           return {
@@ -3276,22 +3351,27 @@ const Groups = () => {
         })
       );
 
+      // Filter groups based on user role
       let filteredGroups = groupsWithDetails;
       
       if (!isAdmin() && !isPastor()) {
         if (isGroupLeader()) {
+          // Group Leaders can see only their own group
           filteredGroups = groupsWithDetails.filter(group => 
             group.leader_id === profile?.id
           );
         } else if (isMember()) {
+          // Members can see only their own group
           const userGroup = await getUserGroup();
           filteredGroups = groupsWithDetails.filter(group => 
             group.id === userGroup?.id
           );
         } else {
+          // No role - no access
           filteredGroups = [];
         }
       }
+      // Administrators and Pastors can see all groups (no filtering)
 
       setGroups(filteredGroups as CellGroup[]);
     } catch (error: any) {
@@ -3374,6 +3454,7 @@ const Groups = () => {
         return;
       }
       
+      console.log('Loaded attendance records:', data); // Debug log
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -3414,6 +3495,7 @@ const Groups = () => {
     
     if (!meeting || !group) return;
 
+    // Get report data
     const reportText = meetingReport?.report_text || 'No report available';
     const decisionsMade = meetingReport?.decisions_made || 'No decisions recorded';
     const actionItems = meetingReport?.action_items || 'No action items recorded';
@@ -3480,19 +3562,19 @@ const Groups = () => {
           <h2>📊 Attendance Summary</h2>
           <div class="stats-grid">
             <div class="stat-box present">
-              <div class="stat-value">${getAttendanceStats().attended}</div>
+              <div class="stat-value">${stats.attended}</div>
               <div class="stat-label">Present</div>
             </div>
             <div class="stat-box absent">
-              <div class="stat-value">${getAttendanceStats().absent}</div>
+              <div class="stat-value">${stats.absent}</div>
               <div class="stat-label">Absent</div>
             </div>
             <div class="stat-box with-reason">
-              <div class="stat-value">${getAttendanceStats().absentWithReason}</div>
+              <div class="stat-value">${stats.absentWithReason}</div>
               <div class="stat-label">Absent with Notes</div>
             </div>
             <div class="stat-box">
-              <div class="stat-value">${getAttendanceStats().total > 0 ? Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100) : 0}%</div>
+              <div class="stat-value">${stats.total > 0 ? Math.round((stats.attended / stats.total) * 100) : 0}%</div>
               <div class="stat-label">Attendance Rate</div>
             </div>
           </div>
@@ -3606,6 +3688,7 @@ const Groups = () => {
   };
 
   const openEditGroupModal = (group: CellGroup) => {
+    // Only allow admin and pastor to edit groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can edit groups');
       return;
@@ -3615,6 +3698,7 @@ const Groups = () => {
   };
 
   const openDeleteGroupModal = (group: CellGroup) => {
+    // Only allow admin and pastor to delete groups
     if (!isAdmin() && !isPastor()) {
       setError('Only administrators and pastors can delete groups');
       return;
@@ -3654,15 +3738,18 @@ const Groups = () => {
     setTimeout(() => setSuccess(null), 3000);
   };
 
+  // Permission functions
   const canCreateGroups = () => {
     return isAdmin() || isPastor();
   };
 
   const canEditGroup = (_group: CellGroup) => {
+    // Only admin and pastor can edit groups
     return isAdmin() || isPastor();
   };
 
   const canDeleteGroup = (_group: CellGroup) => {
+    // Only admin and pastor can delete groups
     return isAdmin() || isPastor();
   };
 
@@ -3690,6 +3777,7 @@ const Groups = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-3">Church Cell Groups</h1>
           <p className="text-lg text-gray-600">
@@ -3697,6 +3785,7 @@ const Groups = () => {
           </p>
         </div>
 
+        {/* Search and Create Group Bar */}
         <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
@@ -3720,6 +3809,7 @@ const Groups = () => {
           )}
         </div>
 
+        {/* Error/Success Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <div className="flex items-center justify-between">
@@ -3748,6 +3838,7 @@ const Groups = () => {
           </div>
         )}
 
+        {/* Groups Grid */}
         {!profile ? (
           <div className="text-center py-12 bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl">
             <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
@@ -3904,6 +3995,7 @@ const Groups = () => {
           </div>
         )}
 
+        {/* Modals */}
         <CreateGroupModal
           isOpen={showCreateGroupModal}
           onClose={() => setShowCreateGroupModal(false)}
@@ -4175,7 +4267,8 @@ const Groups = () => {
                         </h5>
                         <div className="bg-green-50 print:bg-green-50 border border-green-200 print:border-green-300 rounded-lg p-4">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {attendanceRecords.filter(record => record.status === 'present')
+                            {attendanceRecords
+                              .filter(record => record.status === 'present')
                               .map((record) => (
                                 <div key={record.id} className="flex items-center gap-2">
                                   <div className="w-2 h-2 bg-green-600 rounded-full"></div>
@@ -4223,10 +4316,10 @@ const Groups = () => {
                             {attendanceRecords
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
-                                <div key={record.id} className="flex items-center gap-2">
-                                  <div className="w-2 h-2 bg-yellow-600 rounded-full"></div>
-                                  <div>
-                                    <span className="text-gray-900 print:text-black">
+                                <div key={record.id} className="flex items-start gap-2">
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full mt-1.5"></div>
+                                  <div className="flex-1">
+                                    <span className="text-gray-900 print:text-black font-medium">
                                       {record.members?.name} {record.members?.surname}
                                     </span>
                                     {record.notes && (
@@ -4245,34 +4338,20 @@ const Groups = () => {
                 )}
               </div>
 
-              <div className="mb-8">
-                <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Meeting Notes</h4>
-                {selectedMeetingForReport.notes ? (
-                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-xl p-6">
-                    <p className="text-gray-800 print:text-black whitespace-pre-wrap">{selectedMeetingForReport.notes}</p>
+              {selectedMeetingForReport.notes && (
+                <div className="mb-6">
+                  <h4 className="text-xl font-bold text-gray-900 print:text-black mb-3">Meeting Notes</h4>
+                  <div className="bg-gray-50 print:bg-gray-50 border border-gray-200 print:border-gray-300 rounded-lg p-4">
+                    <p className="text-gray-700 print:text-black whitespace-pre-wrap">
+                      {selectedMeetingForReport.notes}
+                    </p>
                   </div>
-                ) : (
-                  <div className="text-center py-6 bg-gray-50 print:bg-gray-50 rounded-lg">
-                    <FileText className="h-10 w-10 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-600 print:text-gray-700">No meeting notes available</p>
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              <div className="footer print:mt-8 print:pt-6 print:border-t print:border-gray-300">
-                <p className="text-center text-sm text-gray-500 print:text-gray-700">
-                  Report generated on {new Date().toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })} at {new Date().toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </p>
-                <p className="text-center text-xs text-gray-400 print:text-gray-600 mt-2">
-                  Church Management System • {selectedGroup.name} Group
+              <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
+                <p className="text-sm text-gray-600 text-center">
+                  Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
                 </p>
               </div>
             </div>
@@ -4281,11 +4360,9 @@ const Groups = () => {
 
         {showWorkflowModal && selectedGroup && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold text-gray-900">
-                  Manage {selectedGroup.name}
-                </h3>
+                <h3 className="text-2xl font-bold text-gray-900">Manage {selectedGroup.name}</h3>
                 <button
                   onClick={closeAllModals}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -4293,7 +4370,7 @@ const Groups = () => {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              
+
               <GroupManagementWorkflow
                 group={selectedGroup}
                 meetings={meetings}
@@ -4302,7 +4379,6 @@ const Groups = () => {
                 onSuccess={(message) => {
                   setSuccess(message);
                   setTimeout(() => setSuccess(null), 3000);
-                  loadMeetings(selectedGroup.id);
                 }}
                 onError={(message) => {
                   setError(message);
@@ -4313,9 +4389,45 @@ const Groups = () => {
           </div>
         )}
       </div>
+
+      <style>{`
+        @media print {
+          body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+          @page {
+            margin: 1cm;
+            size: A4;
+          }
+          .print\\:hidden {
+            display: none !important;
+          }
+          .print\\:block {
+            display: block !important;
+          }
+          .print\\:p-0 {
+            padding: 0 !important;
+          }
+          .print\\:bg-white {
+            background-color: white !important;
+          }
+          .print\\:text-black {
+            color: black !important;
+          }
+          .print\\:max-h-none {
+            max-height: none !important;
+          }
+          .print\\:rounded-none {
+            border-radius: 0 !important;
+          }
+          .print\\:shadow-none {
+            box-shadow: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };
 
-// Export the component
 export default Groups;
