@@ -2525,7 +2525,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
             .stat-value { font-size: 20px; font-weight: bold; color: #111827; }
             .stat-label { font-size: 9px; color: #6b7280; margin-top: 3px; }
-            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin: 10px 0; overflow: hidden; }
             .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; font-size: 12px; }
             .attendance-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
             .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: left; }
@@ -2534,7 +2534,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
             .footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 9px; }
-            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; }
+            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; padding: 12px; border-radius: 6px; margin: 8px 0; }
             .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
             .actions-box { background: #fefce8; border: 2px solid #eab308; }
@@ -2543,9 +2543,9 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
             .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
             .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; }
+            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; }
             .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
-            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; }
+            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             @media print { 
               body { padding: 15px; font-size: 10px; }
               .page-break { page-break-before: always; }
