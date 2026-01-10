@@ -2324,29 +2324,33 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
     const { name, value } = e.target;
     setReportData(prev => ({ ...prev, [name]: value }));
   };
-
-  const handlePrint = () => {
-    const stats = attendanceStats;
-    const meetingNotes = selectedMeeting?.notes || '';
-    const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
-      ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
-      : '';
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+const downloadReport = () => {
+  const stats = attendanceStats;
+  const meeting = selectedMeeting;
+  
+  // Use existing report data if available, otherwise use current form data
+  const reportText = existingReport?.report_text || reportData.report_text || 'No report text recorded';
+  const decisionsMade = existingReport?.decisions_made || reportData.decisions_made || 'No decisions recorded';
+  const actionItems = existingReport?.action_items || reportData.action_items || 'No action items recorded';
+  const nextMeetingDate = existingReport?.next_meeting_date || reportData.next_meeting_date;
+  
+  // Function to format text with line breaks for text file
+  const formatTextForTextFile = (text: string, maxLineLength = 80) => {
+    if (!text) return '';
     
-    // Function to truncate and wrap text for print
-    const formatTextForPrint = (text: string, maxCharsPerLine = 80) => {
-      if (!text) return '';
-      
-      // Remove excessive whitespace
-      text = text.trim().replace(/\s+/g, ' ');
-      
-      // Split into words
-      const words = text.split(' ');
-      let lines = [];
+    // Split into paragraphs
+    const paragraphs = text.split('\n\n');
+    let formatted = '';
+    
+    paragraphs.forEach((paragraph, index) => {
+      const lines = [];
+      const words = paragraph.replace(/\n/g, ' ').split(' ');
       let currentLine = '';
       
       for (const word of words) {
-        if ((currentLine + word).length <= maxCharsPerLine) {
-          currentLine += (currentLine ? ' ' : '') + word;
+        if ((currentLine + ' ' + word).length <= maxLineLength) {
+          currentLine = currentLine ? currentLine + ' ' + word : word;
         } else {
           if (currentLine) lines.push(currentLine);
           currentLine = word;
@@ -2354,644 +2358,47 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
       }
       
       if (currentLine) lines.push(currentLine);
+      formatted += lines.join('\n');
       
-      // Join lines with line breaks
-      return lines.join('\n');
-    };
+      if (index < paragraphs.length - 1) {
+        formatted += '\n\n';
+      }
+    });
     
-    // Function to truncate very long text with ellipsis
-    const truncateLongText = (text: string, maxLength = 1500) => {
-      if (!text) return '';
-      if (text.length <= maxLength) return text;
-      return text.substring(0, maxLength) + '... [Content truncated for print - see full report in system]';
-    };
-    
-    const meetingNotesSection = meetingNotes 
-      ? `<div class="report-section">
-           <h3>📋 Original Meeting Notes</h3>
-           <div class="section-content scrollable-content">${formatTextForPrint(meetingNotes, 70)}</div>
-         </div>` 
-      : '';
-    
-    const additionalNotesSection = reportData.additional_notes 
-      ? `<div class="report-section">
-           <h3>📝 Additional Notes</h3>
-           <div class="section-content scrollable-content">${formatTextForPrint(reportData.additional_notes, 70)}</div>
-         </div>` 
-      : '';
-    
-    const attendanceRows = attendance.map((record, index) => `
-      <tr>
-        <td style="width: 5%; text-align: center;">${index + 1}</td>
-        <td style="width: 20%; max-width: 120px;">${(record.members?.name || '') + ' ' + (record.members?.surname || '')}</td>
-        <td style="width: 20%; max-width: 100px;">${record.members?.residence || '-'}</td>
-        <td style="width: 15%; max-width: 80px;">${record.members?.phone || '-'}</td>
-        <td style="width: 15%; text-align: center;" class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-          ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
-        </td>
-        <td style="width: 25%; max-width: 120px;">${record.notes ? formatTextForPrint(record.notes, 30) : '-'}</td>
-      </tr>
-    `).join('');
-    
-    const attendanceTable = attendance.length > 0 
-      ? `<div class="table-container">
-          <table class="attendance-table">
-            <thead>
-              <tr>
-                <th style="width: 5%;">#</th>
-                <th style="width: 20%;">Name</th>
-                <th style="width: 20%;">Residence</th>
-                <th style="width: 15%;">Phone</th>
-                <th style="width: 15%;">Status</th>
-                <th style="width: 25%;">Notes/Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${attendanceRows}
-            </tbody>
-          </table>
-        </div>` 
-      : '<p class="no-data">No attendance records available.</p>';
-    
-    // Format the three main sections with word wrapping
-    const formattedReportText = formatTextForPrint(truncateLongText(reportData.report_text || 'No summary recorded', 1200));
-    const formattedDecisions = formatTextForPrint(truncateLongText(reportData.decisions_made || 'No decisions recorded', 800));
-    const formattedActions = formatTextForPrint(truncateLongText(reportData.action_items || 'No action items recorded', 800));
-    
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Group Meeting Report - ${group.name}</title>
-          <style>
-            /* Reset and base styles */
-            * { 
-              box-sizing: border-box; 
-              margin: 0;
-              padding: 0;
-              font-family: Arial, Helvetica, sans-serif;
-            }
-            
-            body { 
-              padding: 10mm; 
-              font-size: 10pt;
-              line-height: 1.3;
-              color: #333;
-              background: white;
-              max-width: 210mm; /* A4 width */
-              margin: 0 auto;
-            }
-            
-            .print-container {
-              width: 100%;
-              max-width: 190mm; /* Content area */
-              margin: 0 auto;
-              overflow: hidden;
-            }
-            
-            /* Typography */
-            h1 { 
-              color: #1e3a5f; 
-              border-bottom: 2px solid #3b82f6; 
-              padding-bottom: 4px; 
-              font-size: 16pt; 
-              margin: 0 0 10px 0;
-              word-wrap: break-word;
-              word-break: break-word;
-              line-height: 1.2;
-            }
-            
-            h2 { 
-              color: #374151; 
-              margin: 15px 0 8px 0; 
-              padding-bottom: 3px;
-              border-bottom: 1px solid #e5e7eb; 
-              font-size: 13pt;
-              word-wrap: break-word;
-              word-break: break-word;
-              line-height: 1.2;
-            }
-            
-            h3 {
-              color: #1f2937;
-              margin: 0 0 5px 0;
-              font-size: 11pt;
-              font-weight: 600;
-              word-wrap: break-word;
-              word-break: break-word;
-              line-height: 1.2;
-            }
-            
-            p, .text-content {
-              margin: 5px 0;
-              word-wrap: break-word;
-              word-break: break-word;
-              overflow-wrap: break-word;
-            }
-            
-            /* Header Info */
-            .header-info { 
-              background: #f8f9fa; 
-              padding: 10px 12px; 
-              border-radius: 4px; 
-              margin: 10px 0 15px 0;
-              border: 1px solid #dee2e6;
-              width: 100%;
-              overflow: hidden;
-            }
-            
-            .header-info p { 
-              margin: 3px 0; 
-              font-size: 9pt;
-              word-wrap: break-word;
-              word-break: break-word;
-              line-height: 1.3;
-            }
-            
-            /* Stats Grid */
-            .stats-grid { 
-              display: grid; 
-              grid-template-columns: repeat(4, 1fr); 
-              gap: 8px; 
-              margin: 10px 0 15px 0;
-              width: 100%;
-            }
-            
-            .stat-box { 
-              background: #f8f9fa; 
-              border: 1px solid #dee2e6; 
-              padding: 8px 6px; 
-              border-radius: 4px; 
-              text-align: center;
-              min-height: 60px;
-              display: flex;
-              flex-direction: column;
-              justify-content: center;
-              overflow: hidden;
-            }
-            
-            .stat-box.present { 
-              background: #d1e7dd; 
-              border-color: #a3cfbb; 
-            }
-            
-            .stat-box.absent { 
-              background: #f8d7da; 
-              border-color: #f1aeb5; 
-            }
-            
-            .stat-box.with-reason { 
-              background: #fff3cd; 
-              border-color: #ffda6a; 
-            }
-            
-            .stat-value { 
-              font-size: 14pt; 
-              font-weight: bold; 
-              color: #212529;
-              line-height: 1.1;
-              margin-bottom: 2px;
-            }
-            
-            .stat-label { 
-              font-size: 8pt; 
-              color: #6c757d; 
-              line-height: 1.1;
-              word-wrap: break-word;
-            }
-            
-            /* Report Sections - FIXED FOR PRINT */
-            .report-section { 
-              background: #ffffff; 
-              border: 1px solid #dee2e6; 
-              padding: 10px 12px; 
-              border-radius: 4px; 
-              margin: 10px 0;
-              width: 100%;
-              overflow: hidden;
-              page-break-inside: avoid;
-            }
-            
-            .highlight-box { 
-              background: #e7f1ff; 
-              border: 1px solid #6ea8fe; 
-            }
-            
-            .decisions-box { 
-              background: #d4edda; 
-              border: 1px solid #a3cfbb; 
-            }
-            
-            .actions-box { 
-              background: #fff3cd; 
-              border: 1px solid #ffda6a; 
-            }
-            
-            /* Section Content - FIXED TEXT WRAPPING */
-            .section-content {
-              white-space: pre-wrap;
-              word-wrap: break-word;
-              word-break: break-all;
-              overflow-wrap: anywhere;
-              font-size: 9pt;
-              line-height: 1.4;
-              margin-top: 8px;
-              padding: 8px;
-              background: #f8f9fa;
-              border-radius: 3px;
-              border: 1px solid #e9ecef;
-              max-width: 100%;
-              width: 100%;
-              overflow: hidden;
-              font-family: Arial, Helvetica, sans-serif;
-            }
-            
-            .scrollable-content {
-              max-height: 150px;
-              overflow-y: auto;
-              padding: 6px;
-              background: #f8f9fa;
-              border-radius: 3px;
-              border: 1px solid #e9ecef;
-            }
-            
-            /* Attendance Table */
-            .table-container {
-              width: 100%;
-              overflow-x: auto;
-              margin: 10px 0 15px 0;
-              border: 1px solid #dee2e6;
-              border-radius: 4px;
-            }
-            
-            .attendance-table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              font-size: 8pt;
-              table-layout: fixed; /* Fixed layout for consistent columns */
-              min-width: 600px; /* Minimum width to ensure readability */
-            }
-            
-            .attendance-table th { 
-              background: #f8f9fa; 
-              font-weight: 600; 
-              font-size: 8pt;
-              padding: 6px 4px;
-              border-bottom: 2px solid #dee2e6;
-              text-align: left;
-              word-wrap: break-word;
-              word-break: break-word;
-            }
-            
-            .attendance-table td { 
-              padding: 5px 4px; 
-              border-bottom: 1px solid #dee2e6;
-              word-wrap: break-word;
-              word-break: break-word;
-              vertical-align: top;
-              line-height: 1.2;
-            }
-            
-            .attendance-table tr:last-child td {
-              border-bottom: none;
-            }
-            
-            /* Status colors */
-            .status-present { 
-              color: #198754; 
-              font-weight: 600;
-            }
-            
-            .status-absent { 
-              color: #dc3545; 
-              font-weight: 600;
-            }
-            
-            .status-with-reason { 
-              color: #fd7e14; 
-              font-weight: 600;
-            }
-            
-            /* Footer */
-            .footer { 
-              margin-top: 20px; 
-              padding-top: 10px; 
-              border-top: 1px solid #dee2e6; 
-              text-align: center; 
-              color: #6c757d; 
-              font-size: 8pt;
-              word-wrap: break-word;
-            }
-            
-            /* Utility classes */
-            .no-data {
-              text-align: center;
-              color: #6c757d;
-              font-style: italic;
-              padding: 20px;
-              background: #f8f9fa;
-              border-radius: 4px;
-              border: 1px dashed #dee2e6;
-            }
-            
-            .page-break {
-              page-break-before: always;
-              margin-top: 20px;
-            }
-            
-            /* Print-specific styles */
-            @media print {
-              body {
-                padding: 5mm !important;
-                font-size: 9pt !important;
-                max-width: 100% !important;
-              }
-              
-              .print-container {
-                max-width: 100% !important;
-                margin: 0 !important;
-              }
-              
-              h1 {
-                font-size: 14pt !important;
-                margin-bottom: 8px !important;
-              }
-              
-              h2 {
-                font-size: 12pt !important;
-                margin: 12px 0 6px 0 !important;
-              }
-              
-              h3 {
-                font-size: 10pt !important;
-              }
-              
-              .report-section {
-                margin: 8px 0 !important;
-                padding: 8px 10px !important;
-                border-width: 0.5px !important;
-              }
-              
-              .section-content {
-                font-size: 8pt !important;
-                line-height: 1.3 !important;
-                padding: 6px !important;
-                word-break: break-all !important;
-                overflow-wrap: anywhere !important;
-                max-width: 100% !important;
-                width: 100% !important;
-                overflow: hidden !important;
-              }
-              
-              .scrollable-content {
-                max-height: 120px !important;
-              }
-              
-              .attendance-table {
-                font-size: 7pt !important;
-              }
-              
-              .attendance-table th,
-              .attendance-table td {
-                padding: 4px 3px !important;
-              }
-              
-              .stat-box {
-                padding: 6px 4px !important;
-              }
-              
-              .stat-value {
-                font-size: 12pt !important;
-              }
-              
-              .stat-label {
-                font-size: 7pt !important;
-              }
-              
-              /* Force text wrapping in all elements */
-              * {
-                max-width: 100% !important;
-                overflow-wrap: break-word !important;
-                word-wrap: break-word !important;
-                word-break: break-word !important;
-                hyphens: auto !important;
-              }
-              
-              /* Prevent page breaks inside important sections */
-              .report-section,
-              .table-container {
-                page-break-inside: avoid !important;
-              }
-              
-              /* Force table to fit within page */
-              .attendance-table {
-                width: 100% !important;
-                max-width: 100% !important;
-              }
-              
-              /* Remove backgrounds for better printing */
-              .header-info,
-              .report-section,
-              .stat-box,
-              .section-content {
-                background: white !important;
-                border-color: #ccc !important;
-              }
-              
-              .highlight-box {
-                background: #f0f7ff !important;
-              }
-              
-              .decisions-box {
-                background: #f0f9f0 !important;
-              }
-              
-              .actions-box {
-                background: #fff9e6 !important;
-              }
-              
-              /* Hide scrollbars in print */
-              .section-content,
-              .scrollable-content {
-                overflow: hidden !important;
-                max-height: none !important;
-              }
-            }
-            
-            /* Screen-only styles */
-            @media screen {
-              .section-content,
-              .scrollable-content {
-                overflow-y: auto;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="print-container">
-            <h1>📋 Group Meeting Report</h1>
-            
-            <div class="header-info">
-              <p><strong>Group:</strong> ${group.name}</p>
-              <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
-              <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-              }) : 'N/A'}</p>
-              <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
-              <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
-              <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
-              <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-              ${cancellationReason}
-            </div>
-
-            <h2>📊 Attendance Summary</h2>
-            <div class="stats-grid">
-              <div class="stat-box present">
-                <div class="stat-value">${stats.present}</div>
-                <div class="stat-label">Present</div>
-              </div>
-              <div class="stat-box absent">
-                <div class="stat-value">${stats.absent}</div>
-                <div class="stat-label">Absent</div>
-              </div>
-              <div class="stat-box with-reason">
-                <div class="stat-value">${stats.absentWithReason}</div>
-                <div class="stat-label">Absent with Notes</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
-                <div class="stat-label">Attendance Rate</div>
-              </div>
-            </div>
-
-            <!-- Meeting Summary/Report Section -->
-            <div class="report-section highlight-box">
-              <h3>📝 Meeting Summary</h3>
-              <div class="section-content">${formattedReportText}</div>
-            </div>
-
-            <!-- Decisions Made Section -->
-            <div class="report-section decisions-box">
-              <h3>✅ Decisions Made</h3>
-              <div class="section-content">${formattedDecisions}</div>
-            </div>
-
-            <!-- Action Items Section -->
-            <div class="report-section actions-box">
-              <h3>📌 Action Items & Follow-ups</h3>
-              <div class="section-content">${formattedActions}</div>
-            </div>
-
-            <!-- Next Meeting Section -->
-            <div class="report-section">
-              <h3>📅 Next Meeting Date</h3>
-              <p class="text-content">${reportData.next_meeting_date 
-                ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })
-                : 'Not scheduled'
-              }</p>
-            </div>
-
-            ${meetingNotesSection}
-            ${additionalNotesSection}
-
-            <div class="page-break"></div>
-
-            <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-            ${attendanceTable}
-
-            <div class="footer">
-              <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-              })} at ${new Date().toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit'
-              })}</p>
-              <p>Church Management System • ${group.name} Group</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    }
+    return formatted;
   };
-
-  const downloadReport = () => {
-    const stats = attendanceStats;
-    
-    // Function to format text with line breaks for text file
-    const formatTextForTextFile = (text: string, maxLineLength = 80) => {
-      if (!text) return '';
-      
-      // Split into paragraphs
-      const paragraphs = text.split('\n\n');
-      let formatted = '';
-      
-      paragraphs.forEach((paragraph, index) => {
-        const lines = [];
-        const words = paragraph.replace(/\n/g, ' ').split(' ');
-        let currentLine = '';
-        
-        for (const word of words) {
-          if ((currentLine + ' ' + word).length <= maxLineLength) {
-            currentLine = currentLine ? currentLine + ' ' + word : word;
-          } else {
-            if (currentLine) lines.push(currentLine);
-            currentLine = word;
-          }
-        }
-        
-        if (currentLine) lines.push(currentLine);
-        formatted += lines.join('\n');
-        
-        if (index < paragraphs.length - 1) {
-          formatted += '\n\n';
-        }
-      });
-      
-      return formatted;
-    };
-    
-    // Function to truncate very long text for text file
-    const truncateForTextFile = (text: string, maxLength = 3000) => {
-      if (!text) return '';
-      if (text.length <= maxLength) return text;
-      return text.substring(0, maxLength) + '\n\n[Content truncated - see full report in system]';
-    };
-    
-    const reportContent = `
+  
+  // Function to truncate very long text for text file
+  const truncateForTextFile = (text: string, maxLength = 3000) => {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '\n\n[Content truncated - see full report in system]';
+  };
+  
+  const reportStatus = existingReport ? '✓ SAVED TO SYSTEM' : '✗ NOT SAVED YET';
+  
+  const reportContent = `
 ==================================================================
                     GROUP MEETING REPORT
 ==================================================================
 
+Report Status: ${reportStatus}
+${existingReport ? `Report ID: ${existingReport.id}` : ''}
+
 Group: ${group.name}
-Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+Meeting Date: ${meeting ? new Date(meeting.meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     }) : 'N/A'}
-Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
-Location: ${selectedMeeting?.location || group.location || 'N/A'}
-Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
-Status: ${selectedMeeting?.status || 'N/A'}
+Meeting Time: ${meeting?.meeting_time || 'N/A'}
+Location: ${meeting?.location || group.location || 'N/A'}
+Topic: ${meeting?.topic || 'General Group Meeting'}
+Status: ${meeting?.status || 'N/A'}
 
-${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
-`CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
+${meeting?.status === 'cancelled' && meeting?.cancellation_reason ? 
+`CANCELLATION REASON: ${meeting.cancellation_reason}\n` : ''}
 
 ==================================================================
                     ATTENDANCE SUMMARY
@@ -3005,22 +2412,22 @@ Attendance Rate: ${stats.total > 0 ? Math.round((stats.present / stats.total) * 
 ==================================================================
                     MEETING REPORT
 ==================================================================
-${formatTextForTextFile(truncateForTextFile(reportData.report_text || 'No report text recorded', 2500))}
+${formatTextForTextFile(truncateForTextFile(reportText, 2500))}
 
 ==================================================================
                     DECISIONS MADE
 ==================================================================
-${formatTextForTextFile(truncateForTextFile(reportData.decisions_made || 'No decisions recorded', 1500))}
+${formatTextForTextFile(truncateForTextFile(decisionsMade, 1500))}
 
 ==================================================================
                     ACTION ITEMS
 ==================================================================
-${formatTextForTextFile(truncateForTextFile(reportData.action_items || 'No action items recorded', 1500))}
+${formatTextForTextFile(truncateForTextFile(actionItems, 1500))}
 
 ==================================================================
                     NEXT MEETING
 ==================================================================
-${reportData.next_meeting_date ? `Scheduled for: ${new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+${nextMeetingDate ? `Scheduled for: ${new Date(nextMeetingDate).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -3044,16 +2451,17 @@ ${attendance.length > 0 ? attendance.map(record =>
   ${'-'.repeat(60)}`
 ).join('\n\n') : 'No attendance records available.'}
 
-${selectedMeeting?.notes ? `
+${meeting?.notes ? `
 ==================================================================
                     MEETING NOTES
 ==================================================================
-${formatTextForTextFile(selectedMeeting.notes, 1000)}
+${formatTextForTextFile(meeting.notes, 1000)}
 ` : ''}
 
 ==================================================================
                     REPORT INFORMATION
 ==================================================================
+${existingReport ? `Report Created: ${new Date(existingReport.created_at || '').toLocaleString()}` : ''}
 Generated on: ${new Date().toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -3069,17 +2477,17 @@ ${group.name} Group
 ==================================================================
     `.trim();
 
-    const blob = new Blob([reportContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${selectedMeeting?.meeting_date || 'unknown'}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
+  const blob = new Blob([reportContent], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${meeting?.meeting_date || 'unknown'}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   const generateReport = async () => {
     if (!selectedMeeting) {
       onError('Please select a meeting first');
