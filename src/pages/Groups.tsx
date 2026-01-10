@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
+import { 
+  Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, 
+  CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, 
+  Phone, Download, FileDown, Plus, Trash2, Edit 
+} from 'lucide-react';
 
 // Interfaces
 interface CellGroup {
@@ -107,7 +111,13 @@ interface CreateGroupModalProps {
   userId: string | null;
 }
 
-const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, onSuccess, onError, userId }) => {
+const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  onSuccess, 
+  onError, 
+  userId 
+}) => {
   const { isAdmin, isPastor } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -440,7 +450,14 @@ interface EditGroupModalProps {
   canEdit: boolean;
 }
 
-const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose, onSuccess, onError, canEdit }) => {
+const EditGroupModal: React.FC<EditGroupModalProps> = ({ 
+  isOpen, 
+  group, 
+  onClose, 
+  onSuccess, 
+  onError, 
+  canEdit 
+}) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -782,7 +799,14 @@ interface DeleteGroupModalProps {
   canDelete: boolean;
 }
 
-const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onClose, onConfirm, onError, canDelete }) => {
+const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ 
+  isOpen, 
+  group, 
+  onClose, 
+  onConfirm, 
+  onError, 
+  canDelete 
+}) => {
   const [loading, setLoading] = useState(false);
   const [memberCount, setMemberCount] = useState(0);
   const [confirmationName, setConfirmationName] = useState('');
@@ -987,7 +1011,17 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
 };
 
 // Group Meeting Creation Step
-const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
+interface GroupMeetingCreationStepProps {
+  group: CellGroup;
+  onMeetingCreated: () => void;
+  onError: (message: string) => void;
+}
+
+const GroupMeetingCreationStep: React.FC<GroupMeetingCreationStepProps> = ({ 
+  group, 
+  onMeetingCreated, 
+  onError 
+}) => {
   const { canCreateGroupMeetings, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -1209,7 +1243,14 @@ interface GroupAttendanceStepProps {
   onError: (message: string) => void;
 }
 
-const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
+const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onAttendanceSaved, 
+  onError 
+}) => {
   const { canManageGroupAttendance, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
@@ -1766,7 +1807,12 @@ interface GroupNewcomerStepProps {
   onError: (message: string) => void;
 }
 
-const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
+const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ 
+  group, 
+  selectedMeeting, 
+  onNewcomerAdded, 
+  onError 
+}) => {
   const { canAddGroupNewcomers, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -1864,7 +1910,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           .single();
 
         if (updateError) throw updateError;
-        console.log('Updated member:', updatedData);
 
         await logAuditEvent('members', memberId, 'UPDATE', existingMember, updatedData, profile?.id || null);
       } else {
@@ -1899,7 +1944,6 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           throw memberError;
         }
         memberId = newMemberData.id;
-        console.log('Created new member:', newMemberData);
 
         await logAuditEvent('members', memberId, 'INSERT', null, newMemberData, profile?.id || null);
       }
@@ -2160,7 +2204,14 @@ interface GroupReportStepProps {
   onError: (message: string) => void;
 }
 
-const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
+const GroupReportStep: React.FC<GroupReportStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onReportCreated, 
+  onError 
+}) => {
   const { canCreateGroupReports, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
@@ -2221,7 +2272,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         return;
       }
       
-      console.log('Loaded attendance data:', data);
       setAttendance(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance data:', error);
@@ -2359,67 +2409,8 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
 
   const handlePrint = () => {
     const stats = attendanceStats;
-    const meetingNotes = selectedMeeting?.notes || '';
-    const cancellationReason = selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason 
-      ? `<p><strong>Cancellation Reason:</strong> ${selectedMeeting.cancellation_reason}</p>` 
-      : '';
-    
-    const meetingNotesSection = meetingNotes 
-      ? `<div class="report-section">
-           <h3>📋 Original Meeting Notes</h3>
-           <div class="section-content notes-content">${meetingNotes}</div>
-         </div>` 
-      : '';
-    
-    const additionalNotesSection = reportData.additional_notes 
-      ? `<div class="report-section">
-           <h3>📝 Additional Notes</h3>
-           <div class="section-content notes-content">${reportData.additional_notes}</div>
-         </div>` 
-      : '';
-    
-    const truncateText = (text: string, maxLength: number) => {
-      if (!text) return '';
-      if (text.length <= maxLength) return text;
-      return text.substring(0, maxLength) + '...';
-    };
-    
-    const attendanceRows = attendance.map((record, index) => `
-      <tr>
-        <td style="width: 30px;">${index + 1}</td>
-        <td style="min-width: 120px; max-width: 150px; word-break: break-word;">${(record.members?.name || '') + ' ' + (record.members?.surname || '')}</td>
-        <td style="min-width: 100px; max-width: 120px; word-break: break-word;">${record.members?.residence || '-'}</td>
-        <td style="width: 90px;">${record.members?.phone || '-'}</td>
-        <td style="width: 120px;" class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
-          ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
-        </td>
-        <td style="min-width: 100px; max-width: 150px; word-break: break-word;">${truncateText(record.notes || '-', 50)}</td>
-      </tr>
-    `).join('');
-    
-    const attendanceTable = attendance.length > 0 
-      ? `<div class="attendance-table-container">
-          <table class="attendance-table">
-            <thead>
-              <tr>
-                <th style="width: 30px;">#</th>
-                <th style="min-width: 120px; max-width: 150px;">Name</th>
-                <th style="min-width: 100px; max-width: 120px;">Residence</th>
-                <th style="width: 90px;">Phone</th>
-                <th style="width: 120px;">Status</th>
-                <th style="min-width: 100px; max-width: 150px;">Notes/Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${attendanceRows}
-            </tbody>
-          </table>
-        </div>` 
-      : '<p>No attendance records available.</p>';
-    
-    const truncatedReportText = truncateText(reportData.report_text || 'No summary recorded', 2000);
-    const truncatedDecisions = truncateText(reportData.decisions_made || 'No decisions recorded', 1000);
-    const truncatedActions = truncateText(reportData.action_items || 'No action items recorded', 1000);
+    const meeting = selectedMeeting;
+    const meetingNotes = meeting?.notes || '';
     
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -2429,498 +2420,153 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         <head>
           <title>Group Meeting Report - ${group.name}</title>
           <style>
-            @page {
-              margin: 15mm;
-              size: A4;
-            }
-            
-            * { 
-              box-sizing: border-box; 
-              margin: 0;
-              padding: 0;
-              word-wrap: break-word !important;
-              word-break: break-word !important;
-              overflow-wrap: break-word !important;
-            }
-            
-            body { 
-              font-family: Arial, sans-serif; 
-              padding: 0; 
-              max-width: 100%; 
-              margin: 0 auto; 
-              font-size: 10pt;
-              line-height: 1.3;
-              print-color-adjust: exact;
-              -webkit-print-color-adjust: exact;
-            }
-            
-            .print-container {
-              max-width: 100% !important;
-              width: 100% !important;
-              overflow: visible !important;
-              padding: 0;
-            }
-            
-            h1 { 
-              color: #1e3a5f; 
-              border-bottom: 2px solid #3b82f6; 
-              padding-bottom: 8px; 
-              font-size: 16pt; 
-              margin-bottom: 15px;
-              word-break: break-word;
-            }
-            
-            h2 { 
-              color: #374151; 
-              margin-top: 20px; 
-              border-bottom: 1px solid #e5e7eb; 
-              padding-bottom: 6px; 
-              font-size: 14pt;
-              word-break: break-word;
-            }
-            
-            h3 {
-              color: #1f2937;
-              margin: 12px 0 6px 0;
-              font-size: 12pt;
-              word-break: break-word;
-            }
-            
-            .header-info { 
-              background: #f3f4f6; 
-              padding: 12px; 
-              border-radius: 5px; 
-              margin: 15px 0;
-              border: 1px solid #e5e7eb;
-              max-width: 100%;
-              overflow: hidden;
-              page-break-inside: avoid;
-            }
-            
-            .header-info p { 
-              margin: 4px 0; 
-              font-size: 9pt;
-              word-break: break-word;
-              white-space: normal !important;
-            }
-            
-            .stats-grid { 
-              display: grid; 
-              grid-template-columns: repeat(4, 1fr); 
-              gap: 8px; 
-              margin: 15px 0;
-              max-width: 100%;
-              page-break-inside: avoid;
-            }
-            
-            .stat-box { 
-              background: #f9fafb; 
-              border: 1px solid #e5e7eb; 
-              padding: 10px; 
-              border-radius: 5px; 
-              text-align: center;
-              max-width: 100%;
-              overflow: hidden;
-              page-break-inside: avoid;
-            }
-            
-            .stat-box.present { 
-              background: #dcfce7; 
-              border-color: #86efac; 
-            }
-            
-            .stat-box.absent { 
-              background: #fee2e2; 
-              border-color: #fca5a5; 
-            }
-            
-            .stat-box.with-reason { 
-              background: #fef3c7; 
-              border-color: #fcd34d; 
-            }
-            
-            .stat-value { 
-              font-size: 18pt; 
-              font-weight: bold; 
-              color: #111827; 
-              word-break: break-all;
-              line-height: 1.2;
-            }
-            
-            .stat-label { 
-              font-size: 8pt; 
-              color: #6b7280; 
-              margin-top: 3px;
-              word-break: break-word;
-            }
-            
-            .report-section { 
-              background: #ffffff; 
-              border: 1px solid #e5e7eb; 
-              padding: 12px; 
-              border-radius: 5px; 
-              margin: 10px 0; 
-              max-width: 100%;
-              overflow: hidden;
-              page-break-inside: avoid;
-            }
-            
-            .section-content { 
-              white-space: pre-wrap !important; 
-              word-wrap: break-word !important;
-              word-break: break-word !important;
-              overflow-wrap: break-word !important;
-              hyphens: auto;
-              font-size: 9pt;
-              line-height: 1.4; 
-              margin-top: 8px; 
-              padding: 8px;
-              background: #f8f9fa;
-              border-radius: 3px;
-              border: 1px solid #e9ecef;
-              max-height: 150px;
-              overflow-y: auto;
-              max-width: 100% !important;
-              overflow: hidden !important;
-              font-family: 'Courier New', monospace;
-            }
-            
-            .notes-content {
-              white-space: pre-wrap !important;
-              word-wrap: break-word !important;
-              word-break: break-word !important;
-              overflow-wrap: break-word !important;
-              hyphens: auto;
-              max-width: 100% !important;
-              overflow: hidden !important;
-              max-height: 120px;
-              overflow-y: auto;
-              padding: 6px;
-              background: #f9fafb;
-              border-radius: 3px;
-              border: 1px solid #e5e7eb;
-              font-size: 9pt;
-              line-height: 1.4;
-            }
-            
-            .highlight-box { 
-              background: #eff6ff; 
-              border: 2px solid #3b82f6; 
-            }
-            
-            .decisions-box { 
-              background: #f0fdf4; 
-              border: 2px solid #22c55e; 
-            }
-            
-            .actions-box { 
-              background: #fefce8; 
-              border: 2px solid #eab308; 
-            }
-            
-            .attendance-table-container {
-              max-width: 100%;
-              overflow-x: auto;
-              margin: 15px 0;
-              page-break-inside: avoid;
-            }
-            
-            .attendance-table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              margin-top: 10px; 
-              font-size: 8pt;
-              table-layout: fixed;
-              word-break: break-word;
-              page-break-inside: avoid;
-            }
-            
-            .attendance-table th, 
-            .attendance-table td { 
-              border: 1px solid #e5e7eb; 
-              padding: 6px; 
-              text-align: left; 
-              vertical-align: top;
-              word-break: break-word;
-              overflow-wrap: break-word;
-              hyphens: auto;
-              max-width: 120px;
-              min-width: 60px;
-            }
-            
-            .attendance-table th { 
-              background: #f3f4f6; 
-              font-weight: 600; 
-              font-size: 8pt;
-              white-space: normal;
-              word-break: break-word;
-            }
-            
-            .attendance-table td:nth-child(1) { width: 40px; }
-            .attendance-table td:nth-child(2) { width: 140px; }
-            .attendance-table td:nth-child(3) { width: 120px; }
-            .attendance-table td:nth-child(4) { width: 100px; }
-            .attendance-table td:nth-child(5) { width: 90px; }
-            .attendance-table td:nth-child(6) { width: 150px; }
-            
-            .status-present { 
-              color: #059669; 
-              font-weight: 600; 
-              font-size: 8pt;
-            }
-            
-            .status-absent { 
-              color: #dc2626; 
-              font-weight: 600;
-              font-size: 8pt;
-            }
-            
-            .status-with-reason { 
-              color: #d97706; 
-              font-weight: 600;
-              font-size: 8pt;
-            }
-            
-            .footer { 
-              margin-top: 20px; 
-              padding-top: 10px; 
-              border-top: 1px solid #e5e7eb; 
-              text-align: center; 
-              color: #6b7280; 
-              font-size: 8pt;
-              word-break: break-word;
-              page-break-before: avoid;
-            }
-            
-            .page-break { 
-              page-break-before: always; 
-              margin-top: 20px;
-            }
-            
-            .content-wrapper {
-              max-width: 100% !important;
-              overflow: hidden !important;
-              word-wrap: break-word !important;
-              word-break: break-word !important;
-            }
-            
-            .compact-text {
-              font-size: 9pt;
-              line-height: 1.2;
-              margin: 6px 0;
-              word-break: break-word;
-            }
-            
-            @media print {
-              * {
-                word-wrap: break-word !important;
-                word-break: break-word !important;
-                overflow-wrap: break-word !important;
-                hyphens: auto !important;
-                max-width: 100% !important;
-                overflow: visible !important;
-              }
-              
-              body { 
-                padding: 0 !important;
-                margin: 0 !important;
-                font-size: 9pt !important;
-                max-width: 100% !important;
-                width: 100% !important;
-              }
-              
-              .print-container {
-                max-width: 100% !important;
-                width: 100% !important;
-                padding: 0 !important;
-                margin: 0 !important;
-              }
-              
-              h1 { 
-                font-size: 14pt !important;
-                margin-bottom: 12px !important;
-                page-break-after: avoid;
-              }
-              
-              h2 { 
-                font-size: 12pt !important;
-                margin-top: 16px !important;
-                page-break-after: avoid;
-              }
-              
-              h3 {
-                font-size: 11pt !important;
-                page-break-after: avoid;
-              }
-              
-              .report-section {
-                margin: 8px 0 !important;
-                padding: 10px !important;
-                page-break-inside: avoid;
-                page-break-before: auto;
-              }
-              
-              .section-content {
-                font-size: 8pt !important;
-                max-height: none !important;
-                overflow: visible !important;
-                page-break-inside: avoid;
-              }
-              
-              .attendance-table {
-                font-size: 7pt !important;
-                page-break-inside: avoid;
-              }
-              
-              .attendance-table th,
-              .attendance-table td {
-                padding: 4px !important;
-                page-break-inside: avoid;
-              }
-              
-              .stat-box {
-                padding: 8px !important;
-              }
-              
-              .stat-value {
-                font-size: 16pt !important;
-              }
-              
-              .stat-label {
-                font-size: 7pt !important;
-              }
-              
-              table {
-                page-break-inside: avoid !important;
-              }
-              
-              tr {
-                page-break-inside: avoid !important;
-                page-break-after: auto !important;
-              }
-              
-              td {
-                page-break-inside: avoid !important;
-              }
-              
-              .force-wrap {
-                word-break: break-all !important;
-                hyphens: auto !important;
-                overflow-wrap: break-word !important;
-              }
-              
-              .no-overflow {
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-              }
-            }
-            
-            @media screen and (max-width: 768px) {
-              body {
-                padding: 10px;
-                font-size: 9pt;
-              }
-              
-              .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-              }
-              
-              .attendance-table {
-                font-size: 7pt;
-              }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 12px; }
+            h1 { color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-size: 22px; margin-bottom: 20px; }
+            h2 { color: #374151; margin-top: 25px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 18px; }
+            h3 { color: #4b5563; margin-top: 20px; font-size: 16px; }
+            .header-info { background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0; }
+            .header-info p { margin: 5px 0; font-size: 12px; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 15px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; text-align: center; }
+            .stat-box.present { background: #dcfce7; border-color: #86efac; }
+            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
+            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
+            .stat-value { font-size: 24px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 11px; color: #6b7280; margin-top: 4px; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin: 12px 0; }
+            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 15px; }
+            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; font-size: 12px; }
+            .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; }
+            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
+            .actions-box { background: #fefce8; border: 2px solid #eab308; }
+            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
+            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 11px; }
+            .status-present { color: #059669; font-weight: 600; }
+            .status-absent { color: #dc2626; font-weight: 600; }
+            .status-with-reason { color: #d97706; font-weight: 600; }
+            .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 11px; }
+            @media print { 
+              body { padding: 15px; font-size: 11px; }
+              .page-break { page-break-before: always; }
             }
           </style>
         </head>
         <body>
-          <div class="print-container">
-            <div class="content-wrapper">
-              <h1>📋 Group Meeting Report</h1>
-              <div class="header-info">
-                <p><strong>Group:</strong> ${group.name}</p>
-                <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
-                <p><strong>Meeting Date:</strong> ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric'
-                }) : 'N/A'}</p>
-                <p><strong>Meeting Time:</strong> ${selectedMeeting?.meeting_time || 'Not specified'}</p>
-                <p><strong>Location:</strong> ${selectedMeeting?.location || group.location || 'Not specified'}</p>
-                <p><strong>Topic:</strong> ${selectedMeeting?.topic || 'General Group Meeting'}</p>
-                <p><strong>Status:</strong> ${selectedMeeting?.status || 'N/A'}</p>
-                ${cancellationReason}
-              </div>
+          <h1>📋 Group Meeting Report</h1>
+          <div class="header-info">
+            <p><strong>Group:</strong> ${group.name}</p>
+            <p><strong>Leader:</strong> ${group.leader_name || 'Not assigned'}</p>
+            <p><strong>Meeting Date:</strong> ${meeting ? new Date(meeting.meeting_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            }) : 'N/A'}</p>
+            <p><strong>Meeting Time:</strong> ${meeting?.meeting_time || 'Not specified'}</p>
+            <p><strong>Location:</strong> ${meeting?.location || group.location || 'Not specified'}</p>
+            <p><strong>Topic:</strong> ${meeting?.topic || 'General Group Meeting'}</p>
+            <p><strong>Status:</strong> ${meeting?.status || 'N/A'}</p>
+          </div>
 
-              <h2>📊 Attendance Summary</h2>
-              <div class="stats-grid">
-                <div class="stat-box present">
-                  <div class="stat-value">${stats.present}</div>
-                  <div class="stat-label">Present</div>
-                </div>
-                <div class="stat-box absent">
-                  <div class="stat-value">${stats.absent}</div>
-                  <div class="stat-label">Absent</div>
-                </div>
-                <div class="stat-box with-reason">
-                  <div class="stat-value">${stats.absentWithReason}</div>
-                  <div class="stat-label">Absent with Notes</div>
-                </div>
-                <div class="stat-box">
-                  <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
-                  <div class="stat-label">Attendance Rate</div>
-                </div>
-              </div>
-
-              <div class="report-section highlight-box no-break">
-                <h3>📝 Meeting Summary</h3>
-                <div class="section-content">${truncatedReportText}</div>
-              </div>
-
-              <div class="report-section decisions-box no-break">
-                <h3>✅ Decisions Made</h3>
-                <div class="section-content">${truncatedDecisions}</div>
-              </div>
-
-              <div class="report-section actions-box no-break">
-                <h3>📌 Action Items & Follow-ups</h3>
-                <div class="section-content">${truncatedActions}</div>
-              </div>
-
-              <div class="report-section no-break">
-                <h3>📅 Next Meeting Date</h3>
-                <p class="compact-text">${reportData.next_meeting_date 
-                  ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })
-                  : 'Not scheduled'
-                }</p>
-              </div>
-
-              ${meetingNotesSection}
-              ${additionalNotesSection}
-
-              <div class="page-break"></div>
-
-              <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
-              ${attendanceTable}
-
-              <div class="footer">
-                <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric'
-                })} at ${new Date().toLocaleTimeString('en-US', {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}</p>
-                <p>Church Management System • ${group.name} Group</p>
-              </div>
+          <h2>📊 Attendance Summary</h2>
+          <div class="stats-grid">
+            <div class="stat-box present">
+              <div class="stat-value">${stats.present}</div>
+              <div class="stat-label">Present</div>
             </div>
+            <div class="stat-box absent">
+              <div class="stat-value">${stats.absent}</div>
+              <div class="stat-label">Absent</div>
+            </div>
+            <div class="stat-box with-reason">
+              <div class="stat-value">${stats.absentWithReason}</div>
+              <div class="stat-label">Absent with Notes</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value">${stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0}%</div>
+              <div class="stat-label">Attendance Rate</div>
+            </div>
+          </div>
+
+          <h2>📝 Meeting Report</h2>
+          
+          <div class="report-section highlight-box">
+            <h3>📋 Meeting Summary</h3>
+            <div class="section-content">${reportData.report_text}</div>
+          </div>
+
+          <div class="report-section decisions-box">
+            <h3>✅ Decisions Made</h3>
+            <div class="section-content">${reportData.decisions_made}</div>
+          </div>
+
+          <div class="report-section actions-box">
+            <h3>📌 Action Items & Follow-ups</h3>
+            <div class="section-content">${reportData.action_items}</div>
+          </div>
+
+          <div class="report-section">
+            <h3>📅 Next Meeting Date</h3>
+            <p>${reportData.next_meeting_date !== 'Not scheduled' ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            }) : 'Not scheduled'}</p>
+          </div>
+
+          ${meetingNotes ? `
+          <div class="report-section">
+            <h3>📋 Original Meeting Notes</h3>
+            <div class="section-content">${meetingNotes}</div>
+          </div>
+          ` : ''}
+
+          <div class="page-break"></div>
+
+          <h2>👥 Detailed Attendance (${attendance.length} members)</h2>
+          ${attendance.length > 0 ? `
+          <table class="attendance-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Residence</th>
+                <th>Phone</th>
+                <th>Status</th>
+                <th>Notes/Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${attendance.map((record, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+                  <td>${record.members?.residence || '-'}</td>
+                  <td>${record.members?.phone || '-'}</td>
+                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+                    ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+                  </td>
+                  <td>${record.notes || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p>No attendance records available.</p>'}
+
+          <div class="footer">
+            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })} at ${new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            <p>Church Management System • ${group.name} Group</p>
           </div>
         </body>
         </html>
@@ -2932,25 +2578,26 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
 
   const downloadReport = () => {
     const stats = attendanceStats;
+    const meeting = selectedMeeting;
     const reportContent = `
 ==================================================================
                     GROUP MEETING REPORT
 ==================================================================
 
 Group: ${group.name}
-Meeting Date: ${selectedMeeting ? new Date(selectedMeeting.meeting_date).toLocaleDateString('en-US', {
+Meeting Date: ${meeting ? new Date(meeting.meeting_date).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     }) : 'N/A'}
-Meeting Time: ${selectedMeeting?.meeting_time || 'N/A'}
-Location: ${selectedMeeting?.location || group.location || 'N/A'}
-Topic: ${selectedMeeting?.topic || 'General Group Meeting'}
-Status: ${selectedMeeting?.status || 'N/A'}
+Meeting Time: ${meeting?.meeting_time || 'N/A'}
+Location: ${meeting?.location || group.location || 'N/A'}
+Topic: ${meeting?.topic || 'General Group Meeting'}
+Status: ${meeting?.status || 'N/A'}
 
-${selectedMeeting?.status === 'cancelled' && selectedMeeting?.cancellation_reason ? 
-`CANCELLATION REASON: ${selectedMeeting.cancellation_reason}\n` : ''}
+${meeting?.status === 'cancelled' && meeting?.cancellation_reason ? 
+`CANCELLATION REASON: ${meeting.cancellation_reason}\n` : ''}
 
 ==================================================================
                     ATTENDANCE SUMMARY
@@ -3003,11 +2650,11 @@ ${attendance.length > 0 ? attendance.map(record =>
   ${'-'.repeat(60)}`
 ).join('\n\n') : 'No attendance records available.'}
 
-${selectedMeeting?.notes ? `
+${meeting?.notes ? `
 ==================================================================
                     MEETING NOTES
 ==================================================================
-${selectedMeeting.notes}
+${meeting.notes}
 ` : ''}
 
 ==================================================================
@@ -3032,7 +2679,7 @@ ${group.name} Group
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${selectedMeeting?.meeting_date || 'unknown'}.txt`;
+    a.download = `group-report-${group.name.replace(/\s+/g, '-').toLowerCase()}-${meeting?.meeting_date || 'unknown'}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -3407,7 +3054,14 @@ interface GroupWorkflowProps {
   onError: (message: string) => void;
 }
 
-const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ 
+  group, 
+  meetings, 
+  members: _members, 
+  onClose, 
+  onSuccess, 
+  onError 
+}) => {
   const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
@@ -3720,7 +3374,6 @@ const Groups = () => {
         return;
       }
       
-      console.log('Loaded attendance records:', data);
       setAttendanceRecords(data || []);
     } catch (error: any) {
       console.error('Failed to load attendance:', error);
@@ -3827,19 +3480,19 @@ const Groups = () => {
           <h2>📊 Attendance Summary</h2>
           <div class="stats-grid">
             <div class="stat-box present">
-              <div class="stat-value">${stats.attended}</div>
+              <div class="stat-value">${getAttendanceStats().attended}</div>
               <div class="stat-label">Present</div>
             </div>
             <div class="stat-box absent">
-              <div class="stat-value">${stats.absent}</div>
+              <div class="stat-value">${getAttendanceStats().absent}</div>
               <div class="stat-label">Absent</div>
             </div>
             <div class="stat-box with-reason">
-              <div class="stat-value">${stats.absentWithReason}</div>
+              <div class="stat-value">${getAttendanceStats().absentWithReason}</div>
               <div class="stat-label">Absent with Notes</div>
             </div>
             <div class="stat-box">
-              <div class="stat-value">${stats.total > 0 ? Math.round((stats.attended / stats.total) * 100) : 0}%</div>
+              <div class="stat-value">${getAttendanceStats().total > 0 ? Math.round((getAttendanceStats().attended / getAttendanceStats().total) * 100) : 0}%</div>
               <div class="stat-label">Attendance Rate</div>
             </div>
           </div>
@@ -4570,22 +4223,20 @@ const Groups = () => {
                             {attendanceRecords
                               .filter(record => record.status === 'absent_with_reason')
                               .map((record) => (
-                                <div key={record                                .filter(record => record.status === 'absent_with_reason')
-                                .map((record) => (
-                                    <div key={record.id} className="flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-yellow-600 rounded-full"></div>
-                                        <div>
-                                            <span className="text-gray-900 print:text-black">
-                                                {record.members?.name} {record.members?.surname}
-                                            </span>
-                                            {record.notes && (
-                                                <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
-                                                    Notes: {record.notes}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
+                                <div key={record.id} className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-yellow-600 rounded-full"></div>
+                                  <div>
+                                    <span className="text-gray-900 print:text-black">
+                                      {record.members?.name} {record.members?.surname}
+                                    </span>
+                                    {record.notes && (
+                                      <p className="text-sm text-gray-600 print:text-gray-700 mt-1">
+                                        Notes: {record.notes}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
                           </div>
                         </div>
                       </div>
