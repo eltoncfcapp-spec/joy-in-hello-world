@@ -2241,15 +2241,15 @@ const DepartmentReportStep: React.FC<DepartmentReportStepProps> = ({
             .status-absent { color: #dc2626; font-weight: 600; }
             .status-with-reason { color: #d97706; font-weight: 600; }
             .footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 9px; }
-            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; word-wrap: break-word; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; width: 100%; overflow: hidden; }
-            .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; overflow: hidden; max-width: 100%; }
+            .section-content { white-space: pre-wrap; line-height: 1.4; margin-top: 8px; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
+            .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; }
             .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
             .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
             .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
-            .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-width: 100%; overflow: hidden; }
-            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; max-width: 100%; }
+            .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; }
             .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
-            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; overflow: hidden; }
+            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             @media print { 
               body { padding: 15px; font-size: 10px; }
               .page-break { page-break-before: always; }
