@@ -3,7 +3,7 @@ import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Users, MapPin, Calendar, User, Search, X, Shield, AlertCircle, CheckCircle, Printer, Clock, FileText, Save, UserPlus, Home, Phone, Download, FileDown, Plus, Trash2, Edit } from 'lucide-react';
 
-// Interfaces
+// Interfaces (same as before)
 interface CellGroup {
   id: string;
   name: string;
@@ -69,7 +69,7 @@ interface GroupReport {
   created_at: string | null;
 }
 
-// Audit Log Functions
+// Audit Log Functions (same as before)
 const logAuditEvent = async (
   tableName: string,
   recordId: string,
@@ -98,7 +98,7 @@ const logAuditEvent = async (
   }
 };
 
-// New Group Creation Component
+// New Group Creation Component (same as before)
 interface CreateGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -436,7 +436,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose, on
   );
 };
 
-// Edit Group Modal Component
+// Edit Group Modal Component (same as before)
 interface EditGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
@@ -789,7 +789,7 @@ const EditGroupModal: React.FC<EditGroupModalProps> = ({ isOpen, group, onClose,
   );
 };
 
-// Delete Group Confirmation Modal
+// Delete Group Confirmation Modal (same as before)
 interface DeleteGroupModalProps {
   isOpen: boolean;
   group: CellGroup | null;
@@ -1008,8 +1008,13 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
   );
 };
 
-// Group Meeting Creation Step
-const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
+// Group Meeting Creation Step - MODIFIED to pass the created meeting to next step
+const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError, onMeetingSelect }: { 
+  group: CellGroup; 
+  onMeetingCreated: (createdMeeting: GroupMeeting) => void; 
+  onError: (message: string) => void;
+  onMeetingSelect?: (meeting: GroupMeeting) => void;
+}) => {
   const { canCreateGroupMeetings, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -1083,6 +1088,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
       // Log audit event
       await logAuditEvent('meetings', meetingData.id, 'INSERT', null, newMeeting, profile?.id || null);
 
+      // Reset form
       setFormData({
         meeting_date: '',
         meeting_time: '',
@@ -1090,8 +1096,16 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         topic: '',
         notes: ''
       });
+      
+      // Load recent meetings to refresh the list
       await loadRecentMeetings();
-      onMeetingCreated();
+      
+      // Call the success callback WITH the created meeting
+      onMeetingCreated(meetingData);
+      
+      // Show success message
+      onError('Group meeting scheduled successfully!');
+      
     } catch (error: any) {
       onError('Failed to create group meeting: ' + error.message);
     } finally {
@@ -1223,7 +1237,7 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
   );
 };
 
-// Group Attendance Step Component
+// Group Attendance Step Component - MODIFIED to accept and auto-select newly created meeting
 interface GroupAttendanceStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -1231,9 +1245,18 @@ interface GroupAttendanceStepProps {
   onMeetingSelect: (meeting: GroupMeeting) => void;
   onAttendanceSaved: () => void;
   onError: (message: string) => void;
+  newlyCreatedMeeting?: GroupMeeting | null;
 }
 
-const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onAttendanceSaved, onError }) => {
+const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onAttendanceSaved, 
+  onError,
+  newlyCreatedMeeting 
+}) => {
   const { canManageGroupAttendance, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Member[]>([]);
@@ -1256,10 +1279,15 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   }, [group.id]);
 
   useEffect(() => {
+    // Auto-select the newly created meeting if provided
+    if (newlyCreatedMeeting && !selectedMeeting) {
+      onMeetingSelect(newlyCreatedMeeting);
+    }
+    
     if (selectedMeeting) {
       loadExistingAttendance();
     }
-  }, [selectedMeeting]);
+  }, [selectedMeeting, newlyCreatedMeeting]);
 
   useEffect(() => {
     // Update stats whenever attendance changes
@@ -1500,9 +1528,17 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
       // Reload attendance data after saving to ensure state is synced
       await loadExistingAttendance();
 
-      // Call the success callback AFTER the reload completes
+      // Call the success callback
       onAttendanceSaved();
+      
+      // Show success message
       onError('Attendance saved successfully!');
+      
+      // Refresh the page to load the created schedule
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
     } catch (error: any) {
       onError('Failed to save group attendance: ' + error.message);
     } finally {
@@ -1536,13 +1572,18 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
                 selectedMeeting?.id === meeting.id 
                   ? 'border-blue-500 bg-blue-50' 
                   : 'border-gray-300 hover:border-gray-400'
-              }`}
+              } ${newlyCreatedMeeting?.id === meeting.id ? 'ring-2 ring-green-500' : ''}`}
             >
               <div className="flex items-center gap-2 mb-2">
                 <Calendar className="h-4 w-4 text-gray-500" />
                 <span className="font-medium text-gray-900">
                   {new Date(meeting.meeting_date).toLocaleDateString()}
                 </span>
+                {newlyCreatedMeeting?.id === meeting.id && (
+                  <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                    New
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
                 <Clock className="h-3 w-3" />
@@ -1624,6 +1665,11 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
           <div className="flex items-center justify-between">
             <h4 className="text-lg font-semibold text-gray-900">
               Group Attendance for {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+              {newlyCreatedMeeting?.id === selectedMeeting.id && (
+                <span className="ml-2 inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                  Newly Created Meeting
+                </span>
+              )}
             </h4>
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-600">{groupMembers.length} group members</span>
@@ -1798,15 +1844,16 @@ const GroupAttendanceStep: React.FC<GroupAttendanceStepProps> = ({ group, meetin
   );
 };
 
-// Group Newcomer Step Component
+// Group Newcomer Step Component (same as before, but with meeting passed from step 1)
 interface GroupNewcomerStepProps {
   group: CellGroup;
   selectedMeeting: GroupMeeting | null;
   onNewcomerAdded: () => void;
   onError: (message: string) => void;
+  newlyCreatedMeeting?: GroupMeeting | null;
 }
 
-const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError }) => {
+const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMeeting, onNewcomerAdded, onError, newlyCreatedMeeting }) => {
   const { canAddGroupNewcomers, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -1825,6 +1872,14 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   useEffect(() => {
     loadAllChurchMembers();
   }, []);
+
+  // Auto-select the newly created meeting if it exists and no meeting is selected
+  useEffect(() => {
+    if (newlyCreatedMeeting && !selectedMeeting) {
+      // We'll rely on the parent to handle meeting selection
+      console.log('Newly created meeting available:', newlyCreatedMeeting);
+    }
+  }, [newlyCreatedMeeting, selectedMeeting]);
 
   const loadAllChurchMembers = async () => {
     try {
@@ -2008,9 +2063,28 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
             <div>
               <p className="font-medium text-blue-900">
                 Recording for: {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                {newlyCreatedMeeting?.id === selectedMeeting.id && (
+                  <span className="ml-2 inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                    New Meeting
+                  </span>
+                )}
               </p>
               <p className="text-sm text-blue-700">
                 {selectedMeeting.topic || 'Group Meeting'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!selectedMeeting && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-yellow-600" />
+            <div>
+              <p className="font-medium text-yellow-800">No meeting selected</p>
+              <p className="text-sm text-yellow-700">
+                Please go back to Step 2 and select a meeting to record attendance for newcomers.
               </p>
             </div>
           </div>
@@ -2024,7 +2098,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
               setShowForm(true);
               setSubmitted(false);
             }}
-            disabled={!canAddGroupNewcomers(group.id)}
+            disabled={!canAddGroupNewcomers(group.id) || !selectedMeeting}
             className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-200 font-medium mx-auto disabled:opacity-50"
           >
             <UserPlus className="h-5 w-5" />
@@ -2035,6 +2109,9 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
           </p>
           {!canAddGroupNewcomers(group.id) && (
             <p className="text-sm text-red-500 mt-2">You don't have permission to add newcomers</p>
+          )}
+          {!selectedMeeting && (
+            <p className="text-sm text-yellow-600 mt-2">Please select a meeting first</p>
           )}
         </div>
       )}
@@ -2168,7 +2245,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
                 <div className="flex gap-3 pt-4">
                   <button
                     type="submit"
-                    disabled={loading || !canAddGroupNewcomers(group.id)}
+                    disabled={loading || !canAddGroupNewcomers(group.id) || !selectedMeeting}
                     className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 font-medium"
                   >
                     <Save className="h-4 w-4" />
@@ -2202,7 +2279,7 @@ const GroupNewcomerStep: React.FC<GroupNewcomerStepProps> = ({ group, selectedMe
   );
 };
 
-// Group Report Step Component
+// Group Report Step Component (same as before, but with meeting passed from step 1)
 interface GroupReportStepProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -2210,9 +2287,18 @@ interface GroupReportStepProps {
   onMeetingSelect: (meeting: GroupMeeting) => void;
   onReportCreated: () => void;
   onError: (message: string) => void;
+  newlyCreatedMeeting?: GroupMeeting | null;
 }
 
-const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, selectedMeeting, onMeetingSelect, onReportCreated, onError }) => {
+const GroupReportStep: React.FC<GroupReportStepProps> = ({ 
+  group, 
+  meetings, 
+  selectedMeeting, 
+  onMeetingSelect, 
+  onReportCreated, 
+  onError,
+  newlyCreatedMeeting 
+}) => {
   const { canCreateGroupReports, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [attendance, setAttendance] = useState<GroupAttendanceRecord[]>([]);
@@ -2233,11 +2319,16 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
   });
 
   useEffect(() => {
+    // Auto-select the newly created meeting if provided
+    if (newlyCreatedMeeting && !selectedMeeting) {
+      onMeetingSelect(newlyCreatedMeeting);
+    }
+    
     if (selectedMeeting) {
       loadAttendanceData();
       loadExistingReport();
     }
-  }, [selectedMeeting]);
+  }, [selectedMeeting, newlyCreatedMeeting]);
 
   useEffect(() => {
     // Update stats whenever attendance changes
@@ -2777,13 +2868,18 @@ ${group.name} Group
                 selectedMeeting?.id === meeting.id 
                   ? 'border-blue-500 bg-blue-50' 
                   : 'border-gray-300 hover:border-gray-400'
-              }`}
+              } ${newlyCreatedMeeting?.id === meeting.id ? 'ring-2 ring-green-500' : ''}`}
             >
               <div className="flex items-center gap-2 mb-2">
                 <Calendar className="h-4 w-4 text-gray-500" />
                 <span className="font-medium text-gray-900">
                   {new Date(meeting.meeting_date).toLocaleDateString()}
                 </span>
+                {newlyCreatedMeeting?.id === meeting.id && (
+                  <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                    New
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
                 <Clock className="h-3 w-3" />
@@ -2820,6 +2916,11 @@ ${group.name} Group
                   <p className="text-sm text-gray-600">Date</p>
                   <p className="font-medium text-gray-900">
                     {new Date(selectedMeeting.meeting_date).toLocaleDateString()}
+                    {newlyCreatedMeeting?.id === selectedMeeting.id && (
+                      <span className="ml-2 inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                        New
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -3118,7 +3219,7 @@ ${group.name} Group
   );
 };
 
-// Group Management Workflow Component
+// Group Management Workflow Component - MODIFIED to pass newly created meeting between steps
 interface GroupWorkflowProps {
   group: CellGroup;
   meetings: GroupMeeting[];
@@ -3132,6 +3233,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
+  const [newlyCreatedMeeting, setNewlyCreatedMeeting] = useState<GroupMeeting | null>(null);
 
   const steps = [
     { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
@@ -3155,6 +3257,17 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
       default:
         return false;
     }
+  };
+
+  const handleMeetingCreated = (createdMeeting: GroupMeeting) => {
+    setNewlyCreatedMeeting(createdMeeting);
+    setSelectedMeeting(createdMeeting);
+    onSuccess('Group meeting created successfully!');
+    setCurrentStep(2);
+  };
+
+  const handleMeetingSelect = (meeting: GroupMeeting) => {
+    setSelectedMeeting(meeting);
   };
 
   return (
@@ -3185,10 +3298,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
         {currentStep === 1 && (
           <GroupMeetingCreationStep
             group={group}
-            onMeetingCreated={() => {
-              onSuccess('Group meeting created successfully!');
-              setCurrentStep(2);
-            }}
+            onMeetingCreated={handleMeetingCreated}
             onError={onError}
           />
         )}
@@ -3198,12 +3308,13 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
             group={group}
             meetings={meetings}
             selectedMeeting={selectedMeeting}
-            onMeetingSelect={setSelectedMeeting}
+            onMeetingSelect={handleMeetingSelect}
             onAttendanceSaved={() => {
               onSuccess('Group attendance saved successfully!');
               setCurrentStep(3);
             }}
             onError={onError}
+            newlyCreatedMeeting={newlyCreatedMeeting}
           />
         )}
 
@@ -3216,6 +3327,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
               setCurrentStep(4);
             }}
             onError={onError}
+            newlyCreatedMeeting={newlyCreatedMeeting}
           />
         )}
 
@@ -3224,12 +3336,13 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
             group={group}
             meetings={meetings}
             selectedMeeting={selectedMeeting}
-            onMeetingSelect={setSelectedMeeting}
+            onMeetingSelect={handleMeetingSelect}
             onReportCreated={() => {
               onSuccess('Group report generated successfully!');
               onClose();
             }}
             onError={onError}
+            newlyCreatedMeeting={newlyCreatedMeeting}
           />
         )}
       </div>
@@ -3264,7 +3377,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
   );
 };
 
-// Main Groups Component
+// Main Groups Component (same as before)
 const Groups = () => {
   const { 
     profile, 
@@ -3693,6 +3806,7 @@ const Groups = () => {
 
     setSelectedGroup(group);
     setShowWorkflowModal(true);
+    // Load meetings for this group
     await loadMeetings(group.id);
   };
 
@@ -4403,7 +4517,7 @@ const Groups = () => {
                     </p>
                   </div>
                 </div>
-              )}
+              }
 
               <div className="hidden print:block mt-8 pt-4 border-t border-gray-300">
                 <p className="text-sm text-gray-600 text-center">
