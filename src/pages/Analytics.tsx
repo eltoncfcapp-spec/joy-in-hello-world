@@ -65,9 +65,9 @@ interface GrowthMetrics {
   average_sunday_attendance: number;
   retention_rate: number;
   conversion_rate: number;
-  non_active_members: number; // New
-  non_active_rate: number; // New
-  potential_return_members: number; // New
+  non_active_members: number;
+  non_active_rate: number;
+  potential_return_members: number;
 }
 
 interface CellGroupStats {
@@ -82,7 +82,7 @@ interface CellGroupStats {
   baptism_count: number;
   location: string;
   meeting_day: string;
-  non_active_count: number; // New
+  non_active_count: number;
 }
 
 interface DepartmentStats {
@@ -96,7 +96,7 @@ interface DepartmentStats {
   new_members: number;
   baptism_count: number;
   purpose: string;
-  non_active_count: number; // New
+  non_active_count: number;
 }
 
 interface InviterStats {
@@ -105,7 +105,7 @@ interface InviterStats {
   new_members_count: number;
   baptism_count: number;
   conversion_rate: number;
-  non_active_count: number; // New
+  non_active_count: number;
 }
 
 interface GenderStats {
@@ -117,9 +117,9 @@ interface GenderStats {
   female_baptized: number;
   male_attendance_rate: number;
   female_attendance_rate: number;
-  male_non_active: number; // New
-  female_non_active: number; // New
-  non_active_rate: number; // New
+  male_non_active: number;
+  female_non_active: number;
+  non_active_rate: number;
 }
 
 interface NonActiveMember {
@@ -157,10 +157,9 @@ interface FilterState {
   date_to: string;
   status: 'all' | 'newcomer' | 'signed_member' | 'not_attending';
   baptism_status: 'all' | 'baptized' | 'not_baptized';
-  member_visibility: 'all' | 'active' | 'non-active'; // New filter
+  member_visibility: 'all' | 'active' | 'non-active';
 }
 
-// NEW: Detailed Absence Query Types
 interface AbsenceQueryFilter {
   event_type: 'all' | 'sunday' | 'cell' | 'department' | 'other';
   group_type: 'all' | 'cell_group' | 'department';
@@ -189,7 +188,6 @@ interface DetailedAbsenceRecord {
   status: string;
 }
 
-// Permission checking utilities
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
@@ -198,7 +196,6 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
   return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
 };
 
-// Check if user can view member details (only admin/pastor can view)
 const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
   return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
 };
@@ -263,7 +260,6 @@ const Analytics = () => {
   const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments' | 'non-active' | 'absence-query'>('cell-groups');
   const [exporting, setExporting] = useState(false);
   
-  // NEW: Detailed Absence Query State
   const [showAbsenceQuery, setShowAbsenceQuery] = useState(false);
   const [detailedAbsences, setDetailedAbsences] = useState<DetailedAbsenceRecord[]>([]);
   const [queryLoading, setQueryLoading] = useState(false);
@@ -271,14 +267,13 @@ const Analytics = () => {
     event_type: 'all',
     group_type: 'all',
     group_id: 'all',
-    date_from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+    date_from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     date_to: new Date().toISOString().split('T')[0],
     min_absences: 1,
     show_only_active: true
   });
   const [selectedAbsenceMember, setSelectedAbsenceMember] = useState<DetailedAbsenceRecord | null>(null);
 
-  // Default date range: last 30 days
   const defaultDateFrom = new Date();
   defaultDateFrom.setDate(defaultDateFrom.getDate() - 30);
 
@@ -292,10 +287,9 @@ const Analytics = () => {
     date_to: new Date().toISOString().split('T')[0],
     status: 'all',
     baptism_status: 'all',
-    member_visibility: 'active' // Default to active members only
+    member_visibility: 'active'
   });
 
-  // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
   const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || []);
 
@@ -307,181 +301,116 @@ const Analytics = () => {
     try {
       setLoading(true);
 
-      // Fetch all data with real Supabase queries
-      const [
-        membersData,
-        cellGroupsData,
-        departmentsData,
-        eventsData,
-        eventAttendeesData,
-        nonActiveMembersData
-      ] = await Promise.all([
-        buildMembersQuery(),
+      // First, fetch cell groups and departments for filters
+      const [cellGroupsData, departmentsData] = await Promise.all([
         supabase.from('cell_groups').select('*'),
-        supabase.from('departments').select('*'),
-        buildEventsQuery(),
-        buildEventAttendeesQuery(),
-        fetchNonActiveMembers()
+        supabase.from('departments').select('*')
       ]);
 
-      if (membersData.error) throw membersData.error;
       if (cellGroupsData.error) throw cellGroupsData.error;
       if (departmentsData.error) throw departmentsData.error;
-      if (eventsData.error) throw eventsData.error;
-      if (eventAttendeesData.error) throw eventAttendeesData.error;
 
-      const members = membersData.data || [];
       const allCellGroups = cellGroupsData.data || [];
       const allDepartments = departmentsData.data || [];
-      const events = eventsData.data || [];
-      const eventAttendees = eventAttendeesData.data || [];
-      const nonActiveMembers = nonActiveMembersData || [];
-
+      
       setCellGroups(allCellGroups);
       setDepartments(allDepartments);
 
-      // Calculate all metrics with real data
-      await calculateAllMetrics(members, allCellGroups, allDepartments, events, eventAttendees, nonActiveMembers);
-
-    } catch (error) {
-      console.error('Error fetching analytics data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // NEW: Query detailed absences
-  const queryDetailedAbsences = async () => {
-    try {
-      setQueryLoading(true);
-      setDetailedAbsences([]);
-
-      // Build base query for members
+      // Build base members query
       let membersQuery = supabase
         .from('members')
         .select(`
-          id,
-          name,
-          surname,
-          phone,
-          residence,
-          gender,
-          created_at,
-          status,
-          is_hidden,
-          cell_groups!fk_cell_group(name),
-          department_members(
-            departments(name)
+          *,
+          cell_groups!fk_cell_group(id, name),
+          department_members!left(
+            departments!inner(id, name)
           )
         `);
 
-      // Apply active filter
-      if (absenceQueryFilter.show_only_active) {
+      // Apply member visibility filter
+      if (filters.member_visibility === 'active') {
         membersQuery = membersQuery.eq('is_hidden', false);
+      } else if (filters.member_visibility === 'non-active') {
+        membersQuery = membersQuery.eq('is_hidden', true);
       }
 
-      const { data: members, error: membersError } = await membersQuery;
-      if (membersError) throw membersError;
+      // Apply other filters
+      if (filters.gender !== 'all') {
+        membersQuery = membersQuery.eq('gender', filters.gender);
+      }
 
-      // Build events query
+      if (filters.cell_group !== 'all') {
+        membersQuery = membersQuery.eq('cell_group_id', filters.cell_group);
+      }
+
+      if (filters.status !== 'all') {
+        if (filters.status === 'not_attending') {
+          membersQuery = membersQuery.or('status.ilike.%inactive%,status.ilike.%stopped%,status.ilike.%left%');
+        } else {
+          membersQuery = membersQuery.eq('status', filters.status);
+        }
+      }
+
+      // Fetch members
+      const membersData = await membersQuery;
+      if (membersData.error) throw membersData.error;
+      const members = membersData.data || [];
+
+      // Fetch events with date filter
       let eventsQuery = supabase
         .from('events')
-        .select('id, event_date, name, event_type')
-        .gte('event_date', absenceQueryFilter.date_from)
-        .lte('event_date', absenceQueryFilter.date_to);
-
-      // Apply event type filter
-      if (absenceQueryFilter.event_type !== 'all') {
-        if (absenceQueryFilter.event_type === 'sunday') {
-          eventsQuery = eventsQuery.or('name.ilike.%sunday%,name.ilike.%service%,event_type.eq.sunday');
-        } else if (absenceQueryFilter.event_type === 'cell') {
-          eventsQuery = eventsQuery.or('name.ilike.%cell%,name.ilike.%group%,event_type.eq.cell');
-        } else if (absenceQueryFilter.event_type === 'department') {
-          eventsQuery = eventsQuery.or('name.ilike.%department%,name.ilike.%ministry%,event_type.eq.department');
-        }
-      }
-
-      const { data: events, error: eventsError } = await eventsQuery;
-      if (eventsError) throw eventsError;
-
-      if (!events || events.length === 0 || !members || members.length === 0) {
-        setDetailedAbsences([]);
-        return;
-      }
-
-      // Get attendance records for these events
-      const eventIds = events.map(e => e.id);
-      const { data: attendances, error: attendanceError } = await supabase
-        .from('event_attendees')
         .select('*')
-        .in('event_id', eventIds);
+        .gte('event_date', filters.date_from)
+        .lte('event_date', filters.date_to);
 
-      if (attendanceError) throw attendanceError;
+      if (filters.meeting_type === 'sunday') {
+        eventsQuery = eventsQuery.ilike('name', '%sunday%');
+      } else if (filters.meeting_type === 'cell') {
+        eventsQuery = eventsQuery.ilike('name', '%cell%');
+      } else if (filters.meeting_type === 'department') {
+        eventsQuery = eventsQuery.ilike('name', '%department%');
+      }
 
-      // Process each member's absence record
-      const detailedAbsencesList: DetailedAbsenceRecord[] = [];
+      const eventsData = await eventsQuery;
+      if (eventsData.error) throw eventsData.error;
+      const events = eventsData.data || [];
 
-      members.forEach(member => {
-        // Filter events by group type if specified
-        let memberEvents = events;
-        
-        if (absenceQueryFilter.group_type !== 'all' && absenceQueryFilter.group_id !== 'all') {
-          if (absenceQueryFilter.group_type === 'cell_group' && member.cell_groups?.id !== absenceQueryFilter.group_id) {
-            return; // Skip member if not in selected cell group
-          }
-          // For department filtering, you'd need to check department_members
-        }
+      // Fetch event attendees
+      let attendeesQuery = supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey(id, name, surname, gender, status),
+          events!event_attendees_event_id_fkey(id, name, event_date)
+        `);
 
-        const totalEvents = memberEvents.length;
-        let absences = 0;
-        const absenceDates: string[] = [];
-        let lastAttendedDate: string | null = null;
+      if (filters.attendance_status !== 'all') {
+        attendeesQuery = attendeesQuery.eq('attendance_status', filters.attendance_status);
+      }
 
-        memberEvents.forEach(event => {
-          const attendance = attendances?.find(a => 
-            a.event_id === event.id && a.members_id === member.id
-          );
+      const attendeesData = await attendeesQuery;
+      if (attendeesData.error) throw attendeesData.error;
+      const eventAttendees = attendeesData.data || [];
 
-          if (!attendance || attendance.attendance_status === 'absent') {
-            absences++;
-            absenceDates.push(event.event_date);
-          } else if (attendance.attendance_status === 'present') {
-            lastAttendedDate = event.event_date;
-          }
-        });
+      // Fetch non-active members
+      const nonActiveMembersData = await fetchNonActiveMembers();
+      const nonActiveMembers = nonActiveMembersData || [];
 
-        const absenceRate = totalEvents > 0 ? Math.round((absences / totalEvents) * 100) : 0;
-
-        // Apply minimum absences filter
-        if (absences >= absenceQueryFilter.min_absences) {
-          detailedAbsencesList.push({
-            id: member.id,
-            name: member.name,
-            surname: member.surname,
-            phone: member.phone,
-            residence: member.residence,
-            gender: member.gender || 'unknown',
-            cell_group_name: member.cell_groups?.name || null,
-            department_name: member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null,
-            total_events: totalEvents,
-            absences: absences,
-            absence_rate: absenceRate,
-            absence_dates: absenceDates,
-            last_attended_date: lastAttendedDate,
-            member_since: member.created_at,
-            status: member.status
-          });
-        }
-      });
-
-      // Sort by highest absences first
-      detailedAbsencesList.sort((a, b) => b.absences - a.absences);
-      setDetailedAbsences(detailedAbsencesList);
+      // Calculate all metrics
+      await calculateAllMetrics(
+        members,
+        allCellGroups,
+        allDepartments,
+        events,
+        eventAttendees,
+        nonActiveMembers
+      );
 
     } catch (error) {
-      console.error('Error querying detailed absences:', error);
+      console.error('Error fetching analytics data:', error);
+      // You might want to show an error message to the user here
     } finally {
-      setQueryLoading(false);
+      setLoading(false);
     }
   };
 
@@ -492,7 +421,7 @@ const Analytics = () => {
         .select(`
           *,
           cell_groups!fk_cell_group(name),
-          department_members(
+          department_members!left(
             departments(id, name)
           )
         `)
@@ -507,99 +436,159 @@ const Analytics = () => {
     }
   };
 
-  const buildMembersQuery = () => {
-    let query = supabase
-      .from('members')
-      .select(`
-        *,
-        cell_groups!fk_cell_group(name),
-        department_members(
-          departments(id, name)
-        )
-      `);
+  const queryDetailedAbsences = async () => {
+    try {
+      setQueryLoading(true);
+      setDetailedAbsences([]);
 
-    // Apply member visibility filter
-    if (filters.member_visibility === 'active') {
-      query = query.eq('is_hidden', false);
-    } else if (filters.member_visibility === 'non-active') {
-      query = query.eq('is_hidden', true);
-    }
+      // Build events query based on filters
+      let eventsQuery = supabase
+        .from('events')
+        .select('id, event_date, name')
+        .gte('event_date', absenceQueryFilter.date_from)
+        .lte('event_date', absenceQueryFilter.date_to);
 
-    // Apply gender filter
-    if (filters.gender !== 'all') {
-      query = query.eq('gender', filters.gender);
-    }
-
-    // Apply cell group filter
-    if (filters.cell_group !== 'all') {
-      query = query.eq('cell_group_id', filters.cell_group);
-    }
-
-    // Apply status filter
-    if (filters.status !== 'all') {
-      if (filters.status === 'not_attending') {
-        // For not attending, we need to check status values that indicate not attending
-        query = query.or('status.ilike.%inactive%,status.ilike.%stopped%,status.ilike.%left%');
-      } else {
-        query = query.eq('status', filters.status);
+      if (absenceQueryFilter.event_type !== 'all') {
+        if (absenceQueryFilter.event_type === 'sunday') {
+          eventsQuery = eventsQuery.ilike('name', '%sunday%');
+        } else if (absenceQueryFilter.event_type === 'cell') {
+          eventsQuery = eventsQuery.ilike('name', '%cell%');
+        } else if (absenceQueryFilter.event_type === 'department') {
+          eventsQuery = eventsQuery.ilike('name', '%department%');
+        }
       }
+
+      const { data: events, error: eventsError } = await eventsQuery;
+      if (eventsError) throw eventsError;
+
+      if (!events || events.length === 0) {
+        setDetailedAbsences([]);
+        return;
+      }
+
+      // Build members query
+      let membersQuery = supabase
+        .from('members')
+        .select(`
+          id,
+          name,
+          surname,
+          phone,
+          residence,
+          gender,
+          created_at,
+          status,
+          is_hidden,
+          cell_groups!fk_cell_group(name),
+          department_members!left(
+            departments(name)
+          )
+        `);
+
+      if (absenceQueryFilter.show_only_active) {
+        membersQuery = membersQuery.eq('is_hidden', false);
+      }
+
+      if (absenceQueryFilter.group_type === 'cell_group' && absenceQueryFilter.group_id !== 'all') {
+        membersQuery = membersQuery.eq('cell_group_id', absenceQueryFilter.group_id);
+      }
+
+      const { data: members, error: membersError } = await membersQuery;
+      if (membersError) throw membersError;
+
+      if (!members || members.length === 0) {
+        setDetailedAbsences([]);
+        return;
+      }
+
+      // Get attendance for these events
+      const eventIds = events.map(e => e.id);
+      const { data: attendances, error: attendanceError } = await supabase
+        .from('event_attendees')
+        .select('*')
+        .in('event_id', eventIds);
+
+      if (attendanceError) throw attendanceError;
+
+      // Process each member's absence record
+      const detailedAbsencesList: DetailedAbsenceRecord[] = [];
+
+      for (const member of members) {
+        // For department filtering
+        if (absenceQueryFilter.group_type === 'department' && absenceQueryFilter.group_id !== 'all') {
+          const memberDepartments = member.department_members || [];
+          const hasDepartment = memberDepartments.some((dm: any) => 
+            dm.departments.id === absenceQueryFilter.group_id
+          );
+          if (!hasDepartment) continue;
+        }
+
+        const totalEvents = events.length;
+        let absences = 0;
+        const absenceDates: string[] = [];
+        let lastAttendedDate: string | null = null;
+
+        for (const event of events) {
+          const attendance = attendances?.find(a => 
+            a.event_id === event.id && a.members_id === member.id
+          );
+
+          if (!attendance || attendance.attendance_status === 'absent') {
+            absences++;
+            absenceDates.push(event.event_date);
+          } else if (attendance.attendance_status === 'present') {
+            lastAttendedDate = event.event_date;
+          }
+        }
+
+        const absenceRate = totalEvents > 0 ? Math.round((absences / totalEvents) * 100) : 0;
+
+        if (absences >= absenceQueryFilter.min_absences) {
+          detailedAbsencesList.push({
+            id: member.id,
+            name: member.name,
+            surname: member.surname,
+            phone: member.phone,
+            residence: member.residence,
+            gender: member.gender || 'unknown',
+            cell_group_name: member.cell_groups?.name || null,
+            department_name: member.department_members?.map((dm: any) => dm.departments?.name).filter(Boolean).join(', ') || null,
+            total_events: totalEvents,
+            absences: absences,
+            absence_rate: absenceRate,
+            absence_dates: absenceDates,
+            last_attended_date: lastAttendedDate,
+            member_since: member.created_at,
+            status: member.status
+          });
+        }
+      }
+
+      // Sort by highest absences first
+      detailedAbsencesList.sort((a, b) => b.absences - a.absences);
+      setDetailedAbsences(detailedAbsencesList);
+
+    } catch (error) {
+      console.error('Error querying detailed absences:', error);
+    } finally {
+      setQueryLoading(false);
     }
-
-    return query;
-  };
-
-  const buildEventsQuery = () => {
-    let query = supabase
-      .from('events')
-      .select('*');
-
-    // Apply date filter
-    if (filters.date_from) {
-      query = query.gte('event_date', filters.date_from);
-    }
-    if (filters.date_to) {
-      query = query.lte('event_date', filters.date_to);
-    }
-
-    // Apply meeting type filter
-    if (filters.meeting_type === 'sunday') {
-      query = query.or('name.ilike.%sunday%,name.ilike.%service%');
-    } else if (filters.meeting_type === 'cell') {
-      query = query.or('name.ilike.%cell%,name.ilike.%group%');
-    } else if (filters.meeting_type === 'department') {
-      query = query.or('name.ilike.%department%,name.ilike.%ministry%');
-    }
-
-    return query;
-  };
-
-  const buildEventAttendeesQuery = () => {
-    let query = supabase.from('event_attendees').select('*');
-
-    // Apply attendance status filter
-    if (filters.attendance_status !== 'all') {
-      query = query.eq('attendance_status', filters.attendance_status);
-    }
-
-    return query;
   };
 
   const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[], nonActiveMembersList: any[]) => {
-    // Calculate basic statistics with real data
+    // Calculate basic statistics
     const totalMembers = members.length;
     const totalCellGroups = cellGroups.length;
     const totalDepartments = departments.length;
-    
-    // Events in date range
     const eventsInRange = events.length;
 
-    // Calculate real attendance data
+    // Calculate attendance data
     const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
     const totalPossibleAttendance = events.length * totalMembers;
     const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
 
-    // Get baptism data from members table
-    const baptizedMembers = members.filter(m => m.baptism && m.baptism !== 'not_baptized');
+    // Get baptism data
+    const baptizedMembers = members.filter(m => m.baptism);
     const totalBaptisms = baptizedMembers.length;
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
@@ -608,15 +597,15 @@ const Analytics = () => {
 
     // Calculate members who became baptized this month
     const baptismsThisMonth = baptizedMembers.filter(member => {
-      if (!member.created_at) return false;
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
+      if (!member.baptism) return false;
+      const baptismDate = new Date(member.baptism);
+      return baptismDate.getMonth() === currentMonth && baptismDate.getFullYear() === currentYear;
     }).length;
 
     const baptismsLastMonth = baptizedMembers.filter(member => {
-      if (!member.created_at) return false;
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
+      if (!member.baptism) return false;
+      const baptismDate = new Date(member.baptism);
+      return baptismDate.getMonth() === lastMonth && baptismDate.getFullYear() === lastMonthYear;
     }).length;
 
     const baptismGrowthRate = baptismsLastMonth > 0 
@@ -627,13 +616,11 @@ const Analytics = () => {
     const totalNonActive = nonActiveMembersList.length;
     const nonActiveRate = members.length > 0 ? Math.round((totalNonActive / (members.length + totalNonActive)) * 100) : 0;
     
-    // Calculate non-active by gender
     const nonActiveByGender = {
       male: nonActiveMembersList.filter(m => m.gender === 'male').length,
       female: nonActiveMembersList.filter(m => m.gender === 'female').length
     };
 
-    // Calculate non-active by reason
     const nonActiveByReason: Record<string, number> = {};
     nonActiveMembersList.forEach(member => {
       const reason = member.not_attending_reason || 'No reason provided';
@@ -649,7 +636,7 @@ const Analytics = () => {
     }, 0);
     const avgTimeNonActive = totalNonActive > 0 ? Math.round(totalDaysNonActive / totalNonActive) : 0;
 
-    // Calculate potential return rate (members non-active for less than 90 days)
+    // Calculate potential return rate
     const potentialReturnMembers = nonActiveMembersList.filter(member => {
       const statusDate = member.status_date ? new Date(member.status_date) : new Date(member.created_at);
       const daysDiff = Math.floor((now.getTime() - statusDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -669,7 +656,7 @@ const Analytics = () => {
         phone: member.phone,
         last_attendance_date: member.status_date,
         cell_group_name: member.cell_groups?.name || null,
-        department_name: member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null,
+        department_name: member.department_members?.map((dm: any) => dm.departments?.name).filter(Boolean).join(', ') || null,
         member_since: member.created_at,
         gender: member.gender || 'unknown',
         residence: member.residence,
@@ -689,15 +676,17 @@ const Analytics = () => {
       potential_return_rate: potentialReturnRate
     });
 
-    // Update main stats with real data including non-active members
-    const totalAllMembers = members.length + totalNonActive;
+    // Update main stats
+    const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
+    const totalNewcomers = members.filter(m => m.status === 'newcomer').length;
+
     setStats([
       { 
         icon: Users, 
         label: 'Active Members', 
         value: totalMembers.toString(), 
         color: 'bg-blue-50 dark:bg-blue-900/20',
-        description: `${members.filter(m => m.status === 'signed_member').length} signed members`,
+        description: `${totalSignedMembers} signed members`,
         trend: 5.2
       },
       { 
@@ -713,7 +702,7 @@ const Analytics = () => {
         label: 'Cell Groups', 
         value: totalCellGroups.toString(), 
         color: 'bg-green-50 dark:bg-green-900/20',
-        description: `${cellGroups.filter(g => g.is_active !== false).length} active`,
+        description: `${cellGroups.filter(g => g.status === 'active').length} active`,
         trend: 2.1
       },
       { 
@@ -721,7 +710,7 @@ const Analytics = () => {
         label: 'Departments', 
         value: totalDepartments.toString(), 
         color: 'bg-purple-50 dark:bg-purple-900/20',
-        description: `${departments.filter(d => d.is_active !== false).length} active`,
+        description: `${departments.filter(d => d.status === 'active').length} active`,
         trend: 1.5
       },
       { 
@@ -742,16 +731,16 @@ const Analytics = () => {
       },
     ]);
 
-    // Calculate all detailed metrics with real data
+    // Calculate all detailed metrics
     await calculateGrowthMetrics(members, totalNonActive, potentialReturnMembers);
     await calculateGenderStats(members, eventAttendees, nonActiveMembersList);
     await calculateInviterStats(members, nonActiveMembersList);
     await generateAttendanceReports(events, members, eventAttendees);
     await calculateCellGroupStats(cellGroups, events, members, eventAttendees, nonActiveMembersList);
     await calculateDepartmentStats(departments, events, members, eventAttendees, nonActiveMembersList);
-    await findConsecutiveAbsences(members, events, eventAttendees, cellGroups, departments);
-    await findSundayServiceAbsentees(members, events, eventAttendees, cellGroups, departments);
-    await findThreeTimeAbsentees(members, events, eventAttendees, cellGroups, departments);
+    await findConsecutiveAbsences(members, events, eventAttendees, cellGroups);
+    await findSundayServiceAbsentees(members, events, eventAttendees, cellGroups);
+    await findThreeTimeAbsentees(members, events, eventAttendees, cellGroups);
   };
 
   const calculateGrowthMetrics = async (members: any[], totalNonActive: number, potentialReturnMembers: number) => {
@@ -762,7 +751,7 @@ const Analytics = () => {
     const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
     const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
-    // Real query for new members in date range
+    // New members in date range
     const newMembersInRange = members.filter(member => {
       const memberDate = new Date(member.created_at);
       const fromDate = new Date(filters.date_from);
@@ -770,7 +759,7 @@ const Analytics = () => {
       return memberDate >= fromDate && memberDate <= toDate;
     }).length;
 
-    // Real data for growth rate calculation
+    // New members this month
     const newMembersThisMonth = members.filter(member => {
       const memberDate = new Date(member.created_at);
       return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
@@ -781,7 +770,7 @@ const Analytics = () => {
       return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
     }).length;
 
-    // Real query for members who became signed members in date range
+    // Members who became signed members
     const becameMembersInRange = members.filter(member => {
       if (!member.created_at) return false;
       const createdDate = new Date(member.created_at);
@@ -798,16 +787,16 @@ const Analytics = () => {
     const conversionRate = totalNewcomers > 0 ? Math.round((becameMembersInRange / totalNewcomers) * 100) : 0;
 
     // Baptism calculations
-    const baptizedMembers = members.filter(m => m.baptism && m.baptism !== 'not_baptized');
+    const baptizedMembers = members.filter(m => m.baptism);
     const totalBaptisms = baptizedMembers.length;
     const baptismsThisMonth = baptizedMembers.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
+      const baptismDate = new Date(member.baptism);
+      return baptismDate.getMonth() === currentMonth && baptismDate.getFullYear() === currentYear;
     }).length;
 
     const baptismsLastMonth = baptizedMembers.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
+      const baptismDate = new Date(member.baptism);
+      return baptismDate.getMonth() === lastMonth && baptismDate.getFullYear() === lastMonthYear;
     }).length;
 
     const baptismGrowthRate = baptismsLastMonth > 0 
@@ -850,11 +839,10 @@ const Analytics = () => {
   };
 
   const calculateGenderStats = async (members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
-    // Real gender data from members
     const maleMembers = members.filter(m => m.gender === 'male');
     const femaleMembers = members.filter(m => m.gender === 'female');
     
-    // Calculate real attendance by gender
+    // Calculate attendance by gender
     const malePresent = eventAttendees.filter(attendee => {
       const member = members.find(m => m.id === attendee.members_id);
       return attendee.attendance_status === 'present' && member?.gender === 'male';
@@ -865,8 +853,8 @@ const Analytics = () => {
       return attendee.attendance_status === 'present' && member?.gender === 'female';
     }).length;
 
-    // Calculate baptism by gender from members table
-    const baptizedMembers = members.filter(m => m.baptism && m.baptism !== 'not_baptized');
+    // Calculate baptism by gender
+    const baptizedMembers = members.filter(m => m.baptism);
     const maleBaptized = baptizedMembers.filter(m => m.gender === 'male').length;
     const femaleBaptized = baptizedMembers.filter(m => m.gender === 'female').length;
 
@@ -896,13 +884,9 @@ const Analytics = () => {
   };
 
   const calculateInviterStats = async (members: any[], nonActiveMembers: any[]) => {
-    // Combine active and non-active members for inviter stats
     const allMembers = [...members, ...nonActiveMembers];
-    
-    // Real inviter data from members table
     const inviterMap = new Map();
     
-    // Get all unique inviters from members
     const allInviters = allMembers.filter(member => member.invited_by).map(member => member.invited_by);
     
     allInviters.forEach(inviter => {
@@ -916,7 +900,7 @@ const Analytics = () => {
       .map(([invited_by, invite_count]) => {
         const invitedMembers = allMembers.filter(m => m.invited_by === invited_by);
         const newMembersCount = invitedMembers.filter(m => m.status === 'newcomer').length;
-        const baptismCount = invitedMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
+        const baptismCount = invitedMembers.filter(m => m.baptism).length;
         const nonActiveCount = invitedMembers.filter(m => m.is_hidden).length;
         const conversionRate = invite_count > 0 ? Math.round((baptismCount / invite_count) * 100) : 0;
 
@@ -936,7 +920,6 @@ const Analytics = () => {
   };
 
   const generateAttendanceReports = (events: any[], members: any[], eventAttendees: any[]) => {
-    // Real attendance data for each event
     const reports: AttendanceReport[] = events.map(event => {
       const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
       const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
@@ -947,7 +930,6 @@ const Analytics = () => {
       const late = 0;
       const total = members.length;
       
-      // Calculate real gender attendance
       let malePresent = 0;
       let femalePresent = 0;
       let firstTimers = 0;
@@ -987,17 +969,14 @@ const Analytics = () => {
     const stats: CellGroupStats[] = [];
 
     for (const group of cellGroups) {
-      // Real query for group members (active)
       const groupMembers = members.filter(member => member.cell_group_id === group.id);
-      
-      // Real query for non-active group members
       const nonActiveGroupMembers = nonActiveMembers.filter(member => member.cell_group_id === group.id);
 
       if ((!groupMembers || groupMembers.length === 0) && (!nonActiveGroupMembers || nonActiveGroupMembers.length === 0)) continue;
 
       const groupMemberIds = groupMembers.map(m => m.id);
       
-      // Calculate real attendance for this group
+      // Calculate attendance for this group
       let presentCount = 0;
       let totalPossible = 0;
       
@@ -1013,14 +992,13 @@ const Analytics = () => {
       
       const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
       
-      // Calculate baptism count for this group from members table
-      const groupBaptisms = groupMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
+      // Calculate baptism count
+      const groupBaptisms = groupMembers.filter(m => m.baptism).length;
 
-      // Get real leader info
+      // Get leader info
       const leaderName = group.leader_id ? 
         `Leader ${group.leader_id}` : 'Not assigned';
 
-      // Simple trend calculation based on recent performance
       const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
 
       stats.push({
@@ -1046,21 +1024,20 @@ const Analytics = () => {
     const stats: DepartmentStats[] = [];
 
     for (const department of departments) {
-      // Get department members through department_members relationship (active)
+      // Get department members
       const departmentMembers = members.filter(member => 
-        member.department_members?.some((dm: any) => dm.departments.id === department.id)
+        member.department_members?.some((dm: any) => dm.departments?.id === department.id)
       );
 
-      // Get non-active department members
       const nonActiveDepartmentMembers = nonActiveMembers.filter(member => 
-        member.department_members?.some((dm: any) => dm.departments.id === department.id)
+        member.department_members?.some((dm: any) => dm.departments?.id === department.id)
       );
 
       if ((!departmentMembers || departmentMembers.length === 0) && (!nonActiveDepartmentMembers || nonActiveDepartmentMembers.length === 0)) continue;
 
       const departmentMemberIds = departmentMembers.map(m => m.id);
       
-      // Calculate real attendance for this department
+      // Calculate attendance
       let presentCount = 0;
       let totalPossible = 0;
       
@@ -1076,14 +1053,11 @@ const Analytics = () => {
       
       const avgAttendance = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
       
-      // Calculate baptism count for this department from members table
-      const departmentBaptisms = departmentMembers.filter(m => m.baptism && m.baptism !== 'not_baptized').length;
+      const departmentBaptisms = departmentMembers.filter(m => m.baptism).length;
 
-      // Get department leader info
       const leaderName = department.leader_id ? 
         `Leader ${department.leader_id}` : 'Not assigned';
 
-      // Simple trend calculation based on recent performance
       const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
 
       stats.push({
@@ -1096,7 +1070,7 @@ const Analytics = () => {
         previous_month_attendance: Math.max(0, avgAttendance - 10),
         new_members: departmentMembers.filter(m => m.status === 'newcomer').length,
         baptism_count: departmentBaptisms,
-        purpose: department.purpose || 'Not specified',
+        purpose: department.description || 'Not specified',
         non_active_count: nonActiveDepartmentMembers.length
       });
     }
@@ -1104,11 +1078,10 @@ const Analytics = () => {
     setDepartmentStats(stats.filter(dept => dept.total_members > 0));
   };
 
-  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
+  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
     try {
       const absentMembersList: AbsentMember[] = [];
       
-      // Get recent events sorted by date
       const recentEvents = events
         .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
         .slice(-5);
@@ -1117,7 +1090,6 @@ const Analytics = () => {
         let consecutiveAbsences = 0;
         let lastAttendanceDate: string | null = null;
 
-        // Check last 3 events for this member
         for (const event of recentEvents.slice(-3)) {
           const attendanceRecord = eventAttendees.find((a: any) => 
             a.event_id === event.id && a.members_id === member.id
@@ -1132,11 +1104,9 @@ const Analytics = () => {
         }
 
         if (consecutiveAbsences >= 2) {
-          // Get real cell group name
           const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
           
-          // Get department names
-          const memberDepartments = member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null;
+          const memberDepartments = member.department_members?.map((dm: any) => dm.departments?.name).filter(Boolean).join(', ') || null;
 
           absentMembersList.push({
             id: member.id,
@@ -1161,11 +1131,10 @@ const Analytics = () => {
     }
   };
 
-  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
+  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
     try {
       const sundayAbsenteesList: AbsentMember[] = [];
       
-      // Find real Sunday events (assuming Sunday events have specific naming)
       const sundayEvents = events.filter(event => {
         const eventDate = new Date(event.event_date);
         return eventDate.getDay() === 0;
@@ -1185,7 +1154,7 @@ const Analytics = () => {
 
         if (sundayAbsences >= 2) {
           const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
-          const memberDepartments = member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null;
+          const memberDepartments = member.department_members?.map((dm: any) => dm.departments?.name).filter(Boolean).join(', ') || null;
 
           sundayAbsenteesList.push({
             id: member.id,
@@ -1210,7 +1179,7 @@ const Analytics = () => {
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[], _departments: any[]) => {
+  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
     try {
       const threeTimeAbsenteesList: AbsentMember[] = [];
 
@@ -1228,7 +1197,7 @@ const Analytics = () => {
 
         if (totalAbsences >= 3) {
           const cellGroup = cellGroups.find(group => group.id === member.cell_group_id);
-          const memberDepartments = member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null;
+          const memberDepartments = member.department_members?.map((dm: any) => dm.departments?.name).filter(Boolean).join(', ') || null;
 
           threeTimeAbsenteesList.push({
             id: member.id,
@@ -1290,7 +1259,6 @@ const Analytics = () => {
            filters.member_visibility !== 'active';
   };
 
-  // NEW: Format date for display
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
@@ -1302,7 +1270,6 @@ const Analytics = () => {
     });
   };
 
-  // NEW: View absence member details (only for admins)
   const viewAbsenceMemberDetails = (member: DetailedAbsenceRecord) => {
     if (!currentUserCanViewMemberDetails) {
       return;
@@ -1310,12 +1277,10 @@ const Analytics = () => {
     setSelectedAbsenceMember(member);
   };
 
-  // NEW: Close absence member details
   const closeAbsenceMemberDetails = () => {
     setSelectedAbsenceMember(null);
   };
 
-  // NEW: Component for Absence Member Details Modal
   const AbsenceMemberDetailModal = ({ member }: { member: DetailedAbsenceRecord }) => (
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-6">
@@ -1632,17 +1597,13 @@ const Analytics = () => {
   const exportToCSV = () => {
     setExporting(true);
     
-    // Prepare CSV data
     const csvData = [
-      // Header
       ['Church Analytics Report', `Period: ${filters.date_from} to ${filters.date_to}`, `Generated: ${new Date().toLocaleDateString()}`],
       [],
-      // Main Stats
       ['Key Metrics'],
       ['Metric', 'Value', 'Description'],
       ...stats.map(stat => [stat.label, stat.value, stat.description || '']),
       [],
-      // Growth Metrics
       ['Growth & Baptism Metrics'],
       ['Metric', 'Value'],
       ['New Members (Period)', growthMetrics.new_members_this_month],
@@ -1655,7 +1616,6 @@ const Analytics = () => {
       ['Non-active Rate', `${growthMetrics.non_active_rate}%`],
       ['Potential Return Members', growthMetrics.potential_return_members],
       [],
-      // Cell Groups
       ['Cell Group Performance'],
       ['Group Name', 'Total Members', 'Active Members', 'Non-active Members', 'Avg Attendance', 'Baptisms', 'Trend'],
       ...cellGroupStats.map(group => [
@@ -1669,12 +1629,10 @@ const Analytics = () => {
       ])
     ];
 
-    // Convert to CSV string
     const csvString = csvData.map(row => 
       row.map(cell => `"${cell}"`).join(',')
     ).join('\n');
 
-    // Create download link
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -1706,7 +1664,7 @@ const Analytics = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-3 sm:p-4 md:p-6 animate-fadeIn overflow-x-hidden">
       <div className="max-w-7xl mx-auto">
-        {/* Header - Mobile Optimized */}
+        {/* Header */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -1754,7 +1712,7 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Filters Panel - Mobile Optimized */}
+        {/* Filters Panel */}
         {showFilters && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
@@ -1950,7 +1908,7 @@ const Analytics = () => {
           </div>
         )}
 
-        {/* Main Stats Grid - Mobile Optimized */}
+        {/* Main Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 sm:gap-4 md:gap-6 mb-8">
           {stats.map((stat, index) => (
             <div key={index} className={`${stat.color} rounded-2xl p-4 sm:p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
@@ -1988,7 +1946,7 @@ const Analytics = () => {
           ))}
         </div>
 
-        {/* NEW: Detailed Absence Query Section */}
+        {/* Detailed Absence Query Section */}
         <div className="mb-8">
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4">
@@ -2235,7 +2193,7 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Baptism & Growth Stats - Mobile Optimized */}
+        {/* Baptism & Growth Stats */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 md:gap-8 mb-8">
           {/* Baptism Summary */}
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
@@ -2340,7 +2298,7 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Main Analytics Grid - Mobile Optimized */}
+        {/* Main Analytics Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6 md:gap-8 mb-8">
           {/* Top Inviters */}
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
@@ -2453,7 +2411,7 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Group Performance Tabs - Mobile Optimized */}
+        {/* Group Performance Tabs */}
         <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -2743,7 +2701,7 @@ const Analytics = () => {
           </div>
         )}
 
-        {/* Absence Alerts - Mobile Optimized */}
+        {/* Absence Alerts */}
         <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 md:gap-6 mb-8">
           {/* 2+ Consecutive Absences */}
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-4 sm:p-6 flex-1">
@@ -2827,7 +2785,7 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Recent Attendance Reports - Mobile Optimized */}
+        {/* Recent Attendance Reports */}
         {attendanceReports.length > 0 && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
