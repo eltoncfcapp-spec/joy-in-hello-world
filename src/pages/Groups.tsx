@@ -3482,13 +3482,6 @@ const Groups = () => {
     }
   };
 
-  const openReportModal = async (meeting: GroupMeeting) => {
-    setSelectedMeetingForReport(meeting);
-    await loadAttendanceForMeeting(meeting.id);
-    await loadMeetingReport(meeting.id);
-    setShowReportModal(true);
-  };
-
   const openCreateReportModal = async (meeting: GroupMeeting) => {
     setSelectedGroup(groups.find(g => g.id === meeting.group_id) || null);
     setSelectedMeetingForReport(meeting);

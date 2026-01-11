@@ -885,10 +885,11 @@ const DeleteDepartmentModal: React.FC<DeleteDepartmentModalProps> = ({ isOpen, d
 };
 
 // Department Meeting Creation Step
-const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }: { 
+const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError, onMeetingsRefresh }: { 
   department: Department; 
   onMeetingCreated: () => void; 
-  onError: (message: string) => void; 
+  onError: (message: string) => void;
+  onMeetingsRefresh?: () => Promise<void>;
 }) => {
   const { canCreateDepartmentMeetings } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -968,6 +969,10 @@ const DepartmentMeetingCreationStep = ({ department, onMeetingCreated, onError }
         notes: ''
       });
       await loadRecentMeetings();
+      // Refresh the parent meetings list so the new meeting appears in step 2
+      if (onMeetingsRefresh) {
+        await onMeetingsRefresh();
+      }
       onMeetingCreated();
     } catch (error: any) {
       onError('Failed to create department meeting: ' + error.message);
@@ -2862,19 +2867,47 @@ interface DepartmentWorkflowProps {
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
+  onMeetingsRefresh?: () => Promise<void>;
 }
 
 const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({ 
   department, 
-  meetings, 
+  meetings: initialMeetings, 
   members: _members, 
   onClose, 
   onSuccess, 
-  onError 
+  onError,
+  onMeetingsRefresh
 }) => {
   const { profile, canCreateDepartmentMeetings, canManageDepartmentAttendance, canAddDepartmentNewcomers, canCreateDepartmentReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<DepartmentMeeting | null>(null);
+  const [localMeetings, setLocalMeetings] = useState<DepartmentMeeting[]>(initialMeetings);
+
+  // Update local meetings when initial meetings change
+  useEffect(() => {
+    setLocalMeetings(initialMeetings);
+  }, [initialMeetings]);
+
+  const loadMeetings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('department_meetings')
+        .select('*')
+        .eq('department_id', department.id)
+        .order('meeting_date', { ascending: false });
+
+      if (error) throw error;
+      setLocalMeetings(data || []);
+      
+      // Also refresh parent meetings if callback provided
+      if (onMeetingsRefresh) {
+        await onMeetingsRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to load meetings:', error);
+    }
+  };
 
   const steps = [
     { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
@@ -2933,13 +2966,14 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
               setCurrentStep(2);
             }}
             onError={onError}
+            onMeetingsRefresh={loadMeetings}
           />
         )}
 
         {currentStep === 2 && (
           <DepartmentAttendanceStep
             department={department}
-            meetings={meetings}
+            meetings={localMeetings}
             selectedMeeting={selectedMeeting}
             onMeetingSelect={setSelectedMeeting}
             onAttendanceSaved={() => {
@@ -2965,7 +2999,7 @@ const DepartmentManagementWorkflow: React.FC<DepartmentWorkflowProps> = ({
         {currentStep === 4 && (
           <DepartmentReportStep
             department={department}
-            meetings={meetings}
+            meetings={localMeetings}
             selectedMeeting={selectedMeeting}
             onMeetingSelect={setSelectedMeeting}
             onReportCreated={() => {
@@ -3038,6 +3072,7 @@ const Departments = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<DepartmentMeeting | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<DepartmentAttendanceRecord[]>([]);
+  const [departmentReport, setDepartmentReport] = useState<DepartmentReport | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -3204,14 +3239,207 @@ const Departments = () => {
     }
   };
 
+  const loadDepartmentReport = async (meetingId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('department_reports')
+        .select('*')
+        .eq('meeting_id', meetingId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading department report:', error);
+        return;
+      }
+      
+      setDepartmentReport(data || null);
+    } catch (error: any) {
+      console.error('Failed to load department report:', error);
+    }
+  };
+
   const openReportModal = async (meeting: DepartmentMeeting) => {
     setSelectedMeetingForReport(meeting);
     await loadAttendanceForMeeting(meeting.id);
+    await loadDepartmentReport(meeting.id);
     setShowReportModal(true);
   };
 
   const handlePrintReport = () => {
-    window.print();
+    const stats = getAttendanceStats();
+    const meeting = selectedMeetingForReport;
+    const department = selectedDepartment;
+    
+    if (!meeting || !department) return;
+
+    // Get report data
+    const reportText = departmentReport?.report_text || 'No report available';
+    const decisionsMade = departmentReport?.decisions_made || 'No decisions recorded';
+    const actionItems = departmentReport?.action_items || 'No action items recorded';
+    const nextMeetingDate = departmentReport?.next_meeting_date || 'Not scheduled';
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Department Meeting Report - ${department.name}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 100%; margin: 0 auto; font-size: 12px; }
+            h1 { color: #1e3a5f; border-bottom: 2px solid #8b5cf6; padding-bottom: 10px; font-size: 22px; margin-bottom: 20px; }
+            h2 { color: #374151; margin-top: 25px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 18px; }
+            h3 { color: #4b5563; margin-top: 20px; font-size: 16px; }
+            .header-info { background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0; }
+            .header-info p { margin: 5px 0; font-size: 12px; word-wrap: break-word; overflow-wrap: break-word; }
+            .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 15px 0; }
+            .stat-box { background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; text-align: center; }
+            .stat-box.present { background: #dcfce7; border-color: #86efac; }
+            .stat-box.absent { background: #fee2e2; border-color: #fca5a5; }
+            .stat-box.with-reason { background: #fef3c7; border-color: #fcd34d; }
+            .stat-value { font-size: 24px; font-weight: bold; color: #111827; }
+            .stat-label { font-size: 11px; color: #6b7280; margin-top: 4px; }
+            .report-section { background: #ffffff; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin: 12px 0; overflow: hidden; }
+            .report-section h3 { margin-top: 0; color: #1f2937; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; font-size: 15px; }
+            .section-content { white-space: pre-wrap; line-height: 1.6; margin-top: 10px; font-size: 12px; word-wrap: break-word; overflow-wrap: break-word; overflow: hidden; }
+            .highlight-box { background: #f5f3ff; border: 2px solid #8b5cf6; }
+            .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
+            .actions-box { background: #fefce8; border: 2px solid #eab308; }
+            .attendance-table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
+            .attendance-table th, .attendance-table td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; word-wrap: break-word; overflow-wrap: break-word; }
+            .attendance-table th { background: #f3f4f6; font-weight: 600; font-size: 11px; }
+            .status-present { color: #059669; font-weight: 600; }
+            .status-absent { color: #dc2626; font-weight: 600; }
+            .status-with-reason { color: #d97706; font-weight: 600; }
+            .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 11px; }
+            @media print { 
+              body { padding: 15px; font-size: 11px; }
+              .page-break { page-break-before: always; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>📋 Department Meeting Report</h1>
+          <div class="header-info">
+            <p><strong>Department:</strong> ${department.name}</p>
+            <p><strong>Leader:</strong> ${department.leader_name || 'Not assigned'}</p>
+            <p><strong>Meeting Date:</strong> ${new Date(meeting.meeting_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}</p>
+            <p><strong>Meeting Time:</strong> ${meeting.meeting_time || 'Not specified'}</p>
+            <p><strong>Location:</strong> ${meeting.location || department.location || 'Not specified'}</p>
+            <p><strong>Topic:</strong> ${meeting.topic || 'General Department Meeting'}</p>
+            <p><strong>Status:</strong> ${meeting.status || 'N/A'}</p>
+          </div>
+
+          <h2>📊 Attendance Summary</h2>
+          <div class="stats-grid">
+            <div class="stat-box present">
+              <div class="stat-value">${stats.attended}</div>
+              <div class="stat-label">Present</div>
+            </div>
+            <div class="stat-box absent">
+              <div class="stat-value">${stats.absent}</div>
+              <div class="stat-label">Absent</div>
+            </div>
+            <div class="stat-box with-reason">
+              <div class="stat-value">${stats.absentWithReason}</div>
+              <div class="stat-label">Absent with Notes</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value">${stats.total > 0 ? Math.round((stats.attended / stats.total) * 100) : 0}%</div>
+              <div class="stat-label">Attendance Rate</div>
+            </div>
+          </div>
+
+          <h2>📝 Meeting Report</h2>
+          
+          <div class="report-section highlight-box">
+            <h3>📋 Meeting Summary</h3>
+            <div class="section-content">${reportText}</div>
+          </div>
+
+          <div class="report-section decisions-box">
+            <h3>✅ Decisions Made</h3>
+            <div class="section-content">${decisionsMade}</div>
+          </div>
+
+          <div class="report-section actions-box">
+            <h3>📌 Action Items & Follow-ups</h3>
+            <div class="section-content">${actionItems}</div>
+          </div>
+
+          <div class="report-section">
+            <h3>📅 Next Meeting Date</h3>
+            <p>${nextMeetingDate !== 'Not scheduled' ? new Date(nextMeetingDate).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            }) : 'Not scheduled'}</p>
+          </div>
+
+          ${meeting.notes ? `
+          <div class="report-section">
+            <h3>📋 Original Meeting Notes</h3>
+            <div class="section-content">${meeting.notes}</div>
+          </div>
+          ` : ''}
+
+          <div class="page-break"></div>
+
+          <h2>👥 Detailed Attendance (${attendanceRecords.length} members)</h2>
+          ${attendanceRecords.length > 0 ? `
+          <table class="attendance-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Residence</th>
+                <th>Phone</th>
+                <th>Status</th>
+                <th>Notes/Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${attendanceRecords.map((record, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td>${record.members?.name || ''} ${record.members?.surname || ''}</td>
+                  <td>${record.members?.residence || '-'}</td>
+                  <td>${record.members?.phone || '-'}</td>
+                  <td class="${record.status === 'present' ? 'status-present' : record.status === 'absent' ? 'status-absent' : 'status-with-reason'}">
+                    ${record.status === 'present' ? '✓ Present' : record.status === 'absent' ? '✗ Absent' : '⚠ Absent with Reason'}
+                  </td>
+                  <td>${record.notes || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p>No attendance records available.</p>'}
+
+          <div class="footer">
+            <p>Report Generated: ${new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })} at ${new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            <p>Church Management System • ${department.name} Department</p>
+          </div>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.print();
+    }
   };
 
   const openMeetingsModal = async (department: Department) => {
@@ -3266,6 +3494,7 @@ const Departments = () => {
     setSelectedDepartment(null);
     setSelectedMeetingForReport(null);
     setAttendanceRecords([]);
+    setDepartmentReport(null);
   };
 
   const handleDepartmentCreated = () => {
@@ -3762,6 +3991,68 @@ const Departments = () => {
                 </div>
               </div>
 
+              {/* Existing Report Preview */}
+              {departmentReport && (
+                <div className="mb-8 bg-gradient-to-r from-purple-50 to-blue-50 print:from-purple-50 print:to-blue-50 border-2 border-purple-200 print:border-purple-300 rounded-xl p-6">
+                  <h4 className="text-xl font-bold text-purple-900 print:text-purple-900 mb-4 flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Existing Report Preview
+                  </h4>
+                  
+                  <div className="space-y-4">
+                    <div className="bg-white print:bg-white rounded-lg p-4 border border-purple-100 print:border-purple-200">
+                      <h5 className="font-semibold text-gray-800 print:text-gray-900 mb-2">Meeting Status</h5>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                        selectedMeetingForReport?.status === 'completed' 
+                          ? 'bg-green-100 text-green-800 print:bg-green-100 print:text-green-800' 
+                          : 'bg-blue-100 text-blue-800 print:bg-blue-100 print:text-blue-800'
+                      }`}>
+                        {selectedMeetingForReport?.status || 'N/A'}
+                      </span>
+                    </div>
+                    
+                    <div className="bg-white print:bg-white rounded-lg p-4 border border-purple-100 print:border-purple-200">
+                      <h5 className="font-semibold text-gray-800 print:text-gray-900 mb-2">Report Summary</h5>
+                      <p className="text-gray-700 print:text-gray-800 whitespace-pre-wrap overflow-hidden break-words" style={{ overflowWrap: 'break-word' }}>
+                        {departmentReport.report_text || 'No summary available'}
+                      </p>
+                    </div>
+                    
+                    {departmentReport.decisions_made && (
+                      <div className="bg-white print:bg-white rounded-lg p-4 border border-green-100 print:border-green-200">
+                        <h5 className="font-semibold text-green-800 print:text-green-900 mb-2">✅ Decisions Made</h5>
+                        <p className="text-gray-700 print:text-gray-800 whitespace-pre-wrap overflow-hidden break-words" style={{ overflowWrap: 'break-word' }}>
+                          {departmentReport.decisions_made}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {departmentReport.action_items && (
+                      <div className="bg-white print:bg-white rounded-lg p-4 border border-yellow-100 print:border-yellow-200">
+                        <h5 className="font-semibold text-yellow-800 print:text-yellow-900 mb-2">📌 Action Items</h5>
+                        <p className="text-gray-700 print:text-gray-800 whitespace-pre-wrap overflow-hidden break-words" style={{ overflowWrap: 'break-word' }}>
+                          {departmentReport.action_items}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {departmentReport.next_meeting_date && (
+                      <div className="bg-white print:bg-white rounded-lg p-4 border border-blue-100 print:border-blue-200">
+                        <h5 className="font-semibold text-blue-800 print:text-blue-900 mb-2">📅 Next Meeting</h5>
+                        <p className="text-gray-700 print:text-gray-800">
+                          {new Date(departmentReport.next_meeting_date).toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="mb-6">
                 <h4 className="text-xl font-bold text-gray-900 print:text-black mb-4">Detailed Attendance</h4>
                 {attendanceRecords.length === 0 ? (
@@ -3895,6 +4186,9 @@ const Departments = () => {
                 onError={(message) => {
                   setError(message);
                   setTimeout(() => setError(null), 3000);
+                }}
+                onMeetingsRefresh={async () => {
+                  await loadMeetings(selectedDepartment.id);
                 }}
               />
             </div>
