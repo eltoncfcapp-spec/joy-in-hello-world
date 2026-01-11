@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, BookOpen, FileText } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, FileText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -260,7 +260,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
     }, {} as Record<string, any>);
 
     // Analyze absence patterns
-    const absencePatterns = analyzeAbsencePatterns(detailedAbsences);
+    const processedAbsencePatterns = analyzeAbsencePatterns(detailedAbsences);
 
     // Calculate monthly statistics
     const monthlyStats = calculateMonthlyStats(detailedAbsences);
@@ -289,17 +289,19 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
       consecutive_absences: consecutiveAbsences,
       
       absence_records: detailedAbsences,
-      department_attendance: Object.entries(deptAttendance).map(([deptName, stats]) => ({
+      department_attendance: Object.entries(deptAttendance).map(([deptName, statsData]: [string, any]) => ({
         department_name: deptName,
-        ...stats
+        total_meetings: statsData.total_meetings,
+        absences: statsData.absences,
+        attendance_rate: statsData.attendance_rate,
+        last_attended: statsData.last_attended
       })),
-      absence_patterns,
+      absence_patterns: processedAbsencePatterns,
       monthly_stats: monthlyStats
     };
   };
 
   const analyzeAbsencePatterns = (absences: any[]) => {
-    const patterns: Record<string, number> = {};
     
     // Group by day of week
     const dayPatterns: Record<string, number> = {};
@@ -1229,7 +1231,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
 };
 
 // Add missing imports for the DetailedAbsenceModal
-import { Clock, CalendarDays, Mail, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Clock, CalendarDays } from 'lucide-react';
 
 interface StatCard {
   icon: any;
@@ -1519,7 +1521,7 @@ const Analytics = () => {
     member_visibility: 'active'
   });
 
-  const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
+  void canEdit(profile?.admin_role, profile?.permissions || []); // Keep function call for potential future use
   const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || []);
 
   useEffect(() => {
@@ -1787,8 +1789,8 @@ const Analytics = () => {
             absence_rate: absenceRate,
             absence_dates: absenceDates,
             last_attended_date: lastAttendedDate,
-            member_since: member.created_at,
-            status: member.status
+            member_since: member.created_at || '',
+            status: member.status || 'unknown'
           });
         }
       }
@@ -1809,7 +1811,6 @@ const Analytics = () => {
     const totalMembers = members.length;
     const totalCellGroups = cellGroups.length;
     const totalDepartments = departments.length;
-    const eventsInRange = events.length;
 
     // Calculate attendance data
     const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
@@ -1907,7 +1908,6 @@ const Analytics = () => {
 
     // Update main stats
     const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
-    const totalNewcomers = members.filter(m => m.status === 'newcomer').length;
 
     setStats([
       { 
