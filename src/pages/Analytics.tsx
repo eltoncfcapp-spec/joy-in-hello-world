@@ -1,6 +1,7 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, BookOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
 
 interface StatCard {
   icon: any;
@@ -159,7 +160,51 @@ interface FilterState {
   member_visibility: 'all' | 'active' | 'non-active'; // New filter
 }
 
+// NEW: Detailed Absence Query Types
+interface AbsenceQueryFilter {
+  event_type: 'all' | 'sunday' | 'cell' | 'department' | 'other';
+  group_type: 'all' | 'cell_group' | 'department';
+  group_id: string;
+  date_from: string;
+  date_to: string;
+  min_absences: number;
+  show_only_active: boolean;
+}
+
+interface DetailedAbsenceRecord {
+  id: string;
+  name: string;
+  surname: string;
+  phone: string | null;
+  residence: string | null;
+  gender: string;
+  cell_group_name: string | null;
+  department_name: string | null;
+  total_events: number;
+  absences: number;
+  absence_rate: number;
+  absence_dates: string[];
+  last_attended_date: string | null;
+  member_since: string;
+  status: string;
+}
+
+// Permission checking utilities
+const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
+  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
+};
+
+const canEdit = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
+  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
+};
+
+// Check if user can view member details (only admin/pastor can view)
+const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
+  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
+};
+
 const Analytics = () => {
+  const { profile } = useAuth();
   const [stats, setStats] = useState<StatCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
@@ -215,8 +260,23 @@ const Analytics = () => {
   const [cellGroups, setCellGroups] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments' | 'non-active'>('cell-groups');
+  const [activeTab, setActiveTab] = useState<'cell-groups' | 'departments' | 'non-active' | 'absence-query'>('cell-groups');
   const [exporting, setExporting] = useState(false);
+  
+  // NEW: Detailed Absence Query State
+  const [showAbsenceQuery, setShowAbsenceQuery] = useState(false);
+  const [detailedAbsences, setDetailedAbsences] = useState<DetailedAbsenceRecord[]>([]);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [absenceQueryFilter, setAbsenceQueryFilter] = useState<AbsenceQueryFilter>({
+    event_type: 'all',
+    group_type: 'all',
+    group_id: 'all',
+    date_from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+    date_to: new Date().toISOString().split('T')[0],
+    min_absences: 1,
+    show_only_active: true
+  });
+  const [selectedAbsenceMember, setSelectedAbsenceMember] = useState<DetailedAbsenceRecord | null>(null);
 
   // Default date range: last 30 days
   const defaultDateFrom = new Date();
@@ -234,6 +294,10 @@ const Analytics = () => {
     baptism_status: 'all',
     member_visibility: 'active' // Default to active members only
   });
+
+  // Check user permissions
+  const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
+  const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || []);
 
   useEffect(() => {
     fetchAnalyticsData();
@@ -283,6 +347,141 @@ const Analytics = () => {
       console.error('Error fetching analytics data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NEW: Query detailed absences
+  const queryDetailedAbsences = async () => {
+    try {
+      setQueryLoading(true);
+      setDetailedAbsences([]);
+
+      // Build base query for members
+      let membersQuery = supabase
+        .from('members')
+        .select(`
+          id,
+          name,
+          surname,
+          phone,
+          residence,
+          gender,
+          created_at,
+          status,
+          is_hidden,
+          cell_groups!fk_cell_group(name),
+          department_members(
+            departments(name)
+          )
+        `);
+
+      // Apply active filter
+      if (absenceQueryFilter.show_only_active) {
+        membersQuery = membersQuery.eq('is_hidden', false);
+      }
+
+      const { data: members, error: membersError } = await membersQuery;
+      if (membersError) throw membersError;
+
+      // Build events query
+      let eventsQuery = supabase
+        .from('events')
+        .select('id, event_date, name, event_type')
+        .gte('event_date', absenceQueryFilter.date_from)
+        .lte('event_date', absenceQueryFilter.date_to);
+
+      // Apply event type filter
+      if (absenceQueryFilter.event_type !== 'all') {
+        if (absenceQueryFilter.event_type === 'sunday') {
+          eventsQuery = eventsQuery.or('name.ilike.%sunday%,name.ilike.%service%,event_type.eq.sunday');
+        } else if (absenceQueryFilter.event_type === 'cell') {
+          eventsQuery = eventsQuery.or('name.ilike.%cell%,name.ilike.%group%,event_type.eq.cell');
+        } else if (absenceQueryFilter.event_type === 'department') {
+          eventsQuery = eventsQuery.or('name.ilike.%department%,name.ilike.%ministry%,event_type.eq.department');
+        }
+      }
+
+      const { data: events, error: eventsError } = await eventsQuery;
+      if (eventsError) throw eventsError;
+
+      if (!events || events.length === 0 || !members || members.length === 0) {
+        setDetailedAbsences([]);
+        return;
+      }
+
+      // Get attendance records for these events
+      const eventIds = events.map(e => e.id);
+      const { data: attendances, error: attendanceError } = await supabase
+        .from('event_attendees')
+        .select('*')
+        .in('event_id', eventIds);
+
+      if (attendanceError) throw attendanceError;
+
+      // Process each member's absence record
+      const detailedAbsencesList: DetailedAbsenceRecord[] = [];
+
+      members.forEach(member => {
+        // Filter events by group type if specified
+        let memberEvents = events;
+        
+        if (absenceQueryFilter.group_type !== 'all' && absenceQueryFilter.group_id !== 'all') {
+          if (absenceQueryFilter.group_type === 'cell_group' && member.cell_groups?.id !== absenceQueryFilter.group_id) {
+            return; // Skip member if not in selected cell group
+          }
+          // For department filtering, you'd need to check department_members
+        }
+
+        const totalEvents = memberEvents.length;
+        let absences = 0;
+        const absenceDates: string[] = [];
+        let lastAttendedDate: string | null = null;
+
+        memberEvents.forEach(event => {
+          const attendance = attendances?.find(a => 
+            a.event_id === event.id && a.members_id === member.id
+          );
+
+          if (!attendance || attendance.attendance_status === 'absent') {
+            absences++;
+            absenceDates.push(event.event_date);
+          } else if (attendance.attendance_status === 'present') {
+            lastAttendedDate = event.event_date;
+          }
+        });
+
+        const absenceRate = totalEvents > 0 ? Math.round((absences / totalEvents) * 100) : 0;
+
+        // Apply minimum absences filter
+        if (absences >= absenceQueryFilter.min_absences) {
+          detailedAbsencesList.push({
+            id: member.id,
+            name: member.name,
+            surname: member.surname,
+            phone: member.phone,
+            residence: member.residence,
+            gender: member.gender || 'unknown',
+            cell_group_name: member.cell_groups?.name || null,
+            department_name: member.department_members?.map((dm: any) => dm.departments.name).join(', ') || null,
+            total_events: totalEvents,
+            absences: absences,
+            absence_rate: absenceRate,
+            absence_dates: absenceDates,
+            last_attended_date: lastAttendedDate,
+            member_since: member.created_at,
+            status: member.status
+          });
+        }
+      });
+
+      // Sort by highest absences first
+      detailedAbsencesList.sort((a, b) => b.absences - a.absences);
+      setDetailedAbsences(detailedAbsencesList);
+
+    } catch (error) {
+      console.error('Error querying detailed absences:', error);
+    } finally {
+      setQueryLoading(false);
     }
   };
 
@@ -393,7 +592,6 @@ const Analytics = () => {
     
     // Events in date range
     const eventsInRange = events.length;
-    console.log('Events in range:', eventsInRange);
 
     // Calculate real attendance data
     const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
@@ -493,7 +691,6 @@ const Analytics = () => {
 
     // Update main stats with real data including non-active members
     const totalAllMembers = members.length + totalNonActive;
-    console.log('Total members including non-active:', totalAllMembers);
     setStats([
       { 
         icon: Users, 
@@ -1093,6 +1290,127 @@ const Analytics = () => {
            filters.member_visibility !== 'active';
   };
 
+  // NEW: Format date for display
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  // NEW: View absence member details (only for admins)
+  const viewAbsenceMemberDetails = (member: DetailedAbsenceRecord) => {
+    if (!currentUserCanViewMemberDetails) {
+      return;
+    }
+    setSelectedAbsenceMember(member);
+  };
+
+  // NEW: Close absence member details
+  const closeAbsenceMemberDetails = () => {
+    setSelectedAbsenceMember(null);
+  };
+
+  // NEW: Component for Absence Member Details Modal
+  const AbsenceMemberDetailModal = ({ member }: { member: DetailedAbsenceRecord }) => (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4 mb-6">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center text-white font-semibold text-2xl bg-gradient-to-br from-red-500 to-orange-500">
+          {member.name.charAt(0)}{member.surname.charAt(0)}
+        </div>
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{member.name} {member.surname}</h3>
+          <p className="text-gray-600 dark:text-gray-400">Absence Rate: {member.absence_rate}% ({member.absences} of {member.total_events} events)</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
+          <h4 className="font-semibold text-gray-900 dark:text-white">Member Information</h4>
+          {member.phone && (
+            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+              <Phone className="h-4 w-4" />
+              <span>{member.phone}</span>
+            </div>
+          )}
+          {member.residence && (
+            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+              <Home className="h-4 w-4" />
+              <span>{member.residence}</span>
+            </div>
+          )}
+          <div className="text-gray-600 dark:text-gray-400">
+            <span className="font-medium">Gender:</span> {member.gender}
+          </div>
+          <div className="text-gray-600 dark:text-gray-400">
+            <span className="font-medium">Status:</span> {member.status}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h4 className="font-semibold text-gray-900 dark:text-white">Group Information</h4>
+          {member.cell_group_name && (
+            <div className="text-gray-600 dark:text-gray-400">
+              <span className="font-medium">Cell Group:</span> {member.cell_group_name}
+            </div>
+          )}
+          {member.department_name && (
+            <div className="text-gray-600 dark:text-gray-400">
+              <span className="font-medium">Department:</span> {member.department_name}
+            </div>
+          )}
+          {member.last_attended_date && (
+            <div className="text-gray-600 dark:text-gray-400">
+              <span className="font-medium">Last Attended:</span> {formatDate(member.last_attended_date)}
+            </div>
+          )}
+          <div className="text-gray-600 dark:text-gray-400">
+            <span className="font-medium">Member Since:</span> {formatDate(member.member_since)}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h4 className="font-semibold text-gray-900 dark:text-white">Absence Dates</h4>
+        <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4">
+          {member.absence_dates.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {member.absence_dates.map((date, index) => (
+                <div key={index} className="text-sm text-red-700 dark:text-red-300 bg-white dark:bg-gray-800 rounded px-3 py-2">
+                  {formatDate(date)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500 dark:text-gray-400">No absence dates recorded</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+        {member.phone && (
+          <a
+            href={`tel:${member.phone}`}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
+          >
+            <Phone className="h-4 w-4" />
+            Call Member
+          </a>
+        )}
+        <button
+          onClick={closeAbsenceMemberDetails}
+          className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+
   const handlePrintAnalytics = () => {
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -1670,6 +1988,253 @@ const Analytics = () => {
           ))}
         </div>
 
+        {/* NEW: Detailed Absence Query Section */}
+        <div className="mb-8">
+          <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Search className="h-5 w-5 text-blue-500" />
+                Detailed Absence Query
+              </h2>
+              <button
+                onClick={() => setShowAbsenceQuery(!showAbsenceQuery)}
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium text-sm"
+              >
+                {showAbsenceQuery ? 'Hide Query' : 'Show Query'}
+                <ChevronDown className={`h-4 w-4 transition-transform ${showAbsenceQuery ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {showAbsenceQuery && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Event Type */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Event Type
+                    </label>
+                    <select
+                      value={absenceQueryFilter.event_type}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, event_type: e.target.value as any})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="all">All Events</option>
+                      <option value="sunday">Sunday Services</option>
+                      <option value="cell">Cell Group Meetings</option>
+                      <option value="department">Department Events</option>
+                      <option value="other">Other Events</option>
+                    </select>
+                  </div>
+
+                  {/* Group Type */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Filter by Group
+                    </label>
+                    <select
+                      value={absenceQueryFilter.group_type}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, group_type: e.target.value as any, group_id: 'all'})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="all">All Groups</option>
+                      <option value="cell_group">Cell Group</option>
+                      <option value="department">Department</option>
+                    </select>
+                  </div>
+
+                  {/* Specific Group */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      {absenceQueryFilter.group_type === 'cell_group' ? 'Select Cell Group' : 
+                       absenceQueryFilter.group_type === 'department' ? 'Select Department' : 'Select Group'}
+                    </label>
+                    <select
+                      value={absenceQueryFilter.group_id}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, group_id: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      disabled={absenceQueryFilter.group_type === 'all'}
+                    >
+                      <option value="all">All</option>
+                      {absenceQueryFilter.group_type === 'cell_group' && cellGroups.map(group => (
+                        <option key={group.id} value={group.id}>{group.name}</option>
+                      ))}
+                      {absenceQueryFilter.group_type === 'department' && departments.map(dept => (
+                        <option key={dept.id} value={dept.id}>{dept.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Minimum Absences */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Minimum Absences
+                    </label>
+                    <select
+                      value={absenceQueryFilter.min_absences}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, min_absences: parseInt(e.target.value)})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="1">1+ Absences</option>
+                      <option value="2">2+ Absences</option>
+                      <option value="3">3+ Absences</option>
+                      <option value="5">5+ Absences</option>
+                      <option value="10">10+ Absences</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Date From */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Date From
+                    </label>
+                    <input
+                      type="date"
+                      value={absenceQueryFilter.date_from}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, date_from: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  {/* Date To */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Date To
+                    </label>
+                    <input
+                      type="date"
+                      value={absenceQueryFilter.date_to}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, date_to: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  {/* Member Status */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Show Members
+                    </label>
+                    <select
+                      value={absenceQueryFilter.show_only_active ? 'active' : 'all'}
+                      onChange={(e) => setAbsenceQueryFilter({...absenceQueryFilter, show_only_active: e.target.value === 'active'})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="active">Active Members Only</option>
+                      <option value="all">All Members</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={queryDetailedAbsences}
+                    disabled={queryLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+                  >
+                    <Search className="h-4 w-4" />
+                    {queryLoading ? 'Querying...' : 'Query Absences'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Results Table */}
+            {detailedAbsences.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+                  Query Results: {detailedAbsences.length} members with {absenceQueryFilter.min_absences}+ absences
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead>
+                      <tr className="text-left text-xs text-gray-500 dark:text-gray-400">
+                        <th className="px-3 py-2 font-medium">Member</th>
+                        <th className="px-3 py-2 font-medium">Cell Group</th>
+                        <th className="px-3 py-2 font-medium">Total Events</th>
+                        <th className="px-3 py-2 font-medium">Absences</th>
+                        <th className="px-3 py-2 font-medium">Absence Rate</th>
+                        <th className="px-3 py-2 font-medium">Last Attended</th>
+                        <th className="px-3 py-2 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {detailedAbsences.map((member, index) => (
+                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                          <td className="px-3 py-3 text-sm font-medium text-gray-900 dark:text-white">
+                            {member.name} {member.surname}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {member.cell_group_name || 'Not assigned'}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {member.total_events}
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={`text-sm font-bold ${
+                              member.absence_rate >= 50 ? 'text-red-600 dark:text-red-400' :
+                              member.absence_rate >= 25 ? 'text-orange-600 dark:text-orange-400' :
+                              'text-yellow-600 dark:text-yellow-400'
+                            }`}>
+                              {member.absences}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    member.absence_rate >= 50 ? 'bg-red-500' :
+                                    member.absence_rate >= 25 ? 'bg-orange-500' :
+                                    'bg-yellow-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, member.absence_rate)}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-sm">{member.absence_rate}%</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {member.last_attended_date ? formatDate(member.last_attended_date) : 'Never'}
+                          </td>
+                          <td className="px-3 py-3">
+                            <button
+                              onClick={() => viewAbsenceMemberDetails(member)}
+                              disabled={!currentUserCanViewMemberDetails}
+                              className={`px-3 py-1 rounded text-sm font-medium ${
+                                currentUserCanViewMemberDetails 
+                                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                                  : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {queryLoading && detailedAbsences.length === 0 && (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-2 text-gray-600 dark:text-gray-400">Querying absences...</p>
+              </div>
+            )}
+
+            {!queryLoading && showAbsenceQuery && detailedAbsences.length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <AlertTriangle className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                <p>No members found matching your criteria</p>
+                <p className="text-sm mt-1">Try adjusting your filters</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Baptism & Growth Stats - Mobile Optimized */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 md:gap-8 mb-8">
           {/* Baptism Summary */}
@@ -1926,6 +2491,16 @@ const Analytics = () => {
               >
                 Non-active Members
               </button>
+              <button
+                onClick={() => setActiveTab('absence-query')}
+                className={`flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors min-h-[44px] ${
+                  activeTab === 'absence-query'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Absence Query
+              </button>
             </div>
           </div>
 
@@ -2050,7 +2625,7 @@ const Analytics = () => {
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === 'non-active' ? (
             <div className="space-y-4">
               {/* Non-active Members Summary */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
@@ -2139,8 +2714,34 @@ const Analytics = () => {
                 </div>
               )}
             </div>
+          ) : (
+            <div className="text-center py-8">
+              <Search className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+              <p className="text-gray-600 dark:text-gray-400">Use the Detailed Absence Query section above</p>
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Filter by event type, group, and date range to find members with specific absence patterns</p>
+            </div>
           )}
         </div>
+
+        {/* Absence Member Details Modal */}
+        {selectedAbsenceMember && currentUserCanViewMemberDetails && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+              <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Absence Member Details</h3>
+                <button 
+                  onClick={closeAbsenceMemberDetails}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+                </button>
+              </div>
+              <div className="p-6">
+                <AbsenceMemberDetailModal member={selectedAbsenceMember} />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Absence Alerts - Mobile Optimized */}
         <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 md:gap-6 mb-8">
