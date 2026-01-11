@@ -1083,7 +1083,6 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
       // Log audit event
       await logAuditEvent('meetings', meetingData.id, 'INSERT', null, newMeeting, profile?.id || null);
 
-      // Reset form
       setFormData({
         meeting_date: '',
         meeting_time: '',
@@ -1091,16 +1090,8 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         topic: '',
         notes: ''
       });
-      
-      // Load recent meetings to refresh the list
       await loadRecentMeetings();
-      
-      // Call the success callback AFTER the reload completes
       onMeetingCreated();
-      
-      // Show success message
-      onError('Group meeting scheduled successfully!');
-      
     } catch (error: any) {
       onError('Failed to create group meeting: ' + error.message);
     } finally {
@@ -3702,7 +3693,6 @@ const Groups = () => {
 
     setSelectedGroup(group);
     setShowWorkflowModal(true);
-    // Load meetings for this group
     await loadMeetings(group.id);
   };
 
