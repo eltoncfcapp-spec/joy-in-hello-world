@@ -1,7 +1,1235 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, BookOpen } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, BookOpen, FileText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+
+// Import the DetailedAbsenceModal component types and interfaces
+interface MemberAbsenceDetails {
+  // Member Information
+  id: string;
+  name: string;
+  surname: string;
+  phone: string | null;
+  residence: string | null;
+  gender: string;
+  status: string;
+  baptism: string | null;
+  member_since: string;
+  is_hidden: boolean;
+  
+  // Group Information
+  cell_group_name: string | null;
+  cell_group_location: string | null;
+  department_names: string[];
+  
+  // Overall Statistics
+  total_events: number;
+  total_absences: number;
+  total_present: number;
+  absence_rate: number;
+  last_attended_date: string | null;
+  consecutive_absences: number;
+  
+  // Detailed Absence Records
+  absence_records: {
+    id: string;
+    event_id: string;
+    event_name: string;
+    event_date: string;
+    event_type: 'sunday' | 'cell' | 'department' | 'other';
+    attendance_status: string;
+    notes: string | null;
+    event_location: string | null;
+    cell_group_name: string | null;
+    invited_by: string | null;
+  }[];
+  
+  // Department Attendance
+  department_attendance: {
+    department_name: string;
+    total_meetings: number;
+    absences: number;
+    attendance_rate: number;
+    last_attended: string | null;
+  }[];
+  
+  // Pattern Analysis
+  absence_patterns: {
+    pattern: string;
+    count: number;
+    percentage: number;
+  }[];
+  
+  // Monthly Breakdown
+  monthly_stats: {
+    month: string;
+    year: number;
+    total_events: number;
+    absences: number;
+    attendance_rate: number;
+    trend: 'improving' | 'declining' | 'stable';
+  }[];
+}
+
+interface DetailedAbsenceModalProps {
+  memberId: string;
+  onClose: () => void;
+}
+
+const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [memberData, setMemberData] = useState<MemberAbsenceDetails | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'absences' | 'departments' | 'patterns' | 'monthly'>('overview');
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    if (memberId) {
+      fetchMemberAbsenceDetails();
+    }
+  }, [memberId]);
+
+  const fetchMemberAbsenceDetails = async () => {
+    try {
+      setLoading(true);
+      
+      // 1. Fetch basic member information
+      const { data: memberInfo, error: memberError } = await supabase
+        .from('members')
+        .select(`
+          *,
+          cell_groups!fk_cell_group(name, location),
+          department_members!left(
+            departments!inner(name)
+          )
+        `)
+        .eq('id', memberId)
+        .single();
+
+      if (memberError) throw memberError;
+
+      // 2. Fetch all event attendance records for this member
+      const { data: attendanceRecords, error: attendanceError } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          events!event_attendees_event_id_fkey(
+            id,
+            name,
+            event_date,
+            event_time,
+            location,
+            is_whole_church,
+            target_groups,
+            target_departments
+          ),
+          cell_groups!event_attendees_cell_group_id_fkey(name)
+        `)
+        .eq('members_id', memberId)
+        .order('events.event_date', { ascending: false });
+
+      if (attendanceError) throw attendanceError;
+
+      // 3. Fetch department attendance records
+      const { data: departmentAttendance, error: deptError } = await supabase
+        .from('department_attendance')
+        .select(`
+          *,
+          department_meetings!inner(
+            id,
+            meeting_date,
+            department_id,
+            departments!inner(name)
+          )
+        `)
+        .eq('member_id', memberId)
+        .order('department_meetings.meeting_date', { ascending: false });
+
+      if (deptError && !deptError.message.includes('does not exist')) {
+        console.warn('Department attendance error:', deptError);
+      }
+
+      // 4. Process the data
+      const processedData = processMemberData(
+        memberInfo,
+        attendanceRecords || [],
+        departmentAttendance || []
+      );
+
+      setMemberData(processedData);
+    } catch (error) {
+      console.error('Error fetching member absence details:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const processMemberData = (
+    memberInfo: any,
+    attendanceRecords: any[],
+    departmentAttendance: any[]
+  ): MemberAbsenceDetails => {
+    // Calculate overall statistics
+    const totalEvents = attendanceRecords.length;
+    const absences = attendanceRecords.filter(record => 
+      record.attendance_status === 'absent' || record.attendance_status === 'absent_with_reason'
+    ).length;
+    const presentCount = attendanceRecords.filter(record => 
+      record.attendance_status === 'present'
+    ).length;
+    
+    const absenceRate = totalEvents > 0 ? Math.round((absences / totalEvents) * 100) : 0;
+    
+    // Find last attended date
+    const lastAttended = attendanceRecords
+      .filter(record => record.attendance_status === 'present')
+      .sort((a, b) => new Date(b.events?.event_date).getTime() - new Date(a.events?.event_date).getTime())[0]
+      ?.events?.event_date || null;
+
+    // Calculate consecutive absences
+    let consecutiveAbsences = 0;
+    let currentStreak = 0;
+    
+    const sortedRecords = [...attendanceRecords]
+      .sort((a, b) => new Date(a.events?.event_date).getTime() - new Date(b.events?.event_date).getTime());
+    
+    sortedRecords.forEach(record => {
+      if (record.attendance_status === 'absent' || record.attendance_status === 'absent_with_reason') {
+        currentStreak++;
+        consecutiveAbsences = Math.max(consecutiveAbsences, currentStreak);
+      } else {
+        currentStreak = 0;
+      }
+    });
+
+    // Process detailed absence records
+    const detailedAbsences = attendanceRecords.map(record => {
+      const eventName = record.events?.name || 'Unknown Event';
+      let eventType: 'sunday' | 'cell' | 'department' | 'other' = 'other';
+      
+      if (eventName.toLowerCase().includes('sunday') || eventName.toLowerCase().includes('service')) {
+        eventType = 'sunday';
+      } else if (eventName.toLowerCase().includes('cell') || eventName.toLowerCase().includes('group')) {
+        eventType = 'cell';
+      } else if (eventName.toLowerCase().includes('department') || eventName.toLowerCase().includes('ministry')) {
+        eventType = 'department';
+      }
+
+      return {
+        id: record.id,
+        event_id: record.event_id,
+        event_name: eventName,
+        event_date: record.events?.event_date || '',
+        event_type: eventType,
+        attendance_status: record.attendance_status,
+        notes: record.notes,
+        event_location: record.events?.location,
+        cell_group_name: record.cell_groups?.name,
+        invited_by: record.invited_by
+      };
+    });
+
+    // Process department attendance
+    const deptAttendance = departmentAttendance.reduce((acc, record) => {
+      const deptName = record.department_meetings?.departments?.name || 'Unknown Department';
+      
+      if (!acc[deptName]) {
+        acc[deptName] = {
+          total_meetings: 0,
+          absences: 0,
+          attendance_rate: 0,
+          last_attended: null
+        };
+      }
+      
+      acc[deptName].total_meetings++;
+      
+      if (record.status === 'absent' || record.status === 'absent_with_reason') {
+        acc[deptName].absences++;
+      } else if (record.status === 'present') {
+        const meetingDate = record.department_meetings?.meeting_date;
+        if (!acc[deptName].last_attended || new Date(meetingDate) > new Date(acc[deptName].last_attended)) {
+          acc[deptName].last_attended = meetingDate;
+        }
+      }
+      
+      acc[deptName].attendance_rate = acc[deptName].total_meetings > 0 
+        ? Math.round(((acc[deptName].total_meetings - acc[deptName].absences) / acc[deptName].total_meetings) * 100)
+        : 0;
+      
+      return acc;
+    }, {} as Record<string, any>);
+
+    // Analyze absence patterns
+    const absencePatterns = analyzeAbsencePatterns(detailedAbsences);
+
+    // Calculate monthly statistics
+    const monthlyStats = calculateMonthlyStats(detailedAbsences);
+
+    return {
+      id: memberInfo.id,
+      name: memberInfo.name,
+      surname: memberInfo.surname,
+      phone: memberInfo.phone,
+      residence: memberInfo.residence,
+      gender: memberInfo.gender,
+      status: memberInfo.status,
+      baptism: memberInfo.baptism,
+      member_since: memberInfo.created_at,
+      is_hidden: memberInfo.is_hidden,
+      
+      cell_group_name: memberInfo.cell_groups?.name,
+      cell_group_location: memberInfo.cell_groups?.location,
+      department_names: memberInfo.department_members?.map((dm: any) => dm.departments?.name) || [],
+      
+      total_events: totalEvents,
+      total_absences: absences,
+      total_present: presentCount,
+      absence_rate: absenceRate,
+      last_attended_date: lastAttended,
+      consecutive_absences: consecutiveAbsences,
+      
+      absence_records: detailedAbsences,
+      department_attendance: Object.entries(deptAttendance).map(([deptName, stats]) => ({
+        department_name: deptName,
+        ...stats
+      })),
+      absence_patterns,
+      monthly_stats: monthlyStats
+    };
+  };
+
+  const analyzeAbsencePatterns = (absences: any[]) => {
+    const patterns: Record<string, number> = {};
+    
+    // Group by day of week
+    const dayPatterns: Record<string, number> = {};
+    absences.forEach(absence => {
+      const date = new Date(absence.event_date);
+      const day = date.toLocaleDateString('en-US', { weekday: 'long' });
+      dayPatterns[day] = (dayPatterns[day] || 0) + 1;
+    });
+    
+    // Group by event type
+    const typePatterns: Record<string, number> = {};
+    absences.forEach(absence => {
+      typePatterns[absence.event_type] = (typePatterns[absence.event_type] || 0) + 1;
+    });
+    
+    // Group by month
+    const monthPatterns: Record<string, number> = {};
+    absences.forEach(absence => {
+      const date = new Date(absence.event_date);
+      const monthYear = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      monthPatterns[monthYear] = (monthPatterns[monthYear] || 0) + 1;
+    });
+    
+    return [
+      ...Object.entries(dayPatterns).map(([pattern, count]) => ({
+        pattern: `Absent on ${pattern}`,
+        count,
+        percentage: Math.round((count / absences.length) * 100)
+      })),
+      ...Object.entries(typePatterns).map(([pattern, count]) => ({
+        pattern: `Absent from ${pattern} events`,
+        count,
+        percentage: Math.round((count / absences.length) * 100)
+      })),
+      ...Object.entries(monthPatterns).slice(0, 3).map(([pattern, count]) => ({
+        pattern: `Absent in ${pattern}`,
+        count,
+        percentage: Math.round((count / absences.length) * 100)
+      }))
+    ].sort((a, b) => b.percentage - a.percentage);
+  };
+
+  const calculateMonthlyStats = (absences: any[]) => {
+    const monthlyData: Record<string, any> = {};
+    
+    absences.forEach(absence => {
+      const date = new Date(absence.event_date);
+      const month = date.toLocaleDateString('en-US', { month: 'short' });
+      const year = date.getFullYear();
+      const key = `${month} ${year}`;
+      
+      if (!monthlyData[key]) {
+        monthlyData[key] = {
+          month,
+          year,
+          total_events: 0,
+          absences: 0,
+          present: 0
+        };
+      }
+      
+      monthlyData[key].total_events++;
+      if (absence.attendance_status === 'absent' || absence.attendance_status === 'absent_with_reason') {
+        monthlyData[key].absences++;
+      } else {
+        monthlyData[key].present++;
+      }
+    });
+    
+    // Convert to array and calculate rates
+    const result = Object.values(monthlyData).map((data: any) => {
+      const attendanceRate = Math.round((data.present / data.total_events) * 100);
+      
+      // Determine trend (simple calculation)
+      let trend: 'improving' | 'declining' | 'stable' = 'stable';
+      // This would be better with more data, but for now we'll use a simple approach
+      
+      return {
+        ...data,
+        attendance_rate: attendanceRate,
+        trend
+      };
+    }).sort((a: any, b: any) => {
+      // Sort by year and month
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthOrderA = months.indexOf(a.month);
+      const monthOrderB = months.indexOf(b.month);
+      
+      if (a.year === b.year) {
+        return monthOrderA - monthOrderB;
+      }
+      return a.year - b.year;
+    });
+    
+    return result;
+  };
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'Never';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const getEventTypeColor = (type: string) => {
+    switch (type) {
+      case 'sunday': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
+      case 'cell': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+      case 'department': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'present': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+      case 'absent': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300';
+      case 'absent_with_reason': return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300';
+    }
+  };
+
+  const exportToCSV = () => {
+    if (!memberData) return;
+    
+    setExporting(true);
+    
+    try {
+      // Prepare CSV data
+      const csvData = [
+        [`Member Absence Report: ${memberData.name} ${memberData.surname}`, `Generated: ${new Date().toLocaleDateString()}`],
+        [],
+        ['Member Information'],
+        ['Field', 'Value'],
+        ['Name', `${memberData.name} ${memberData.surname}`],
+        ['Phone', memberData.phone || 'N/A'],
+        ['Residence', memberData.residence || 'N/A'],
+        ['Gender', memberData.gender],
+        ['Status', memberData.status],
+        ['Cell Group', memberData.cell_group_name || 'N/A'],
+        ['Departments', memberData.department_names.join(', ') || 'N/A'],
+        ['Member Since', formatDate(memberData.member_since)],
+        ['Is Hidden', memberData.is_hidden ? 'Yes' : 'No'],
+        [],
+        ['Attendance Statistics'],
+        ['Total Events', memberData.total_events],
+        ['Total Present', memberData.total_present],
+        ['Total Absences', memberData.total_absences],
+        ['Absence Rate', `${memberData.absence_rate}%`],
+        ['Consecutive Absences', memberData.consecutive_absences],
+        ['Last Attended', formatDate(memberData.last_attended_date)],
+        [],
+        ['Detailed Absence Records'],
+        ['Date', 'Event Name', 'Event Type', 'Attendance Status', 'Location', 'Notes'],
+        ...memberData.absence_records.map(record => [
+          formatDate(record.event_date),
+          record.event_name,
+          record.event_type.toUpperCase(),
+          record.attendance_status.replace('_', ' ').toUpperCase(),
+          record.event_location || 'N/A',
+          record.notes || 'N/A'
+        ])
+      ];
+
+      // Convert to CSV string
+      const csvString = csvData.map(row => 
+        row.map(cell => `"${cell}"`).join(',')
+      ).join('\n');
+
+      // Create download link
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `absence-report-${memberData.name}-${memberData.surname}-${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+          <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Loading Details...</h3>
+          </div>
+          <div className="p-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading member absence details...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!memberData) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+          <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Error Loading Details</h3>
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+          <div className="p-8 text-center">
+            <AlertTriangle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <p className="text-gray-700 dark:text-gray-300 mb-4">Failed to load member details. The member may not exist or you may not have permission to view them.</p>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[95vh] overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-4 mb-2">
+                <div className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-2xl bg-gradient-to-br from-blue-500 to-purple-600">
+                  {memberData.name.charAt(0)}{memberData.surname.charAt(0)}
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {memberData.name} {memberData.surname}
+                  </h3>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Absence Rate: <span className={`font-bold ${memberData.absence_rate > 50 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      {memberData.absence_rate}%
+                    </span> ({memberData.total_absences} of {memberData.total_events} events)
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap gap-4 mt-4">
+                {memberData.cell_group_name && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <Users className="h-4 w-4" />
+                    <span>{memberData.cell_group_name}</span>
+                  </div>
+                )}
+                {memberData.department_names.length > 0 && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <Building className="h-4 w-4" />
+                    <span>{memberData.department_names.join(', ')}</span>
+                  </div>
+                )}
+                {memberData.phone && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <Phone className="h-4 w-4" />
+                    <span>{memberData.phone}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-2 self-stretch sm:self-auto">
+              <button
+                onClick={exportToCSV}
+                disabled={exporting}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+              >
+                <Download className="h-4 w-4" />
+                {exporting ? 'Exporting...' : 'Export CSV'}
+              </button>
+              <button 
+                onClick={onClose}
+                className="flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
+              >
+                <X className="h-4 w-4" />
+                Close
+              </button>
+            </div>
+          </div>
+          
+          {/* Tabs */}
+          <div className="px-6">
+            <div className="flex border-b border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'overview'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                onClick={() => setActiveTab('absences')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'absences'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Absence Records ({memberData.absence_records.filter(a => a.attendance_status !== 'present').length})
+              </button>
+              <button
+                onClick={() => setActiveTab('departments')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'departments'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Departments ({memberData.department_attendance.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('patterns')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'patterns'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Patterns
+              </button>
+              <button
+                onClick={() => setActiveTab('monthly')}
+                className={`px-4 py-3 font-medium text-sm transition-colors relative ${
+                  activeTab === 'monthly'
+                    ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                Monthly Trends
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="overflow-y-auto max-h-[calc(95vh-200px)] p-6">
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              {/* Quick Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BarChart3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <h4 className="font-semibold text-blue-700 dark:text-blue-300">Overall Attendance</h4>
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                    {memberData.absence_rate}%
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {memberData.total_present} present / {memberData.total_events} events
+                  </div>
+                </div>
+                
+                <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingDown className="h-5 w-5 text-red-600 dark:text-red-400" />
+                    <h4 className="font-semibold text-red-700 dark:text-red-300">Total Absences</h4>
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                    {memberData.total_absences}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {memberData.consecutive_absences} consecutive
+                  </div>
+                </div>
+                
+                <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="h-5 w-5 text-green-600 dark:text-green-400" />
+                    <h4 className="font-semibold text-green-700 dark:text-green-300">Last Attended</h4>
+                  </div>
+                  <div className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+                    {formatDate(memberData.last_attended_date)}
+                  </div>
+                  {memberData.last_attended_date && (
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      {Math.floor((new Date().getTime() - new Date(memberData.last_attended_date).getTime()) / (1000 * 60 * 60 * 24))} days ago
+                    </div>
+                  )}
+                </div>
+                
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                    <h4 className="font-semibold text-amber-700 dark:text-amber-300">Member Since</h4>
+                  </div>
+                  <div className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+                    {formatDate(memberData.member_since)}
+                  </div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {Math.floor((new Date().getTime() - new Date(memberData.member_since).getTime()) / (1000 * 60 * 60 * 24))} days
+                  </div>
+                </div>
+              </div>
+
+              {/* Member Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
+                  <h4 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Member Information
+                  </h4>
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Status:</span>
+                      <span className={`font-medium ${memberData.status === 'active' ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                        {memberData.status}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Gender:</span>
+                      <span className="font-medium text-gray-900 dark:text-white">{memberData.gender}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Residence:</span>
+                      <span className="font-medium text-gray-900 dark:text-white">{memberData.residence || 'N/A'}</span>
+                    </div>
+                    {memberData.baptism && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Baptism Date:</span>
+                        <span className="font-medium text-gray-900 dark:text-white">{formatDate(memberData.baptism)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Visibility:</span>
+                      <span className={`font-medium ${memberData.is_hidden ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                        {memberData.is_hidden ? 'Hidden (Non-active)' : 'Visible (Active)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
+                  <h4 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Group Information
+                  </h4>
+                  <div className="space-y-4">
+                    {memberData.cell_group_name ? (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Users className="h-4 w-4 text-blue-500" />
+                          <span className="font-medium text-gray-900 dark:text-white">Cell Group:</span>
+                        </div>
+                        <div className="ml-6">
+                          <div className="text-gray-700 dark:text-gray-300">{memberData.cell_group_name}</div>
+                          {memberData.cell_group_location && (
+                            <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {memberData.cell_group_location}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 dark:text-gray-400">No cell group assigned</div>
+                    )}
+                    
+                    {memberData.department_names.length > 0 ? (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Building className="h-4 w-4 text-purple-500" />
+                          <span className="font-medium text-gray-900 dark:text-white">Departments:</span>
+                        </div>
+                        <div className="ml-6">
+                          <div className="flex flex-wrap gap-2">
+                            {memberData.department_names.map((dept, index) => (
+                              <span key={index} className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded text-sm">
+                                {dept}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 dark:text-gray-400">No departments assigned</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Absences */}
+              {memberData.absence_records.filter(a => a.attendance_status !== 'present').length > 0 && (
+                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
+                  <h4 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-500" />
+                    Recent Absences
+                  </h4>
+                  <div className="space-y-3">
+                    {memberData.absence_records
+                      .filter(a => a.attendance_status !== 'present')
+                      .slice(0, 5)
+                      .map((record, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <div className={`px-3 py-1 rounded-full text-xs font-medium ${getEventTypeColor(record.event_type)}`}>
+                              {record.event_type.toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="font-medium text-gray-900 dark:text-white">{record.event_name}</div>
+                              <div className="text-sm text-gray-600 dark:text-gray-400">{formatDate(record.event_date)}</div>
+                            </div>
+                          </div>
+                          <div className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(record.attendance_status)}`}>
+                            {record.attendance_status.replace('_', ' ').toUpperCase()}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  {memberData.absence_records.filter(a => a.attendance_status !== 'present').length > 5 && (
+                    <button
+                      onClick={() => setActiveTab('absences')}
+                      className="mt-4 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center gap-1"
+                    >
+                      View all {memberData.absence_records.filter(a => a.attendance_status !== 'present').length} absences
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'absences' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <h4 className="font-semibold text-gray-900 dark:text-white text-lg">
+                  All Attendance Records ({memberData.absence_records.length})
+                </h4>
+                <div className="flex gap-2">
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
+                    <option value="all">All Status</option>
+                    <option value="present">Present Only</option>
+                    <option value="absent">Absent Only</option>
+                  </select>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
+                    <option value="all">All Event Types</option>
+                    <option value="sunday">Sunday Services</option>
+                    <option value="cell">Cell Groups</option>
+                    <option value="department">Departments</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead>
+                    <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 py-3">Date</th>
+                      <th className="px-3 py-3">Event</th>
+                      <th className="px-3 py-3">Type</th>
+                      <th className="px-3 py-3">Location</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-3 py-3">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {memberData.absence_records.map((record, index) => (
+                      <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {formatDate(record.event_date)}
+                          </div>
+                        </td>
+                        <td className="px-3 py-4">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {record.event_name}
+                          </div>
+                          {record.invited_by && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              Invited by: {record.invited_by}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getEventTypeColor(record.event_type)}`}>
+                            {record.event_type.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-600 dark:text-gray-400">
+                          {record.event_location || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(record.attendance_status)}`}>
+                            {record.attendance_status.replace('_', ' ').toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-600 dark:text-gray-400 max-w-xs truncate" title={record.notes || ''}>
+                          {record.notes || 'No notes'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {memberData.absence_records.length === 0 && (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                  <CalendarDays className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                  <p className="text-lg">No attendance records found for this member</p>
+                  <p className="text-sm mt-2">This member may not have been invited to any events yet</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'departments' && (
+            <div className="space-y-6">
+              <h4 className="font-semibold text-gray-900 dark:text-white text-lg">
+                Department Attendance ({memberData.department_attendance.length})
+              </h4>
+              
+              {memberData.department_attendance.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {memberData.department_attendance.map((dept, index) => (
+                    <div key={index} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Building className="h-5 w-5 text-purple-500" />
+                        <h5 className="font-semibold text-gray-900 dark:text-white">{dept.department_name}</h5>
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Attendance Rate</span>
+                            <span className={`text-lg font-bold ${
+                              dept.attendance_rate >= 80 ? 'text-green-600 dark:text-green-400' :
+                              dept.attendance_rate >= 60 ? 'text-amber-600 dark:text-amber-400' :
+                              'text-red-600 dark:text-red-400'
+                            }`}>
+                              {dept.attendance_rate}%
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                            <div 
+                              className={`h-2 rounded-full ${
+                                dept.attendance_rate >= 80 ? 'bg-green-500' :
+                                dept.attendance_rate >= 60 ? 'bg-amber-500' :
+                                'bg-red-500'
+                              }`}
+                              style={{ width: `${dept.attendance_rate}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="text-center">
+                            <div className="text-2xl font-bold text-gray-900 dark:text-white">{dept.total_meetings}</div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">Total Meetings</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-2xl font-bold text-red-600 dark:text-red-400">{dept.absences}</div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">Absences</div>
+                          </div>
+                        </div>
+                        
+                        {dept.last_attended && (
+                          <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Last Attended</div>
+                            <div className="font-medium text-gray-900 dark:text-white">
+                              {formatDate(dept.last_attended)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                  <Building className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                  <p className="text-lg">No department attendance records found</p>
+                  <p className="text-sm mt-2">This member may not be assigned to any departments</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'patterns' && (
+            <div className="space-y-6">
+              <h4 className="font-semibold text-gray-900 dark:text-white text-lg">
+                Absence Patterns Analysis
+              </h4>
+              
+              {memberData.absence_patterns.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <h5 className="font-medium text-gray-900 dark:text-white">Most Common Patterns</h5>
+                    <div className="space-y-3">
+                      {memberData.absence_patterns.slice(0, 5).map((pattern, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {pattern.pattern}
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-lg font-bold text-gray-900 dark:text-white">
+                              {pattern.count}
+                            </div>
+                            <div className="w-24 bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                              <div 
+                                className="h-2 rounded-full bg-blue-500"
+                                style={{ width: `${pattern.percentage}%` }}
+                              ></div>
+                            </div>
+                            <div className="text-sm font-medium text-blue-600 dark:text-blue-400 w-10 text-right">
+                              {pattern.percentage}%
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <h5 className="font-medium text-gray-900 dark:text-white">Insights</h5>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-6">
+                      <div className="space-y-4">
+                        {memberData.absence_patterns[0] && (
+                          <div>
+                            <div className="font-semibold text-blue-700 dark:text-blue-300">Primary Pattern:</div>
+                            <div className="text-gray-900 dark:text-white mt-1">
+                              {memberData.absence_patterns[0].pattern} ({memberData.absence_patterns[0].percentage}% of absences)
+                            </div>
+                          </div>
+                        )}
+                        
+                        {memberData.consecutive_absences >= 3 && (
+                          <div>
+                            <div className="font-semibold text-red-700 dark:text-red-300">⚠️ Concern:</div>
+                            <div className="text-gray-900 dark:text-white mt-1">
+                              Has {memberData.consecutive_absences} consecutive absences
+                            </div>
+                          </div>
+                        )}
+                        
+                        {memberData.absence_rate > 50 && (
+                          <div>
+                            <div className="font-semibold text-amber-700 dark:text-amber-300">⚠️ Alert:</div>
+                            <div className="text-gray-900 dark:text-white mt-1">
+                              Overall absence rate is {memberData.absence_rate}% (above 50%)
+                            </div>
+                          </div>
+                        )}
+                        
+                        {memberData.last_attended_date && 
+                          (new Date().getTime() - new Date(memberData.last_attended_date).getTime()) > (30 * 24 * 60 * 60 * 1000) && (
+                          <div>
+                            <div className="font-semibold text-red-700 dark:text-red-300">⚠️ Critical:</div>
+                            <div className="text-gray-900 dark:text-white mt-1">
+                              Last attended over 30 days ago
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                  <AlertTriangle className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                  <p className="text-lg">No absence patterns to analyze</p>
+                  <p className="text-sm mt-2">This member has no recorded absences</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'monthly' && (
+            <div className="space-y-6">
+              <h4 className="font-semibold text-gray-900 dark:text-white text-lg">
+                Monthly Attendance Trends
+              </h4>
+              
+              {memberData.monthly_stats.length > 0 ? (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {memberData.monthly_stats.slice(-4).reverse().map((month, index) => (
+                      <div key={index} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
+                        <div className="font-semibold text-gray-900 dark:text-white mb-4">
+                          {month.month} {month.year}
+                        </div>
+                        
+                        <div className="space-y-4">
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">Attendance</span>
+                              <span className={`text-lg font-bold ${
+                                month.attendance_rate >= 80 ? 'text-green-600 dark:text-green-400' :
+                                month.attendance_rate >= 60 ? 'text-amber-600 dark:text-amber-400' :
+                                'text-red-600 dark:text-red-400'
+                              }`}>
+                                {month.attendance_rate}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                              <div 
+                                className={`h-2 rounded-full ${
+                                  month.attendance_rate >= 80 ? 'bg-green-500' :
+                                  month.attendance_rate >= 60 ? 'bg-amber-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${month.attendance_rate}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-gray-900 dark:text-white">{month.total_events}</div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">Events</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-red-600 dark:text-red-400">{month.absences}</div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">Absences</div>
+                            </div>
+                          </div>
+                          
+                          <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <div className="text-sm text-gray-600 dark:text-gray-400">Trend</div>
+                            <div className={`font-medium ${
+                              month.trend === 'improving' ? 'text-green-600 dark:text-green-400' :
+                              month.trend === 'declining' ? 'text-red-600 dark:text-red-400' :
+                              'text-amber-600 dark:text-amber-400'
+                            }`}>
+                              {month.trend.toUpperCase()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Year-over-year comparison */}
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
+                    <h5 className="font-medium text-gray-900 dark:text-white mb-4">Yearly Comparison</h5>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full">
+                        <thead>
+                          <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
+                            <th className="px-3 py-2">Year</th>
+                            <th className="px-3 py-2">Months</th>
+                            <th className="px-3 py-2">Total Events</th>
+                            <th className="px-3 py-2">Avg Attendance</th>
+                            <th className="px-3 py-2">Total Absences</th>
+                            <th className="px-3 py-2">Trend</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(
+                            memberData.monthly_stats.reduce((acc: any, month) => {
+                              if (!acc[month.year]) {
+                                acc[month.year] = {
+                                  months: [],
+                                  totalEvents: 0,
+                                  totalAbsences: 0,
+                                  attendanceRates: []
+                                };
+                              }
+                              acc[month.year].months.push(month.month);
+                              acc[month.year].totalEvents += month.total_events;
+                              acc[month.year].totalAbsences += month.absences;
+                              acc[month.year].attendanceRates.push(month.attendance_rate);
+                              return acc;
+                            }, {})
+                          ).map(([year, data]: [string, any]) => (
+                            <tr key={year} className="border-t border-gray-200 dark:border-gray-700">
+                              <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">{year}</td>
+                              <td className="px-3 py-3 text-gray-600 dark:text-gray-400">{data.months.join(', ')}</td>
+                              <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">{data.totalEvents}</td>
+                              <td className="px-3 py-3">
+                                <span className={`font-bold ${
+                                  Math.round(data.attendanceRates.reduce((a: number, b: number) => a + b, 0) / data.attendanceRates.length) >= 80 ? 'text-green-600 dark:text-green-400' :
+                                  Math.round(data.attendanceRates.reduce((a: number, b: number) => a + b, 0) / data.attendanceRates.length) >= 60 ? 'text-amber-600 dark:text-amber-400' :
+                                  'text-red-600 dark:text-red-400'
+                                }`}>
+                                  {Math.round(data.attendanceRates.reduce((a: number, b: number) => a + b, 0) / data.attendanceRates.length)}%
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-red-600 dark:text-red-400 font-medium">{data.totalAbsences}</td>
+                              <td className="px-3 py-3">
+                                <span className="text-amber-600 dark:text-amber-400 font-medium">STABLE</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                  <Calendar className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                  <p className="text-lg">No monthly data available</p>
+                  <p className="text-sm mt-2">Insufficient attendance records for trend analysis</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Add missing imports for the DetailedAbsenceModal
+import { Clock, CalendarDays, Mail, ChevronRight as ChevronRightIcon } from 'lucide-react';
 
 interface StatCard {
   icon: any;
@@ -273,6 +1501,7 @@ const Analytics = () => {
     show_only_active: true
   });
   const [selectedAbsenceMember, setSelectedAbsenceMember] = useState<DetailedAbsenceRecord | null>(null);
+  const [selectedMemberForDetailedView, setSelectedMemberForDetailedView] = useState<string | null>(null);
 
   const defaultDateFrom = new Date();
   defaultDateFrom.setDate(defaultDateFrom.getDate() - 30);
@@ -1281,6 +2510,17 @@ const Analytics = () => {
     setSelectedAbsenceMember(null);
   };
 
+  const openDetailedAbsenceModal = (memberId: string) => {
+    if (!currentUserCanViewMemberDetails) {
+      return;
+    }
+    setSelectedMemberForDetailedView(memberId);
+  };
+
+  const closeDetailedAbsenceModal = () => {
+    setSelectedMemberForDetailedView(null);
+  };
+
   const AbsenceMemberDetailModal = ({ member }: { member: DetailedAbsenceRecord }) => (
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-6">
@@ -1357,6 +2597,16 @@ const Analytics = () => {
       </div>
 
       <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => {
+            setSelectedAbsenceMember(null);
+            openDetailedAbsenceModal(member.id);
+          }}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+        >
+          <FileText className="h-4 w-4" />
+          View Detailed Report
+        </button>
         {member.phone && (
           <a
             href={`tel:${member.phone}`}
@@ -2156,17 +3406,31 @@ const Analytics = () => {
                             {member.last_attended_date ? formatDate(member.last_attended_date) : 'Never'}
                           </td>
                           <td className="px-3 py-3">
-                            <button
-                              onClick={() => viewAbsenceMemberDetails(member)}
-                              disabled={!currentUserCanViewMemberDetails}
-                              className={`px-3 py-1 rounded text-sm font-medium ${
-                                currentUserCanViewMemberDetails 
-                                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                                  : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                              }`}
-                            >
-                              View Details
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => viewAbsenceMemberDetails(member)}
+                                disabled={!currentUserCanViewMemberDetails}
+                                className={`px-3 py-1 rounded text-sm font-medium ${
+                                  currentUserCanViewMemberDetails 
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                                    : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                                }`}
+                              >
+                                Quick View
+                              </button>
+                              <button
+                                onClick={() => openDetailedAbsenceModal(member.id)}
+                                disabled={!currentUserCanViewMemberDetails}
+                                className={`px-3 py-1 rounded text-sm font-medium ${
+                                  currentUserCanViewMemberDetails 
+                                    ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                                    : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                                }`}
+                              >
+                                <FileText className="h-3 w-3 inline mr-1" />
+                                Full Report
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -2699,6 +3963,14 @@ const Analytics = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Detailed Absence Modal */}
+        {selectedMemberForDetailedView && (
+          <DetailedAbsenceModal 
+            memberId={selectedMemberForDetailedView} 
+            onClose={closeDetailedAbsenceModal} 
+          />
         )}
 
         {/* Absence Alerts */}
