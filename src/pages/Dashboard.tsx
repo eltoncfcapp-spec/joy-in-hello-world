@@ -128,6 +128,11 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
   return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
 };
 
+// Check if user can view member details (only admin/pastor can view)
+const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
+  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
+};
+
 const Dashboard = () => {
   const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -166,6 +171,7 @@ const Dashboard = () => {
 
   // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
+  const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || []);
 
   // Filter functions - Filter out hidden members by default
   const getFilteredMembers = () => {
@@ -396,7 +402,7 @@ const Dashboard = () => {
         changeType: 'info',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
-        action: 'viewMembers'
+        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none'
       },
       { 
         icon: Calendar, 
@@ -426,7 +432,7 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-green-500 to-green-600',
         bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: 'viewMembers'
+        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none'
       },
       { 
         icon: TrendingUp, 
@@ -446,7 +452,7 @@ const Dashboard = () => {
         changeType: currentAbsentCount > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
         bgColor: 'bg-red-50 dark:bg-red-950/20',
-        action: 'viewAbsentMembers'
+        action: currentUserCanViewMemberDetails ? 'viewAbsentMembers' : 'none'
       },
     ];
 
@@ -458,23 +464,25 @@ const Dashboard = () => {
   const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
-    // Add recent NON-HIDDEN member joins
-    const recentActiveMembers = allMembers
-      .filter(m => m.is_hidden !== true && m.created_at)
-      .sort((a, b) => new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime())
-      .slice(0, 2);
+    // Add recent NON-HIDDEN member joins - only if user can view details
+    if (currentUserCanViewMemberDetails) {
+      const recentActiveMembers = allMembers
+        .filter(m => m.is_hidden !== true && m.created_at)
+        .sort((a, b) => new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime())
+        .slice(0, 2);
 
-    recentActiveMembers.forEach(member => {
-      activities.push({
-        id: activities.length + 1,
-        type: 'member',
-        message: `${member.name} ${member.surname} joined the church`,
-        time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
-        color: 'bg-green-500',
-        icon: Users,
-        action: () => openMemberDetail(member)
+      recentActiveMembers.forEach(member => {
+        activities.push({
+          id: activities.length + 1,
+          type: 'member',
+          message: `${member.name} ${member.surname} joined the church`,
+          time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
+          color: 'bg-green-500',
+          icon: Users,
+          action: () => openMemberDetail(member)
+        });
       });
-    });
+    }
 
     // Add recent sermons
     const recentSermons = allSermons.slice(0, 2);
@@ -622,6 +630,12 @@ const Dashboard = () => {
       return;
     }
 
+    // Check if user can view member details modals
+    if ((modalType === 'viewMembers' || modalType === 'viewAbsentMembers') && !currentUserCanViewMemberDetails) {
+      setError('You do not have permission to view member details');
+      return;
+    }
+
     setActiveModal(modalType);
     setError(null);
   };
@@ -641,6 +655,12 @@ const Dashboard = () => {
   };
 
   const openMemberDetail = (member: Member | AbsentMember) => {
+    // Check if user can view member details
+    if (!currentUserCanViewMemberDetails) {
+      setError('You do not have permission to view member details');
+      return;
+    }
+    
     // Convert AbsentMember to Member if needed
     const fullMember: Member = {
       id: member.id,
@@ -984,8 +1004,11 @@ const Dashboard = () => {
         {stats.map((stat) => (
           <button
             key={stat.label}
-            onClick={() => openModal(stat.action)}
-            className="group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={() => stat.action !== 'none' ? openModal(stat.action) : null}
+            disabled={stat.action === 'none'}
+            className={`group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              stat.action === 'none' ? 'cursor-default hover:scale-100 hover:shadow-none hover:border-gray-200/50 dark:hover:border-gray-700/50' : ''
+            }`}
           >
             <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300`} />
             
@@ -994,7 +1017,7 @@ const Dashboard = () => {
                 <div className={`p-3 rounded-xl ${stat.bgColor}`}>
                   <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
                 </div>
-                <MoreVertical className="h-5 w-5 text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-400 transition-colors" />
+                <MoreVertical className="h-5 w-5 text-gray-400 dark:text-gray-500" />
               </div>
               
               <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
@@ -1038,7 +1061,10 @@ const Dashboard = () => {
                   <button
                     key={activity.id}
                     onClick={activity.action}
-                    className="w-full flex items-center gap-4 p-3 rounded-xl hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+                    disabled={!currentUserCanViewMemberDetails && activity.type === 'member'}
+                    className={`w-full flex items-center gap-4 p-3 rounded-xl hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
+                      !currentUserCanViewMemberDetails && activity.type === 'member' ? 'cursor-default hover:bg-transparent dark:hover:bg-transparent' : ''
+                    }`}
                   >
                     <div className={`w-10 h-10 rounded-full ${activity.color} flex items-center justify-center flex-shrink-0`}>
                       <activity.icon className="h-5 w-5 text-white" />
@@ -1361,7 +1387,7 @@ const Dashboard = () => {
       )}
 
       {/* Absent Members Modal - Updated to mention hidden members */}
-      {activeModal === 'viewAbsentMembers' && (
+      {activeModal === 'viewAbsentMembers' && currentUserCanViewMemberDetails && (
         <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
           <div className="space-y-4">
             <p className="text-gray-600 dark:text-gray-400">
@@ -1435,7 +1461,7 @@ const Dashboard = () => {
       )}
 
       {/* Member Detail Modal */}
-      {activeModal === 'memberDetail' && selectedMember && (
+      {activeModal === 'memberDetail' && selectedMember && currentUserCanViewMemberDetails && (
         <Modal title="Member Details" size="max-w-md">
           <MemberDetailModal member={selectedMember} />
         </Modal>
@@ -1608,7 +1634,7 @@ const Dashboard = () => {
       )}
 
       {/* Members Modal - Updated with hidden members toggle */}
-      {activeModal === 'viewMembers' && (
+      {activeModal === 'viewMembers' && currentUserCanViewMemberDetails && (
         <Modal title="Members" size="max-w-4xl">
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
