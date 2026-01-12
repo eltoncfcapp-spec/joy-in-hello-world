@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link, useLocation, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, useLocation, Outlet, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { lazy, Suspense, useState, useEffect } from 'react';
@@ -214,6 +214,8 @@ function App() {
               <Route path="analytics" element={<Analytics />} />
               <Route path="admin" element={<Admin />} />
             </Route>
+            {/* Catch-all route - redirect unknown paths to login */}
+            <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </Suspense>
       </BrowserRouter>
