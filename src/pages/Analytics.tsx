@@ -1430,6 +1430,21 @@ interface DetailedAbsenceRecord {
   status: string;
 }
 
+// Check if user has permission to view analytics page
+const canViewAnalyticsPage = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
+  // Only pastors and admins can view this page
+  if (userRole === 'pastor' || userRole === 'admin') return true;
+  
+  // Check boolean role flags from profile
+  if (profile) {
+    if (profile.pastor_role || profile.is_admin || profile.is_developer) return true;
+    if (profile.admin_role === 'admin' || profile.admin_role === 'pastor') return true;
+  }
+  
+  // Check permissions array
+  return hasPermission(userPermissions, 'admin_access');
+};
+
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
@@ -1456,6 +1471,8 @@ const canViewMemberDetails = (userRole: string | null | undefined, userPermissio
 
 const Analytics = () => {
   const { profile } = useAuth();
+  const [hasAccess, setHasAccess] = useState(false);
+  const [accessLoading, setAccessLoading] = useState(true);
   const [stats, setStats] = useState<StatCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
@@ -1545,12 +1562,42 @@ const Analytics = () => {
     member_visibility: 'active'
   });
 
+  useEffect(() => {
+    checkAccess();
+  }, [profile]);
+
+  const checkAccess = async () => {
+    try {
+      setAccessLoading(true);
+      
+      // Check if user has pastor or admin role
+      const userCanView = canViewAnalyticsPage(
+        profile?.admin_role,
+        profile?.permissions || [],
+        profile
+      );
+      
+      setHasAccess(userCanView);
+      
+      if (userCanView) {
+        fetchAnalyticsData();
+      }
+    } catch (error) {
+      console.error('Error checking access:', error);
+      setHasAccess(false);
+    } finally {
+      setAccessLoading(false);
+    }
+  };
+
   void canEdit(profile?.admin_role, profile?.permissions || []); // Keep function call for potential future use
   const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile);
 
   useEffect(() => {
-    fetchAnalyticsData();
-  }, [filters]);
+    if (hasAccess) {
+      fetchAnalyticsData();
+    }
+  }, [filters, hasAccess]);
 
   const fetchAnalyticsData = async () => {
     try {
@@ -2921,6 +2968,50 @@ const Analytics = () => {
     
     setExporting(false);
   };
+
+  // Show access denied if user doesn't have permission
+  if (accessLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Checking access permissions...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasAccess) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center py-12">
+            <AlertTriangle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Access Denied</h1>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              You don't have permission to access the analytics page. Only pastors and administrators can view this page.
+            </p>
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-6 max-w-md mx-auto">
+              <p className="text-yellow-800 dark:text-yellow-300 mb-4">
+                <strong>Allowed Roles:</strong> Pastor, Admin
+              </p>
+              <p className="text-yellow-700 dark:text-yellow-400">
+                <strong>Restricted Roles:</strong> Regular Members, Group Leaders, Department Leaders, Deacons
+              </p>
+            </div>
+            <a
+              href="/dashboard"
+              className="inline-block mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+            >
+              Return to Dashboard
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
