@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link, useLocation, Outlet, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, useLocation, Outlet, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { lazy, Suspense, useState, useEffect } from 'react';
@@ -36,9 +36,34 @@ const PageLoader = () => (
   </div>
 );
 
+// Error Boundary Component
+const ErrorFallback = () => {
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    // Redirect to login after a brief moment
+    const timer = setTimeout(() => {
+      navigate('/login', { replace: true });
+    }, 2000);
+    
+    return () => clearTimeout(timer);
+  }, [navigate]);
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">Page Not Found</h1>
+        <p className="text-gray-600 mb-4">Redirecting to login...</p>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+      </div>
+    </div>
+  );
+};
+
 // Layout component with responsive sidebar
 const Layout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { logout, profile } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -53,6 +78,16 @@ const Layout = () => {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Handle navigation errors
+  useEffect(() => {
+    const handleNavigationError = () => {
+      navigate('/login', { replace: true });
+    };
+
+    window.addEventListener('unhandledrejection', handleNavigationError);
+    return () => window.removeEventListener('unhandledrejection', handleNavigationError);
+  }, [navigate]);
 
   const navigationItems = [
     { path: '/', icon: Home, label: 'Dashboard' },
@@ -138,7 +173,7 @@ const Layout = () => {
         )}
 
         {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-2">
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto max-h-[calc(100vh-300px)]">
           {navigationItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -188,7 +223,9 @@ const Layout = () => {
         {/* Page Content */}
         <main className="flex-1 overflow-auto p-4 md:p-6 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
           <div className="max-w-7xl mx-auto">
-            <Outlet />
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>
@@ -202,8 +239,11 @@ function App() {
       <BrowserRouter>
         <Suspense fallback={<PageLoader />}>
           <Routes>
+            {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/install" element={<Install />} />
+            
+            {/* Protected routes */}
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="members" element={<Members />} />
@@ -214,7 +254,8 @@ function App() {
               <Route path="analytics" element={<Analytics />} />
               <Route path="admin" element={<Admin />} />
             </Route>
-            {/* Catch-all route - redirect unknown paths to login */}
+            
+            {/* Catch-all route - redirect to login */}
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </Suspense>
