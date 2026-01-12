@@ -124,8 +124,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
           ),
           cell_groups!event_attendees_cell_group_id_fkey(name)
         `)
-        .eq('members_id', memberId)
-        .order('events.event_date', { ascending: false });
+        .eq('members_id', memberId);
 
       if (attendanceError) throw attendanceError;
 
@@ -141,18 +140,31 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
             departments!inner(name)
           )
         `)
-        .eq('member_id', memberId)
-        .order('department_meetings.meeting_date', { ascending: false });
+        .eq('member_id', memberId);
 
       if (deptError && !deptError.message.includes('does not exist')) {
         console.warn('Department attendance error:', deptError);
       }
+      
+      // Sort attendance records by event date (descending) in JavaScript
+      const sortedAttendanceRecords = (attendanceRecords || []).sort((a, b) => {
+        const dateA = new Date(a.events?.event_date || 0).getTime();
+        const dateB = new Date(b.events?.event_date || 0).getTime();
+        return dateB - dateA;
+      });
+      
+      // Sort department attendance by meeting date (descending) in JavaScript
+      const sortedDeptAttendance = (departmentAttendance || []).sort((a, b) => {
+        const dateA = new Date(a.department_meetings?.meeting_date || 0).getTime();
+        const dateB = new Date(b.department_meetings?.meeting_date || 0).getTime();
+        return dateB - dateA;
+      });
 
       // 4. Process the data
       const processedData = processMemberData(
         memberInfo,
-        attendanceRecords || [],
-        departmentAttendance || []
+        sortedAttendanceRecords,
+        sortedDeptAttendance
       );
 
       setMemberData(processedData);
