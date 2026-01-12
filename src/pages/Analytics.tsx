@@ -3001,12 +3001,12 @@ const Analytics = () => {
                 <strong>Restricted Roles:</strong> Regular Members, Group Leaders, Department Leaders, Deacons
               </p>
             </div>
-            <a
-              href="/dashboard"
-              className="inline-block mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-            >
-              Return to Dashboard
-            </a>
+<a
+  href="/"  // ← Changed from "/dashboard" to "/"
+  className="inline-block mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+>
+  Return to Home  // ← Changed text
+</a>
           </div>
         </div>
       </div>
