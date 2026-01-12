@@ -1426,8 +1426,20 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
   return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
 };
 
-const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
-  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
+const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
+  // Check admin_role string
+  if (userRole === 'pastor' || userRole === 'admin') return true;
+  
+  // Check boolean role flags from profile
+  if (profile) {
+    if (profile.pastor_role || profile.is_admin || profile.is_developer) return true;
+    if (profile.admin_role === 'admin' || profile.admin_role === 'pastor') return true;
+    // Group leaders and department leaders can also view member details
+    if (profile.group_leader || profile.department_leader || profile.deacon_role) return true;
+  }
+  
+  // Check permissions array
+  return hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
 };
 
 const Analytics = () => {
@@ -1522,7 +1534,7 @@ const Analytics = () => {
   });
 
   void canEdit(profile?.admin_role, profile?.permissions || []); // Keep function call for potential future use
-  const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || []);
+  const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile);
 
   useEffect(() => {
     fetchAnalyticsData();
