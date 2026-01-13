@@ -93,7 +93,7 @@ interface StatCard {
   changeType: 'positive' | 'negative' | 'info';
   color: string;
   bgColor: string;
-  action: string;
+  action: string; // This determines which modal opens when card is clicked
 }
 
 interface Activity {
@@ -402,7 +402,7 @@ const Dashboard = () => {
         changeType: 'info',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
-        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none'
+        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none' // Card opens 'viewMembers' modal
       },
       { 
         icon: Calendar, 
@@ -412,7 +412,7 @@ const Dashboard = () => {
         changeType: 'info',
         color: 'from-purple-500 to-purple-600',
         bgColor: 'bg-purple-50 dark:bg-purple-950/20',
-        action: 'viewEvents'
+        action: 'viewEvents' // Card opens 'viewEvents' modal
       },
       { 
         icon: BookOpen, 
@@ -422,7 +422,7 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
-        action: 'viewSermons'
+        action: 'viewSermons' // Card opens 'viewSermons' modal
       },
       { 
         icon: UserPlus, 
@@ -432,7 +432,7 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-green-500 to-green-600',
         bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none'
+        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none' // Card opens 'viewMembers' modal
       },
       { 
         icon: TrendingUp, 
@@ -442,7 +442,7 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-indigo-500 to-indigo-600',
         bgColor: 'bg-indigo-50 dark:bg-indigo-950/20',
-        action: 'viewGroups'
+        action: 'viewGroups' // Card opens 'viewGroups' modal
       },
       { 
         icon: AlertTriangle, 
@@ -452,7 +452,7 @@ const Dashboard = () => {
         changeType: currentAbsentCount > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
         bgColor: 'bg-red-50 dark:bg-red-950/20',
-        action: currentUserCanViewMemberDetails ? 'viewAbsentMembers' : 'none'
+        action: currentUserCanViewMemberDetails ? 'viewAbsentMembers' : 'none' // Card opens 'viewAbsentMembers' modal
       },
     ];
 
@@ -479,7 +479,7 @@ const Dashboard = () => {
           time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
           color: 'bg-green-500',
           icon: Users,
-          action: () => openMemberDetail(member)
+          action: () => openMemberDetail(member) // Activity item opens member detail
         });
       });
     }
@@ -494,7 +494,7 @@ const Dashboard = () => {
         time: formatTimeAgo(new Date(sermon.sermon_date)),
         color: 'bg-orange-500',
         icon: BookOpen,
-        action: () => openSermonDetail(sermon)
+        action: () => openSermonDetail(sermon) // Activity item opens sermon detail
       });
     });
 
@@ -508,7 +508,7 @@ const Dashboard = () => {
         time: formatTimeAgo(new Date(event.event_date)),
         color: 'bg-blue-500',
         icon: Calendar,
-        action: () => openEventDetail(event)
+        action: () => openEventDetail(event) // Activity item opens event detail
       });
     });
 
@@ -624,7 +624,9 @@ const Dashboard = () => {
     loadDashboardData();
   }, []);
 
+  // ============ KEY FUNCTION: Opens modals when cards are clicked ============
   const openModal = (modalType: string) => {
+    // Check edit permissions for certain modals
     if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
       setError('You do not have permission to perform this action');
       return;
@@ -636,6 +638,7 @@ const Dashboard = () => {
       return;
     }
 
+    // Set the active modal - this triggers the modal to render
     setActiveModal(modalType);
     setError(null);
   };
@@ -999,11 +1002,15 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Stats Grid */}
+      {/* ============ STATS GRID ============ */}
+      {/* This is where the card clicking happens */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 md:gap-6 mb-8">
         {stats.map((stat) => (
           <button
             key={stat.label}
+            // ============ CARD CLICK HANDLER ============
+            // When a stat card is clicked, it calls openModal with the stat.action value
+            // Example: stat.action = 'viewMembers' opens the members modal
             onClick={() => stat.action !== 'none' ? openModal(stat.action) : null}
             disabled={stat.action === 'none'}
             className={`group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -1038,6 +1045,7 @@ const Dashboard = () => {
                 {stat.change}
               </div>
               
+              {/* Show eye icon on hover for non-clickable cards */}
               {stat.action === 'none' && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <div className="bg-white/90 dark:bg-gray-800/90 p-2 rounded-lg shadow-lg">
@@ -1068,6 +1076,8 @@ const Dashboard = () => {
                 {displayedActivities.map((activity) => (
                   <button
                     key={activity.id}
+                    // ============ ACTIVITY ITEM CLICK HANDLER ============
+                    // Each activity item has its own action function
                     onClick={activity.action}
                     className="w-full flex items-center gap-4 p-3 rounded-xl hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
                   >
@@ -1120,8 +1130,10 @@ const Dashboard = () => {
                 {displayedEvents.map((event) => (
                   <div
                     key={event.id}
-                    className="w-full border-l-4 border-blue-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
+                    // ============ EVENT ITEM CLICK HANDLER ============
+                    // Clicking an event opens its detail modal
                     onClick={() => openEventDetail(event)}
+                    className="w-full border-l-4 border-blue-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
                   >
                     <div className="flex justify-between items-start mb-1">
                       <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
@@ -1150,7 +1162,10 @@ const Dashboard = () => {
                           </div>
                           <div 
                             className="relative group cursor-pointer overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-                            onClick={() => setExpandedImage(event.pamphlet_url)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent event detail from opening
+                              setExpandedImage(event.pamphlet_url);
+                            }}
                           >
                             <img 
                               src={event.pamphlet_url} 
@@ -1187,7 +1202,10 @@ const Dashboard = () => {
                           </div>
                           <div className="flex gap-1">
                             <button
-                              onClick={() => openQuickView(event)}
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent event detail from opening
+                                openQuickView(event);
+                              }}
                               className="p-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
                               title="Quick View"
                             >
@@ -1198,8 +1216,9 @@ const Dashboard = () => {
                               href={event.pamphlet_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="p-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-600 dark:text-green-400 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
+                              className="p-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-600 dark:text-green-400 rounded-lg transition-colors duration-200"
                               title="Download"
+                              onClick={(e) => e.stopPropagation()}
                             >
                               <Download className="h-3 w-3" />
                               <span className="hidden sm:inline">Download</span>
@@ -1245,8 +1264,10 @@ const Dashboard = () => {
                 {displayedSermons.map((sermon) => (
                   <div
                     key={sermon.id}
-                    className="w-full border-l-4 border-orange-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
+                    // ============ SERMON ITEM CLICK HANDLER ============
+                    // Clicking a sermon opens its detail modal
                     onClick={() => openSermonDetail(sermon)}
+                    className="w-full border-l-4 border-orange-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
                   >
                     <div className="flex justify-between items-start mb-1">
                       <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors line-clamp-2">
@@ -1391,6 +1412,10 @@ const Dashboard = () => {
           </div>
         </div>
       )}
+
+      {/* ============ MODALS ============ */}
+      {/* These modals are conditionally rendered based on activeModal state */}
+      {/* The openModal function sets activeModal, which triggers the corresponding modal to render */}
 
       {/* View Events Modal */}
       {activeModal === 'viewEvents' && (
