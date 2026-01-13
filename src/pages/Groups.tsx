@@ -1009,7 +1009,12 @@ const DeleteGroupModal: React.FC<DeleteGroupModalProps> = ({ isOpen, group, onCl
 };
 
 // Group Meeting Creation Step
-const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group: CellGroup; onMeetingCreated: () => void; onError: (message: string) => void; }) => {
+const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError, onMeetingsRefresh }: { 
+  group: CellGroup; 
+  onMeetingCreated: () => void; 
+  onError: (message: string) => void;
+  onMeetingsRefresh?: () => Promise<void>;
+}) => {
   const { canCreateGroupMeetings, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -1091,6 +1096,10 @@ const GroupMeetingCreationStep = ({ group, onMeetingCreated, onError }: { group:
         notes: ''
       });
       await loadRecentMeetings();
+      // Refresh the parent meetings list so the new meeting appears in step 2
+      if (onMeetingsRefresh) {
+        await onMeetingsRefresh();
+      }
       onMeetingCreated();
     } catch (error: any) {
       onError('Failed to create group meeting: ' + error.message);
@@ -3126,12 +3135,47 @@ interface GroupWorkflowProps {
   onClose: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
+  onMeetingsRefresh?: () => Promise<void>;
 }
 
-const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings, members: _members, onClose, onSuccess, onError }) => {
+const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ 
+  group, 
+  meetings: initialMeetings, 
+  members: _members, 
+  onClose, 
+  onSuccess, 
+  onError,
+  onMeetingsRefresh
+}) => {
   const { profile, canCreateGroupMeetings, canManageGroupAttendance, canAddGroupNewcomers, canCreateGroupReports } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedMeeting, setSelectedMeeting] = useState<GroupMeeting | null>(null);
+  const [localMeetings, setLocalMeetings] = useState<GroupMeeting[]>(initialMeetings);
+
+  // Update local meetings when initial meetings change
+  useEffect(() => {
+    setLocalMeetings(initialMeetings);
+  }, [initialMeetings]);
+
+  const loadMeetings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('group_id', group.id)
+        .order('meeting_date', { ascending: false });
+
+      if (error) throw error;
+      setLocalMeetings(data || []);
+      
+      // Also refresh parent meetings if callback provided
+      if (onMeetingsRefresh) {
+        await onMeetingsRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to load meetings:', error);
+    }
+  };
 
   const steps = [
     { number: 1, title: 'Schedule Meeting', description: 'Create a new meeting schedule' },
@@ -3190,13 +3234,14 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
               setCurrentStep(2);
             }}
             onError={onError}
+            onMeetingsRefresh={loadMeetings}
           />
         )}
 
         {currentStep === 2 && (
           <GroupAttendanceStep
             group={group}
-            meetings={meetings}
+            meetings={localMeetings}
             selectedMeeting={selectedMeeting}
             onMeetingSelect={setSelectedMeeting}
             onAttendanceSaved={() => {
@@ -3222,7 +3267,7 @@ const GroupManagementWorkflow: React.FC<GroupWorkflowProps> = ({ group, meetings
         {currentStep === 4 && (
           <GroupReportStep
             group={group}
-            meetings={meetings}
+            meetings={localMeetings}
             selectedMeeting={selectedMeeting}
             onMeetingSelect={setSelectedMeeting}
             onReportCreated={() => {
@@ -4432,6 +4477,11 @@ const Groups = () => {
                 onError={(message) => {
                   setError(message);
                   setTimeout(() => setError(null), 3000);
+                }}
+                onMeetingsRefresh={async () => {
+                  if (selectedGroup) {
+                    await loadMeetings(selectedGroup.id);
+                  }
                 }}
               />
             </div>
