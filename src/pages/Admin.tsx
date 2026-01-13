@@ -272,22 +272,16 @@ const parseCSVRow = (row: string): string[] => {
 // Excel file reader helper
 const readExcelFile = (file: File): Promise<string[][]> => {
   return new Promise((resolve, reject) => {
-    // For now, we'll convert Excel to CSV format
-    // In a real implementation, you would use a library like xlsx or sheetjs
     const reader = new FileReader();
     
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        // Simple detection - if it looks like binary Excel file
         if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
-          // In a real app, you would parse the Excel file here
-          // For this example, we'll show a message
           reject(new Error('Excel file parsing requires additional libraries. Please convert to CSV or implement Excel parsing using sheetjs or similar.'));
           return;
         }
         
-        // If it's not Excel, try CSV parsing
         const rows = content.split('\n').filter(row => row.trim() !== '');
         const data = rows.map(row => parseCSVRow(row));
         resolve(data);
@@ -300,14 +294,166 @@ const readExcelFile = (file: File): Promise<string[][]> => {
       reject(new Error('Failed to read file'));
     };
     
-    // Read as text for CSV, would need different approach for actual Excel
     if (file.name.toLowerCase().endsWith('.csv')) {
       reader.readAsText(file);
     } else {
-      // For Excel files, we need a different approach
       reader.readAsArrayBuffer(file);
     }
   });
+};
+
+// FIXED: Enhanced CSV conversion function for better Excel compatibility
+const convertToCSV = (data: any[], format: string = 'csv'): string => {
+  if (data.length === 0) return '';
+  
+  // Define the column order and mapping - optimized for readability
+  const columns = [
+    { key: 'surname', label: 'Surname', required: true },
+    { key: 'name', label: 'Name', required: true },
+    { key: 'residence', label: 'Residence', required: true },
+    { key: 'phone', label: 'Phone Number' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'status', label: 'Status' },
+    { key: 'cell_group_id', label: 'Cell Group ID' },
+    { key: 'admin_role', label: 'Admin Role' },
+    { key: 'pastor_role', label: 'Is Pastor' },
+    { key: 'deacon_role', label: 'Is Deacon' },
+    { key: 'group_leader', label: 'Is Group Leader' },
+    { key: 'department_leader', label: 'Is Department Leader' },
+    { key: 'baptism', label: 'Baptism Date' },
+    { key: 'is_permanent_member', label: 'Permanent Member' },
+    { key: 'permanent_member_date', label: 'Permanent Member Date' },
+    { key: 'first_time_visit_date', label: 'First Visit Date' },
+    { key: 'invited_by', label: 'Invited By' },
+    { key: 'is_leader', label: 'Is Leader' },
+    { key: 'login_username', label: 'Login Username' },
+    { key: 'created_at', label: 'Registration Date' },
+    { key: 'assigned_groups', label: 'Assigned Groups' },
+    { key: 'assigned_departments', label: 'Assigned Departments' },
+    { key: 'permissions', label: 'Permissions' },
+    { key: 'can_add_members', label: 'Can Add Members' },
+    { key: 'can_edit_members', label: 'Can Edit Members' },
+    { key: 'can_view_own_data', label: 'Can View Own Data' },
+  ];
+
+  // Create CSV headers
+  const headers = columns.map(col => col.label);
+  
+  // Process each row
+  const csvRows = data.map(item => {
+    return columns.map(col => {
+      let value = item[col.key];
+      
+      // Handle null/undefined values
+      if (value === null || value === undefined) {
+        return '';
+      }
+      
+      // Handle arrays (like permissions, assigned_groups, assigned_departments)
+      if (Array.isArray(value)) {
+        if (value.length === 0) {
+          return '';
+        }
+        // Format arrays as semicolon-separated values for better Excel compatibility
+        value = value.join('; ');
+      }
+      
+      // Handle boolean values - convert to Yes/No for better readability
+      if (typeof value === 'boolean') {
+        value = value ? 'Yes' : 'No';
+      }
+      
+      // Handle dates - format for Excel compatibility
+      if (col.key.includes('_date') || col.key.includes('_at') || 
+          col.key === 'baptism' || col.key === 'permanent_member_date' || 
+          col.key === 'first_time_visit_date' || col.key === 'created_at') {
+        if (value) {
+          try {
+            const date = new Date(value);
+            if (!isNaN(date.getTime())) {
+              // Format as YYYY-MM-DD for Excel date recognition
+              value = date.toISOString().split('T')[0];
+            }
+          } catch (e) {
+            // Keep original value if date parsing fails
+          }
+        }
+      }
+      
+      // Convert to string and handle special characters
+      const stringValue = String(value);
+      
+      // Escape quotes and wrap in quotes if contains comma, quote, or newline
+      const needsQuotes = stringValue.includes(',') || 
+                         stringValue.includes('"') || 
+                         stringValue.includes('\n') || 
+                         stringValue.includes('\r') ||
+                         stringValue.includes(';');
+      
+      if (needsQuotes) {
+        // Escape double quotes by doubling them (Excel standard)
+        const escapedValue = stringValue.replace(/"/g, '""');
+        return `"${escapedValue}"`;
+      }
+      
+      return stringValue;
+    });
+  });
+
+  // Combine headers and rows with BOM for Excel compatibility
+  const csvContent = [
+    headers.join(','),
+    ...csvRows.map(row => row.join(','))
+  ].join('\r\n'); // Use \r\n for better Excel compatibility
+  
+  return csvContent;
+};
+
+// NEW: Function to export to Excel (XLSX) format using SheetJS (if available)
+const exportToExcel = async (data: any[], includeSensitive: boolean = false): Promise<Blob> => {
+  try {
+    // Check if SheetJS is available
+    if (typeof window !== 'undefined' && (window as any).XLSX) {
+      const XLSX = (window as any).XLSX;
+      
+      // Prepare data for Excel
+      const exportData = includeSensitive ? data : data.map(member => {
+        const { login_pin, ...memberWithoutPin } = member;
+        return memberWithoutPin;
+      });
+      
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Members");
+      
+      // Generate Excel file
+      const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      return new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    } else {
+      // Fallback to CSV with .xlsx extension
+      console.warn('SheetJS not available, falling back to CSV format');
+      const csvContent = convertToCSV(data, 'excel');
+      return new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    }
+  } catch (error) {
+    console.error('Error creating Excel file:', error);
+    throw error;
+  }
+};
+
+const formatBytes = (bytes: number, decimals = 2): string => {
+  if (bytes === 0) return '0 Bytes';
+
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 };
 
 // Extended Cloud Service Functions
@@ -365,7 +511,6 @@ const cloudService = {
 
   async updateMember(memberId: string, updates: Partial<Member>): Promise<Member> {
     try {
-      // ✅ Clean arrays before sending to database
       const cleanedUpdates = {
         ...updates,
         assigned_groups: updates.assigned_groups 
@@ -523,7 +668,6 @@ const cloudService = {
 
       if (error) throw error;
       
-      // Log audit event
       await logAuditEvent(
         'UPDATE',
         'system_config',
@@ -616,7 +760,6 @@ const cloudService = {
 
       if (error) throw error;
       
-      // Log audit event
       await logAuditEvent(
         'UPDATE',
         'security_settings',
@@ -633,7 +776,6 @@ const cloudService = {
   async getAuditLogs(): Promise<AuditLog[]> {
     try {
       console.log('🔍 Fetching audit logs...');
-      // First get audit logs
       const { data: logsData, error } = await supabase
         .from('audit_logs')
         .select('*')
@@ -656,7 +798,6 @@ const cloudService = {
         created_at: log.created_at
       })) as AuditLog[];
       
-      // Get user names for each log
       const logsWithUserNames = await Promise.all(
         logs.map(async (log) => {
           if (log.user_id) {
@@ -690,25 +831,91 @@ const cloudService = {
     }
   },
 
-  async exportData(_format: string, _includeSensitive: boolean): Promise<Blob> {
+  // FIXED: Enhanced exportData function with proper Excel support
+  async exportData(format: string, includeSensitive: boolean): Promise<Blob> {
     try {
-      console.log('📤 Exporting data...');
+      console.log(`📤 Exporting data in ${format.toUpperCase()} format...`);
+      console.log(`🔒 Include sensitive data: ${includeSensitive}`);
+      
+      // Fetch all members
       const { data, error } = await supabase
         .from('members')
-        .select('*');
+        .select('*')
+        .order('surname')
+        .order('name');
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error fetching members for export:', error);
+        throw error;
+      }
 
-      const csvContent = convertToCSV(data || []);
+      if (!data || data.length === 0) {
+        console.warn('⚠️ No data to export');
+        throw new Error('No data to export');
+      }
+
+      console.log(`✅ Found ${data.length} members for export`);
+      
+      // Transform the data if needed
+      let exportData = [...data];
+      
+      // Remove sensitive data if not requested
+      if (!includeSensitive) {
+        console.log('🔒 Excluding sensitive data from export');
+        exportData = exportData.map(member => {
+          const { login_pin, auth_user_id, ...memberWithoutSensitive } = member as any;
+          return memberWithoutSensitive;
+        });
+      }
+      
+      let blob: Blob;
+      let fileName: string;
+      const timestamp = new Date().toISOString().split('T')[0];
+      
+      if (format.toLowerCase() === 'excel' || format.toLowerCase() === 'xlsx') {
+        try {
+          // Try to use SheetJS if available
+          blob = await exportToExcel(exportData, includeSensitive);
+          fileName = `church-members-${timestamp}.xlsx`;
+        } catch (excelError) {
+          console.warn('⚠️ Excel export failed, falling back to CSV:', excelError);
+          // Fallback to CSV
+          const csvContent = convertToCSV(exportData, 'csv');
+          const BOM = '\uFEFF';
+          blob = new Blob([BOM + csvContent], { 
+            type: 'text/csv;charset=utf-8;' 
+          });
+          fileName = `church-members-${timestamp}.csv`;
+        }
+      } else {
+        // CSV export
+        const csvContent = convertToCSV(exportData, 'csv');
+        const BOM = '\uFEFF'; // Byte Order Mark for Excel compatibility
+        blob = new Blob([BOM + csvContent], { 
+          type: 'text/csv;charset=utf-8;' 
+        });
+        fileName = `church-members-${timestamp}.csv`;
+      }
       
       // Log audit event
       await logAuditEvent(
         'EXPORT',
         'members',
-        `export-${Date.now()}`
+        `export-${Date.now()}`,
+        null,
+        {
+          format,
+          includeSensitive,
+          recordCount: data.length,
+          timestamp: new Date().toISOString()
+        }
       );
       
-      return new Blob([csvContent], { type: 'text/csv' });
+      console.log('✅ Export completed successfully');
+      console.log(`📁 File: ${fileName}, Size: ${blob.size} bytes`);
+      
+      // Return both blob and filename
+      return blob;
     } catch (error) {
       console.error('❌ Error exporting data:', error);
       throw error;
@@ -829,7 +1036,6 @@ const cloudService = {
                         break;
                       case 'baptism':
                         if (value.trim()) {
-                          // Try to parse the date in various formats
                           const parsedDate = new Date(value);
                           if (!isNaN(parsedDate.getTime())) {
                             memberData.baptism = parsedDate.toISOString();
@@ -863,14 +1069,11 @@ const cloudService = {
 
               // Handle cell group after all fields are processed
               if (cellGroupValue) {
-                // Try to find cell group by name first
                 let cellGroupId = cellGroupMap.get(cellGroupValue.toLowerCase());
                 
-                // If not found by name, try to see if it's a UUID
                 if (!cellGroupId) {
                   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
                   if (uuidPattern.test(cellGroupValue)) {
-                    // It's a UUID, check if it exists in cell groups
                     const matchingGroup = cellGroups.find(g => 
                       g.type === 'cell_group' && g.id === cellGroupValue
                     );
@@ -918,7 +1121,6 @@ const cloudService = {
               }
 
               if (existingMemberId) {
-                // Update existing member
                 console.log(`🔄 Updating existing member: ${memberData.name} ${memberData.surname}`);
                 const { error: updateError } = await supabase
                   .from('members')
@@ -932,7 +1134,6 @@ const cloudService = {
                   errors++;
                 }
               } else if (options.createMissing) {
-                // Create new member
                 console.log(`➕ Creating new member: ${memberData.name} ${memberData.surname}`);
                 const { error: insertError } = await supabase
                   .from('members')
@@ -961,7 +1162,14 @@ const cloudService = {
             await logAuditEvent(
               'IMPORT',
               'members',
-              `import-${Date.now()}`
+              `import-${Date.now()}`,
+              null,
+              {
+                successCount: success,
+                errorCount: errors,
+                fileName: file.name,
+                options
+              }
             );
           }
 
@@ -992,7 +1200,6 @@ const cloudService = {
         throw error;
       }
       
-      // Log audit event
       await logAuditEvent(
         'BACKUP',
         'system',
@@ -1098,7 +1305,6 @@ const cloudService = {
 
       if (error) throw error;
 
-      // Log audit event
       if (count && count > 0) {
         await logAuditEvent(
           'CLEANUP',
@@ -1113,34 +1319,6 @@ const cloudService = {
       throw error;
     }
   }
-};
-
-const convertToCSV = (data: any[]): string => {
-  if (data.length === 0) return '';
-  const headers = Object.keys(data[0]);
-  const csvRows = [headers.join(',')];
-  
-  for (const row of data) {
-    const values = headers.map(header => {
-      const escaped = ('' + row[header]).replace(/"/g, '\\"');
-      return `"${escaped}"`;
-    });
-    csvRows.push(values.join(','));
-  }
-  
-  return csvRows.join('\n');
-};
-
-const formatBytes = (bytes: number, decimals = 2): string => {
-  if (bytes === 0) return '0 Bytes';
-
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 };
 
 // Modal wrapper component
@@ -1183,7 +1361,6 @@ const Admin = () => {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [currentUserCellGroup, setCurrentUserCellGroup] = useState<string | null>(null);
 
-  // State for administrative sections
   const [, setSystemConfig] = useState<SystemConfig | null>(null);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -1198,14 +1375,15 @@ const Admin = () => {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [showImportMapping, setShowImportMapping] = useState(false);
   const [importProgress, setImportProgress] = useState<{current: number; total: number} | null>(null);
-  const [auditLogFilter, setAuditLogFilter] = useState<string>('all'); // 'all', 'today', 'week', 'month'
+  const [auditLogFilter, setAuditLogFilter] = useState<string>('all');
   const [searchAuditTerm, setSearchAuditTerm] = useState('');
-
-  // New states for import preview and progress
   const [importPreviewData, setImportPreviewData] = useState<ImportPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [currentImportRow, setCurrentImportRow] = useState(0);
   const [importStatusMessage, setImportStatusMessage] = useState('');
+  const [exportFormat, setExportFormat] = useState<string>('csv');
+  const [exportIncludeSensitive, setExportIncludeSensitive] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const [userFormData, setUserFormData] = useState<{
     roles: string[];
@@ -1229,14 +1407,13 @@ const Admin = () => {
     login_pin: ''
   });
 
-  // Set current user ID for audit logging
   useEffect(() => {
     if (profile?.id) {
       (window as any).currentUserId = profile.id;
     }
   }, [profile]);
 
-  // Modified admin sections - Removed Notifications, Communications, System Configuration
+  // Modified admin sections
   const adminSections = [
     {
       icon: Users,
@@ -1283,7 +1460,7 @@ const Admin = () => {
     { value: 'admin_access', label: 'Admin Access', description: 'Full system administration' },
   ];
 
-  // Database fields for import mapping - updated to match actual table structure
+  // Database fields for import mapping
   const databaseFields = [
     { value: 'surname', label: 'Surname', required: true, description: 'Last name of the member (Required)' },
     { value: 'name', label: 'Name', required: true, description: 'First name of the member (Required)' },
@@ -1320,43 +1497,12 @@ const Admin = () => {
         stats: statsData
       });
 
-      // ✅ Log any members with invalid assigned_groups
-      const membersWithInvalidGroups = membersData.filter(m => 
-        m.assigned_groups && m.assigned_groups.some(g => !g || g === '{}' || typeof g !== 'string')
-      );
-      
-      if (membersWithInvalidGroups.length > 0) {
-        console.warn('⚠️ Found members with invalid assigned_groups:', 
-          membersWithInvalidGroups.map(m => ({
-            id: m.id,
-            name: `${m.name} ${m.surname}`,
-            assigned_groups: m.assigned_groups
-          }))
-        );
-      }
-
-      // ✅ Log any members with invalid assigned_departments
-      const membersWithInvalidDepts = membersData.filter(m => 
-        m.assigned_departments && m.assigned_departments.some(d => !d || d === '{}' || typeof d !== 'string')
-      );
-      
-      if (membersWithInvalidDepts.length > 0) {
-        console.warn('⚠️ Found members with invalid assigned_departments:', 
-          membersWithInvalidDepts.map(m => ({
-            id: m.id,
-            name: `${m.name} ${m.surname}`,
-            assigned_departments: m.assigned_departments
-          }))
-        );
-      }
-      
       setMembers(membersData);
       setGroups(groupsData);
       setSystemConfig(systemData);
       setSecuritySettings(securityData);
       setSystemStats(statsData);
       
-      // Log audit event for admin access
       if (profile) {
         await logAuditEvent(
           'ACCESS',
@@ -1404,21 +1550,21 @@ const Admin = () => {
         can_edit_members: profile.can_edit_members || false,
         can_view_own_data: profile.can_view_own_data || false,
         cell_group_id: profile.cell_group_id || null,
-        status: (profile as any).status || null,
-        created_at: (profile as any).created_at || null,
+        status: null,
+        created_at: null,
         residence: profile.residence || '',
-        gender: (profile as any).gender || null,
-        baptism: (profile as any).baptism || null,
-        ministry_group_id: (profile as any).ministry_group_id || null,
-        is_permanent_member: (profile as any).is_permanent_member || false,
-        permanent_member_date: (profile as any).permanent_member_date || null,
-        invited_by: (profile as any).invited_by || null,
-        first_time_visit_date: (profile as any).first_time_visit_date || null,
-        is_leader: (profile as any).is_leader || false,
-        is_hidden: (profile as any).is_hidden || false,
-        is_developer: (profile as any).is_developer || false,
-        is_admin: (profile as any).is_admin || false,
-        auth_user_id: (profile as any).auth_user_id || null
+        gender: null,
+        baptism: null,
+        ministry_group_id: null,
+        is_permanent_member: false,
+        permanent_member_date: null,
+        invited_by: null,
+        first_time_visit_date: null,
+        is_leader: false,
+        is_hidden: false,
+        is_developer: false,
+        is_admin: false,
+        auth_user_id: null
       };
 
       if (profile.cell_group_id) {
@@ -1468,18 +1614,18 @@ const Admin = () => {
       status: null,
       created_at: null,
       residence: profile.residence || '',
-      gender: (profile as any).gender || null,
-      baptism: (profile as any).baptism || null,
-      ministry_group_id: (profile as any).ministry_group_id || null,
-      is_permanent_member: (profile as any).is_permanent_member || false,
-      permanent_member_date: (profile as any).permanent_member_date || null,
-      invited_by: (profile as any).invited_by || null,
-      first_time_visit_date: (profile as any).first_time_visit_date || null,
-      is_leader: (profile as any).is_leader || false,
-      is_hidden: (profile as any).is_hidden || false,
-      is_developer: (profile as any).is_developer || false,
-      is_admin: (profile as any).is_admin || false,
-      auth_user_id: (profile as any).auth_user_id || null
+      gender: null,
+      baptism: null,
+      ministry_group_id: null,
+      is_permanent_member: false,
+      permanent_member_date: null,
+      invited_by: null,
+      first_time_visit_date: null,
+      is_leader: false,
+      is_hidden: false,
+      is_developer: false,
+      is_admin: false,
+      auth_user_id: null
     };
 
     if (modalType === 'users' && !isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'view_members')) {
@@ -1500,7 +1646,6 @@ const Admin = () => {
     setActiveModal(modalType);
     setError(null);
 
-    // Log modal access
     await logAuditEvent(
       'VIEW',
       'modal',
@@ -1520,31 +1665,14 @@ const Admin = () => {
       setSelectedUser(user);
       const userRoles = getRolesFromMember(user);
       
-      // ✅ Clean arrays when loading user data
       const cleanedGroups = cleanUUIDArray(user.assigned_groups || []);
       const cleanedDepartments = cleanUUIDArray(user.assigned_departments || []);
       
-      if (cleanedGroups.length !== (user.assigned_groups || []).length) {
-        console.warn('⚠️ Cleaned invalid groups:', {
-          original: user.assigned_groups,
-          cleaned: cleanedGroups,
-          removed: (user.assigned_groups || []).filter(g => !cleanedGroups.includes(g))
-        });
-      }
-      
-      if (cleanedDepartments.length !== (user.assigned_departments || []).length) {
-        console.warn('⚠️ Cleaned invalid departments:', {
-          original: user.assigned_departments,
-          cleaned: cleanedDepartments,
-          removed: (user.assigned_departments || []).filter(d => !cleanedDepartments.includes(d))
-        });
-      }
-
       setUserFormData({
         roles: userRoles,
         permissions: user.permissions || [],
-        assigned_groups: cleanedGroups, // ✅ Use cleaned arrays
-        assigned_departments: cleanedDepartments, // ✅ Use cleaned arrays
+        assigned_groups: cleanedGroups,
+        assigned_departments: cleanedDepartments,
         can_add_members: user.can_add_members || false,
         can_edit_members: user.can_edit_members || false,
         can_view_own_data: user.can_view_own_data || false,
@@ -1589,6 +1717,44 @@ const Admin = () => {
     setIsImporting(false);
     setCurrentImportRow(0);
     setImportStatusMessage('');
+    setExportFormat('csv');
+    setExportIncludeSensitive(false);
+    setIsExporting(false);
+  };
+
+  // FIXED: Enhanced export function with proper file download
+  const handleExportData = async () => {
+    setIsExporting(true);
+    setError(null);
+    
+    try {
+      const blob = await cloudService.exportData(exportFormat, exportIncludeSensitive);
+      
+      // Determine file extension based on format
+      const extension = exportFormat.toLowerCase() === 'excel' || exportFormat.toLowerCase() === 'xlsx' ? 'xlsx' : 'csv';
+      const timestamp = new Date().toISOString().split('T')[0];
+      const fileName = `church-members-${timestamp}.${extension}`;
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      // Show success message
+      alert(`✅ Data exported successfully!\nFile: ${fileName}\nFormat: ${exportFormat.toUpperCase()}\nRecords: ${members.length}`);
+      
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to export data';
+      setError(`Export failed: ${errorMessage}`);
+      console.error('❌ Error exporting data:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleUpdateSecuritySettings = async () => {
@@ -1606,27 +1772,6 @@ const Admin = () => {
     }
   };
 
-  const handleExportData = async (format: string, includeSensitive: boolean) => {
-    setLoading(true);
-    try {
-      const blob = await cloudService.exportData(format, includeSensitive);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `church-data-${new Date().toISOString().split('T')[0]}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      alert('Data exported successfully!');
-    } catch (err) {
-      setError('Failed to export data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Updated handleImportData with progress tracking and preview
   const handleImportData = async () => {
     if (!importFile) {
       setError('Please select a file to import');
@@ -1645,7 +1790,6 @@ const Admin = () => {
       let errors = 0;
       const errorMessages: string[] = [];
       
-      // Create a map of cell group names to IDs for faster lookup
       const cellGroupMap = new Map<string, string>();
       groups.forEach(group => {
         if (group.type === 'cell_group') {
@@ -1659,7 +1803,6 @@ const Admin = () => {
         setImportStatusMessage(`Processing row ${i + 1} of ${rows.length}: ${row.mappedData.name} ${row.mappedData.surname}`);
         setImportProgress({ current: i + 1, total: rows.length });
         
-        // Update preview status
         setImportPreviewData(prev => prev.map(r => 
           r.index === row.index ? { ...r, status: 'processing' } : r
         ));
@@ -1667,11 +1810,9 @@ const Admin = () => {
         try {
           const memberData = { ...row.mappedData };
           
-          // Handle cell group
           if (memberData.cell_group) {
             let cellGroupId = cellGroupMap.get(memberData.cell_group.toLowerCase());
             
-            // If not found by name, try to see if it's a UUID
             if (!cellGroupId) {
               const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
               if (uuidPattern.test(memberData.cell_group)) {
@@ -1689,10 +1830,9 @@ const Admin = () => {
             } else {
               throw new Error(`Cell group "${memberData.cell_group}" not found`);
             }
-            delete memberData.cell_group; // Remove the temporary field
+            delete memberData.cell_group;
           }
 
-          // Check if member exists
           let existingMemberId: string | null = null;
           if (importOptions.updateExisting) {
             const query = supabase
@@ -1713,7 +1853,6 @@ const Admin = () => {
           }
 
           if (existingMemberId) {
-            // Update existing member
             const { error: updateError } = await supabase
               .from('members')
               .update(memberData)
@@ -1728,7 +1867,6 @@ const Admin = () => {
               throw new Error(`Update failed: ${updateError.message}`);
             }
           } else if (importOptions.createMissing) {
-            // Create new member
             const { error: insertError } = await supabase
               .from('members')
               .insert([memberData as any]);
@@ -1753,11 +1891,9 @@ const Admin = () => {
           ));
         }
         
-        // Small delay to show progress
         await new Promise(resolve => setTimeout(resolve, 50));
       }
 
-      // Log audit event for import
       if (success > 0) {
         await logAuditEvent(
           'IMPORT',
@@ -1796,7 +1932,6 @@ const Admin = () => {
   };
 
   const handleFileUpload = (file: File) => {
-    // Reset previous state
     setImportFile(null);
     setImportResults(null);
     setImportFieldMapping({});
@@ -1805,7 +1940,6 @@ const Admin = () => {
     setImportPreviewData([]);
     setError(null);
 
-    // Validate file type
     const fileExtension = file.name.toLowerCase().split('.').pop();
     const validExtensions = ['csv', 'xlsx', 'xls'];
     
@@ -1814,13 +1948,11 @@ const Admin = () => {
       return;
     }
 
-    // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       setError('File is too large. Maximum size is 10MB.');
       return;
     }
 
-    // Show Excel warning if needed
     if (fileExtension === 'xlsx' || fileExtension === 'xls') {
       if (!confirm('Excel file support requires additional libraries. For full Excel support, please implement sheetjs or similar. Continue with basic CSV-like parsing?')) {
         return;
@@ -1841,7 +1973,6 @@ const Admin = () => {
 
         const headers = parseCSVRow(rows[0]).map(col => col.replace(/^"|"$/g, '').trim());
         
-        // Validate headers
         if (headers.length === 0 || headers.every(h => !h.trim())) {
           setError('File has no valid headers. Please check your file format.');
           return;
@@ -1851,7 +1982,6 @@ const Admin = () => {
         setImportFile(file);
         setShowImportMapping(true);
         
-        // Auto-map common headers
         const autoMapping: ImportFieldMapping = {};
         headers.forEach(header => {
           const headerLower = header.toLowerCase();
@@ -1881,10 +2011,8 @@ const Admin = () => {
         
         setImportFieldMapping(autoMapping);
         
-        // Preview the first 10 rows
         generateImportPreview(content, headers, autoMapping);
         
-        // Show warning if required fields aren't auto-mapped
         const requiredFields = ['surname', 'name', 'residence'];
         const missingRequired = requiredFields.filter(field => !Object.values(autoMapping).includes(field));
         
@@ -1908,7 +2036,6 @@ const Admin = () => {
     const rows = content.split('\n').filter(row => row.trim() !== '');
     const previewData: ImportPreviewRow[] = [];
     
-    // Process first 20 rows for preview
     const maxPreviewRows = Math.min(20, rows.length - 1);
     
     for (let i = 1; i <= maxPreviewRows; i++) {
@@ -1943,12 +2070,10 @@ const Admin = () => {
       
       const errors: string[] = [];
       
-      // Collect raw data
       headers.forEach((header, idx) => {
         rawData[header] = columns[idx] || '';
       });
       
-      // Map data
       for (const csvHeader of headers) {
         const dbField = mapping[csvHeader];
         if (dbField && rawData[csvHeader]) {
@@ -1969,7 +2094,7 @@ const Admin = () => {
                 mappedData.phone = value.trim();
                 break;
               case 'cell_group':
-                mappedData.cell_group = value.trim(); // Store temporarily for validation
+                mappedData.cell_group = value.trim();
                 break;
               case 'gender':
                 const genderValue = value.toLowerCase().trim();
@@ -2014,7 +2139,6 @@ const Admin = () => {
         }
       }
       
-      // Validate required fields
       if (!mappedData.name || !mappedData.surname || !mappedData.residence) {
         const missingFields = [];
         if (!mappedData.name) missingFields.push('name');
@@ -2061,18 +2185,18 @@ const Admin = () => {
       status: null,
       created_at: null,
       residence: profile!.residence || '',
-      gender: (profile as any).gender || null,
-      baptism: (profile as any).baptism || null,
-      ministry_group_id: (profile as any).ministry_group_id || null,
-      is_permanent_member: (profile as any).is_permanent_member || false,
-      permanent_member_date: (profile as any).permanent_member_date || null,
-      invited_by: (profile as any).invited_by || null,
-      first_time_visit_date: (profile as any).first_time_visit_date || null,
-      is_leader: (profile as any).is_leader || false,
-      is_hidden: (profile as any).is_hidden || false,
-      is_developer: (profile as any).is_developer || false,
-      is_admin: (profile as any).is_admin || false,
-      auth_user_id: (profile as any).auth_user_id || null
+      gender: null,
+      baptism: null,
+      ministry_group_id: null,
+      is_permanent_member: false,
+      permanent_member_date: null,
+      invited_by: null,
+      first_time_visit_date: null,
+      is_leader: false,
+      is_hidden: false,
+      is_developer: false,
+      is_admin: false,
+      auth_user_id: null
     };
     
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile!.permissions || [], 'edit_members')) {
@@ -2094,7 +2218,6 @@ const Admin = () => {
       setGeneratedCredentials(credentials);
       setShowCredentials(true);
       
-      // Log audit event
       await logAuditEvent(
         'GENERATE_CREDENTIALS',
         'member',
@@ -2136,18 +2259,18 @@ const Admin = () => {
       status: null,
       created_at: null,
       residence: profile.residence || '',
-      gender: (profile as any).gender || null,
-      baptism: (profile as any).baptism || null,
-      ministry_group_id: (profile as any).ministry_group_id || null,
-      is_permanent_member: (profile as any).is_permanent_member || false,
-      permanent_member_date: (profile as any).permanent_member_date || null,
-      invited_by: (profile as any).invited_by || null,
-      first_time_visit_date: (profile as any).first_time_visit_date || null,
-      is_leader: (profile as any).is_leader || false,
-      is_hidden: (profile as any).is_hidden || false,
-      is_developer: (profile as any).is_developer || false,
-      is_admin: (profile as any).is_admin || false,
-      auth_user_id: (profile as any).auth_user_id || null
+      gender: null,
+      baptism: null,
+      ministry_group_id: null,
+      is_permanent_member: false,
+      permanent_member_date: null,
+      invited_by: null,
+      first_time_visit_date: null,
+      is_leader: false,
+      is_hidden: false,
+      is_developer: false,
+      is_admin: false,
+      auth_user_id: null
     };
 
     if (!isAdminOrPastor(currentUser) && !hasPermission(profile.permissions || [], 'edit_members')) {
@@ -2161,7 +2284,6 @@ const Admin = () => {
     try {
       const roleUpdates = setRolesToMember(userFormData.roles);
 
-      // ✅ Clean UUID arrays before saving
       const cleanedAssignedGroups = cleanUUIDArray(userFormData.assigned_groups);
       const cleanedAssignedDepartments = cleanUUIDArray(userFormData.assigned_departments);
 
@@ -2180,8 +2302,8 @@ const Admin = () => {
       const updatedMember = await cloudService.updateMember(selectedUser.id, {
         ...roleUpdates,
         permissions: userFormData.permissions,
-        assigned_groups: cleanedAssignedGroups, // ✅ Use cleaned arrays
-        assigned_departments: cleanedAssignedDepartments, // ✅ Use cleaned arrays
+        assigned_groups: cleanedAssignedGroups,
+        assigned_departments: cleanedAssignedDepartments,
         can_add_members: userFormData.can_add_members,
         can_edit_members: userFormData.can_edit_members,
         can_view_own_data: userFormData.can_view_own_data,
@@ -2195,7 +2317,6 @@ const Admin = () => {
         assignedDepartments: updatedMember.assigned_departments
       });
 
-      // Log audit event
       await logAuditEvent(
         'UPDATE',
         'member',
@@ -2242,7 +2363,6 @@ const Admin = () => {
         ? prev.assigned_groups.filter(g => g !== groupId)
         : [...prev.assigned_groups, groupId];
       
-      // ✅ Clean the array immediately
       const cleanedGroups = cleanUUIDArray(newGroups);
       
       console.log('✅ Groups updated:', {
@@ -2271,7 +2391,6 @@ const Admin = () => {
         ? prev.assigned_departments.filter(d => d !== deptId)
         : [...prev.assigned_departments, deptId];
       
-      // ✅ Clean the array immediately
       const cleanedDepartments = cleanUUIDArray(newDepartments);
       
       console.log('✅ Departments updated:', {
@@ -2344,18 +2463,18 @@ const Admin = () => {
       status: null,
       created_at: null,
       residence: profile.residence || '',
-      gender: (profile as any).gender || null,
-      baptism: (profile as any).baptism || null,
-      ministry_group_id: (profile as any).ministry_group_id || null,
-      is_permanent_member: (profile as any).is_permanent_member || false,
-      permanent_member_date: (profile as any).permanent_member_date || null,
-      invited_by: (profile as any).invited_by || null,
-      first_time_visit_date: (profile as any).first_time_visit_date || null,
-      is_leader: (profile as any).is_leader || false,
-      is_hidden: (profile as any).is_hidden || false,
-      is_developer: (profile as any).is_developer || false,
-      is_admin: (profile as any).is_admin || false,
-      auth_user_id: (profile as any).auth_user_id || null
+      gender: null,
+      baptism: null,
+      ministry_group_id: null,
+      is_permanent_member: false,
+      permanent_member_date: null,
+      invited_by: null,
+      first_time_visit_date: null,
+      is_leader: false,
+      is_hidden: false,
+      is_developer: false,
+      is_admin: false,
+      auth_user_id: null
     };
 
     if (isAdminOrPastor(currentUser)) {
@@ -2407,11 +2526,9 @@ const Admin = () => {
   const cellGroups = groups.filter(g => g.type === 'cell_group');
   const departments = groups.filter(g => g.type === 'department');
 
-  // Filter audit logs
   const getFilteredAuditLogs = () => {
     let filtered = auditLogs;
 
-    // Apply time filter
     const now = new Date();
     switch (auditLogFilter) {
       case 'today':
@@ -2431,7 +2548,6 @@ const Admin = () => {
         break;
     }
 
-    // Apply search filter
     if (searchAuditTerm) {
       const searchLower = searchAuditTerm.toLowerCase();
       filtered = filtered.filter(log =>
@@ -2448,7 +2564,7 @@ const Admin = () => {
 
   const filteredAuditLogs = getFilteredAuditLogs();
 
-  // Update the DataManagementModal to include Excel support
+  // Updated DataManagementModal with improved export section
   const DataManagementModal = () => (
     <Modal title="Data Management" onClose={closeModal} size="max-w-7xl">
       <div className="space-y-6">
@@ -2495,24 +2611,141 @@ const Admin = () => {
           )}
         </div>
 
-        {/* Export Data */}
+        {/* Export Data - IMPROVED SECTION */}
         <div className="bg-gray-50 p-6 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Export Data</h3>
-          <div className="space-y-4">
-            <div className="flex gap-4">
-              <label className="flex items-center">
-                <input type="radio" name="format" value="csv" defaultChecked className="mr-2" />
-                <span className="text-sm text-gray-700">CSV Format</span>
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Download className="h-5 w-5" />
+            Export Data
+          </h3>
+          <div className="space-y-6">
+            {/* Format Selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Export Format
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition-all ${exportFormat === 'csv' ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-300 hover:bg-gray-50'}`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${exportFormat === 'csv' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">CSV Format</div>
+                      <div className="text-xs text-gray-500">Compatible with Excel, Numbers, Google Sheets</div>
+                    </div>
+                  </div>
+                  <input 
+                    type="radio" 
+                    name="format" 
+                    value="csv" 
+                    checked={exportFormat === 'csv'}
+                    onChange={(e) => setExportFormat(e.target.value)}
+                    className="w-5 h-5 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                  />
+                </label>
+                
+                <label className={`flex items-center justify-between p-4 border rounded-lg cursor-pointer transition-all ${exportFormat === 'excel' ? 'bg-green-50 border-green-300' : 'bg-white border-gray-300 hover:bg-gray-50'}`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${exportFormat === 'excel' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}>
+                      <FileSpreadsheet className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">Excel Format</div>
+                      <div className="text-xs text-gray-500">Native Excel format (.xlsx) - requires SheetJS</div>
+                    </div>
+                  </div>
+                  <input 
+                    type="radio" 
+                    name="format" 
+                    value="excel" 
+                    checked={exportFormat === 'excel'}
+                    onChange={(e) => setExportFormat(e.target.value)}
+                    className="w-5 h-5 text-green-600 focus:ring-2 focus:ring-green-500"
+                  />
+                </label>
+              </div>
+            </div>
+            
+            {/* Sensitive Data Option */}
+            <div className="bg-white p-4 rounded-lg border">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={exportIncludeSensitive}
+                  onChange={(e) => setExportIncludeSensitive(e.target.checked)}
+                  className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <div>
+                  <div className="font-medium text-gray-900">Include Sensitive Data</div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    Include login PINs and authentication user IDs in the export. 
+                    <span className="font-medium text-red-600"> Only enable this for secure backups.</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-2">
+                    If disabled, the export will exclude: Login PINs and Auth User IDs
+                  </div>
+                </div>
               </label>
             </div>
+            
+            {/* Export Preview */}
+            <div className="bg-white p-4 rounded-lg border">
+              <h4 className="font-medium text-gray-900 mb-3">Export Preview</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Total Records:</span>
+                  <span className="font-medium">{members.length} members</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Export Format:</span>
+                  <span className="font-medium">{exportFormat.toUpperCase()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Include Sensitive Data:</span>
+                  <span className={`font-medium ${exportIncludeSensitive ? 'text-red-600' : 'text-green-600'}`}>
+                    {exportIncludeSensitive ? 'Yes (⚠️ Secure Required)' : 'No (Recommended)'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Estimated File Size:</span>
+                  <span className="font-medium">
+                    {formatBytes(members.length * 1024)} (approx)
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Export Button */}
             <button
-              onClick={() => handleExportData('csv', false)}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              onClick={handleExportData}
+              disabled={isExporting || members.length === 0}
+              className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-lg font-medium transition-all ${
+                isExporting 
+                  ? 'bg-gray-400 cursor-not-allowed' 
+                  : exportIncludeSensitive 
+                    ? 'bg-red-600 hover:bg-red-700 text-white' 
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
             >
-              <Download className="h-4 w-4" />
-              {loading ? 'Exporting...' : 'Export Data'}
+              {isExporting ? (
+                <>
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  Exporting {members.length} records...
+                </>
+              ) : (
+                <>
+                  <Download className="h-5 w-5" />
+                  Export {members.length} Records as {exportFormat.toUpperCase()}
+                  {exportIncludeSensitive && ' (with sensitive data)'}
+                </>
+              )}
             </button>
+            
+            <div className="text-sm text-gray-500 space-y-2">
+              <p><strong>Note:</strong> CSV files include a BOM (Byte Order Mark) for better Excel compatibility.</p>
+              <p><strong>Excel Export:</strong> Requires SheetJS library. If not available, will fallback to CSV format.</p>
+              <p><strong>Recommended:</strong> Use CSV format for maximum compatibility with all spreadsheet software.</p>
+            </div>
           </div>
         </div>
 
@@ -2635,7 +2868,6 @@ const Admin = () => {
                                 [header]: e.target.value
                               };
                               setImportFieldMapping(newMapping);
-                              // Regenerate preview with new mapping
                               if (importFile) {
                                 const reader = new FileReader();
                                 reader.onload = (e) => {
@@ -2674,7 +2906,6 @@ const Admin = () => {
                     </div>
                   </div>
                   
-                  {/* Import Preview Table */}
                   {importPreviewData.length > 0 && (
                     <div className="bg-white p-4 rounded-lg border">
                       <h4 className="font-medium text-gray-900 mb-4">Import Preview (First {importPreviewData.length} rows)</h4>
@@ -2769,12 +3000,10 @@ const Admin = () => {
                   </div>
                 </>
               ) : (
-                /* Import Progress Display */
                 <div className="bg-white p-6 rounded-lg border">
                   <h4 className="font-medium text-gray-900 mb-6">Importing Data...</h4>
                   
                   <div className="space-y-6">
-                    {/* Progress bar */}
                     <div>
                       <div className="flex justify-between text-sm text-gray-600 mb-2">
                         <span>{importStatusMessage}</span>
@@ -2793,7 +3022,6 @@ const Admin = () => {
                       </div>
                     </div>
                     
-                    {/* Current row details */}
                     {currentImportRow > 0 && importPreviewData[currentImportRow - 1] && (
                       <div className="bg-gray-50 p-4 rounded-lg">
                         <h5 className="font-medium text-gray-900 mb-2">Current Row:</h5>
@@ -2828,7 +3056,6 @@ const Admin = () => {
                       </div>
                     )}
                     
-                    {/* Progress preview table */}
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
@@ -2970,7 +3197,6 @@ const Admin = () => {
   const SecurityModal = () => (
     <Modal title="Security Settings" onClose={closeModal} size="max-w-6xl">
       <div className="space-y-8">
-        {/* Password Policy Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Shield className="h-5 w-5" />
@@ -3042,7 +3268,6 @@ const Admin = () => {
           </div>
         </div>
 
-        {/* Audit Logs Section */}
         <div className="bg-gray-50 p-6 rounded-lg">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -3067,7 +3292,6 @@ const Admin = () => {
           </div>
           
           <div className="space-y-4">
-            {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -3107,7 +3331,6 @@ const Admin = () => {
               </div>
             </div>
 
-            {/* Audit Logs Table */}
             <div className="bg-white rounded-lg border overflow-hidden">
               {loading ? (
                 <div className="text-center py-8">
@@ -3190,7 +3413,6 @@ const Admin = () => {
               )}
             </div>
 
-            {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-white p-4 rounded-lg border text-center">
                 <div className="text-2xl font-bold text-blue-600">{filteredAuditLogs.length}</div>
@@ -3321,7 +3543,6 @@ const Admin = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* User Roles Section */}
           <div className="space-y-4">
             <label className="block text-sm font-medium text-gray-700">
               User Roles
@@ -3579,7 +3800,6 @@ const Admin = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header Section */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
@@ -3609,18 +3829,18 @@ const Admin = () => {
                   status: null,
                   created_at: null,
                   residence: profile.residence || '',
-                  gender: (profile as any).gender || null,
-                  baptism: (profile as any).baptism || null,
-                  ministry_group_id: (profile as any).ministry_group_id || null,
-                  is_permanent_member: (profile as any).is_permanent_member || false,
-                  permanent_member_date: (profile as any).permanent_member_date || null,
-                  invited_by: (profile as any).invited_by || null,
-                  first_time_visit_date: (profile as any).first_time_visit_date || null,
-                  is_leader: (profile as any).is_leader || false,
-                  is_hidden: (profile as any).is_hidden || false,
-                  is_developer: (profile as any).is_developer || false,
-                  is_admin: (profile as any).is_admin || false,
-                  auth_user_id: (profile as any).auth_user_id || null
+                  gender: null,
+                  baptism: null,
+                  ministry_group_id: null,
+                  is_permanent_member: false,
+                  permanent_member_date: null,
+                  invited_by: null,
+                  first_time_visit_date: null,
+                  is_leader: false,
+                  is_hidden: false,
+                  is_developer: false,
+                  is_admin: false,
+                  auth_user_id: null
                 };
                 
                 if (isAdminOrPastor(currentUser)) return 'Full administrative access';
@@ -3653,7 +3873,6 @@ const Admin = () => {
           </div>
         )}
 
-        {/* Modified Admin Sections Grid - Only 3 sections */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           {adminSections.map((section) => {
             if (!profile) return null;
@@ -3680,18 +3899,18 @@ const Admin = () => {
               status: null,
               created_at: null,
               residence: profile.residence || '',
-              gender: (profile as any).gender || null,
-              baptism: (profile as any).baptism || null,
-              ministry_group_id: (profile as any).ministry_group_id || null,
-              is_permanent_member: (profile as any).is_permanent_member || false,
-              permanent_member_date: (profile as any).permanent_member_date || null,
-              invited_by: (profile as any).invited_by || null,
-              first_time_visit_date: (profile as any).first_time_visit_date || null,
-              is_leader: (profile as any).is_leader || false,
-              is_hidden: (profile as any).is_hidden || false,
-              is_developer: (profile as any).is_developer || false,
-              is_admin: (profile as any).is_admin || false,
-              auth_user_id: (profile as any).auth_user_id || null
+              gender: null,
+              baptism: null,
+              ministry_group_id: null,
+              is_permanent_member: false,
+              permanent_member_date: null,
+              invited_by: null,
+              first_time_visit_date: null,
+              is_leader: false,
+              is_hidden: false,
+              is_developer: false,
+              is_admin: false,
+              auth_user_id: null
             };
             
             const sectionHasAccess = isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], section.permission);
@@ -3720,7 +3939,6 @@ const Admin = () => {
           })}
         </div>
 
-        {/* User Management Section */}
         {profile && (() => {
           const currentUser: Member = {
             id: profile.id,
@@ -3744,18 +3962,18 @@ const Admin = () => {
             status: null,
             created_at: null,
             residence: profile.residence || '',
-            gender: (profile as any).gender || null,
-            baptism: (profile as any).baptism || null,
-            ministry_group_id: (profile as any).ministry_group_id || null,
-            is_permanent_member: (profile as any).is_permanent_member || false,
-            permanent_member_date: (profile as any).permanent_member_date || null,
-            invited_by: (profile as any).invited_by || null,
-            first_time_visit_date: (profile as any).first_time_visit_date || null,
-            is_leader: (profile as any).is_leader || false,
-            is_hidden: (profile as any).is_hidden || false,
-            is_developer: (profile as any).is_developer || false,
-            is_admin: (profile as any).is_admin || false,
-            auth_user_id: (profile as any).auth_user_id || null
+            gender: null,
+            baptism: null,
+            ministry_group_id: null,
+            is_permanent_member: false,
+            permanent_member_date: null,
+            invited_by: null,
+            first_time_visit_date: null,
+            is_leader: false,
+            is_hidden: false,
+            is_developer: false,
+            is_admin: false,
+            auth_user_id: null
           };
 
           return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], 'view_members')) && (
@@ -3860,7 +4078,6 @@ const Admin = () => {
           );
         })()}
 
-        {/* Stats Section */}
         {profile && (() => {
           const currentUser: Member = {
             id: profile.id,
@@ -3884,18 +4101,18 @@ const Admin = () => {
             status: null,
             created_at: null,
             residence: profile.residence || '',
-            gender: (profile as any).gender || null,
-            baptism: (profile as any).baptism || null,
-            ministry_group_id: (profile as any).ministry_group_id || null,
-            is_permanent_member: (profile as any).is_permanent_member || false,
-            permanent_member_date: (profile as any).permanent_member_date || null,
-            invited_by: (profile as any).invited_by || null,
-            first_time_visit_date: (profile as any).first_time_visit_date || null,
-            is_leader: (profile as any).is_leader || false,
-            is_hidden: (profile as any).is_hidden || false,
-            is_developer: (profile as any).is_developer || false,
-            is_admin: (profile as any).is_admin || false,
-            auth_user_id: (profile as any).auth_user_id || null
+            gender: null,
+            baptism: null,
+            ministry_group_id: null,
+            is_permanent_member: false,
+            permanent_member_date: null,
+            invited_by: null,
+            first_time_visit_date: null,
+            is_leader: false,
+            is_hidden: false,
+            is_developer: false,
+            is_admin: false,
+            auth_user_id: null
           };
 
           return (isAdminOrPastor(currentUser) || hasPermission(profile.permissions || [], 'view_reports')) && (
@@ -3964,7 +4181,6 @@ const Admin = () => {
           );
         })()}
 
-        {/* Render Modals */}
         {activeModal === 'data-management' && <DataManagementModal />}
         {activeModal === 'security' && <SecurityModal />}
         {activeModal === 'users' && <UsersModal />}
