@@ -94,6 +94,7 @@ interface StatCard {
   color: string;
   bgColor: string;
   action: string;
+  requiresPermission: boolean; // New field to check if action requires permission
 }
 
 interface Activity {
@@ -104,6 +105,7 @@ interface Activity {
   color: string;
   icon: any;
   action: () => void;
+  requiresPermission: boolean; // New field to check if action requires permission
 }
 
 interface AbsentMember {
@@ -131,6 +133,21 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 // Check if user can view member details (only admin/pastor can view)
 const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
   return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
+};
+
+// Check if user can view events (everyone can view events)
+const canViewEvents = (): boolean => {
+  return true; // Everyone can view events
+};
+
+// Check if user can view sermons (everyone can view sermons)
+const canViewSermons = (): boolean => {
+  return true; // Everyone can view sermons
+};
+
+// Check if user can view groups (everyone can view groups)
+const canViewGroups = (): boolean => {
+  return true; // Everyone can view groups
 };
 
 const Dashboard = () => {
@@ -172,6 +189,9 @@ const Dashboard = () => {
   // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
   const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || []);
+  const currentUserCanViewEvents = canViewEvents();
+  const currentUserCanViewSermons = canViewSermons();
+  const currentUserCanViewGroups = canViewGroups();
 
   // Filter functions - Filter out hidden members by default
   const getFilteredMembers = () => {
@@ -402,7 +422,8 @@ const Dashboard = () => {
         changeType: 'info',
         color: 'from-blue-500 to-blue-600',
         bgColor: 'bg-blue-50 dark:bg-blue-950/20',
-        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none'
+        action: 'viewMembers',
+        requiresPermission: true // Only admin/pastor can view
       },
       { 
         icon: Calendar, 
@@ -412,7 +433,8 @@ const Dashboard = () => {
         changeType: 'info',
         color: 'from-purple-500 to-purple-600',
         bgColor: 'bg-purple-50 dark:bg-purple-950/20',
-        action: 'viewEvents'
+        action: 'viewEvents',
+        requiresPermission: false // Everyone can view
       },
       { 
         icon: BookOpen, 
@@ -422,7 +444,8 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
-        action: 'viewSermons'
+        action: 'viewSermons',
+        requiresPermission: false // Everyone can view
       },
       { 
         icon: UserPlus, 
@@ -432,7 +455,8 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-green-500 to-green-600',
         bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: currentUserCanViewMemberDetails ? 'viewMembers' : 'none'
+        action: 'viewMembers',
+        requiresPermission: true // Only admin/pastor can view
       },
       { 
         icon: TrendingUp, 
@@ -442,7 +466,8 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-indigo-500 to-indigo-600',
         bgColor: 'bg-indigo-50 dark:bg-indigo-950/20',
-        action: 'viewGroups'
+        action: 'viewGroups',
+        requiresPermission: false // Everyone can view
       },
       { 
         icon: AlertTriangle, 
@@ -452,7 +477,8 @@ const Dashboard = () => {
         changeType: currentAbsentCount > 0 ? 'negative' : 'positive',
         color: 'from-red-500 to-red-600',
         bgColor: 'bg-red-50 dark:bg-red-950/20',
-        action: currentUserCanViewMemberDetails ? 'viewAbsentMembers' : 'none'
+        action: 'viewAbsentMembers',
+        requiresPermission: true // Only admin/pastor can view
       },
     ];
 
@@ -479,7 +505,8 @@ const Dashboard = () => {
           time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
           color: 'bg-green-500',
           icon: Users,
-          action: () => openMemberDetail(member)
+          action: () => openMemberDetail(member),
+          requiresPermission: true // Requires permission to view member details
         });
       });
     }
@@ -494,7 +521,8 @@ const Dashboard = () => {
         time: formatTimeAgo(new Date(sermon.sermon_date)),
         color: 'bg-orange-500',
         icon: BookOpen,
-        action: () => openSermonDetail(sermon)
+        action: () => openSermonDetail(sermon),
+        requiresPermission: false // Everyone can view sermons
       });
     });
 
@@ -508,7 +536,8 @@ const Dashboard = () => {
         time: formatTimeAgo(new Date(event.event_date)),
         color: 'bg-blue-500',
         icon: Calendar,
-        action: () => openEventDetail(event)
+        action: () => openEventDetail(event),
+        requiresPermission: false // Everyone can view events
       });
     });
 
@@ -623,6 +652,31 @@ const Dashboard = () => {
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  // Check if user can perform a specific action based on stat card requirements
+  const canPerformAction = (action: string, requiresPermission: boolean) => {
+    if (!requiresPermission) return true; // No permission required
+    
+    // These actions require admin/pastor permission
+    if (action === 'viewMembers' || action === 'viewAbsentMembers') {
+      return currentUserCanViewMemberDetails;
+    }
+    
+    // These actions are open to everyone
+    if (action === 'viewEvents') {
+      return currentUserCanViewEvents;
+    }
+    
+    if (action === 'viewSermons') {
+      return currentUserCanViewSermons;
+    }
+    
+    if (action === 'viewGroups') {
+      return currentUserCanViewGroups;
+    }
+    
+    return false;
+  };
 
   const openModal = (modalType: string) => {
     if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
@@ -1001,45 +1055,70 @@ const Dashboard = () => {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 md:gap-6 mb-8">
-        {stats.map((stat) => (
-          <button
-            key={stat.label}
-            onClick={() => stat.action !== 'none' ? openModal(stat.action) : null}
-            disabled={stat.action === 'none'}
-            className={`group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 hover:scale-105 transition-all duration-300 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-              stat.action === 'none' ? 'cursor-default hover:scale-100 hover:shadow-none hover:border-gray-200/50 dark:hover:border-gray-700/50' : ''
-            }`}
-          >
-            <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300`} />
-            
-            <div className="relative z-10">
-              <div className="flex justify-between items-start mb-4">
-                <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                  <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+        {stats.map((stat) => {
+          const canClick = canPerformAction(stat.action, stat.requiresPermission);
+          
+          return (
+            <button
+              key={stat.label}
+              onClick={() => {
+                if (canClick && stat.action !== 'none') {
+                  openModal(stat.action);
+                } else if (!canClick && stat.action !== 'none') {
+                  setError('You do not have permission to view this content');
+                }
+              }}
+              disabled={!canClick}
+              className={`group relative bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 md:p-6 transition-all duration-300 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                canClick && stat.action !== 'none'
+                  ? 'hover:scale-105 hover:shadow-xl hover:border-gray-300/50 dark:hover:border-gray-600/50 cursor-pointer'
+                  : 'cursor-default'
+              } ${
+                !canClick ? 'opacity-90' : ''
+              }`}
+              title={!canClick ? 'You do not have permission to view this' : ''}
+            >
+              <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${stat.color} opacity-5 group-hover:opacity-10 transition-opacity duration-300 ${
+                !canClick ? 'group-hover:opacity-5' : ''
+              }`} />
+              
+              <div className="relative z-10">
+                <div className="flex justify-between items-start mb-4">
+                  <div className={`p-3 rounded-xl ${stat.bgColor}`}>
+                    <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
+                  </div>
+                  <MoreVertical className="h-5 w-5 text-gray-400 dark:text-gray-500" />
                 </div>
-                <MoreVertical className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                
+                <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                  {stat.value}
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 text-sm font-medium mb-3">
+                  {stat.label}
+                </p>
+                
+                <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                  stat.changeType === 'positive' 
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                    : stat.changeType === 'negative'
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                }`}>
+                  {getChangeIcon(stat.changeType)}
+                  {stat.change}
+                </div>
+                
+                {!canClick && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <div className="bg-white/90 dark:bg-gray-800/90 p-2 rounded-lg shadow-lg">
+                      <Eye className="h-4 w-4 text-gray-500" />
+                    </div>
+                  </div>
+                )}
               </div>
-              
-              <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                {stat.value}
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400 text-sm font-medium mb-3">
-                {stat.label}
-              </p>
-              
-              <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                stat.changeType === 'positive' 
-                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                  : stat.changeType === 'negative'
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                  : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-              }`}>
-                {getChangeIcon(stat.changeType)}
-                {stat.change}
-              </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       {/* Content Grid */}
@@ -1057,29 +1136,44 @@ const Dashboard = () => {
           {expandedSections.activity && (
             <div className="p-4 md:p-6 pt-0">
               <div className="space-y-4">
-                {displayedActivities.map((activity) => (
-                  <button
-                    key={activity.id}
-                    onClick={activity.action}
-                    disabled={!currentUserCanViewMemberDetails && activity.type === 'member'}
-                    className={`w-full flex items-center gap-4 p-3 rounded-xl hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
-                      !currentUserCanViewMemberDetails && activity.type === 'member' ? 'cursor-default hover:bg-transparent dark:hover:bg-transparent' : ''
-                    }`}
-                  >
-                    <div className={`w-10 h-10 rounded-full ${activity.color} flex items-center justify-center flex-shrink-0`}>
-                      <activity.icon className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-gray-900 dark:text-white font-medium truncate">
-                        {activity.message}
-                      </p>
-                      <p className="text-gray-500 dark:text-gray-400 text-sm">
-                        {activity.time}
-                      </p>
-                    </div>
-                    <div className="w-2 h-2 rounded-full bg-gray-300 group-hover:bg-gray-400 transition-colors" />
-                  </button>
-                ))}
+                {displayedActivities.map((activity) => {
+                  const canClick = activity.requiresPermission ? currentUserCanViewMemberDetails : true;
+                  
+                  return (
+                    <button
+                      key={activity.id}
+                      onClick={() => {
+                        if (canClick) {
+                          activity.action();
+                        } else {
+                          setError('You do not have permission to view this activity');
+                        }
+                      }}
+                      disabled={!canClick}
+                      className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors duration-200 group text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
+                        canClick
+                          ? 'hover:bg-gray-50/50 dark:hover:bg-gray-700/30 cursor-pointer'
+                          : 'cursor-default opacity-80'
+                      }`}
+                      title={!canClick ? 'You do not have permission to view this activity' : ''}
+                    >
+                      <div className={`w-10 h-10 rounded-full ${activity.color} flex items-center justify-center flex-shrink-0`}>
+                        <activity.icon className="h-5 w-5 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-gray-900 dark:text-white font-medium truncate">
+                          {activity.message}
+                        </p>
+                        <p className="text-gray-500 dark:text-gray-400 text-sm">
+                          {activity.time}
+                        </p>
+                      </div>
+                      <div className={`w-2 h-2 rounded-full transition-colors ${
+                        canClick ? 'bg-gray-300 group-hover:bg-gray-400' : 'bg-gray-200'
+                      }`} />
+                    </button>
+                  );
+                })}
                 {recentActivities.length === 0 && (
                   <p className="text-gray-500 dark:text-gray-400 text-center py-4">No recent activity</p>
                 )}
@@ -1115,7 +1209,8 @@ const Dashboard = () => {
                 {displayedEvents.map((event) => (
                   <div
                     key={event.id}
-                    className="w-full border-l-4 border-blue-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group"
+                    className="w-full border-l-4 border-blue-400 pl-4 py-3 rounded-r-lg hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors duration-200 group cursor-pointer"
+                    onClick={() => openEventDetail(event)}
                   >
                     <div className="flex justify-between items-start mb-1">
                       <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
@@ -1144,7 +1239,10 @@ const Dashboard = () => {
                           </div>
                           <div 
                             className="relative group cursor-pointer overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-                            onClick={() => setExpandedImage(event.pamphlet_url)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedImage(event.pamphlet_url);
+                            }}
                           >
                             <img 
                               src={event.pamphlet_url} 
@@ -1181,7 +1279,10 @@ const Dashboard = () => {
                           </div>
                           <div className="flex gap-1">
                             <button
-                              onClick={() => openQuickView(event)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openQuickView(event);
+                              }}
                               className="p-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
                               title="Quick View"
                             >
@@ -1194,6 +1295,7 @@ const Dashboard = () => {
                               rel="noopener noreferrer"
                               className="p-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-600 dark:text-green-400 rounded-lg transition-colors duration-200 flex items-center gap-1 text-xs"
                               title="Download"
+                              onClick={(e) => e.stopPropagation()}
                             >
                               <Download className="h-3 w-3" />
                               <span className="hidden sm:inline">Download</span>
@@ -1386,95 +1488,87 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Absent Members Modal - Updated to mention hidden members */}
-      {activeModal === 'viewAbsentMembers' && currentUserCanViewMemberDetails && (
-        <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
+      {/* View Events Modal - Everyone can access */}
+      {activeModal === 'viewEvents' && (
+        <Modal title="Upcoming Events" size="max-w-4xl">
           <div className="space-y-4">
             <p className="text-gray-600 dark:text-gray-400">
-              Active members who have been absent for the last 2 Sunday services. Hidden members are excluded from this list.
+              All upcoming events
             </p>
             
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {filteredAbsentMembers.map((member) => (
-                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-red-200 dark:border-red-800 rounded-xl bg-red-50 dark:bg-red-900/20">
-                  <div className="flex items-center gap-4 mb-3 sm:mb-0">
-                    <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
-                      {member.name.charAt(0)}{member.surname.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        <Phone className="h-3 w-3 inline mr-1" />
-                        {member.phone || 'No phone number'}
-                      </p>
-                      <p className="text-sm text-gray-600 dark:text-gray-500">
-                        <Home className="h-3 w-3 inline mr-1" />
-                        {member.residence || 'No residence'}
-                      </p>
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                        <AlertTriangle className="h-3 w-3 inline mr-1" />
-                        Absent for {member.consecutiveAbsences} consecutive Sundays
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {filteredEvents.map((event) => (
+                <div 
+                  key={event.id}
+                  className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors duration-200 cursor-pointer"
+                  onClick={() => openEventDetail(event)}
+                >
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-3 gap-2">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-lg text-gray-900 dark:text-white mb-1">{event.name}</h4>
+                      <p className="text-purple-600 dark:text-purple-400 font-medium text-sm">
+                        {event.topic || 'No topic specified'}
                       </p>
                     </div>
+                    <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full self-start sm:self-auto">
+                      {formatShortDate(event.event_date)}
+                    </span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {member.phone && (
-                      <a
-                        href={`tel:${member.phone}`}
-                        className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium text-sm"
-                      >
-                        <Phone className="h-4 w-4" />
-                        <span className="hidden sm:inline">Call</span>
-                      </a>
+                  
+                  <div className="space-y-2 mb-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <Calendar className="h-3 w-3" />
+                      <span>{event.event_time}</span>
+                    </div>
+                    {event.location && (
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                        <MapPin className="h-3 w-3" />
+                        <span>{event.location}</span>
+                      </div>
                     )}
-                    <button 
-                      onClick={() => {
-                        openMemberDetail(member);
-                      }}
-                      className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium text-sm"
-                    >
-                      <Eye className="h-4 w-4" />
-                      <span className="hidden sm:inline">Details</span>
-                    </button>
                   </div>
-                </div>
-              ))}
-              {filteredAbsentMembers.length === 0 && (
-                <div className="text-center py-8">
-                  <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="h-8 w-8 text-green-600 dark:text-green-400" />
-                  </div>
-                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Great News!</h4>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    All active members have attended at least one of the last 2 Sunday services.
-                  </p>
-                  {hiddenMembersCount > 0 && (
-                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                      Note: {hiddenMembersCount} hidden members are excluded from this count.
-                    </p>
+
+                  {event.pamphlet_url && (
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-green-600 dark:text-green-400" />
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">Pamphlet Available</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openQuickView(event);
+                          }}
+                          className="p-1.5 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors duration-200"
+                          title="Quick View"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </button>
+                        <a
+                          href={event.pamphlet_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-800 text-green-600 dark:text-green-400 rounded-lg transition-colors duration-200"
+                          title="Download"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Download className="h-3 w-3" />
+                        </a>
+                      </div>
+                    </div>
                   )}
                 </div>
+              ))}
+              {filteredEvents.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">No upcoming events</p>
               )}
             </div>
           </div>
         </Modal>
       )}
 
-      {/* Member Detail Modal */}
-      {activeModal === 'memberDetail' && selectedMember && currentUserCanViewMemberDetails && (
-        <Modal title="Member Details" size="max-w-md">
-          <MemberDetailModal member={selectedMember} />
-        </Modal>
-      )}
-
-      {/* Event Detail Modal */}
-      {activeModal === 'eventDetail' && selectedEvent && (
-        <Modal title="Event Details" size="max-w-md">
-          <EventDetailModal event={selectedEvent} />
-        </Modal>
-      )}
-
-      {/* Sermons Modal */}
+      {/* View Sermons Modal - Everyone can access */}
       {activeModal === 'viewSermons' && (
         <Modal title="All Sermons" size="max-w-4xl">
           <div className="space-y-4">
@@ -1570,7 +1664,134 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Sermon Detail Modal */}
+      {/* View Groups Modal - Everyone can access */}
+      {activeModal === 'viewGroups' && (
+        <Modal title="Cell Groups" size="max-w-md">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">
+              All active cell groups
+            </p>
+            
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {cellGroups.map((group) => {
+                const membersInGroup = filteredMembers.filter(member => member.cell_group_id === group.id).length;
+                
+                return (
+                  <div key={group.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-indigo-200 dark:border-indigo-800 rounded-xl bg-indigo-50 dark:bg-indigo-900/20">
+                    <div className="mb-3 sm:mb-0">
+                      <p className="font-medium text-gray-900 dark:text-white">{group.name}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {membersInGroup} member{membersInGroup !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                        <Users className="h-4 w-4" />
+                        <span className="text-sm font-medium">{membersInGroup}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {cellGroups.length === 0 && (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-4">
+                  No cell groups available
+                </p>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Absent Members Modal - Only admin/pastors can access */}
+      {activeModal === 'viewAbsentMembers' && currentUserCanViewMemberDetails && (
+        <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
+          <div className="space-y-4">
+            <p className="text-gray-600 dark:text-gray-400">
+              Active members who have been absent for the last 2 Sunday services. Hidden members are excluded from this list.
+            </p>
+            
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {filteredAbsentMembers.map((member) => (
+                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-red-200 dark:border-red-800 rounded-xl bg-red-50 dark:bg-red-900/20">
+                  <div className="flex items-center gap-4 mb-3 sm:mb-0">
+                    <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-orange-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {member.name.charAt(0)}{member.surname.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">{member.name} {member.surname}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <Phone className="h-3 w-3 inline mr-1" />
+                        {member.phone || 'No phone number'}
+                      </p>
+                      <p className="text-sm text-gray-600 dark:text-gray-500">
+                        <Home className="h-3 w-3 inline mr-1" />
+                        {member.residence || 'No residence'}
+                      </p>
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                        <AlertTriangle className="h-3 w-3 inline mr-1" />
+                        Absent for {member.consecutiveAbsences} consecutive Sundays
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {member.phone && (
+                      <a
+                        href={`tel:${member.phone}`}
+                        className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium text-sm"
+                      >
+                        <Phone className="h-4 w-4" />
+                        <span className="hidden sm:inline">Call</span>
+                      </a>
+                    )}
+                    <button 
+                      onClick={() => {
+                        openMemberDetail(member);
+                      }}
+                      className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium text-sm"
+                    >
+                      <Eye className="h-4 w-4" />
+                      <span className="hidden sm:inline">Details</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredAbsentMembers.length === 0 && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="h-8 w-8 text-green-600 dark:text-green-400" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Great News!</h4>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    All active members have attended at least one of the last 2 Sunday services.
+                  </p>
+                  {hiddenMembersCount > 0 && (
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                      Note: {hiddenMembersCount} hidden members are excluded from this count.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Member Detail Modal - Only admin/pastors can access */}
+      {activeModal === 'memberDetail' && selectedMember && currentUserCanViewMemberDetails && (
+        <Modal title="Member Details" size="max-w-md">
+          <MemberDetailModal member={selectedMember} />
+        </Modal>
+      )}
+
+      {/* Event Detail Modal - Everyone can access */}
+      {activeModal === 'eventDetail' && selectedEvent && (
+        <Modal title="Event Details" size="max-w-md">
+          <EventDetailModal event={selectedEvent} />
+        </Modal>
+      )}
+
+      {/* Sermon Detail Modal - Everyone can access */}
       {activeModal === 'sermonDetail' && selectedSermon && (
         <Modal title="Sermon Details" size="max-w-2xl">
           <div className="space-y-6">
@@ -1633,7 +1854,7 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Members Modal - Updated with hidden members toggle */}
+      {/* Members Modal - Only admin/pastors can access */}
       {activeModal === 'viewMembers' && currentUserCanViewMemberDetails && (
         <Modal title="Members" size="max-w-4xl">
           <div className="space-y-4">
