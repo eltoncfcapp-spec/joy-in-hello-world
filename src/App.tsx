@@ -36,29 +36,7 @@ const PageLoader = () => (
   </div>
 );
 
-// Error Boundary Component
-const ErrorFallback = () => {
-  const navigate = useNavigate();
-  
-  useEffect(() => {
-    // Redirect to login after a brief moment
-    const timer = setTimeout(() => {
-      navigate('/login', { replace: true });
-    }, 2000);
-    
-    return () => clearTimeout(timer);
-  }, [navigate]);
-
-  return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 mb-4">Page Not Found</h1>
-        <p className="text-gray-600 mb-4">Redirecting to login...</p>
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-      </div>
-    </div>
-  );
-};
+// Note: ErrorFallback is handled by the catch-all route redirecting to login
 
 // Layout component with responsive sidebar
 const Layout = () => {
