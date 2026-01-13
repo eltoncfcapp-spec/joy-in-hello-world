@@ -94,6 +94,7 @@ interface StatCard {
   color: string;
   bgColor: string;
   action: string;
+  visibleTo: ('pastor' | 'admin' | 'all')[]; // New field to control visibility
 }
 
 interface Activity {
@@ -126,6 +127,11 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
 
 const canEdit = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
   return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
+};
+
+// Check if user can view sensitive stats (pastor or admin only)
+const canViewSensitiveStats = (userRole: string | null | undefined): boolean => {
+  return userRole === 'pastor' || userRole === 'admin';
 };
 
 const Dashboard = () => {
@@ -166,6 +172,7 @@ const Dashboard = () => {
 
   // Check user permissions
   const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
+  const currentUserCanViewSensitiveStats = canViewSensitiveStats(profile?.admin_role);
 
   // Filter functions - Filter out hidden members by default
   const getFilteredMembers = () => {
@@ -387,17 +394,8 @@ const Dashboard = () => {
     
     const uniqueGroups = [...new Set(activeMembers.map(m => m.cell_group_id).filter(Boolean))].length;
 
+    // Base stats visible to all users
     const statsData: StatCard[] = [
-      { 
-        icon: Users, 
-        label: 'Active Members', 
-        value: totalMembers.toString(), 
-        change: `${hiddenMembersCountValue} hidden members`, 
-        changeType: 'info',
-        color: 'from-blue-500 to-blue-600',
-        bgColor: 'bg-blue-50 dark:bg-blue-950/20',
-        action: 'viewMembers'
-      },
       { 
         icon: Calendar, 
         label: 'Upcoming Events', 
@@ -406,7 +404,8 @@ const Dashboard = () => {
         changeType: 'info',
         color: 'from-purple-500 to-purple-600',
         bgColor: 'bg-purple-50 dark:bg-purple-950/20',
-        action: 'viewEvents'
+        action: 'viewEvents',
+        visibleTo: ['all'] // Everyone can see events
       },
       { 
         icon: BookOpen, 
@@ -416,17 +415,8 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-orange-500 to-orange-600',
         bgColor: 'bg-orange-50 dark:bg-orange-950/20',
-        action: 'viewSermons'
-      },
-      { 
-        icon: UserPlus, 
-        label: 'Newcomers', 
-        value: newcomers.toString(), 
-        change: `${newcomers} new visitors`, 
-        changeType: 'positive',
-        color: 'from-green-500 to-green-600',
-        bgColor: 'bg-green-50 dark:bg-green-950/20',
-        action: 'viewMembers'
+        action: 'viewSermons',
+        visibleTo: ['all'] // Everyone can see sermons
       },
       { 
         icon: TrendingUp, 
@@ -436,19 +426,52 @@ const Dashboard = () => {
         changeType: 'positive',
         color: 'from-indigo-500 to-indigo-600',
         bgColor: 'bg-indigo-50 dark:bg-indigo-950/20',
-        action: 'viewGroups'
-      },
-      { 
-        icon: AlertTriangle, 
-        label: 'Absent 2 Sundays', 
-        value: currentAbsentCount.toString(),
-        change: currentAbsentCount > 0 ? 'Need follow-up' : 'All members present',
-        changeType: currentAbsentCount > 0 ? 'negative' : 'positive',
-        color: 'from-red-500 to-red-600',
-        bgColor: 'bg-red-50 dark:bg-red-950/20',
-        action: 'viewAbsentMembers'
+        action: 'viewGroups',
+        visibleTo: ['all'] // Everyone can see groups count
       },
     ];
+
+    // Add sensitive stats only for pastors and admins
+    if (currentUserCanViewSensitiveStats) {
+      const sensitiveStats: StatCard[] = [
+        { 
+          icon: Users, 
+          label: 'Active Members', 
+          value: totalMembers.toString(), 
+          change: `${hiddenMembersCountValue} hidden members`, 
+          changeType: 'info',
+          color: 'from-blue-500 to-blue-600',
+          bgColor: 'bg-blue-50 dark:bg-blue-950/20',
+          action: 'viewMembers',
+          visibleTo: ['pastor', 'admin']
+        },
+        { 
+          icon: UserPlus, 
+          label: 'Newcomers', 
+          value: newcomers.toString(), 
+          change: `${newcomers} new visitors`, 
+          changeType: 'positive',
+          color: 'from-green-500 to-green-600',
+          bgColor: 'bg-green-50 dark:bg-green-950/20',
+          action: 'viewMembers',
+          visibleTo: ['pastor', 'admin']
+        },
+        { 
+          icon: AlertTriangle, 
+          label: 'Absent 2 Sundays', 
+          value: currentAbsentCount.toString(),
+          change: currentAbsentCount > 0 ? 'Need follow-up' : 'All members present',
+          changeType: currentAbsentCount > 0 ? 'negative' : 'positive',
+          color: 'from-red-500 to-red-600',
+          bgColor: 'bg-red-50 dark:bg-red-950/20',
+          action: 'viewAbsentMembers',
+          visibleTo: ['pastor', 'admin']
+        },
+      ];
+
+      // Insert sensitive stats at the beginning
+      statsData.unshift(...sensitiveStats);
+    }
 
     setStats(statsData);
     setHiddenMembersCount(hiddenMembersCountValue);
@@ -458,25 +481,27 @@ const Dashboard = () => {
   const generateRecentActivities = (allMembers: Member[], events: Event[], allSermons: Sermon[]) => {
     const activities: Activity[] = [];
 
-    // Add recent NON-HIDDEN member joins
-    const recentActiveMembers = allMembers
-      .filter(m => m.is_hidden !== true && m.created_at)
-      .sort((a, b) => new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime())
-      .slice(0, 2);
+    // Add recent NON-HIDDEN member joins (only show to pastors/admins)
+    if (currentUserCanViewSensitiveStats) {
+      const recentActiveMembers = allMembers
+        .filter(m => m.is_hidden !== true && m.created_at)
+        .sort((a, b) => new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime())
+        .slice(0, 2);
 
-    recentActiveMembers.forEach(member => {
-      activities.push({
-        id: activities.length + 1,
-        type: 'member',
-        message: `${member.name} ${member.surname} joined the church`,
-        time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
-        color: 'bg-green-500',
-        icon: Users,
-        action: () => openMemberDetail(member)
+      recentActiveMembers.forEach(member => {
+        activities.push({
+          id: activities.length + 1,
+          type: 'member',
+          message: `${member.name} ${member.surname} joined the church`,
+          time: formatTimeAgo(member.created_at ? new Date(member.created_at) : new Date()),
+          color: 'bg-green-500',
+          icon: Users,
+          action: () => openMemberDetail(member)
+        });
       });
-    });
+    }
 
-    // Add recent sermons
+    // Add recent sermons (visible to all)
     const recentSermons = allSermons.slice(0, 2);
     recentSermons.forEach(sermon => {
       activities.push({
@@ -490,7 +515,7 @@ const Dashboard = () => {
       });
     });
 
-    // Add recent events
+    // Add recent events (visible to all)
     const recentEvents = events.slice(0, 2);
     recentEvents.forEach(event => {
       activities.push({
@@ -568,11 +593,18 @@ const Dashboard = () => {
       setUpcomingEvents(eventsList);
       setSermons(sermonsList);
 
-      // Load absent count and members in parallel
-      const [absentCountResult] = await Promise.all([
-        loadAbsentCount(),
-        loadAbsentMembers()
-      ]);
+      // Load absent count and members in parallel (only for pastors/admins)
+      let absentCountResult = 0;
+      if (currentUserCanViewSensitiveStats) {
+        const [absentCount] = await Promise.all([
+          loadAbsentCount(),
+          loadAbsentMembers()
+        ]);
+        absentCountResult = absentCount;
+      } else {
+        // For non-pastor/admin users, don't load absent members
+        setAbsentMembers([]);
+      }
 
       // Calculate stats with the actual absent count
       calculateStats(membersList, eventsList, sermonsList, absentCountResult);
@@ -617,9 +649,23 @@ const Dashboard = () => {
   }, []);
 
   const openModal = (modalType: string) => {
-    if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
-      setError('You do not have permission to perform this action');
-      return;
+    // Check if user can access sensitive modals
+    const sensitiveModals = ['viewMembers', 'viewAbsentMembers', 'addMember', 'createEvent'];
+    
+    if (sensitiveModals.includes(modalType)) {
+      if (modalType === 'viewMembers' || modalType === 'viewAbsentMembers') {
+        // Only pastors/admins can view members and absent members
+        if (!currentUserCanViewSensitiveStats) {
+          setError('You do not have permission to view this information');
+          return;
+        }
+      } else if (modalType === 'addMember' || modalType === 'createEvent') {
+        // Only pastors/admins can add members or create events
+        if (!currentUserCanEdit) {
+          setError('You do not have permission to perform this action');
+          return;
+        }
+      }
     }
 
     setActiveModal(modalType);
@@ -641,6 +687,12 @@ const Dashboard = () => {
   };
 
   const openMemberDetail = (member: Member | AbsentMember) => {
+    // Only allow pastors/admins to view member details
+    if (!currentUserCanViewSensitiveStats) {
+      setError('You do not have permission to view member details');
+      return;
+    }
+
     // Convert AbsentMember to Member if needed
     const fullMember: Member = {
       id: member.id,
@@ -939,6 +991,11 @@ const Dashboard = () => {
           {!currentUserCanEdit && (
             <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
               View-only access - contact pastor/admin for edits
+            </p>
+          )}
+          {!currentUserCanViewSensitiveStats && (
+            <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+              Limited view - Member statistics hidden
             </p>
           )}
         </div>
@@ -1361,7 +1418,7 @@ const Dashboard = () => {
       )}
 
       {/* Absent Members Modal - Updated to mention hidden members */}
-      {activeModal === 'viewAbsentMembers' && (
+      {activeModal === 'viewAbsentMembers' && currentUserCanViewSensitiveStats && (
         <Modal title="Members Absent for 2 Sundays" size="max-w-4xl">
           <div className="space-y-4">
             <p className="text-gray-600 dark:text-gray-400">
@@ -1434,8 +1491,8 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Member Detail Modal */}
-      {activeModal === 'memberDetail' && selectedMember && (
+      {/* Member Detail Modal - Only for pastors/admins */}
+      {activeModal === 'memberDetail' && selectedMember && currentUserCanViewSensitiveStats && (
         <Modal title="Member Details" size="max-w-md">
           <MemberDetailModal member={selectedMember} />
         </Modal>
@@ -1607,8 +1664,8 @@ const Dashboard = () => {
         </Modal>
       )}
 
-      {/* Members Modal - Updated with hidden members toggle */}
-      {activeModal === 'viewMembers' && (
+      {/* Members Modal - Updated with hidden members toggle - Only for pastors/admins */}
+      {activeModal === 'viewMembers' && currentUserCanViewSensitiveStats && (
         <Modal title="Members" size="max-w-4xl">
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
