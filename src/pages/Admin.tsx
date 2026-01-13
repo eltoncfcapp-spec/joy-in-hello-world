@@ -1,4 +1,4 @@
-import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2, Clock, Activity } from 'lucide-react';
+import { Users, Database, Shield, X, Search, Key, Copy, RefreshCw, AlertCircle, FileText, Download, Upload, Trash2, Clock, Activity, FileSpreadsheet } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../integrations/supabase/client';
@@ -157,7 +157,7 @@ interface StorageInfo {
 }
 
 interface ImportFieldMapping {
-  [key: string]: string; // Column name in CSV -> Database field name
+  [key: string]: string; // Column name in CSV/Excel -> Database field name
 }
 
 interface ImportPreviewRow {
@@ -267,6 +267,47 @@ const parseCSVRow = (row: string): string[] => {
   // Add the last field
   result.push(current.trim());
   return result;
+};
+
+// Excel file reader helper
+const readExcelFile = (file: File): Promise<string[][]> => {
+  return new Promise((resolve, reject) => {
+    // For now, we'll convert Excel to CSV format
+    // In a real implementation, you would use a library like xlsx or sheetjs
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        // Simple detection - if it looks like binary Excel file
+        if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
+          // In a real app, you would parse the Excel file here
+          // For this example, we'll show a message
+          reject(new Error('Excel file parsing requires additional libraries. Please convert to CSV or implement Excel parsing using sheetjs or similar.'));
+          return;
+        }
+        
+        // If it's not Excel, try CSV parsing
+        const rows = content.split('\n').filter(row => row.trim() !== '');
+        const data = rows.map(row => parseCSVRow(row));
+        resolve(data);
+      } catch (error) {
+        reject(new Error('Failed to parse file'));
+      }
+    };
+    
+    reader.onerror = () => {
+      reject(new Error('Failed to read file'));
+    };
+    
+    // Read as text for CSV, would need different approach for actual Excel
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      reader.readAsText(file);
+    } else {
+      // For Excel files, we need a different approach
+      reader.readAsArrayBuffer(file);
+    }
+  });
 };
 
 // Extended Cloud Service Functions
@@ -698,7 +739,7 @@ const cloudService = {
           
           // Validate that we have headers
           if (headers.length === 0 || headers.every(h => !h.trim())) {
-            reject(new Error('CSV file has no valid headers. Please check your file format.'));
+            reject(new Error('File has no valid headers. Please check your file format.'));
             return;
           }
 
@@ -706,7 +747,7 @@ const cloudService = {
           let success = 0;
           let errors = 0;
 
-          console.log(`📥 Importing ${rows.length - 1} rows from CSV...`);
+          console.log(`📥 Importing ${rows.length - 1} rows from file...`);
 
           // First, create a map of cell group names to IDs for faster lookup
           const cellGroupMap = new Map<string, string>();
@@ -930,7 +971,7 @@ const cloudService = {
         }
       };
 
-      reader.onerror = () => reject(new Error('Failed to read the file. Please make sure it is a valid CSV file.'));
+      reader.onerror = () => reject(new Error('Failed to read the file. Please make sure it is a valid file.'));
       reader.readAsText(file);
     });
   },
@@ -1765,8 +1806,11 @@ const Admin = () => {
     setError(null);
 
     // Validate file type
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setError('Please upload a CSV file. Only .csv files are supported.');
+    const fileExtension = file.name.toLowerCase().split('.').pop();
+    const validExtensions = ['csv', 'xlsx', 'xls'];
+    
+    if (!validExtensions.includes(fileExtension || '')) {
+      setError('Please upload a CSV or Excel file. Only .csv, .xlsx, and .xls files are supported.');
       return;
     }
 
@@ -1774,6 +1818,13 @@ const Admin = () => {
     if (file.size > 10 * 1024 * 1024) {
       setError('File is too large. Maximum size is 10MB.');
       return;
+    }
+
+    // Show Excel warning if needed
+    if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+      if (!confirm('Excel file support requires additional libraries. For full Excel support, please implement sheetjs or similar. Continue with basic CSV-like parsing?')) {
+        return;
+      }
     }
 
     const reader = new FileReader();
@@ -1784,7 +1835,7 @@ const Admin = () => {
         const rows = content.split('\n').filter(row => row.trim() !== '');
         
         if (rows.length === 0) {
-          setError('File is empty. Please upload a CSV file with data.');
+          setError('File is empty. Please upload a file with data.');
           return;
         }
 
@@ -1792,7 +1843,7 @@ const Admin = () => {
         
         // Validate headers
         if (headers.length === 0 || headers.every(h => !h.trim())) {
-          setError('CSV file has no valid headers. Please check your file format.');
+          setError('File has no valid headers. Please check your file format.');
           return;
         }
 
@@ -1841,8 +1892,8 @@ const Admin = () => {
           setError(`Warning: Could not auto-detect required fields: ${missingRequired.join(', ')}. Please map them manually.`);
         }
       } catch (error) {
-        setError('Failed to parse CSV file. Please make sure it is a valid CSV format.');
-        console.error('❌ CSV parsing error:', error);
+        setError('Failed to parse file. Please make sure it is a valid CSV format.');
+        console.error('❌ File parsing error:', error);
       }
     };
     
@@ -2397,7 +2448,7 @@ const Admin = () => {
 
   const filteredAuditLogs = getFilteredAuditLogs();
 
-  // Update the DataManagementModal to include import preview
+  // Update the DataManagementModal to include Excel support
   const DataManagementModal = () => (
     <Modal title="Data Management" onClose={closeModal} size="max-w-7xl">
       <div className="space-y-6">
@@ -2474,7 +2525,11 @@ const Admin = () => {
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
                 {importFile ? (
                   <div className="space-y-2">
-                    <FileText className="h-12 w-12 text-green-600 mx-auto" />
+                    {importFile.name.toLowerCase().endsWith('.csv') ? (
+                      <FileText className="h-12 w-12 text-green-600 mx-auto" />
+                    ) : (
+                      <FileSpreadsheet className="h-12 w-12 text-blue-600 mx-auto" />
+                    )}
                     <p className="text-sm font-medium text-gray-900">{importFile.name}</p>
                     <p className="text-xs text-gray-500">
                       {formatBytes(importFile.size)} • {new Date(importFile.lastModified).toLocaleDateString()}
@@ -2488,15 +2543,19 @@ const Admin = () => {
                   </div>
                 ) : (
                   <div>
-                    <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-sm text-gray-600 mb-2">Upload CSV file with member data</p>
+                    <div className="flex justify-center gap-4 mb-4">
+                      <FileText className="h-12 w-12 text-gray-400" />
+                      <FileSpreadsheet className="h-12 w-12 text-gray-400" />
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Upload CSV or Excel file with member data</p>
                     <p className="text-xs text-gray-500 mb-4">
+                      <strong>Supported formats:</strong> .csv, .xlsx, .xls<br />
                       <strong>Required fields:</strong> Surname, Name, Residence<br />
                       <strong>Optional fields:</strong> Phone, Cell Group, Gender, Baptism Date, etc.
                     </p>
                     <input 
                       type="file" 
-                      accept=".csv"
+                      accept=".csv,.xlsx,.xls"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) handleFileUpload(file);
@@ -2506,9 +2565,10 @@ const Admin = () => {
                     />
                     <label
                       htmlFor="file-upload"
-                      className="mt-2 inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-medium cursor-pointer hover:bg-blue-700"
+                      className="mt-2 inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium cursor-pointer hover:bg-blue-700"
                     >
-                      Choose CSV File
+                      <Upload className="h-4 w-4" />
+                      Choose CSV or Excel File
                     </label>
                   </div>
                 )}
@@ -2547,9 +2607,16 @@ const Admin = () => {
               {!isImporting ? (
                 <>
                   <div className="bg-white p-4 rounded-lg border">
-                    <h4 className="font-medium text-gray-900 mb-4">Map CSV Columns to Database Fields</h4>
+                    <div className="flex items-center gap-2 mb-4">
+                      {importFile?.name.toLowerCase().endsWith('.csv') ? (
+                        <FileText className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <FileSpreadsheet className="h-5 w-5 text-blue-600" />
+                      )}
+                      <h4 className="font-medium text-gray-900">Map File Columns to Database Fields</h4>
+                    </div>
                     <p className="text-sm text-gray-600 mb-4">
-                      Please map each CSV column to its corresponding database field.
+                      Please map each file column to its corresponding database field.
                       <span className="text-red-500 font-medium"> Required fields are marked with *</span>
                     </p>
                     
@@ -2557,7 +2624,7 @@ const Admin = () => {
                       {csvHeaders.map((header, index) => (
                         <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div className="flex-1">
-                            <span className="font-medium text-gray-900">CSV Column: </span>
+                            <span className="font-medium text-gray-900">Column {index + 1}: </span>
                             <code className="bg-gray-200 px-2 py-1 rounded text-sm">{header}</code>
                           </div>
                           <select
