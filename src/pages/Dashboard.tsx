@@ -24,7 +24,8 @@ import {
   Phone,
   Home,
   ChevronRight,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Lock
 } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -119,22 +120,21 @@ interface AbsentMember {
   is_hidden?: boolean | null;
 }
 
-// Permission checking utilities
-const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
-  return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
-};
-
-const canEdit = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
-  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
-};
-
-// Check if user can view sensitive details (pastor or admin only)
-const canViewSensitiveDetails = (userRole: string | null | undefined): boolean => {
-  return userRole === 'pastor' || userRole === 'admin';
-};
-
 const Dashboard = () => {
-  const { profile } = useAuth();
+  const { 
+    profile, 
+    isAdmin, 
+    isPastor, 
+    isDeacon, 
+    isGroupLeader, 
+    isDepartmentLeader,
+    hasPermission,
+    canViewGroup,
+    canViewDepartment,
+    canManageGroup,
+    canManageDepartment
+  } = useAuth();
+  
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -165,13 +165,15 @@ const Dashboard = () => {
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
-  const [, setAbsentCount] = useState<number>(0);
+  const [absentCount, setAbsentCount] = useState<number>(0);
   const [hiddenMembersCount, setHiddenMembersCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Check user permissions
-  const currentUserCanEdit = canEdit(profile?.admin_role, profile?.permissions || []);
-  const currentUserCanViewSensitiveDetails = canViewSensitiveDetails(profile?.admin_role);
+  // Check user permissions using AuthContext
+  const currentUserCanEdit = isAdmin() || isPastor() || hasPermission('edit_users');
+  const currentUserCanViewSensitiveDetails = isAdmin() || isPastor();
+  const currentUserCanViewAllGroups = isAdmin() || isPastor() || isDeacon();
+  const currentUserCanViewAllDepartments = isAdmin() || isPastor() || isDeacon();
 
   // Filter functions - Filter out hidden members by default
   const getFilteredMembers = () => {
@@ -386,8 +388,6 @@ const Dashboard = () => {
     const totalMembers = activeMembers.length;
     const hiddenMembersCountValue = hiddenMembers.length;
     const newcomers = activeMembers.filter(m => m.status === 'newcomer').length;
-    // signedMembers - used for future features
-    console.log('Signed members:', activeMembers.filter(m => m.status === 'signed_member').length);
     const upcomingEventsCount = events.length;
     const totalSermons = allSermons.length;
     
@@ -623,20 +623,35 @@ const Dashboard = () => {
   }, []);
 
   const openModal = (modalType: string) => {
-    // Check if user can access sensitive modals (members, absent members)
-    const sensitiveModals = ['viewMembers', 'viewAbsentMembers'];
+    // Check permissions based on modal type
+    let hasAccess = false;
     
-    if (sensitiveModals.includes(modalType)) {
-      // Only pastors/admins can view members and absent members details
-      if (!currentUserCanViewSensitiveDetails) {
-        setError('You do not have permission to view this information');
-        return;
-      }
+    switch (modalType) {
+      case 'viewMembers':
+      case 'viewAbsentMembers':
+        // Only pastors/admins can view members and absent members details
+        hasAccess = currentUserCanViewSensitiveDetails;
+        break;
+      case 'addMember':
+      case 'createEvent':
+        // Only admins, pastors, or users with edit permission can add/create
+        hasAccess = currentUserCanEdit;
+        break;
+      case 'viewSermons':
+      case 'viewEvents':
+        // Everyone can view sermons and events
+        hasAccess = true;
+        break;
+      case 'viewGroups':
+        // Check if user has group access
+        hasAccess = hasPermission('view_own_group') || hasPermission('view_all_groups');
+        break;
+      default:
+        hasAccess = false;
     }
-    
-    // Check for edit permissions for add/create actions
-    if ((modalType === 'addMember' || modalType === 'createEvent') && !currentUserCanEdit) {
-      setError('You do not have permission to perform this action');
+
+    if (!hasAccess) {
+      setError('You do not have permission to access this feature');
       return;
     }
 
@@ -902,6 +917,26 @@ const Dashboard = () => {
     </div>
   );
 
+  // Permission-based stat cards
+  const getFilteredStats = () => {
+    return stats.filter(stat => {
+      // Everyone can see events and sermons
+      if (stat.action === 'viewEvents' || stat.action === 'viewSermons') {
+        return true;
+      }
+      
+      // Check permissions for other stats
+      switch (stat.action) {
+        case 'viewMembers':
+        case 'viewAbsentMembers':
+        case 'viewGroups':
+          return currentUserCanViewSensitiveDetails;
+        default:
+          return true;
+      }
+    });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6 flex items-center justify-center">
@@ -917,6 +952,7 @@ const Dashboard = () => {
   const filteredEvents = getFilteredEvents();
   const filteredAbsentMembers = getFilteredAbsentMembers();
   const filteredSermons = getFilteredSermons();
+  const filteredStats = getFilteredStats();
 
   // Get display items (last 3 or all based on showAll state)
   const displayedActivities = showAllActivities ? recentActivities : recentActivities.slice(0, 3);
@@ -960,9 +996,9 @@ const Dashboard = () => {
               : `Welcome - ${profile?.admin_role || 'Member'} access`
             }
           </p>
-          {!currentUserCanEdit && (
+          {!currentUserCanViewSensitiveDetails && (
             <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-              View-only access - contact pastor/admin for edits
+              Limited access view - contact pastor/admin for full access
             </p>
           )}
         </div>
@@ -1005,7 +1041,7 @@ const Dashboard = () => {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 md:gap-6 mb-8">
-        {stats.map((stat) => (
+        {filteredStats.map((stat) => (
           <button
             key={stat.label}
             onClick={() => openModal(stat.action)}
@@ -1018,7 +1054,9 @@ const Dashboard = () => {
                 <div className={`p-3 rounded-xl ${stat.bgColor}`}>
                   <stat.icon className="h-6 w-6 text-gray-700 dark:text-gray-300" />
                 </div>
-                <MoreVertical className="h-5 w-5 text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-400 transition-colors" />
+                {!currentUserCanViewSensitiveDetails && (stat.action === 'viewMembers' || stat.action === 'viewAbsentMembers') && (
+                  <Lock className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                )}
               </div>
               
               <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
@@ -1809,7 +1847,7 @@ const Dashboard = () => {
                   href={viewingPamphlet}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 font-medium"
                 >
                   <FileText className="h-4 w-4" />
                   Open in New Tab
