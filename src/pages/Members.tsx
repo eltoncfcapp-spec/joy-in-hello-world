@@ -1,8 +1,12 @@
-import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key } from 'lucide-react';
+import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+
+// Import the new components you'll need to create
+import MemberNotes from './MemberNotes';
+import FoundationalTraining from './FoundationalTraining';
 
 interface Member {
   id: string;
@@ -79,6 +83,10 @@ const Members = () => {
   const [showHiddenMembers, setShowHiddenMembers] = useState(false);
   const [exporting, setExporting] = useState(false);
   
+  // New state for expandable sections
+  const [expandedMember, setExpandedMember] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'profile' | 'notes' | 'training'>('profile');
+  
   const [selectedMinistryGroup, setSelectedMinistryGroup] = useState('');
   const [editSelectedMinistryGroup, setEditSelectedMinistryGroup] = useState('');
   
@@ -132,13 +140,7 @@ const Members = () => {
   const isGroupLeader = () => profile?.admin_role === 'group_leader';
   const isMember = () => profile?.admin_role === 'member' || !profile?.admin_role;
 
-  useEffect(() => {
-    if (!authLoading && !profile) {
-      navigate('/login');
-    }
-  }, [authLoading, profile, navigate]);
-
-  // Permission checks
+  // Updated permission checks
   const canViewAllMembers = () => isAdmin() || isPastor() || isDeacon();
   const canViewHiddenMembers = () => isAdmin() || isPastor() || isDeacon();
   const canEditMember = (memberCellGroupId?: string | null) => {
@@ -154,6 +156,19 @@ const Members = () => {
     return false;
   };
   const canExportMembers = () => isAdmin() || isPastor();
+
+  // New permission checks for notes and training
+  const canViewConfidentialNotes = () => {
+    return isAdmin() || isPastor() || isDeacon();
+  };
+
+  const canAddNotes = () => {
+    return isAdmin() || isPastor() || isDeacon() || isGroupLeader();
+  };
+
+  const canManageTraining = () => {
+    return isAdmin() || isPastor() || isDeacon() || isGroupLeader();
+  };
 
   const getVisibleMembers = () => {
     if (canViewAllMembers()) return null;
@@ -176,7 +191,7 @@ const Members = () => {
       fetchCellGroups();
       fetchMinistryGroups();
     }
-  }, [profile]); // Removed showHiddenMembers from dependencies
+  }, [profile]);
 
   const fetchMembers = async () => {
     if (!profile) return;
@@ -814,7 +829,7 @@ const Members = () => {
       total: members.length,
       ...counts,
       baptized: members.filter(m => m.baptism && m.baptism.trim() !== '').length,
-      hidden: hiddenMembers.length, // This will now have the actual count
+      hidden: hiddenMembers.length,
     };
   };
 
@@ -1064,156 +1079,279 @@ const Members = () => {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col lg:flex-row justify-between gap-6">
-          <div className="flex-1">
-            <div className="flex items-start gap-4 mb-4">
-              <div className={`w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg ${
-                isHidden 
-                  ? 'bg-gradient-to-br from-red-500 to-orange-500' 
-                  : 'bg-gradient-to-br from-blue-500 to-purple-500'
-              }`}>
-                {getInitials(member.name, member.surname)}
-              </div>
-              <div className="flex-1">
-                <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
-                  <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
-                    {member.name} {member.surname}
-                  </h3>
-                  <span className={`px-2 md:px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
-                    {getStatusBadge(member.status).text}
-                  </span>
-                  {isHidden && (
-                    <span className="px-2 md:px-3 py-1 rounded-full text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex items-center gap-1">
-                      <EyeOff className="h-3 w-3" />
-                      Hidden
-                    </span>
-                  )}
-                  {member.is_permanent_member && (
-                    <span className="px-2 md:px-3 py-1 rounded-full text-sm font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 flex items-center gap-1">
-                      Permanent
-                    </span>
-                  )}
+        <>
+          <div className="flex flex-col lg:flex-row justify-between gap-6">
+            <div className="flex-1">
+              <div className="flex items-start gap-4 mb-4">
+                <div className={`w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg ${
+                  isHidden 
+                    ? 'bg-gradient-to-br from-red-500 to-orange-500' 
+                    : 'bg-gradient-to-br from-blue-500 to-purple-500'
+                }`}>
+                  {getInitials(member.name, member.surname)}
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-gray-600 dark:text-gray-400">
-                  {member.phone && (
-                    <div className="flex items-center gap-3">
-                      <Phone className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium">{member.phone}</span>
-                    </div>
-                  )}
-                  {member.residence && (
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
+                    <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
+                      {member.name} {member.surname}
+                    </h3>
+                    <span className={`px-2 md:px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(member.status).color}`}>
+                      {getStatusBadge(member.status).text}
+                    </span>
+                    {isHidden && (
+                      <span className="px-2 md:px-3 py-1 rounded-full text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex items-center gap-1">
+                        <EyeOff className="h-3 w-3" />
+                        Hidden
+                      </span>
+                    )}
+                    {member.is_permanent_member && (
+                      <span className="px-2 md:px-3 py-1 rounded-full text-sm font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 flex items-center gap-1">
+                        Permanent
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-gray-600 dark:text-gray-400">
+                    {member.phone && (
+                      <div className="flex items-center gap-3">
+                        <Phone className="h-4 w-4 flex-shrink-0" />
+                        <span className="font-medium">{member.phone}</span>
+                      </div>
+                    )}
+                    {member.residence && (
+                      <div className="flex items-center gap-3">
+                        <MapPin className="h-4 w-4 flex-shrink-0" />
+                        <span className="font-medium break-all">{member.residence}</span>
+                      </div>
+                    )}
+                    {member.baptism && (
+                      <div className="flex items-start gap-3">
+                        <Droplets className="h-4 w-4 flex-shrink-0 mt-1" />
+                        <span className="font-medium text-blue-600 dark:text-blue-400 break-all">
+                          Baptized: {new Date(member.baptism).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                          })}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-3">
                       <MapPin className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium break-all">{member.residence}</span>
+                      <span className="font-medium">{member.cell_group_name || 'No Cell Group'}</span>
                     </div>
-                  )}
-                  {member.baptism && (
-                    <div className="flex items-start gap-3">
-                      <Droplets className="h-4 w-4 flex-shrink-0 mt-1" />
-                      <span className="font-medium text-blue-600 dark:text-blue-400 break-all">
-                        Baptized: {new Date(member.baptism).toLocaleDateString('en-US', {
+                    {member.gender && (
+                      <div className="flex items-center gap-3 text-sm">
+                        <User className="h-4 w-4 flex-shrink-0" />
+                        <span>Gender: {member.gender}</span>
+                      </div>
+                    )}
+                    {member.invited_by && (
+                      <div className="flex items-center gap-3 text-sm">
+                        <User className="h-4 w-4 flex-shrink-0" />
+                        <span>Invited by: {member.invited_by}</span>
+                      </div>
+                    )}
+                    {member.permanent_member_date && (
+                      <div className="text-sm text-purple-600 dark:text-purple-400">
+                        Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'short',
                           day: 'numeric'
                         })}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-3">
-                    <MapPin className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium">{member.cell_group_name || 'No Cell Group'}</span>
+                      </div>
+                    )}
                   </div>
-                  {member.gender && (
-                    <div className="flex items-center gap-3 text-sm">
-                      <User className="h-4 w-4 flex-shrink-0" />
-                      <span>Gender: {member.gender}</span>
-                    </div>
-                  )}
-                  {member.invited_by && (
-                    <div className="flex items-center gap-3 text-sm">
-                      <User className="h-4 w-4 flex-shrink-0" />
-                      <span>Invited by: {member.invited_by}</span>
-                    </div>
-                  )}
-                  {member.permanent_member_date && (
-                    <div className="text-sm text-purple-600 dark:text-purple-400">
-                      Permanent since: {new Date(member.permanent_member_date).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
+            
+            <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
+              <div className="flex flex-col sm:flex-row lg:flex-col gap-3">
+                {canEditMember(member.cell_group_id) && (
+                  <button
+                    onClick={() => handleEditMember(member)}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  >
+                    <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                    <span className="hidden sm:inline">Edit</span>
+                  </button>
+                )}
+                
+                {/* Add Show More/Less button for active members */}
+                {!isHidden && (canAddNotes() || canManageTraining()) && (
+                  <button
+                    onClick={() => {
+                      if (expandedMember === member.id) {
+                        setExpandedMember(null);
+                        setActiveTab('profile');
+                      } else {
+                        setExpandedMember(member.id);
+                        setActiveTab('profile');
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  >
+                    {expandedMember === member.id ? (
+                      <>
+                        <ChevronUp className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                        <span className="hidden sm:inline">Show Less</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                        <span className="hidden sm:inline">Show More</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {isHidden ? (
+                  <>
+                    {canEditMember(null) && (
+                      <button
+                        onClick={() => handleRestoreMember(member.id)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                      >
+                        <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
+                        <span className="hidden sm:inline">Restore</span>
+                      </button>
+                    )}
+                    {canDeleteMember() && (
+                      <button
+                        onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                      >
+                        <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                        <span className="hidden sm:inline">Delete</span>
+                      </button>
+                    )}
+                  </>
+                ) : canDeleteMember() && (
+                  <button
+                    onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  >
+                    <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {member.status_date && (
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {member.status ? `${member.status} since: ` : 'Member since: '}
+                    {new Date(member.status_date).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </div>
+                )}
+                {member.not_attending_reason && (
+                  <div className="text-sm text-red-600 dark:text-red-400 max-w-xs break-words">
+                    Reason: {member.not_attending_reason}
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 overflow-hidden">
+                ID: {member.id.slice(0, 8)}...
+              </div>
+            </div>
           </div>
-          
-          <div className="flex flex-col justify-between items-stretch lg:items-end gap-4">
-            <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3">
-              {canEditMember(member.cell_group_id) && (
+
+          {/* Expandable section for Notes and Training */}
+          {!isHidden && expandedMember === member.id && (
+            <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+              <div className="flex border-b border-gray-200 dark:border-gray-700">
                 <button
-                  onClick={() => handleEditMember(member)}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
+                  className={`px-4 py-2 font-medium transition-colors duration-200 ${
+                    activeTab === 'profile' 
+                      ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
+                  }`}
+                  onClick={() => setActiveTab('profile')}
                 >
-                  <Edit2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                  <span className="hidden sm:inline">Edit</span>
+                  Profile Details
                 </button>
-              )}
-              {isHidden ? (
-                <>
-                  {canEditMember(null) && (
-                    <button
-                      onClick={() => handleRestoreMember(member.id)}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                    >
-                      <RefreshCw className="h-4 w-4 group-hover:rotate-180 transition-transform duration-200" />
-                      <span className="hidden sm:inline">Restore</span>
-                    </button>
-                  )}
-                  {canDeleteMember() && (
-                    <button
-                      onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                    >
-                      <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                      <span className="hidden sm:inline">Delete</span>
-                    </button>
-                  )}
-                </>
-              ) : canDeleteMember() && (
-                <button
-                  onClick={() => handlePermanentDeleteMember(member.id, `${member.name} ${member.surname}`)}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium group"
-                >
-                  <Trash2 className="h-4 w-4 group-hover:scale-110 transition-transform duration-200" />
-                  <span className="hidden sm:inline">Delete</span>
-                </button>
-              )}
+                {canAddNotes() && (
+                  <button
+                    className={`px-4 py-2 font-medium transition-colors duration-200 ${
+                      activeTab === 'notes' 
+                        ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
+                    }`}
+                    onClick={() => setActiveTab('notes')}
+                  >
+                    Notes
+                  </button>
+                )}
+                {canManageTraining() && (
+                  <button
+                    className={`px-4 py-2 font-medium transition-colors duration-200 ${
+                      activeTab === 'training' 
+                        ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
+                    }`}
+                    onClick={() => setActiveTab('training')}
+                  >
+                    Foundational Training
+                  </button>
+                )}
+              </div>
+              
+              <div className="mt-6">
+                {activeTab === 'profile' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-600 dark:text-gray-400">
+                      {member.created_at && (
+                        <div className="flex items-center gap-3">
+                          <Calendar className="h-4 w-4 text-gray-400" />
+                          <span>Joined: {new Date(member.created_at).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                          })}</span>
+                        </div>
+                      )}
+                      {member.status && (
+                        <div className="flex items-center gap-3">
+                          <span>Current Status: <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(member.status).color}`}>
+                            {getStatusBadge(member.status).text}
+                          </span></span>
+                        </div>
+                      )}
+                    </div>
+                    {member.not_attending_reason && (
+                      <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700/50 rounded-lg">
+                        <div className="text-sm text-red-700 dark:text-red-300">
+                          <strong>Not Attending Reason:</strong> {member.not_attending_reason}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {activeTab === 'notes' && canAddNotes() && (
+                  <MemberNotes
+                    memberId={member.id}
+                    currentUserId={profile?.id || ''}
+                    canViewConfidential={canViewConfidentialNotes()}
+                    canEditNotes={canEditMember(member.cell_group_id)}
+                  />
+                )}
+                
+                {activeTab === 'training' && canManageTraining() && (
+                  <FoundationalTraining
+                    memberId={member.id}
+                    currentUserId={profile?.id || ''}
+                    canEditTraining={canEditMember(member.cell_group_id)}
+                  />
+                )}
+              </div>
             </div>
-            <div className="space-y-2">
-              {member.status_date && (
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  {member.status ? `${member.status} since: ` : 'Member since: '}
-                  {new Date(member.status_date).toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric'
-                  })}
-                </div>
-              )}
-              {member.not_attending_reason && (
-                <div className="text-sm text-red-600 dark:text-red-400 max-w-xs break-words">
-                  Reason: {member.not_attending_reason}
-                </div>
-              )}
-            </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 overflow-hidden">
-              ID: {member.id.slice(0, 8)}...
-            </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1322,7 +1460,6 @@ const Members = () => {
               <button
                 onClick={() => {
                   setShowHiddenMembers(!showHiddenMembers);
-                  // Force a re-render by fetching members again
                   fetchMembers();
                 }}
                 className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105 font-medium group"
