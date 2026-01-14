@@ -1,4 +1,4 @@
-import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key, ChevronDown, ChevronUp, MessageSquare, Lock, CheckCircle, Circle, BookOpen, Award } from 'lucide-react';
+import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key, ChevronDown, ChevronUp, MessageSquare, Lock, CheckCircle, Circle, BookOpen, Award, Clipboard, BookText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -58,6 +58,15 @@ interface FoundationalTopic {
   created_at: string;
 }
 
+interface TrainingProgress {
+  id: string;
+  member_id: string;
+  topic_id: string;
+  completed_by: string;
+  completed_date: string;
+  topic?: FoundationalTopic;
+}
+
 const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
 const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
 const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
@@ -91,15 +100,19 @@ const MemberNotes: React.FC<{
   currentUserId: string;
   canViewConfidential: boolean;
   canEditNotes: boolean;
+  editingMode?: boolean;
+  onNoteAdded?: () => void;
 }> = ({
   memberId,
   currentUserId,
   canViewConfidential,
-  canEditNotes
+  canEditNotes,
+  editingMode = false,
+  onNoteAdded
 }) => {
   const [notes, setNotes] = useState<MemberNote[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [showNoteForm, setShowNoteForm] = useState(editingMode);
   const [editingNote, setEditingNote] = useState<string | null>(null);
   
   const [noteForm, setNoteForm] = useState({
@@ -168,8 +181,9 @@ const MemberNotes: React.FC<{
         note_content: '',
         is_confidential: false
       });
-      setShowNoteForm(false);
+      setShowNoteForm(editingMode);
       fetchNotes();
+      if (onNoteAdded) onNoteAdded();
     } catch (error) {
       console.error('Error adding note:', error);
     }
@@ -246,7 +260,7 @@ const MemberNotes: React.FC<{
           <MessageSquare className="h-5 w-5" />
           Member Notes
         </h3>
-        {canEditNotes && (
+        {canEditNotes && !editingMode && (
           <button
             onClick={() => setShowNoteForm(!showNoteForm)}
             className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors duration-200"
@@ -257,7 +271,7 @@ const MemberNotes: React.FC<{
         )}
       </div>
 
-      {showNoteForm && (
+      {(showNoteForm || editingMode) && canEditNotes && (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
           <form onSubmit={handleSubmitNote} className="space-y-4">
             <div className="space-y-2">
@@ -312,13 +326,15 @@ const MemberNotes: React.FC<{
                 <Save className="h-4 w-4" />
                 Save Note
               </button>
-              <button
-                type="button"
-                onClick={() => setShowNoteForm(false)}
-                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
-              >
-                Cancel
-              </button>
+              {!editingMode && (
+                <button
+                  type="button"
+                  onClick={() => setShowNoteForm(false)}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </form>
         </div>
@@ -329,17 +345,17 @@ const MemberNotes: React.FC<{
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading notes...</p>
         </div>
-      ) : notes.length === 0 ? (
+      ) : notes.length === 0 && !editingMode ? (
         <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
           <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-3" />
           <p className="text-gray-600 dark:text-gray-400">No notes yet.</p>
-          {canEditNotes && (
+          {canEditNotes && !editingMode && (
             <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
               Add the first note using the "Add Note" button.
             </p>
           )}
         </div>
-      ) : (
+      ) : notes.length > 0 && (
         <div className="space-y-4">
           {notes.map((note) => (
             <div key={note.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
@@ -441,7 +457,7 @@ const MemberNotes: React.FC<{
                       By: {note.author?.name} {note.author?.surname}
                     </div>
                     
-                    {canEditNotes && (
+                    {canEditNotes && !editingMode && (
                       <div className="flex gap-2">
                         <button
                           onClick={() => startEditingNote(note)}
@@ -473,13 +489,17 @@ const FoundationalTraining: React.FC<{
   memberId: string;
   currentUserId: string;
   canEditTraining: boolean;
+  editingMode?: boolean;
+  onTrainingUpdated?: () => void;
 }> = ({
   memberId,
   currentUserId,
-  canEditTraining
+  canEditTraining,
+  editingMode = false,
+  onTrainingUpdated
 }) => {
   const [topics, setTopics] = useState<FoundationalTopic[]>([]);
-  const [completedTopics, setCompletedTopics] = useState<string[]>([]);
+  const [trainingProgress, setTrainingProgress] = useState<TrainingProgress[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({
     level1: 0,
@@ -487,6 +507,7 @@ const FoundationalTraining: React.FC<{
     level3: 0,
     total: 0
   });
+  const [expandedLevel, setExpandedLevel] = useState<number | null>(null);
 
   const fetchTrainingData = async () => {
     try {
@@ -503,16 +524,17 @@ const FoundationalTraining: React.FC<{
       if (topicsError) throw topicsError;
       setTopics(topicsData || []);
 
-      // Fetch member's completed topics
+      // Fetch member's training progress with topic details
       const { data: progressData, error: progressError } = await supabase
         .from('member_training_progress')
-        .select('topic_id, completed_date, completed_by')
+        .select(`
+          *,
+          topic:topic_id(*)
+        `)
         .eq('member_id', memberId);
 
       if (progressError) throw progressError;
-      
-      const completed = progressData?.map(p => p.topic_id) || [];
-      setCompletedTopics(completed);
+      setTrainingProgress(progressData || []);
 
       // Calculate progress
       const level1Topics = topicsData?.filter(t => t.level === 1) || [];
@@ -520,21 +542,21 @@ const FoundationalTraining: React.FC<{
       const level3Topics = topicsData?.filter(t => t.level === 3) || [];
       const totalTopics = topicsData?.length || 0;
 
-      const completedLevel1 = completed.filter(id => 
-        level1Topics.find(t => t.id === id)
-      ).length;
-      const completedLevel2 = completed.filter(id => 
-        level2Topics.find(t => t.id === id)
-      ).length;
-      const completedLevel3 = completed.filter(id => 
-        level3Topics.find(t => t.id === id)
-      ).length;
+      const completedLevel1 = progressData?.filter(p => 
+        level1Topics.find(t => t.id === p.topic_id)
+      ).length || 0;
+      const completedLevel2 = progressData?.filter(p => 
+        level2Topics.find(t => t.id === p.topic_id)
+      ).length || 0;
+      const completedLevel3 = progressData?.filter(p => 
+        level3Topics.find(t => t.id === p.topic_id)
+      ).length || 0;
 
       setProgress({
         level1: level1Topics.length > 0 ? Math.round((completedLevel1 / level1Topics.length) * 100) : 0,
         level2: level2Topics.length > 0 ? Math.round((completedLevel2 / level2Topics.length) * 100) : 0,
         level3: level3Topics.length > 0 ? Math.round((completedLevel3 / level3Topics.length) * 100) : 0,
-        total: totalTopics > 0 ? Math.round((completed.length / totalTopics) * 100) : 0
+        total: totalTopics > 0 ? Math.round((progressData?.length || 0) / totalTopics * 100) : 0
       });
 
     } catch (error) {
@@ -578,6 +600,7 @@ const FoundationalTraining: React.FC<{
       }
 
       fetchTrainingData();
+      if (onTrainingUpdated) onTrainingUpdated();
     } catch (error) {
       console.error('Error updating topic completion:', error);
     }
@@ -609,6 +632,10 @@ const FoundationalTraining: React.FC<{
     if (percentage >= 80) return 'bg-green-500';
     if (percentage >= 50) return 'bg-yellow-500';
     return 'bg-red-500';
+  };
+
+  const isTopicCompleted = (topicId: string) => {
+    return trainingProgress.some(progress => progress.topic_id === topicId);
   };
 
   return (
@@ -671,62 +698,72 @@ const FoundationalTraining: React.FC<{
             const levelTopics = getLevelTopics(level);
             if (levelTopics.length === 0) return null;
 
+            const completedCount = levelTopics.filter(t => isTopicCompleted(t.id)).length;
+            
             return (
               <div key={level} className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <h4 className="text-md font-semibold text-gray-900 dark:text-white">
-                    {getLevelTitle(level)}
-                  </h4>
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getLevelColor(level)}`}>
-                    {levelTopics.filter(t => completedTopics.includes(t.id)).length}/{levelTopics.length} completed
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  {levelTopics.map(topic => {
-                    const isCompleted = completedTopics.includes(topic.id);
-                    return (
-                      <div 
-                        key={topic.id}
-                        className={`bg-white dark:bg-gray-800 border rounded-lg p-3 hover:shadow-sm transition-all duration-200 ${
-                          isCompleted 
-                            ? 'border-green-200 dark:border-green-700/50' 
-                            : 'border-gray-200 dark:border-gray-700'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <button
-                            onClick={() => handleTopicToggle(topic.id, isCompleted)}
-                            disabled={!canEditTraining}
-                            className={`flex-shrink-0 mt-1 ${canEditTraining ? 'cursor-pointer hover:scale-110 transition-transform duration-200' : 'cursor-default'}`}
-                          >
-                            {isCompleted ? (
-                              <CheckCircle className="h-5 w-5 text-green-500" />
-                            ) : (
-                              <Circle className="h-5 w-5 text-gray-400" />
-                            )}
-                          </button>
-                          
-                          <div className="flex-1">
-                            <div className="flex justify-between items-start">
-                              <h5 className={`font-medium ${isCompleted ? 'text-green-700 dark:text-green-300' : 'text-gray-900 dark:text-white'}`}>
-                                {topic.title}
-                              </h5>
-                              {isCompleted && (
-                                <Award className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                <button
+                  onClick={() => setExpandedLevel(expandedLevel === level ? null : level)}
+                  className="w-full flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+                >
+                  <div className="flex items-center gap-3">
+                    <h4 className="text-md font-semibold text-gray-900 dark:text-white">
+                      {getLevelTitle(level)}
+                    </h4>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getLevelColor(level)}`}>
+                      {completedCount}/{levelTopics.length} completed
+                    </span>
+                  </div>
+                  <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${expandedLevel === level ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {expandedLevel === level && (
+                  <div className="space-y-2 pl-4">
+                    {levelTopics.map(topic => {
+                      const isCompleted = isTopicCompleted(topic.id);
+                      return (
+                        <div 
+                          key={topic.id}
+                          className={`bg-white dark:bg-gray-800 border rounded-lg p-3 hover:shadow-sm transition-all duration-200 ${
+                            isCompleted 
+                              ? 'border-green-200 dark:border-green-700/50' 
+                              : 'border-gray-200 dark:border-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <button
+                              onClick={() => handleTopicToggle(topic.id, isCompleted)}
+                              disabled={!canEditTraining}
+                              className={`flex-shrink-0 mt-1 ${canEditTraining ? 'cursor-pointer hover:scale-110 transition-transform duration-200' : 'cursor-default'}`}
+                            >
+                              {isCompleted ? (
+                                <CheckCircle className="h-5 w-5 text-green-500" />
+                              ) : (
+                                <Circle className="h-5 w-5 text-gray-400" />
+                              )}
+                            </button>
+                            
+                            <div className="flex-1">
+                              <div className="flex justify-between items-start">
+                                <h5 className={`font-medium ${isCompleted ? 'text-green-700 dark:text-green-300' : 'text-gray-900 dark:text-white'}`}>
+                                  {topic.title}
+                                </h5>
+                                {isCompleted && (
+                                  <Award className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                                )}
+                              </div>
+                              {topic.description && (
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                  {topic.description}
+                                </p>
                               )}
                             </div>
-                            {topic.description && (
-                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                {topic.description}
-                              </p>
-                            )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -803,6 +840,9 @@ const Members = () => {
     not_attending_reason: '',
     is_hidden: false,
   });
+
+  // State for edit mode tabs
+  const [editActiveTab, setEditActiveTab] = useState<'profile' | 'notes' | 'training'>('profile');
 
   const isAdmin = () => profile?.admin_role === 'admin' || profile?.admin_role === 'administrator';
   const isPastor = () => profile?.admin_role === 'pastor';
@@ -1094,6 +1134,7 @@ const Members = () => {
       not_attending_reason: member.not_attending_reason || '',
       is_hidden: member.is_hidden || false,
     });
+    setEditActiveTab('profile');
     
     if (member.id) {
       try {
@@ -1248,6 +1289,7 @@ const Members = () => {
       is_hidden: false,
     });
     setEditSelectedMinistryGroup('');
+    setEditActiveTab('profile');
   };
 
   const handleRestoreMember = async (memberId: string) => {
@@ -1541,52 +1583,50 @@ const Members = () => {
     }
   };
 
-  const renderMemberCard = (member: Member, isHidden: boolean = false) => (
-    <div 
-      key={member.id} 
-      className={`bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border rounded-2xl p-4 md:p-6 hover:shadow-xl transition-all duration-300 group ${
-        isHidden 
-          ? 'border-red-200/50 dark:border-red-700/50 hover:border-red-300/50 dark:hover:border-red-600/50' 
-          : 'border-gray-200/50 dark:border-gray-700/50 hover:border-gray-300/50 dark:hover:border-gray-600/50'
-      }`}
-    >
-      {editingMember === member.id ? (
+  const renderEditTabs = (member: Member) => (
+    <div className="mt-6 border-t border-gray-200 dark:border-gray-600 pt-6">
+      <div className="flex border-b border-gray-200 dark:border-gray-600 mb-6">
+        <button
+          className={`px-4 py-2 font-medium transition-colors duration-200 flex items-center gap-2 ${
+            editActiveTab === 'profile' 
+              ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
+          }`}
+          onClick={() => setEditActiveTab('profile')}
+        >
+          <User className="h-4 w-4" />
+          Profile
+        </button>
+        {canAddNotes() && (
+          <button
+            className={`px-4 py-2 font-medium transition-colors duration-200 flex items-center gap-2 ${
+              editActiveTab === 'notes' 
+                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setEditActiveTab('notes')}
+          >
+            <Clipboard className="h-4 w-4" />
+            Notes
+          </button>
+        )}
+        {canManageTraining() && (
+          <button
+            className={`px-4 py-2 font-medium transition-colors duration-200 flex items-center gap-2 ${
+              editActiveTab === 'training' 
+                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setEditActiveTab('training')}
+          >
+            <BookText className="h-4 w-4" />
+            Training
+          </button>
+        )}
+      </div>
+      
+      {editActiveTab === 'profile' && (
         <div className="space-y-6">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
-                {getInitials(editFormData.name, editFormData.surname)}
-              </div>
-              <div>
-                <div className="flex flex-col sm:flex-row gap-3 mb-2">
-                  <input
-                    type="text"
-                    value={editFormData.name}
-                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                    className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
-                    placeholder="First Name"
-                  />
-                  <input
-                    type="text"
-                    value={editFormData.surname}
-                    onChange={(e) => setEditFormData({ ...editFormData, surname: e.target.value })}
-                    className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
-                    placeholder="Last Name"
-                  />
-                </div>
-                <select
-                  value={editFormData.status}
-                  onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
-                >
-                  {availableStatuses.map(status => (
-                    <option key={status} value={status}>{status}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex items-center gap-3">
@@ -1721,27 +1761,102 @@ const Members = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          <div className="flex flex-col sm:flex-row gap-3 pt-4">
-            <button
-              onClick={() => handleSaveMember(member.id)}
-              disabled={loading}
-              className="flex-1 flex items-center justify-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
-            >
-              <Save className="h-4 w-4" />
-              {loading ? 'Saving...' : 'Save Changes'}
-            </button>
-            <button
-              onClick={handleCancelEdit}
-              className="flex-1 px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 text-center"
-            >
-              Cancel
-            </button>
+      {editActiveTab === 'notes' && canAddNotes() && (
+        <MemberNotes
+          memberId={member.id}
+          currentUserId={profile?.id || ''}
+          canViewConfidential={canViewConfidentialNotes()}
+          canEditNotes={canEditMember(member.cell_group_id)}
+          editingMode={true}
+          onNoteAdded={() => {
+            setSuccess('Note added successfully!');
+            setTimeout(() => setSuccess(null), 3000);
+          }}
+        />
+      )}
+
+      {editActiveTab === 'training' && canManageTraining() && (
+        <FoundationalTraining
+          memberId={member.id}
+          currentUserId={profile?.id || ''}
+          canEditTraining={canEditMember(member.cell_group_id)}
+          editingMode={true}
+          onTrainingUpdated={() => {
+            setSuccess('Training progress updated!');
+            setTimeout(() => setSuccess(null), 3000);
+          }}
+        />
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-3 pt-6 border-t border-gray-200 dark:border-gray-600">
+        <button
+          onClick={() => handleSaveMember(member.id)}
+          disabled={loading}
+          className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 transition-all duration-200"
+        >
+          <Save className="h-4 w-4" />
+          {loading ? 'Saving...' : 'Save Changes'}
+        </button>
+        <button
+          onClick={handleCancelEdit}
+          className="flex-1 px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 text-center"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderMemberCard = (member: Member, isHidden: boolean = false) => (
+    <div 
+      key={member.id} 
+      className={`bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border rounded-2xl p-4 md:p-6 hover:shadow-xl transition-all duration-300 group ${
+        isHidden 
+          ? 'border-red-200/50 dark:border-red-700/50 hover:border-red-300/50 dark:hover:border-red-600/50' 
+          : 'border-gray-200/50 dark:border-gray-700/50 hover:border-gray-300/50 dark:hover:border-gray-600/50'
+      }`}
+    >
+      {editingMember === member.id ? (
+        <div className="space-y-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                {getInitials(editFormData.name, editFormData.surname)}
+              </div>
+              <div>
+                <div className="flex flex-col sm:flex-row gap-3 mb-2">
+                  <input
+                    type="text"
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
+                    placeholder="First Name"
+                  />
+                  <input
+                    type="text"
+                    value={editFormData.surname}
+                    onChange={(e) => setEditFormData({ ...editFormData, surname: e.target.value })}
+                    className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1"
+                    placeholder="Last Name"
+                  />
+                </div>
+                <select
+                  value={editFormData.status}
+                  onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
+                  className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadge(editFormData.status).color} border-none focus:ring-2 focus:ring-blue-500`}
+                >
+                  {availableStatuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
-          <div className="text-xs text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-600 overflow-hidden">
-            Member ID: {member.id.slice(0, 8)}...
-          </div>
+          {renderEditTabs(member)}
         </div>
       ) : (
         <>
