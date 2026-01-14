@@ -1,12 +1,8 @@
-import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Droplets, Eye, EyeOff, RefreshCw, Download, Filter, Shield, Users, Key, ChevronDown, ChevronUp, MessageSquare, Lock, CheckCircle, Circle, BookOpen, Award } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-
-// Import the new components you'll need to create
-import MemberNotes from './MemberNotes';
-import FoundationalTraining from './FoundationalTraining';
 
 interface Member {
   id: string;
@@ -38,6 +34,30 @@ interface MinistryGroup {
   name: string;
 }
 
+interface MemberNote {
+  id: string;
+  member_id: string;
+  author_id: string;
+  note_type: string;
+  note_content: string;
+  is_confidential: boolean;
+  created_at: string;
+  author?: {
+    name: string;
+    surname: string;
+  };
+}
+
+interface FoundationalTopic {
+  id: string;
+  title: string;
+  description: string;
+  level: number;
+  topic_order: number;
+  is_active: boolean;
+  created_at: string;
+}
+
 const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
 const ATTENDING_STATUSES = ['newcomer', 'member', 'signed member', 'permanent', 'active'];
 const VALID_STATUSES = [...ATTENDING_STATUSES, ...NOT_ATTENDING_STATUSES];
@@ -65,6 +85,658 @@ const logAudit = async (
   }
 };
 
+// MemberNotes Component
+const MemberNotes: React.FC<{
+  memberId: string;
+  currentUserId: string;
+  canViewConfidential: boolean;
+  canEditNotes: boolean;
+}> = ({
+  memberId,
+  currentUserId,
+  canViewConfidential,
+  canEditNotes
+}) => {
+  const [notes, setNotes] = useState<MemberNote[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  
+  const [noteForm, setNoteForm] = useState({
+    note_type: 'general',
+    note_content: '',
+    is_confidential: false
+  });
+
+  const [editNoteForm, setEditNoteForm] = useState({
+    note_type: 'general',
+    note_content: '',
+    is_confidential: false
+  });
+
+  const fetchNotes = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('member_notes')
+        .select(`
+          *,
+          author:author_id(name, surname)
+        `)
+        .eq('member_id', memberId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      const filteredNotes = canViewConfidential 
+        ? data 
+        : data?.filter(note => !note.is_confidential);
+      
+      setNotes(filteredNotes || []);
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotes();
+  }, [memberId, canViewConfidential]);
+
+  const handleSubmitNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noteForm.note_content.trim()) return;
+    
+    try {
+      const newNote = {
+        member_id: memberId,
+        author_id: currentUserId,
+        note_type: noteForm.note_type,
+        note_content: noteForm.note_content.trim(),
+        is_confidential: noteForm.is_confidential
+      };
+
+      const { error } = await supabase
+        .from('member_notes')
+        .insert([newNote]);
+
+      if (error) throw error;
+
+      setNoteForm({
+        note_type: 'general',
+        note_content: '',
+        is_confidential: false
+      });
+      setShowNoteForm(false);
+      fetchNotes();
+    } catch (error) {
+      console.error('Error adding note:', error);
+    }
+  };
+
+  const handleUpdateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNote || !editNoteForm.note_content.trim()) return;
+    
+    try {
+      const { error } = await supabase
+        .from('member_notes')
+        .update({
+          note_type: editNoteForm.note_type,
+          note_content: editNoteForm.note_content.trim(),
+          is_confidential: editNoteForm.is_confidential,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingNote);
+
+      if (error) throw error;
+
+      setEditingNote(null);
+      fetchNotes();
+    } catch (error) {
+      console.error('Error updating note:', error);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!confirm('Are you sure you want to delete this note?')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('member_notes')
+        .delete()
+        .eq('id', noteId);
+
+      if (error) throw error;
+
+      fetchNotes();
+    } catch (error) {
+      console.error('Error deleting note:', error);
+    }
+  };
+
+  const startEditingNote = (note: MemberNote) => {
+    setEditingNote(note.id);
+    setEditNoteForm({
+      note_type: note.note_type,
+      note_content: note.note_content,
+      is_confidential: note.is_confidential
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingNote(null);
+  };
+
+  const getNoteTypeColor = (type: string) => {
+    switch (type) {
+      case 'pastoral': return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300';
+      case 'counseling': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
+      case 'discipleship': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300';
+      case 'prayer': return 'bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300';
+      default: return 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300';
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+          <MessageSquare className="h-5 w-5" />
+          Member Notes
+        </h3>
+        {canEditNotes && (
+          <button
+            onClick={() => setShowNoteForm(!showNoteForm)}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors duration-200"
+          >
+            <Plus className="h-4 w-4" />
+            {showNoteForm ? 'Cancel' : 'Add Note'}
+          </button>
+        )}
+      </div>
+
+      {showNoteForm && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+          <form onSubmit={handleSubmitNote} className="space-y-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Note Type
+              </label>
+              <select
+                value={noteForm.note_type}
+                onChange={(e) => setNoteForm({...noteForm, note_type: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="general">General</option>
+                <option value="pastoral">Pastoral</option>
+                <option value="counseling">Counseling</option>
+                <option value="discipleship">Discipleship</option>
+                <option value="prayer">Prayer Request</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Note Content *
+              </label>
+              <textarea
+                value={noteForm.note_content}
+                onChange={(e) => setNoteForm({...noteForm, note_content: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
+                placeholder="Enter your note here..."
+                required
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="confidential"
+                checked={noteForm.is_confidential}
+                onChange={(e) => setNoteForm({...noteForm, is_confidential: e.target.checked})}
+                className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+              />
+              <label htmlFor="confidential" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <Lock className="h-4 w-4" />
+                Confidential (only visible to pastors, deacons, and admins)
+              </label>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors duration-200"
+              >
+                <Save className="h-4 w-4" />
+                Save Note
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowNoteForm(false)}
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading notes...</p>
+        </div>
+      ) : notes.length === 0 ? (
+        <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
+          <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+          <p className="text-gray-600 dark:text-gray-400">No notes yet.</p>
+          {canEditNotes && (
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+              Add the first note using the "Add Note" button.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {notes.map((note) => (
+            <div key={note.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+              {editingNote === note.id ? (
+                <form onSubmit={handleUpdateNote} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Note Type
+                    </label>
+                    <select
+                      value={editNoteForm.note_type}
+                      onChange={(e) => setEditNoteForm({...editNoteForm, note_type: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="general">General</option>
+                      <option value="pastoral">Pastoral</option>
+                      <option value="counseling">Counseling</option>
+                      <option value="discipleship">Discipleship</option>
+                      <option value="prayer">Prayer Request</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Note Content *
+                    </label>
+                    <textarea
+                      value={editNoteForm.note_content}
+                      onChange={(e) => setEditNoteForm({...editNoteForm, note_content: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="edit-confidential"
+                      checked={editNoteForm.is_confidential}
+                      onChange={(e) => setEditNoteForm({...editNoteForm, is_confidential: e.target.checked})}
+                      className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    <label htmlFor="edit-confidential" className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <Lock className="h-4 w-4" />
+                      Confidential
+                    </label>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors duration-200"
+                    >
+                      <Save className="h-4 w-4" />
+                      Update Note
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditing}
+                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getNoteTypeColor(note.note_type)}`}>
+                        {note.note_type.charAt(0).toUpperCase() + note.note_type.slice(1)}
+                      </span>
+                      {note.is_confidential && (
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex items-center gap-1">
+                          <Lock className="h-3 w-3" />
+                          Confidential
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {new Date(note.created_at).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                      {note.note_content}
+                    </p>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      By: {note.author?.name} {note.author?.surname}
+                    </div>
+                    
+                    {canEditNotes && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => startEditingNote(note)}
+                          className="p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-200"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteNote(note.id)}
+                          className="p-1 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// FoundationalTraining Component
+const FoundationalTraining: React.FC<{
+  memberId: string;
+  currentUserId: string;
+  canEditTraining: boolean;
+}> = ({
+  memberId,
+  currentUserId,
+  canEditTraining
+}) => {
+  const [topics, setTopics] = useState<FoundationalTopic[]>([]);
+  const [completedTopics, setCompletedTopics] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState({
+    level1: 0,
+    level2: 0,
+    level3: 0,
+    total: 0
+  });
+
+  const fetchTrainingData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch all active topics
+      const { data: topicsData, error: topicsError } = await supabase
+        .from('foundational_topics')
+        .select('*')
+        .eq('is_active', true)
+        .order('level')
+        .order('topic_order');
+
+      if (topicsError) throw topicsError;
+      setTopics(topicsData || []);
+
+      // Fetch member's completed topics
+      const { data: progressData, error: progressError } = await supabase
+        .from('member_training_progress')
+        .select('topic_id, completed_date, completed_by')
+        .eq('member_id', memberId);
+
+      if (progressError) throw progressError;
+      
+      const completed = progressData?.map(p => p.topic_id) || [];
+      setCompletedTopics(completed);
+
+      // Calculate progress
+      const level1Topics = topicsData?.filter(t => t.level === 1) || [];
+      const level2Topics = topicsData?.filter(t => t.level === 2) || [];
+      const level3Topics = topicsData?.filter(t => t.level === 3) || [];
+      const totalTopics = topicsData?.length || 0;
+
+      const completedLevel1 = completed.filter(id => 
+        level1Topics.find(t => t.id === id)
+      ).length;
+      const completedLevel2 = completed.filter(id => 
+        level2Topics.find(t => t.id === id)
+      ).length;
+      const completedLevel3 = completed.filter(id => 
+        level3Topics.find(t => t.id === id)
+      ).length;
+
+      setProgress({
+        level1: level1Topics.length > 0 ? Math.round((completedLevel1 / level1Topics.length) * 100) : 0,
+        level2: level2Topics.length > 0 ? Math.round((completedLevel2 / level2Topics.length) * 100) : 0,
+        level3: level3Topics.length > 0 ? Math.round((completedLevel3 / level3Topics.length) * 100) : 0,
+        total: totalTopics > 0 ? Math.round((completed.length / totalTopics) * 100) : 0
+      });
+
+    } catch (error) {
+      console.error('Error fetching training data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTrainingData();
+  }, [memberId]);
+
+  const handleTopicToggle = async (topicId: string, isCompleted: boolean) => {
+    if (!canEditTraining) return;
+
+    try {
+      if (isCompleted) {
+        // Remove completion
+        const { error } = await supabase
+          .from('member_training_progress')
+          .delete()
+          .eq('member_id', memberId)
+          .eq('topic_id', topicId);
+
+        if (error) throw error;
+      } else {
+        // Add completion
+        const completionData = {
+          member_id: memberId,
+          topic_id: topicId,
+          completed_by: currentUserId,
+          completed_date: new Date().toISOString()
+        };
+
+        const { error } = await supabase
+          .from('member_training_progress')
+          .insert([completionData]);
+
+        if (error) throw error;
+      }
+
+      fetchTrainingData();
+    } catch (error) {
+      console.error('Error updating topic completion:', error);
+    }
+  };
+
+  const getLevelTopics = (level: number) => {
+    return topics.filter(topic => topic.level === level);
+  };
+
+  const getLevelTitle = (level: number) => {
+    switch (level) {
+      case 1: return 'Level 1: Foundations';
+      case 2: return 'Level 2: Growth';
+      case 3: return 'Level 3: Leadership';
+      default: return `Level ${level}`;
+    }
+  };
+
+  const getLevelColor = (level: number) => {
+    switch (level) {
+      case 1: return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
+      case 2: return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300';
+      case 3: return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300';
+      default: return 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300';
+    }
+  };
+
+  const getProgressColor = (percentage: number) => {
+    if (percentage >= 80) return 'bg-green-500';
+    if (percentage >= 50) return 'bg-yellow-500';
+    return 'bg-red-500';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+          <BookOpen className="h-5 w-5" />
+          Foundational Training
+        </h3>
+        <div className="text-sm text-gray-600 dark:text-gray-400">
+          {canEditTraining ? 'Click to toggle completion' : 'View only'}
+        </div>
+      </div>
+
+      {/* Progress Overview */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700/50 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="font-semibold text-gray-900 dark:text-white">Training Progress</h4>
+          <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{progress.total}%</span>
+        </div>
+        
+        <div className="space-y-4">
+          {[1, 2, 3].map(level => (
+            <div key={level} className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getLevelColor(level)}`}>
+                  {getLevelTitle(level)}
+                </span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {progress[`level${level}` as keyof typeof progress]}%
+                </span>
+              </div>
+              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full ${getProgressColor(progress[`level${level}` as keyof typeof progress])} transition-all duration-500`}
+                  style={{ width: `${progress[`level${level}` as keyof typeof progress]}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading training topics...</p>
+        </div>
+      ) : topics.length === 0 ? (
+        <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
+          <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+          <p className="text-gray-600 dark:text-gray-400">No training topics configured.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+            Contact an administrator to set up foundational training topics.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {[1, 2, 3].map(level => {
+            const levelTopics = getLevelTopics(level);
+            if (levelTopics.length === 0) return null;
+
+            return (
+              <div key={level} className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <h4 className="text-md font-semibold text-gray-900 dark:text-white">
+                    {getLevelTitle(level)}
+                  </h4>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getLevelColor(level)}`}>
+                    {levelTopics.filter(t => completedTopics.includes(t.id)).length}/{levelTopics.length} completed
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {levelTopics.map(topic => {
+                    const isCompleted = completedTopics.includes(topic.id);
+                    return (
+                      <div 
+                        key={topic.id}
+                        className={`bg-white dark:bg-gray-800 border rounded-lg p-3 hover:shadow-sm transition-all duration-200 ${
+                          isCompleted 
+                            ? 'border-green-200 dark:border-green-700/50' 
+                            : 'border-gray-200 dark:border-gray-700'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <button
+                            onClick={() => handleTopicToggle(topic.id, isCompleted)}
+                            disabled={!canEditTraining}
+                            className={`flex-shrink-0 mt-1 ${canEditTraining ? 'cursor-pointer hover:scale-110 transition-transform duration-200' : 'cursor-default'}`}
+                          >
+                            {isCompleted ? (
+                              <CheckCircle className="h-5 w-5 text-green-500" />
+                            ) : (
+                              <Circle className="h-5 w-5 text-gray-400" />
+                            )}
+                          </button>
+                          
+                          <div className="flex-1">
+                            <div className="flex justify-between items-start">
+                              <h5 className={`font-medium ${isCompleted ? 'text-green-700 dark:text-green-300' : 'text-gray-900 dark:text-white'}`}>
+                                {topic.title}
+                              </h5>
+                              {isCompleted && (
+                                <Award className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                              )}
+                            </div>
+                            {topic.description && (
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                {topic.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Main Members Component
 const Members = () => {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -83,7 +755,6 @@ const Members = () => {
   const [showHiddenMembers, setShowHiddenMembers] = useState(false);
   const [exporting, setExporting] = useState(false);
   
-  // New state for expandable sections
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'profile' | 'notes' | 'training'>('profile');
   
@@ -133,14 +804,12 @@ const Members = () => {
     is_hidden: false,
   });
 
-  // Role check functions
   const isAdmin = () => profile?.admin_role === 'admin' || profile?.admin_role === 'administrator';
   const isPastor = () => profile?.admin_role === 'pastor';
   const isDeacon = () => profile?.admin_role === 'deacon';
   const isGroupLeader = () => profile?.admin_role === 'group_leader';
   const isMember = () => profile?.admin_role === 'member' || !profile?.admin_role;
 
-  // Updated permission checks
   const canViewAllMembers = () => isAdmin() || isPastor() || isDeacon();
   const canViewHiddenMembers = () => isAdmin() || isPastor() || isDeacon();
   const canEditMember = (memberCellGroupId?: string | null) => {
@@ -157,7 +826,6 @@ const Members = () => {
   };
   const canExportMembers = () => isAdmin() || isPastor();
 
-  // New permission checks for notes and training
   const canViewConfidentialNotes = () => {
     return isAdmin() || isPastor() || isDeacon();
   };
@@ -202,7 +870,6 @@ const Members = () => {
       
       const visibleFilter = getVisibleMembers();
       
-      // Fetch active members (is_hidden = false)
       if (visibleFilter || canViewAllMembers()) {
         let activeQuery = supabase
           .from('members')
@@ -238,7 +905,6 @@ const Members = () => {
         setMembers([]);
       }
 
-      // Fetch hidden members (is_hidden = true) - only if user has permission
       if (canViewHiddenMembers() && (visibleFilter || canViewAllMembers())) {
         let hiddenQuery = supabase
           .from('members')
@@ -819,7 +1485,6 @@ const Members = () => {
   const getStatusCounts = () => {
     const counts: Record<string, number> = {};
     
-    // Count statuses for active members
     members.forEach(member => {
       const status = member.status || 'No Status';
       counts[status] = (counts[status] || 0) + 1;
@@ -1178,7 +1843,6 @@ const Members = () => {
                   </button>
                 )}
                 
-                {/* Add Show More/Less button for active members */}
                 {!isHidden && (canAddNotes() || canManageTraining()) && (
                   <button
                     onClick={() => {
@@ -1260,7 +1924,6 @@ const Members = () => {
             </div>
           </div>
 
-          {/* Expandable section for Notes and Training */}
           {!isHidden && expandedMember === member.id && (
             <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
               <div className="flex border-b border-gray-200 dark:border-gray-700">
@@ -1356,7 +2019,6 @@ const Members = () => {
     </div>
   );
 
-  // Show loading while auth is loading
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
@@ -1365,7 +2027,6 @@ const Members = () => {
     );
   }
 
-  // Redirect to login if not authenticated
   if (!profile) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
@@ -1377,7 +2038,6 @@ const Members = () => {
     );
   }
 
-  // If user is a regular member (with no special roles), show their profile only
   if (isMember() && !isAdmin() && !isPastor() && !isDeacon() && !isGroupLeader()) {
     const memberProfile = members.find(m => m.id === profile.id);
     
