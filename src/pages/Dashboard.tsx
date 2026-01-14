@@ -3,7 +3,6 @@ import {
   Users, 
   Calendar, 
   TrendingUp, 
-  MoreVertical, 
   ArrowUp, 
   ArrowDown, 
   X,
@@ -124,15 +123,8 @@ const Dashboard = () => {
   const { 
     profile, 
     isAdmin, 
-    isPastor, 
-    isDeacon, 
-    isGroupLeader, 
-    isDepartmentLeader,
-    hasPermission,
-    canViewGroup,
-    canViewDepartment,
-    canManageGroup,
-    canManageDepartment
+    isPastor,
+    hasPermission
   } = useAuth();
   
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -165,15 +157,13 @@ const Dashboard = () => {
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [absentMembers, setAbsentMembers] = useState<AbsentMember[]>([]);
   const [sermons, setSermons] = useState<Sermon[]>([]);
-  const [absentCount, setAbsentCount] = useState<number>(0);
+  const [_absentCount, setAbsentCount] = useState<number>(0); // Used for state sync
   const [hiddenMembersCount, setHiddenMembersCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
   // Check user permissions using AuthContext
   const currentUserCanEdit = isAdmin() || isPastor() || hasPermission('edit_users');
   const currentUserCanViewSensitiveDetails = isAdmin() || isPastor();
-  const currentUserCanViewAllGroups = isAdmin() || isPastor() || isDeacon();
-  const currentUserCanViewAllDepartments = isAdmin() || isPastor() || isDeacon();
 
   // Filter functions - Filter out hidden members by default
   const getFilteredMembers = () => {
