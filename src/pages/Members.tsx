@@ -50,21 +50,28 @@ interface MemberNote {
 
 interface FoundationalTopic {
   id: string;
-  title: string;
-  description: string;
+  topic_name: string;
+  topic_description: string | null;
   level: number;
   topic_order: number;
   is_active: boolean;
   created_at: string;
+  duration_minutes?: number | null;
 }
 
 interface TrainingProgress {
   id: string;
   member_id: string;
   topic_id: string;
-  completed_by: string;
+  completed_by: string | null;
   completed_date: string;
+  notes: string | null;
+  created_at: string;
   topic?: FoundationalTopic;
+  completed_by_member?: {
+    name: string;
+    surname: string;
+  };
 }
 
 const NOT_ATTENDING_STATUSES = ['inactive', 'stopped attending', 'not attending', 'left'];
@@ -167,12 +174,14 @@ const MemberNotes: React.FC<{
         author_id: currentUserId,
         note_type: noteForm.note_type,
         note_content: noteForm.note_content.trim(),
-        is_confidential: noteForm.is_confidential
+        is_confidential: noteForm.is_confidential,
+        created_at: new Date().toISOString()
       };
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('member_notes')
-        .insert([newNote]);
+        .insert([newNote])
+        .select();
 
       if (error) throw error;
 
@@ -186,6 +195,7 @@ const MemberNotes: React.FC<{
       if (onNoteAdded) onNoteAdded();
     } catch (error) {
       console.error('Error adding note:', error);
+      alert('Failed to save note. Please try again.');
     }
   };
 
@@ -194,7 +204,7 @@ const MemberNotes: React.FC<{
     if (!editingNote || !editNoteForm.note_content.trim()) return;
     
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('member_notes')
         .update({
           note_type: editNoteForm.note_type,
@@ -202,7 +212,8 @@ const MemberNotes: React.FC<{
           is_confidential: editNoteForm.is_confidential,
           updated_at: new Date().toISOString()
         })
-        .eq('id', editingNote);
+        .eq('id', editingNote)
+        .select();
 
       if (error) throw error;
 
@@ -210,6 +221,7 @@ const MemberNotes: React.FC<{
       fetchNotes();
     } catch (error) {
       console.error('Error updating note:', error);
+      alert('Failed to update note. Please try again.');
     }
   };
 
@@ -227,6 +239,7 @@ const MemberNotes: React.FC<{
       fetchNotes();
     } catch (error) {
       console.error('Error deleting note:', error);
+      alert('Failed to delete note. Please try again.');
     }
   };
 
@@ -513,7 +526,7 @@ const FoundationalTraining: React.FC<{
     try {
       setLoading(true);
       
-      // Fetch all active topics
+      // Fetch all active topics with correct column names
       const { data: topicsData, error: topicsError } = await supabase
         .from('foundational_topics')
         .select('*')
@@ -529,7 +542,8 @@ const FoundationalTraining: React.FC<{
         .from('member_training_progress')
         .select(`
           *,
-          topic:topic_id(*)
+          topic:topic_id(*),
+          completed_by_member:completed_by(name, surname)
         `)
         .eq('member_id', memberId);
 
@@ -589,7 +603,8 @@ const FoundationalTraining: React.FC<{
           member_id: memberId,
           topic_id: topicId,
           completed_by: currentUserId,
-          completed_date: new Date().toISOString()
+          completed_date: new Date().toISOString(),
+          notes: `Completed foundational training topic`
         };
 
         const { error } = await supabase
@@ -603,6 +618,7 @@ const FoundationalTraining: React.FC<{
       if (onTrainingUpdated) onTrainingUpdated();
     } catch (error) {
       console.error('Error updating topic completion:', error);
+      alert('Failed to update training progress. Please try again.');
     }
   };
 
@@ -636,6 +652,23 @@ const FoundationalTraining: React.FC<{
 
   const isTopicCompleted = (topicId: string) => {
     return trainingProgress.some(progress => progress.topic_id === topicId);
+  };
+
+  const getCompletionDetails = (topicId: string) => {
+    const progress = trainingProgress.find(p => p.topic_id === topicId);
+    if (!progress) return null;
+    
+    return {
+      completedBy: progress.completed_by_member 
+        ? `${progress.completed_by_member.name} ${progress.completed_by_member.surname}`
+        : 'Unknown',
+      completedDate: new Date(progress.completed_date).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      }),
+      notes: progress.notes
+    };
   };
 
   return (
@@ -721,6 +754,8 @@ const FoundationalTraining: React.FC<{
                   <div className="space-y-2 pl-4">
                     {levelTopics.map(topic => {
                       const isCompleted = isTopicCompleted(topic.id);
+                      const completionDetails = getCompletionDetails(topic.id);
+                      
                       return (
                         <div 
                           key={topic.id}
@@ -746,16 +781,33 @@ const FoundationalTraining: React.FC<{
                             <div className="flex-1">
                               <div className="flex justify-between items-start">
                                 <h5 className={`font-medium ${isCompleted ? 'text-green-700 dark:text-green-300' : 'text-gray-900 dark:text-white'}`}>
-                                  {topic.title}
+                                  {topic.topic_name}
                                 </h5>
                                 {isCompleted && (
                                   <Award className="h-4 w-4 text-yellow-500 flex-shrink-0" />
                                 )}
                               </div>
-                              {topic.description && (
+                              {topic.topic_description && (
                                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                  {topic.description}
+                                  {topic.topic_description}
                                 </p>
+                              )}
+                              {topic.duration_minutes && (
+                                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                  Duration: {topic.duration_minutes} minutes
+                                </p>
+                              )}
+                              {completionDetails && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Completed by: {completionDetails.completedBy} on {completionDetails.completedDate}
+                                  </p>
+                                  {completionDetails.notes && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                      Notes: {completionDetails.notes}
+                                    </p>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>
