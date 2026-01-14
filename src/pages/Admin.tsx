@@ -269,41 +269,78 @@ const parseCSVRow = (row: string): string[] => {
   return result;
 };
 
-// Excel file reader helper
-const readExcelFile = (file: File): Promise<string[][]> => {
+// Excel file reader helper - now uses SheetJS (xlsx library)
+const readExcelOrCsvFile = async (file: File): Promise<{ headers: string[], data: string[][] }> => {
+  const fileExtension = file.name.toLowerCase().split('.').pop();
+  
+  if (fileExtension === 'csv') {
+    // Handle CSV files
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const content = e.target?.result as string;
+          const rows = content.split('\n').filter(row => row.trim() !== '');
+          const data = rows.map(row => parseCSVRow(row));
+          const headers = data[0] || [];
+          resolve({ headers, data: data.slice(1) });
+        } catch (error) {
+          reject(new Error('Failed to parse CSV file'));
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read CSV file'));
+      reader.readAsText(file);
+    });
+  }
+  
+  // Handle Excel files (.xlsx, .xls)
+  const XLSX = await import('xlsx');
+  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    
     reader.onload = (e) => {
       try {
-        const content = e.target?.result as string;
-        if (file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls')) {
-          reject(new Error('Excel file parsing requires additional libraries. Please convert to CSV or implement Excel parsing using sheetjs or similar.'));
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        
+        // Get the first sheet
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        // Convert to array of arrays
+        const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        
+        if (jsonData.length === 0) {
+          reject(new Error('Excel file is empty'));
           return;
         }
         
-        const rows = content.split('\n').filter(row => row.trim() !== '');
-        const data = rows.map(row => parseCSVRow(row));
-        resolve(data);
+        // First row is headers
+        const headers = jsonData[0].map((h: any) => String(h).trim());
+        
+        // Rest is data - convert all values to strings
+        const data = jsonData.slice(1).map(row => 
+          row.map((cell: any) => {
+            if (cell === null || cell === undefined) return '';
+            if (typeof cell === 'number') return String(cell);
+            if (cell instanceof Date) return cell.toISOString().split('T')[0];
+            return String(cell).trim();
+          })
+        );
+        
+        resolve({ headers, data });
       } catch (error) {
-        reject(new Error('Failed to parse file'));
+        console.error('Excel parsing error:', error);
+        reject(new Error('Failed to parse Excel file. Please ensure it is a valid .xlsx or .xls file.'));
       }
     };
-    
-    reader.onerror = () => {
-      reject(new Error('Failed to read file'));
-    };
-    
-    if (file.name.toLowerCase().endsWith('.csv')) {
-      reader.readAsText(file);
-    } else {
-      reader.readAsArrayBuffer(file);
-    }
+    reader.onerror = () => reject(new Error('Failed to read Excel file'));
+    reader.readAsArrayBuffer(file);
   });
 };
 
 // FIXED: Enhanced CSV conversion function for better Excel compatibility
-const convertToCSV = (data: any[], format: string = 'csv'): string => {
+const convertToCSV = (data: any[]): string => {
   if (data.length === 0) return '';
   
   // Define the column order and mapping - optimized for readability
@@ -435,7 +472,7 @@ const exportToExcel = async (data: any[], includeSensitive: boolean = false): Pr
     } else {
       // Fallback to CSV with .xlsx extension
       console.warn('SheetJS not available, falling back to CSV format');
-      const csvContent = convertToCSV(data, 'excel');
+      const csvContent = convertToCSV(data);
       return new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     }
   } catch (error) {
@@ -880,7 +917,7 @@ const cloudService = {
         } catch (excelError) {
           console.warn('⚠️ Excel export failed, falling back to CSV:', excelError);
           // Fallback to CSV
-          const csvContent = convertToCSV(exportData, 'csv');
+          const csvContent = convertToCSV(exportData);
           const BOM = '\uFEFF';
           blob = new Blob([BOM + csvContent], { 
             type: 'text/csv;charset=utf-8;' 
@@ -889,7 +926,7 @@ const cloudService = {
         }
       } else {
         // CSV export
-        const csvContent = convertToCSV(exportData, 'csv');
+        const csvContent = convertToCSV(exportData);
         const BOM = '\uFEFF'; // Byte Order Mark for Excel compatibility
         blob = new Blob([BOM + csvContent], { 
           type: 'text/csv;charset=utf-8;' 
@@ -1931,7 +1968,7 @@ const Admin = () => {
     }
   };
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
     setImportFile(null);
     setImportResults(null);
     setImportFieldMapping({});
@@ -1939,110 +1976,109 @@ const Admin = () => {
     setShowImportMapping(false);
     setImportPreviewData([]);
     setError(null);
+    setLoading(true);
 
     const fileExtension = file.name.toLowerCase().split('.').pop();
     const validExtensions = ['csv', 'xlsx', 'xls'];
     
     if (!validExtensions.includes(fileExtension || '')) {
       setError('Please upload a CSV or Excel file. Only .csv, .xlsx, and .xls files are supported.');
+      setLoading(false);
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File is too large. Maximum size is 10MB.');
+    // Increased limit to 50MB for large Excel files
+    if (file.size > 50 * 1024 * 1024) {
+      setError('File is too large. Maximum size is 50MB.');
+      setLoading(false);
       return;
     }
 
-    if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-      if (!confirm('Excel file support requires additional libraries. For full Excel support, please implement sheetjs or similar. Continue with basic CSV-like parsing?')) {
+    try {
+      console.log(`📂 Processing ${fileExtension?.toUpperCase()} file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+      
+      // Use the new Excel/CSV reader
+      const { headers, data } = await readExcelOrCsvFile(file);
+      
+      if (headers.length === 0 || headers.every(h => !h.trim())) {
+        setError('File has no valid headers. Please check your file format.');
+        setLoading(false);
         return;
       }
-    }
 
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const rows = content.split('\n').filter(row => row.trim() !== '');
-        
-        if (rows.length === 0) {
-          setError('File is empty. Please upload a file with data.');
-          return;
-        }
-
-        const headers = parseCSVRow(rows[0]).map(col => col.replace(/^"|"$/g, '').trim());
-        
-        if (headers.length === 0 || headers.every(h => !h.trim())) {
-          setError('File has no valid headers. Please check your file format.');
-          return;
-        }
-
-        setCsvHeaders(headers);
-        setImportFile(file);
-        setShowImportMapping(true);
-        
-        const autoMapping: ImportFieldMapping = {};
-        headers.forEach(header => {
-          const headerLower = header.toLowerCase();
-          
-          if (headerLower.includes('surname') || headerLower.includes('last')) {
-            autoMapping[header] = 'surname';
-          } else if (headerLower.includes('name') || headerLower.includes('first')) {
-            autoMapping[header] = 'name';
-          } else if (headerLower.includes('residence') || headerLower.includes('address')) {
-            autoMapping[header] = 'residence';
-          } else if (headerLower.includes('phone') || headerLower.includes('mobile') || headerLower.includes('contact')) {
-            autoMapping[header] = 'phone';
-          } else if (headerLower.includes('cell') || headerLower.includes('group')) {
-            autoMapping[header] = 'cell_group';
-          } else if (headerLower.includes('gender') || headerLower.includes('sex')) {
-            autoMapping[header] = 'gender';
-          } else if (headerLower.includes('baptism') || headerLower.includes('baptised')) {
-            autoMapping[header] = 'baptism';
-          } else if (headerLower.includes('permanent') || headerLower.includes('member')) {
-            autoMapping[header] = 'is_permanent_member';
-          } else if (headerLower.includes('leader')) {
-            autoMapping[header] = 'is_leader';
-          } else if (headerLower.includes('status')) {
-            autoMapping[header] = 'status';
-          }
-        });
-        
-        setImportFieldMapping(autoMapping);
-        
-        generateImportPreview(content, headers, autoMapping);
-        
-        const requiredFields = ['surname', 'name', 'residence'];
-        const missingRequired = requiredFields.filter(field => !Object.values(autoMapping).includes(field));
-        
-        if (missingRequired.length > 0) {
-          setError(`Warning: Could not auto-detect required fields: ${missingRequired.join(', ')}. Please map them manually.`);
-        }
-      } catch (error) {
-        setError('Failed to parse file. Please make sure it is a valid CSV format.');
-        console.error('❌ File parsing error:', error);
+      if (data.length === 0) {
+        setError('File has no data rows. Please upload a file with data.');
+        setLoading(false);
+        return;
       }
-    };
-    
-    reader.onerror = () => {
-      setError('Failed to read file. Please try again with a different file.');
-    };
-    
-    reader.readAsText(file);
+
+      console.log(`✅ Parsed ${data.length} rows with ${headers.length} columns`);
+
+      setCsvHeaders(headers);
+      setImportFile(file);
+      setShowImportMapping(true);
+      
+      // Auto-mapping logic
+      const autoMapping: ImportFieldMapping = {};
+      headers.forEach(header => {
+        const headerLower = header.toLowerCase();
+        
+        if (headerLower.includes('surname') || headerLower.includes('last')) {
+          autoMapping[header] = 'surname';
+        } else if (headerLower.includes('name') || headerLower.includes('first')) {
+          autoMapping[header] = 'name';
+        } else if (headerLower.includes('residence') || headerLower.includes('address') || headerLower.includes('location')) {
+          autoMapping[header] = 'residence';
+        } else if (headerLower.includes('phone') || headerLower.includes('mobile') || headerLower.includes('contact') || headerLower.includes('tel')) {
+          autoMapping[header] = 'phone';
+        } else if (headerLower.includes('cell') || headerLower.includes('group')) {
+          autoMapping[header] = 'cell_group';
+        } else if (headerLower.includes('gender') || headerLower.includes('sex')) {
+          autoMapping[header] = 'gender';
+        } else if (headerLower.includes('baptism') || headerLower.includes('baptised') || headerLower.includes('baptized')) {
+          autoMapping[header] = 'baptism';
+        } else if (headerLower.includes('permanent') && headerLower.includes('member')) {
+          autoMapping[header] = 'is_permanent_member';
+        } else if (headerLower.includes('leader')) {
+          autoMapping[header] = 'is_leader';
+        } else if (headerLower.includes('status')) {
+          autoMapping[header] = 'status';
+        }
+      });
+      
+      setImportFieldMapping(autoMapping);
+      
+      // Generate preview with all data rows (supporting 1000+ rows)
+      generateImportPreviewFromData(data, headers, autoMapping);
+      
+      const requiredFields = ['surname', 'name', 'residence'];
+      const missingRequired = requiredFields.filter(field => !Object.values(autoMapping).includes(field));
+      
+      if (missingRequired.length > 0) {
+        setError(`Warning: Could not auto-detect required fields: ${missingRequired.join(', ')}. Please map them manually.`);
+      } else {
+        console.log(`✅ Successfully mapped ${Object.keys(autoMapping).length} fields`);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to parse file';
+      setError(`Failed to parse file: ${errorMessage}`);
+      console.error('❌ File parsing error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const generateImportPreview = (content: string, headers: string[], mapping: ImportFieldMapping) => {
-    const rows = content.split('\n').filter(row => row.trim() !== '');
+  // New function to generate preview from parsed data (supports 1000+ rows)
+  const generateImportPreviewFromData = (data: string[][], headers: string[], mapping: ImportFieldMapping) => {
     const previewData: ImportPreviewRow[] = [];
     
-    const maxPreviewRows = Math.min(20, rows.length - 1);
+    // Process ALL rows (not just 20) - show first 50 in preview but keep all for import
+    const totalRows = data.length;
+    console.log(`📊 Processing ${totalRows} data rows for import`);
     
-    for (let i = 1; i <= maxPreviewRows; i++) {
-      const row = rows[i];
-      if (!row.trim()) continue;
-      
-      const columns = parseCSVRow(row).map(col => col.replace(/^"|"$/g, '').trim());
+    for (let i = 0; i < totalRows; i++) {
+      const columns = data[i];
+      if (!columns || columns.every(c => !c.trim())) continue; // Skip empty rows
       
       const rawData: { [key: string]: string } = {};
       const mappedData: any = {
@@ -2098,8 +2134,8 @@ const Admin = () => {
                 break;
               case 'gender':
                 const genderValue = value.toLowerCase().trim();
-                if (genderValue === 'male' || genderValue === 'female') {
-                  mappedData.gender = genderValue;
+                if (genderValue === 'male' || genderValue === 'female' || genderValue === 'm' || genderValue === 'f') {
+                  mappedData.gender = genderValue === 'm' ? 'male' : genderValue === 'f' ? 'female' : genderValue;
                 } else if (value.trim()) {
                   errors.push(`Invalid gender: "${value}". Must be "Male" or "Female"`);
                 }
@@ -2125,11 +2161,13 @@ const Admin = () => {
                                       value === '1';
                 break;
               case 'status':
-                const validStatuses = ['newcomer', 'active', 'inactive', 'not_attending'];
-                if (validStatuses.includes(value.toLowerCase().trim())) {
-                  mappedData.status = value.toLowerCase().trim();
+                const validStatuses = ['newcomer', 'active', 'inactive', 'not_attending', 'member', 'permanent'];
+                const statusValue = value.toLowerCase().trim().replace(/\s+/g, '_');
+                if (validStatuses.includes(statusValue)) {
+                  mappedData.status = statusValue;
                 } else if (value.trim()) {
-                  errors.push(`Invalid status: "${value}". Must be one of: ${validStatuses.join(', ')}`);
+                  errors.push(`Invalid status: "${value}". Will default to "newcomer"`);
+                  mappedData.status = 'newcomer';
                 }
                 break;
             }
@@ -2149,7 +2187,7 @@ const Admin = () => {
       }
       
       previewData.push({
-        index: i,
+        index: i + 1, // 1-based index for display
         rawData,
         mappedData,
         errors,
@@ -2157,8 +2195,11 @@ const Admin = () => {
       });
     }
     
+    console.log(`✅ Prepared ${previewData.length} rows for import (${previewData.filter(r => r.errors.length === 0).length} valid)`);
     setImportPreviewData(previewData);
   };
+
+  // Old generateImportPreview removed - using generateImportPreviewFromData instead
 
   const handleGenerateCredentials = async () => {
     if (!selectedUser) return;
@@ -2862,19 +2903,19 @@ const Admin = () => {
                           </div>
                           <select
                             value={importFieldMapping[header] || ''}
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const newMapping = {
                                 ...importFieldMapping,
                                 [header]: e.target.value
                               };
                               setImportFieldMapping(newMapping);
                               if (importFile) {
-                                const reader = new FileReader();
-                                reader.onload = (e) => {
-                                  const content = e.target?.result as string;
-                                  generateImportPreview(content, csvHeaders, newMapping);
-                                };
-                                reader.readAsText(importFile);
+                                try {
+                                  const { headers: parsedHeaders, data } = await readExcelOrCsvFile(importFile);
+                                  generateImportPreviewFromData(data, parsedHeaders, newMapping);
+                                } catch (err) {
+                                  console.error('Error re-parsing file:', err);
+                                }
                               }
                             }}
                             className="px-3 py-2 border border-gray-300 rounded-lg min-w-48"
