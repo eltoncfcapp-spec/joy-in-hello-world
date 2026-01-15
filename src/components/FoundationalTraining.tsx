@@ -1,19 +1,48 @@
-// FoundationalTraining Component
-const FoundationalTraining: React.FC<{
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../integrations/supabase/client';
+import { CheckCircle, Circle, BookOpen, Calendar, Award, ChevronDown, ChevronUp } from 'lucide-react';
+
+interface FoundationalTrainingProps {
   memberId: string;
   currentUserId: string;
   canEditTraining: boolean;
-  editingMode?: boolean;
-  onTrainingUpdated?: () => void;
-}> = ({
+}
+
+interface FoundationalTopic {
+  id: string;
+  topic_name: string;
+  description?: string;
+  level: number;
+  topic_order: number;
+  is_active: boolean;
+  subject_area?: string;
+  estimated_hours?: number;
+  created_at: string;
+}
+
+interface MemberProgress {
+  topic_id: string;
+  completed_date: string;
+  completed_by: string;
+  verified_by?: string;
+  verified_date?: string;
+}
+
+interface LevelInfo {
+  level: number;
+  name: string;
+  description: string;
+  required_for_certification: boolean;
+  completed_date?: string;
+}
+
+const FoundationalTraining: React.FC<FoundationalTrainingProps> = ({
   memberId,
   currentUserId,
-  canEditTraining,
-  editingMode = false,
-  onTrainingUpdated
+  canEditTraining
 }) => {
   const [topics, setTopics] = useState<FoundationalTopic[]>([]);
-  const [trainingProgress, setTrainingProgress] = useState<TrainingProgress[]>([]);
+  const [completedTopics, setCompletedTopics] = useState<MemberProgress[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({
     level1: 0,
@@ -21,31 +50,30 @@ const FoundationalTraining: React.FC<{
     level3: 0,
     total: 0
   });
-  const [expandedLevel, setExpandedLevel] = useState<number | null>(null);
+  const [expandedLevels, setExpandedLevels] = useState<number[]>([1, 2, 3]);
   const [expandedSubjects, setExpandedSubjects] = useState<string[]>([]);
-  
-  // Define levels with names and descriptions
-  const levels = [
+  const [levelsInfo, setLevelsInfo] = useState<LevelInfo[]>([
     {
       level: 1,
-      name: "Level 1: Foundations",
-      description: "Basic concepts and introductory training",
-      required: true
+      name: "Basic Foundations",
+      description: "Essential concepts and introductory material",
+      required_for_certification: true
     },
     {
       level: 2,
-      name: "Level 2: Growth",
-      description: "Intermediate development and practical skills",
-      required: true
+      name: "Intermediate Development",
+      description: "Building on foundational knowledge with practical skills",
+      required_for_certification: true
     },
     {
       level: 3,
-      name: "Level 3: Leadership",
-      description: "Advanced application and leadership development",
-      required: true
+      name: "Advanced Application",
+      description: "Specialized topics and real-world application",
+      required_for_certification: true
     }
-  ];
-
+  ]);
+  
+  // Fetch all training data
   const fetchTrainingData = async () => {
     try {
       setLoading(true);
@@ -61,40 +89,77 @@ const FoundationalTraining: React.FC<{
       if (topicsError) throw topicsError;
       setTopics(topicsData || []);
 
-      // Fetch member's training progress with topic details
+      // Fetch member's completed topics with dates
       const { data: progressData, error: progressError } = await supabase
         .from('member_training_progress')
-        .select(`
-          *,
-          topic:topic_id(*),
-          completed_by_member:completed_by(name, surname)
-        `)
-        .eq('member_id', memberId);
+        .select('*')
+        .eq('member_id', memberId)
+        .order('completed_date', { ascending: false });
 
       if (progressError) throw progressError;
-      setTrainingProgress(progressData || []);
+      
+      setCompletedTopics(progressData || []);
 
-      // Calculate progress
+      // Calculate progress and find level completion dates
       const level1Topics = topicsData?.filter(t => t.level === 1) || [];
       const level2Topics = topicsData?.filter(t => t.level === 2) || [];
       const level3Topics = topicsData?.filter(t => t.level === 3) || [];
-      const totalTopics = topicsData?.length || 0;
+      
+      const totalTopics = level1Topics.length + level2Topics.length + level3Topics.length;
+      const completedTopicIds = progressData?.map(p => p.topic_id) || [];
 
-      const completedLevel1 = progressData?.filter(p => 
-        level1Topics.find(t => t.id === p.topic_id)
-      ).length || 0;
-      const completedLevel2 = progressData?.filter(p => 
-        level2Topics.find(t => t.id === p.topic_id)
-      ).length || 0;
-      const completedLevel3 = progressData?.filter(p => 
-        level3Topics.find(t => t.id === p.topic_id)
-      ).length || 0;
+      // Calculate level completion
+      const completedLevel1 = level1Topics.filter(t => completedTopicIds.includes(t.id));
+      const completedLevel2 = level2Topics.filter(t => completedTopicIds.includes(t.id));
+      const completedLevel3 = level3Topics.filter(t => completedTopicIds.includes(t.id));
 
+      // Find completion dates for each level (date when all topics in level were completed)
+      const updatedLevelsInfo = [...levelsInfo];
+      
+      // Level 1 completion date
+      if (completedLevel1.length === level1Topics.length && level1Topics.length > 0) {
+        const level1CompletionDates = progressData
+          ?.filter(p => level1Topics.some(t => t.id === p.topic_id))
+          .map(p => new Date(p.completed_date).getTime()) || [];
+        
+        if (level1CompletionDates.length > 0) {
+          const latestCompletionDate = new Date(Math.max(...level1CompletionDates));
+          updatedLevelsInfo[0].completed_date = latestCompletionDate.toISOString();
+        }
+      }
+      
+      // Level 2 completion date
+      if (completedLevel2.length === level2Topics.length && level2Topics.length > 0) {
+        const level2CompletionDates = progressData
+          ?.filter(p => level2Topics.some(t => t.id === p.topic_id))
+          .map(p => new Date(p.completed_date).getTime()) || [];
+        
+        if (level2CompletionDates.length > 0) {
+          const latestCompletionDate = new Date(Math.max(...level2CompletionDates));
+          updatedLevelsInfo[1].completed_date = latestCompletionDate.toISOString();
+        }
+      }
+      
+      // Level 3 completion date
+      if (completedLevel3.length === level3Topics.length && level3Topics.length > 0) {
+        const level3CompletionDates = progressData
+          ?.filter(p => level3Topics.some(t => t.id === p.topic_id))
+          .map(p => new Date(p.completed_date).getTime()) || [];
+        
+        if (level3CompletionDates.length > 0) {
+          const latestCompletionDate = new Date(Math.max(...level3CompletionDates));
+          updatedLevelsInfo[2].completed_date = latestCompletionDate.toISOString();
+        }
+      }
+      
+      setLevelsInfo(updatedLevelsInfo);
+
+      // Calculate progress percentages
       setProgress({
-        level1: level1Topics.length > 0 ? Math.round((completedLevel1 / level1Topics.length) * 100) : 0,
-        level2: level2Topics.length > 0 ? Math.round((completedLevel2 / level2Topics.length) * 100) : 0,
-        level3: level3Topics.length > 0 ? Math.round((completedLevel3 / level3Topics.length) * 100) : 0,
-        total: totalTopics > 0 ? Math.round((progressData?.length || 0) / totalTopics * 100) : 0
+        level1: level1Topics.length > 0 ? Math.round((completedLevel1.length / level1Topics.length) * 100) : 0,
+        level2: level2Topics.length > 0 ? Math.round((completedLevel2.length / level2Topics.length) * 100) : 0,
+        level3: level3Topics.length > 0 ? Math.round((completedLevel3.length / level3Topics.length) * 100) : 0,
+        total: totalTopics > 0 ? Math.round((completedTopicIds.length / totalTopics) * 100) : 0
       });
 
     } catch (error) {
@@ -103,10 +168,6 @@ const FoundationalTraining: React.FC<{
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchTrainingData();
-  }, [memberId]);
 
   const handleTopicToggle = async (topicId: string, isCompleted: boolean) => {
     if (!canEditTraining) return;
@@ -127,8 +188,7 @@ const FoundationalTraining: React.FC<{
           member_id: memberId,
           topic_id: topicId,
           completed_by: currentUserId,
-          completed_date: new Date().toISOString(),
-          notes: `Completed foundational training topic`
+          completed_date: new Date().toISOString()
         };
 
         const { error } = await supabase
@@ -139,20 +199,30 @@ const FoundationalTraining: React.FC<{
       }
 
       fetchTrainingData();
-      if (onTrainingUpdated) onTrainingUpdated();
     } catch (error) {
       console.error('Error updating topic completion:', error);
-      alert('Failed to update training progress. Please try again.');
     }
   };
 
-  const getLevelTopics = (level: number) => {
-    return topics.filter(topic => topic.level === level);
+  const toggleLevel = (level: number) => {
+    setExpandedLevels(prev => 
+      prev.includes(level) 
+        ? prev.filter(l => l !== level)
+        : [...prev, level]
+    );
   };
 
-  // Get unique subjects for a level
+  const toggleSubject = (subject: string) => {
+    setExpandedSubjects(prev =>
+      prev.includes(subject)
+        ? prev.filter(s => s !== subject)
+        : [...prev, subject]
+    );
+  };
+
+  // Get all unique subjects from topics
   const getSubjectsByLevel = (level: number) => {
-    const levelTopics = getLevelTopics(level);
+    const levelTopics = topics.filter(topic => topic.level === level);
     const subjects = [...new Set(levelTopics.map(topic => topic.subject_area || 'General'))];
     return subjects;
   };
@@ -165,351 +235,291 @@ const FoundationalTraining: React.FC<{
     );
   };
 
-  const toggleLevel = (level: number) => {
-    setExpandedLevel(expandedLevel === level ? null : level);
+  // Format date for display
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'Not completed';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
   };
 
-  const toggleSubject = (subject: string) => {
-    setExpandedSubjects(prev =>
-      prev.includes(subject)
-        ? prev.filter(s => s !== subject)
-        : [...prev, subject]
-    );
+  // Get completion date for a topic
+  const getTopicCompletionDate = (topicId: string) => {
+    const completion = completedTopics.find(topic => topic.topic_id === topicId);
+    return completion ? formatDate(completion.completed_date) : null;
   };
 
-  const getLevelColor = (level: number) => {
-    switch (level) {
-      case 1: return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
-      case 2: return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300';
-      case 3: return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300';
-      default: return 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300';
-    }
-  };
-
-  const getProgressColor = (percentage: number) => {
-    if (percentage >= 80) return 'bg-green-500';
-    if (percentage >= 50) return 'bg-yellow-500';
-    return 'bg-red-500';
-  };
-
+  // Get completion status for a topic
   const isTopicCompleted = (topicId: string) => {
-    return trainingProgress.some(progress => progress.topic_id === topicId);
-  };
-
-  const getCompletionDetails = (topicId: string) => {
-    const progress = trainingProgress.find(p => p.topic_id === topicId);
-    if (!progress) return null;
-    
-    return {
-      completedBy: progress.completed_by_member 
-        ? `${progress.completed_by_member.name} ${progress.completed_by_member.surname}`
-        : 'Unknown',
-      completedDate: new Date(progress.completed_date).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      }),
-      notes: progress.notes
-    };
+    return completedTopics.some(topic => topic.topic_id === topicId);
   };
 
   // Calculate total hours completed
   const calculateTotalHours = () => {
     let totalHours = 0;
-    const completedTopicIds = trainingProgress.map(t => t.topic_id);
+    const completedTopicIds = completedTopics.map(t => t.topic_id);
     
     topics.forEach(topic => {
-      if (completedTopicIds.includes(topic.id) && topic.duration_minutes) {
-        totalHours += topic.duration_minutes / 60;
+      if (completedTopicIds.includes(topic.id) && topic.estimated_hours) {
+        totalHours += topic.estimated_hours;
       }
     });
     
-    return Math.round(totalHours * 10) / 10; // Round to 1 decimal place
+    return totalHours;
   };
 
-  // Calculate level completion date
-  const getLevelCompletionDate = (level: number) => {
-    const levelTopics = getLevelTopics(level);
-    if (levelTopics.length === 0) return null;
-    
-    const completedTopicsInLevel = levelTopics.filter(t => isTopicCompleted(t.id));
-    if (completedTopicsInLevel.length !== levelTopics.length) return null;
-    
-    // Get the latest completion date for this level
-    let latestDate: Date | null = null;
-    trainingProgress.forEach(progress => {
-      if (levelTopics.some(t => t.id === progress.topic_id)) {
-        const date = new Date(progress.completed_date);
-        if (!latestDate || date > latestDate) {
-          latestDate = date;
-        }
-      }
-    });
-    
-    return latestDate?.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
+  useEffect(() => {
+    fetchTrainingData();
+  }, [memberId]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-          <BookOpen className="h-5 w-5" />
-          Foundational Training
-        </h3>
-        <div className="text-sm text-gray-600 dark:text-gray-400">
-          {canEditTraining ? 'Click to toggle completion' : 'View only'}
+    <div className="bg-white rounded-lg shadow-lg p-6">
+      {/* Overall Progress Summary */}
+      <div className="mb-8 p-4 bg-blue-50 rounded-lg">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <Award className="h-6 w-6 text-blue-600 mr-2" />
+            <h2 className="text-xl font-bold text-gray-800">Foundational Training Progress</h2>
+          </div>
+          <div className="text-right">
+            <div className="text-sm text-gray-600">Overall Completion</div>
+            <div className="text-2xl font-bold text-blue-600">{progress.total}%</div>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white p-3 rounded shadow-sm">
+            <div className="text-sm text-gray-600">Level 1 Completed</div>
+            <div className="text-lg font-semibold">{progress.level1}%</div>
+          </div>
+          <div className="bg-white p-3 rounded shadow-sm">
+            <div className="text-sm text-gray-600">Level 2 Completed</div>
+            <div className="text-lg font-semibold">{progress.level2}%</div>
+          </div>
+          <div className="bg-white p-3 rounded shadow-sm">
+            <div className="text-sm text-gray-600">Level 3 Completed</div>
+            <div className="text-lg font-semibold">{progress.level3}%</div>
+          </div>
+          <div className="bg-white p-3 rounded shadow-sm">
+            <div className="text-sm text-gray-600">Total Hours</div>
+            <div className="text-lg font-semibold">{calculateTotalHours()} hrs</div>
+          </div>
         </div>
       </div>
 
-      {/* Overall Progress Summary */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700/50 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h4 className="font-semibold text-gray-900 dark:text-white">Training Progress</h4>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Total completion overview</p>
+      {/* Levels Section */}
+      {levelsInfo.map((levelInfo) => {
+        const subjects = getSubjectsByLevel(levelInfo.level);
+        const isLevelExpanded = expandedLevels.includes(levelInfo.level);
+        
+        return (
+          <div key={levelInfo.level} className="mb-6 border rounded-lg overflow-hidden">
+            {/* Level Header */}
+            <div 
+              className="bg-gray-50 p-4 flex justify-between items-center cursor-pointer hover:bg-gray-100"
+              onClick={() => toggleLevel(levelInfo.level)}
+            >
+              <div className="flex items-center">
+                <div className="mr-3">
+                  {isLevelExpanded ? 
+                    <ChevronUp className="h-5 w-5 text-gray-500" /> : 
+                    <ChevronDown className="h-5 w-5 text-gray-500" />
+                  }
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-800">
+                    {levelInfo.name} (Level {levelInfo.level})
+                  </h3>
+                  <p className="text-sm text-gray-600">{levelInfo.description}</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div className="text-right">
+                  <div className="text-sm text-gray-600">Completion</div>
+                  <div className="font-bold text-blue-600">
+                    {progress[`level${levelInfo.level}` as keyof typeof progress]}%
+                  </div>
+                </div>
+                {levelInfo.completed_date && (
+                  <div className="text-right">
+                    <div className="text-sm text-gray-600">Completed on</div>
+                    <div className="text-sm font-medium text-green-600">
+                      {formatDate(levelInfo.completed_date)}
+                    </div>
+                  </div>
+                )}
+                {levelInfo.required_for_certification && (
+                  <div className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">
+                    Required
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Level Content */}
+            {isLevelExpanded && (
+              <div className="p-4">
+                {/* Progress Bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Progress</span>
+                    <span>{progress[`level${levelInfo.level}` as keyof typeof progress]}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full" 
+                      style={{ width: `${progress[`level${levelInfo.level}` as keyof typeof progress]}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Subjects */}
+                {subjects.map((subject) => {
+                  const subjectTopics = getTopicsByLevelAndSubject(levelInfo.level, subject);
+                  const completedInSubject = subjectTopics.filter(topic => 
+                    isTopicCompleted(topic.id)
+                  ).length;
+                  const subjectProgress = subjectTopics.length > 0 
+                    ? Math.round((completedInSubject / subjectTopics.length) * 100) 
+                    : 0;
+                  const isSubjectExpanded = expandedSubjects.includes(`${levelInfo.level}-${subject}`);
+                  
+                  return (
+                    <div key={`${levelInfo.level}-${subject}`} className="mb-4 border rounded-lg">
+                      <div 
+                        className="bg-gray-50 p-3 flex justify-between items-center cursor-pointer hover:bg-gray-100"
+                        onClick={() => toggleSubject(`${levelInfo.level}-${subject}`)}
+                      >
+                        <div className="flex items-center">
+                          <BookOpen className="h-4 w-4 text-gray-500 mr-2" />
+                          <h4 className="font-medium text-gray-800">{subject}</h4>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <span className="text-sm text-gray-600">
+                            {completedInSubject}/{subjectTopics.length} topics
+                          </span>
+                          <span className="text-sm font-medium text-blue-600">{subjectProgress}%</span>
+                          {isSubjectExpanded ? 
+                            <ChevronUp className="h-4 w-4 text-gray-500" /> : 
+                            <ChevronDown className="h-4 w-4 text-gray-500" />
+                          }
+                        </div>
+                      </div>
+
+                      {/* Topics List */}
+                      {isSubjectExpanded && (
+                        <div className="p-3">
+                          {subjectTopics.map((topic) => {
+                            const completed = isTopicCompleted(topic.id);
+                            const completionDate = getTopicCompletionDate(topic.id);
+                            
+                            return (
+                              <div 
+                                key={topic.id}
+                                className="flex items-center justify-between p-3 hover:bg-gray-50 rounded mb-2"
+                              >
+                                <div className="flex items-center">
+                                  <button
+                                    onClick={() => handleTopicToggle(topic.id, completed)}
+                                    disabled={!canEditTraining}
+                                    className={`mr-3 ${!canEditTraining ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                                  >
+                                    {completed ? (
+                                      <CheckCircle className="h-5 w-5 text-green-500" />
+                                    ) : (
+                                      <Circle className="h-5 w-5 text-gray-300" />
+                                    )}
+                                  </button>
+                                  <div>
+                                    <div className="font-medium text-gray-800">{topic.topic_name}</div>
+                                    {topic.description && (
+                                      <div className="text-sm text-gray-600">{topic.description}</div>
+                                    )}
+                                    {completionDate && (
+                                      <div className="flex items-center text-sm text-green-600 mt-1">
+                                        <Calendar className="h-3 w-3 mr-1" />
+                                        Completed on {completionDate}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  {topic.estimated_hours && (
+                                    <div className="text-sm text-gray-600">
+                                      {topic.estimated_hours} hour{topic.estimated_hours !== 1 ? 's' : ''}
+                                    </div>
+                                  )}
+                                  <div className="text-xs text-gray-500">
+                                    Order: {topic.topic_order}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* No Subjects Fallback */}
+                {subjects.length === 0 && (
+                  <div className="text-center py-4 text-gray-500">
+                    No subjects available for this level
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{progress.total}%</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              {trainingProgress.length}/{topics.length} topics
+        );
+      })}
+
+      {/* Completion Summary */}
+      <div className="mt-8 p-4 bg-green-50 rounded-lg">
+        <h3 className="font-bold text-lg text-gray-800 mb-2">Training Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div className="text-sm text-gray-600">Total Topics Completed</div>
+            <div className="text-xl font-bold text-green-600">
+              {completedTopics.length} of {topics.length}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm text-gray-600">Total Training Hours</div>
+            <div className="text-xl font-bold text-green-600">
+              {calculateTotalHours()} hours
             </div>
           </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <div className="bg-white dark:bg-gray-800/50 p-3 rounded-lg shadow-sm">
-            <div className="text-sm text-gray-600 dark:text-gray-400">Total Hours</div>
-            <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{calculateTotalHours()} hrs</div>
-          </div>
-          <div className="bg-white dark:bg-gray-800/50 p-3 rounded-lg shadow-sm">
-            <div className="text-sm text-gray-600 dark:text-gray-400">Levels Completed</div>
-            <div className="text-lg font-bold text-green-600 dark:text-green-400">
-              {[1, 2, 3].filter(level => getLevelCompletionDate(level) !== null).length}/3
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800/50 p-3 rounded-lg shadow-sm">
-            <div className="text-sm text-gray-600 dark:text-gray-400">Last Updated</div>
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {trainingProgress.length > 0 
-                ? new Date(trainingProgress[0]?.completed_date || '').toLocaleDateString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric' 
-                  })
-                : 'Never'}
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {levels.map(levelInfo => (
-            <div key={levelInfo.level} className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {levelInfo.name}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    {progress[`level${levelInfo.level}` as keyof typeof progress]}%
-                  </span>
-                  {getLevelCompletionDate(levelInfo.level) && (
-                    <span className="text-xs text-green-600 dark:text-green-400">
-                      ✓ Completed
-                    </span>
-                  )}
-                </div>
+        {/* Level Completion Dates */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {levelsInfo.map((level) => (
+            <div key={level.level} className="bg-white p-3 rounded shadow-sm">
+              <div className="text-sm font-medium text-gray-800">Level {level.level}</div>
+              <div className="text-sm text-gray-600">
+                {level.completed_date 
+                  ? `Completed: ${formatDate(level.completed_date)}`
+                  : 'In Progress'
+                }
               </div>
-              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full ${getProgressColor(progress[`level${levelInfo.level}` as keyof typeof progress])} transition-all duration-500`}
-                  style={{ width: `${progress[`level${levelInfo.level}` as keyof typeof progress]}%` }}
-                />
-              </div>
-              {getLevelCompletionDate(levelInfo.level) && (
-                <div className="text-xs text-gray-500 dark:text-gray-500">
-                  Completed on: {getLevelCompletionDate(levelInfo.level)}
-                </div>
-              )}
             </div>
           ))}
         </div>
       </div>
-
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading training topics...</p>
-        </div>
-      ) : topics.length === 0 ? (
-        <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
-          <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-          <p className="text-gray-600 dark:text-gray-400">No training topics configured.</p>
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-            Contact an administrator to set up foundational training topics.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {levels.map(levelInfo => {
-            const levelTopics = getLevelTopics(levelInfo.level);
-            if (levelTopics.length === 0) return null;
-
-            const subjects = getSubjectsByLevel(levelInfo.level);
-            const completedCount = levelTopics.filter(t => isTopicCompleted(t.id)).length;
-            
-            return (
-              <div key={levelInfo.level} className="space-y-3">
-                <button
-                  onClick={() => toggleLevel(levelInfo.level)}
-                  className="w-full flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
-                >
-                  <div className="flex items-center gap-3">
-                    <h4 className="text-md font-semibold text-gray-900 dark:text-white">
-                      {levelInfo.name}
-                    </h4>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getLevelColor(levelInfo.level)}`}>
-                      {completedCount}/{levelTopics.length} completed
-                    </span>
-                    {levelInfo.required && (
-                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">
-                        Required
-                      </span>
-                    )}
-                  </div>
-                  <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform duration-200 ${expandedLevel === levelInfo.level ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {expandedLevel === levelInfo.level && (
-                  <div className="space-y-3 pl-4 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                      {levelInfo.description}
-                    </p>
-                    
-                    {subjects.map(subject => {
-                      const subjectTopics = getTopicsByLevelAndSubject(levelInfo.level, subject);
-                      const completedInSubject = subjectTopics.filter(t => isTopicCompleted(t.id)).length;
-                      const subjectProgress = subjectTopics.length > 0 
-                        ? Math.round((completedInSubject / subjectTopics.length) * 100) 
-                        : 0;
-                      const isSubjectExpanded = expandedSubjects.includes(`${levelInfo.level}-${subject}`);
-                      
-                      return (
-                        <div key={`${levelInfo.level}-${subject}`} className="space-y-2">
-                          <button
-                            onClick={() => toggleSubject(`${levelInfo.level}-${subject}`)}
-                            className="w-full flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors duration-200"
-                          >
-                            <div className="flex items-center gap-2">
-                              <BookOpen className="h-4 w-4 text-gray-400" />
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{subject}</span>
-                              <span className="text-xs text-gray-500 dark:text-gray-500">
-                                ({completedInSubject}/{subjectTopics.length})
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-blue-600 dark:text-blue-400">
-                                {subjectProgress}%
-                              </span>
-                              {isSubjectExpanded ? 
-                                <ChevronUp className="h-4 w-4 text-gray-400" /> : 
-                                <ChevronDown className="h-4 w-4 text-gray-400" />
-                              }
-                            </div>
-                          </button>
-                          
-                          {isSubjectExpanded && (
-                            <div className="space-y-2 pl-4">
-                              {subjectTopics.map(topic => {
-                                const isCompleted = isTopicCompleted(topic.id);
-                                const completionDetails = getCompletionDetails(topic.id);
-                                
-                                return (
-                                  <div 
-                                    key={topic.id}
-                                    className={`p-3 rounded-lg hover:shadow-sm transition-all duration-200 ${
-                                      isCompleted 
-                                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700/50' 
-                                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                                    }`}
-                                  >
-                                    <div className="flex items-start gap-3">
-                                      <button
-                                        onClick={() => handleTopicToggle(topic.id, isCompleted)}
-                                        disabled={!canEditTraining}
-                                        className={`flex-shrink-0 mt-1 ${canEditTraining ? 'cursor-pointer hover:scale-110 transition-transform duration-200' : 'cursor-default'}`}
-                                      >
-                                        {isCompleted ? (
-                                          <CheckCircle className="h-5 w-5 text-green-500" />
-                                        ) : (
-                                          <Circle className="h-5 w-5 text-gray-400" />
-                                        )}
-                                      </button>
-                                      
-                                      <div className="flex-1">
-                                        <div className="flex justify-between items-start">
-                                          <h5 className={`font-medium ${isCompleted ? 'text-green-700 dark:text-green-300' : 'text-gray-900 dark:text-white'}`}>
-                                            {topic.topic_name}
-                                          </h5>
-                                          {topic.duration_minutes && (
-                                            <span className="text-xs text-gray-500 dark:text-gray-500">
-                                              {topic.duration_minutes} min
-                                            </span>
-                                          )}
-                                        </div>
-                                        {topic.topic_description && (
-                                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                            {topic.topic_description}
-                                          </p>
-                                        )}
-                                        {completionDetails && (
-                                          <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                              Completed by {completionDetails.completedBy} on {completionDetails.completedDate}
-                                            </p>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Level Completion Summary */}
-      {trainingProgress.length > 0 && (
-        <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
-          <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Level Completion Dates</h4>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {levels.map(levelInfo => {
-              const completionDate = getLevelCompletionDate(levelInfo.level);
-              return (
-                <div key={levelInfo.level} className="bg-white dark:bg-gray-800 p-3 rounded-lg">
-                  <div className="font-medium text-gray-700 dark:text-gray-300">
-                    {levelInfo.name}
-                  </div>
-                  <div className={`text-sm ${completionDate ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-500'}`}>
-                    {completionDate ? `Completed: ${completionDate}` : 'In Progress'}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
+
+export default FoundationalTraining;
