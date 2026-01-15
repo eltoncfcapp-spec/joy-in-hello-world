@@ -127,7 +127,6 @@ const SermonModal = ({
   uploadingSermonFile,
   handleSermonSubmit 
 }: SermonModalProps) => {
-  // ✅ ALL HOOKS MUST BE AT THE TOP, BEFORE ANY RETURNS
   const modalTitle = useMemo(() => {
     if (editingSermon) return 'Edit Sermon';
     if (showSermonModal === 'new') return 'Add New Sermon';
@@ -151,7 +150,6 @@ const SermonModal = ({
     await handleSermonSubmit(e);
   }, [handleSermonSubmit]);
 
-  // ✅ NOW the conditional return comes AFTER all hooks
   if (!showSermonModal) return null;
 
   return (
@@ -379,7 +377,6 @@ const NewcomerModal = ({
   loading,
   eventName 
 }: NewcomerModalProps) => {
-  // ✅ Move hooks to the top
   const [newcomerFormData, setNewcomerFormData] = useState({
     name: '',
     surname: '',
@@ -392,7 +389,6 @@ const NewcomerModal = ({
 
   useEffect(() => {
     if (!showNewcomerModal) {
-      // Reset form when modal closes
       setNewcomerFormData({
         name: '',
         surname: '',
@@ -418,7 +414,6 @@ const NewcomerModal = ({
     await handleNewcomerSubmit(newcomerFormData, showNewcomerModal!);
   };
 
-  // ✅ Conditional return after all hooks
   if (!showNewcomerModal) return null;
 
   return (
@@ -609,6 +604,37 @@ const BulkAttendanceModal = ({
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
 
+  // Find event and target members using useMemo
+  const event = useMemo(() => {
+    return events.find(e => e.id === showBulkAttendanceModal);
+  }, [events, showBulkAttendanceModal]);
+
+  const targetMembers = useMemo(() => {
+    return event ? fetchTargetMembersForEvent(event) : [];
+  }, [event, fetchTargetMembersForEvent]);
+
+  // Memoize filtered members calculation
+  const filteredMembers = useMemo(() => {
+    if (!bulkAttendanceSearch.trim()) return targetMembers;
+    
+    const searchLower = bulkAttendanceSearch.toLowerCase().trim();
+    
+    return targetMembers.filter(member => {
+      const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
+      return searchableText.includes(searchLower);
+    });
+  }, [targetMembers, bulkAttendanceSearch]);
+
+  // Calculate stats using useMemo
+  const stats = useMemo(() => {
+    return {
+      present: Object.values(bulkAttendance).filter(status => status === 'present').length,
+      absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
+      total: targetMembers.length,
+      filtered: filteredMembers.length
+    };
+  }, [bulkAttendance, targetMembers.length, filteredMembers.length]);
+
   // Track unsaved changes when attendance is modified
   const handleAttendanceChangeWithTracking = useCallback((memberId: string, status: 'present' | 'absent') => {
     handleBulkAttendanceChange(memberId, status);
@@ -675,32 +701,8 @@ const BulkAttendanceModal = ({
     }
   }, [showBulkAttendanceModal]);
 
-  // ✅ Conditional return at the beginning (no hooks after this)
-  if (!showBulkAttendanceModal) return null;
-
-  const event = events.find(e => e.id === showBulkAttendanceModal);
-  if (!event) return null;
-
-  const targetMembers = fetchTargetMembersForEvent(event);
-  
-  // FIXED: Memoize filtered members calculation
-  const filteredMembers = useMemo(() => {
-    if (!bulkAttendanceSearch.trim()) return targetMembers;
-    
-    const searchLower = bulkAttendanceSearch.toLowerCase().trim();
-    
-    return targetMembers.filter(member => {
-      const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
-      return searchableText.includes(searchLower);
-    });
-  }, [targetMembers, bulkAttendanceSearch]);
-
-  const stats = {
-    present: Object.values(bulkAttendance).filter(status => status === 'present').length,
-    absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
-    total: targetMembers.length,
-    filtered: filteredMembers.length
-  };
+  // Conditional return at the beginning (no hooks after this)
+  if (!showBulkAttendanceModal || !event) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -780,7 +782,6 @@ const BulkAttendanceModal = ({
             <div className="flex flex-wrap gap-2 mb-4">
               <button
                 onClick={() => {
-                  // Mark all as present
                   targetMembers.forEach(member => {
                     handleAttendanceChangeWithTracking(member.id, 'present');
                   });
@@ -791,7 +792,6 @@ const BulkAttendanceModal = ({
               </button>
               <button
                 onClick={() => {
-                  // Mark all as absent (this is the default)
                   targetMembers.forEach(member => {
                     handleAttendanceChangeWithTracking(member.id, 'absent');
                   });
@@ -802,7 +802,6 @@ const BulkAttendanceModal = ({
               </button>
               <button
                 onClick={() => {
-                  // Clear all attendance
                   Object.keys(bulkAttendance).forEach(key => handleAttendanceChangeWithTracking(key, 'absent'));
                 }}
                 className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
@@ -1120,7 +1119,6 @@ const Events = () => {
       
       setEvents(eventsWithDefaults as Event[]);
       
-      // Fetch attendees for all events in parallel
       const attendeePromises = eventsWithDefaults.map((event: Event) => 
         fetchEventAttendees(event.id)
       );
@@ -1158,7 +1156,6 @@ const Events = () => {
     try {
       setError(null);
       
-      // Fetch all data in parallel
       const [
         { data: membersData, error: membersError },
         { data: cellGroupsData },
@@ -1176,30 +1173,24 @@ const Events = () => {
 
       if (membersError) throw membersError;
 
-      // Create maps for faster lookups
       const cellGroupMap = new Map(cellGroupsData?.map(cg => [cg.id, cg.name]) || []);
       const ministryGroupMap = new Map<string, string[]>();
       const departmentMap = new Map<string, string[]>();
-      // Store cell group ID for member lookup
 
-      // Build ministry group map
       ministryGroupMembersData?.forEach(mgm => {
         const existing = ministryGroupMap.get(mgm.member_id) || [];
         ministryGroupMap.set(mgm.member_id, [...existing, mgm.ministry_groups.id]);
       });
 
-      // Build department map
       departmentMembersData?.forEach(dm => {
         const existing = departmentMap.get(dm.member_id) || [];
         departmentMap.set(dm.member_id, [...existing, dm.departments.id]);
       });
 
-      // Store in ref for performance
       memberMinistryMapRef.current = ministryGroupMap;
       memberDepartmentMapRef.current = departmentMap;
       memberCellGroupMapRef.current = cellGroupMap;
 
-      // Combine all data
       const membersWithDetails = (membersData || []).map((member: any) => ({
         ...member,
         cell_group_name: member.cell_group_id ? cellGroupMap.get(member.cell_group_id) : null,
@@ -1258,7 +1249,6 @@ const Events = () => {
 
   const fetchEventAttendees = useCallback(async (eventId: string) => {
     try {
-      // Fetch attendees with member info in a single query
       const { data: attendeesData, error: attendeesError } = await supabase
         .from('event_attendees')
         .select(`
@@ -1272,7 +1262,6 @@ const Events = () => {
 
       if (attendeesError) throw attendeesError;
 
-      // Fetch inviter details in batch
       const inviteeIds = (attendeesData || [])
         .filter(attendee => attendee.invited_by_id)
         .map(attendee => attendee.invited_by_id)
@@ -1311,28 +1300,22 @@ const Events = () => {
     }
   }, []);
 
-  // Optimized version of isMemberInTargetGroups
   const isMemberInTargetGroups = useCallback((member: Member, event: Event): boolean => {
     if (event.is_whole_church) return true;
 
-    // Check cell groups
     if (event.target_groups && event.target_groups.length > 0) {
       if (member.cell_group_id && event.target_groups.includes(member.cell_group_id)) {
         return true;
       }
     }
 
-    // Check departments and ministry groups
     if (event.target_departments && event.target_departments.length > 0) {
-      // Use cached maps for faster lookups
       const memberDepartments = memberDepartmentMapRef.current.get(member.id) || [];
       const memberMinistries = memberMinistryMapRef.current.get(member.id) || [];
       
-      // Convert arrays to Sets for O(1) lookups
       const memberDeptSet = new Set(memberDepartments);
       const memberMinistrySet = new Set(memberMinistries);
       
-      // Check if member is in any target department or ministry group
       for (const targetId of event.target_departments) {
         if (memberDeptSet.has(targetId) || memberMinistrySet.has(targetId)) {
           return true;
@@ -1343,10 +1326,8 @@ const Events = () => {
     return false;
   }, []);
 
-  // Batch fetch for bulk attendance
   const fetchTargetMembersForEvent = useCallback((event: Event): Member[] => {
     if (event.is_whole_church) {
-      // For whole church events, all non-"not_attending" members are targets
       return members.filter(member => member.status !== 'not_attending');
     }
 
@@ -1356,23 +1337,17 @@ const Events = () => {
     });
   }, [members, isMemberInTargetGroups]);
 
-  // FIXED: Optimized filter members for bulk attendance search - immediate filtering
   const filterTargetMembersSearch = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
     if (!searchTerm.trim()) return targetMembers;
     
     const searchLower = searchTerm.toLowerCase().trim();
     
     return targetMembers.filter(member => {
-      // Create searchable text once
       const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
       return searchableText.includes(searchLower);
     });
   }, []);
-  
-  // Use the search filter
-  console.log('Filter function available:', typeof filterTargetMembersSearch);
 
-  // Optimized handleDeleteEvent
   const handleDeleteEvent = useCallback(async (eventId: string) => {
     if (!confirm('Are you sure you want to delete this event? This action cannot be undone.')) return;
 
@@ -1384,10 +1359,8 @@ const Events = () => {
       const event = events.find(e => e.id === eventId);
       if (!event) throw new Error('Event not found');
 
-      // Prepare all promises
       const promises = [];
 
-      // 1. Delete associated sermons and their files
       const eventSermons = sermons.filter(s => s.event_id === eventId);
       for (const sermon of eventSermons) {
         if (sermon.video_url) {
@@ -1402,7 +1375,6 @@ const Events = () => {
         );
       }
 
-      // 2. Delete event pamphlet if exists
       if (event.pamphlet_url) {
         const urlParts = event.pamphlet_url.split('/');
         const fileName = urlParts[urlParts.length - 1];
@@ -1413,20 +1385,16 @@ const Events = () => {
         );
       }
 
-      // 3. Delete event attendees
       promises.push(
         supabase.from('event_attendees').delete().eq('event_id', eventId)
       );
 
-      // 4. Delete the event itself
       promises.push(
         supabase.from('events').delete().eq('id', eventId)
       );
 
-      // Execute all promises
       await Promise.all(promises);
 
-      // Update local state
       setEvents(prev => prev.filter(event => event.id !== eventId));
       setSermons(prev => prev.filter(sermon => sermon.event_id !== eventId));
       setAttendees(prev => prev.filter(attendee => attendee.event_id !== eventId));
@@ -1526,7 +1494,6 @@ const Events = () => {
     }
   }, [bulkAttendance, saveAttendance, fetchEventAttendees]);
 
-  // Memoize event attendees
   const getEventAttendees = useCallback((eventId: string) => {
     return attendees.filter(attendee => attendee.event_id === eventId);
   }, [attendees]);
@@ -1545,7 +1512,6 @@ const Events = () => {
     );
   }, [getEventAttendees]);
 
-  // Memoize attendance stats
   const getAttendanceStats = useCallback((eventId: string) => {
     const eventAttendees = getEventAttendees(eventId);
     const present = eventAttendees.filter(a => a.attendance_status === 'present').length;
@@ -2180,7 +2146,6 @@ const Events = () => {
     setSuccess(null);
     
     try {
-      // For Sunday service, use "Sunday" if name is empty or use the user's input
       const eventName = eventFormData.eventType === 'sunday' && !eventFormData.name.trim() 
         ? 'Sunday' 
         : eventFormData.name.trim();
@@ -2276,7 +2241,6 @@ const Events = () => {
     setShowAttendeeModal(null);
   }, []);
 
-  // Optimized openBulkAttendanceModal - DEFAULT TO ALL ABSENT
   const openBulkAttendanceModal = useCallback((eventId: string) => {
     setShowBulkAttendanceModal(eventId);
     setBulkAttendanceSearch('');
@@ -2292,7 +2256,6 @@ const Events = () => {
 
     for (const member of targetMembers) {
       const existingAttendee = existingAttendeeMap.get(member.id);
-      // CHANGED: Default to 'absent' instead of 'present'
       initialAttendance[member.id] = existingAttendee?.attendance_status as 'present' | 'absent' || 'absent';
     }
 
@@ -2319,7 +2282,6 @@ const Events = () => {
     setShowNewcomerModal(null);
   }, []);
 
-  // UPDATED handleNewcomerSubmit with residence and gender
   const handleNewcomerSubmit = useCallback(async (newcomerData: {
     name: string;
     surname: string;
@@ -2424,7 +2386,6 @@ const Events = () => {
         memberId = memberData.id;
       }
 
-      // Add as attendee with first_time = true
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
@@ -2442,7 +2403,6 @@ const Events = () => {
 
       if (attendeeError) throw attendeeError;
 
-      // Add the new attendee to state
       const memberData = existingMember || { 
         id: memberId, 
         name: newcomerData.name.trim(), 
@@ -2464,7 +2424,6 @@ const Events = () => {
 
       setAttendees(prev => [...prev, attendeeWithMember]);
 
-      // Refresh members list
       await fetchMembers();
       
       closeNewcomerModal();
@@ -2500,14 +2459,6 @@ const Events = () => {
     return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
   }, []);
 
-  // Status badge helper - available for UI components
-  const statusBadges = {
-    newcomer: { color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', text: 'Newcomer' },
-    signed_member: { color: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', text: 'Signed Member' },
-    not_attending: { color: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', text: 'Not Attending' },
-  };
-  console.log('Status badges available:', Object.keys(statusBadges));
-
   const getEventScopeBadge = useCallback((event: Event) => {
     if (event.is_whole_church) {
       return {
@@ -2540,7 +2491,6 @@ const Events = () => {
     }
   }, []);
 
-  // Clean up file URLs
   useEffect(() => {
     return () => {
       if (viewingPamphlet && viewingPamphlet.startsWith('blob:')) {
@@ -2549,14 +2499,12 @@ const Events = () => {
     };
   }, [viewingPamphlet]);
 
-  // Initialize data
   useEffect(() => {
     if (user && !authLoading) {
       const initializeData = async () => {
         try {
           setLoading(true);
           
-          // Fetch all data in parallel
           await Promise.all([
             fetchEvents(),
             fetchSermons(),
@@ -2577,7 +2525,6 @@ const Events = () => {
     }
   }, [user, authLoading, fetchEvents, fetchSermons, fetchMembers, fetchCellGroups, fetchMinistryGroups, fetchDepartments]);
 
-  // Sermon List Component
   const SermonList = useCallback(() => {
     return (
       <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-6 mb-8 shadow-lg hover:shadow-xl transition-all duration-300">
@@ -3739,7 +3686,6 @@ const Events = () => {
         handleSermonSubmit={handleSermonSubmit}
       />
 
-      {/* Use the separate NewcomerModal component */}
       <NewcomerModal
         showNewcomerModal={showNewcomerModal}
         closeNewcomerModal={closeNewcomerModal}
@@ -3750,7 +3696,6 @@ const Events = () => {
 
       <PamphletModal />
       
-      {/* Use the separate BulkAttendanceModal component with Save on Exit functionality */}
       <BulkAttendanceModal
         showBulkAttendanceModal={showBulkAttendanceModal}
         closeBulkAttendanceModal={closeBulkAttendanceModal}
