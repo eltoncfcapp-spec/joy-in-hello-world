@@ -2,6 +2,7 @@ import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
+import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 interface Event {
   id: string;
@@ -588,7 +589,9 @@ const BulkAttendanceModal = ({
   saveBulkAttendance,
   loading,
   attendanceNotesRef,
-  getInitials
+  getInitials,
+  hasUnsavedChanges,
+  setHasUnsavedChanges
 }: {
   showBulkAttendanceModal: string | null;
   closeBulkAttendanceModal: () => void;
@@ -602,8 +605,63 @@ const BulkAttendanceModal = ({
   loading: boolean;
   attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
   getInitials: (name: string, surname: string) => string;
+  hasUnsavedChanges: boolean;
+  setHasUnsavedChanges: (value: boolean) => void;
 }) => {
-  // ✅ Conditional return at the beginning (no hooks after this)
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
+
+  // Track unsaved changes when attendance is modified
+  const handleAttendanceChangeWithTracking = useCallback((memberId: string, status: 'present' | 'absent') => {
+    handleBulkAttendanceChange(memberId, status);
+    setHasUnsavedChanges(true);
+  }, [handleBulkAttendanceChange, setHasUnsavedChanges]);
+
+  // Handle close with unsaved changes check
+  const handleClose = useCallback(() => {
+    if (hasUnsavedChanges && Object.keys(bulkAttendance).length > 0) {
+      setShowUnsavedDialog(true);
+    } else {
+      closeBulkAttendanceModal();
+    }
+  }, [hasUnsavedChanges, bulkAttendance, closeBulkAttendanceModal]);
+
+  // Handle save and close
+  const handleSaveAndClose = useCallback(async () => {
+    if (showBulkAttendanceModal) {
+      await saveBulkAttendance(showBulkAttendanceModal);
+      setShowUnsavedDialog(false);
+      setHasUnsavedChanges(false);
+      closeBulkAttendanceModal();
+    }
+  }, [showBulkAttendanceModal, saveBulkAttendance, closeBulkAttendanceModal, setHasUnsavedChanges]);
+
+  // Handle discard changes
+  const handleDiscardChanges = useCallback(() => {
+    setShowUnsavedDialog(false);
+    setHasUnsavedChanges(false);
+    closeBulkAttendanceModal();
+  }, [closeBulkAttendanceModal, setHasUnsavedChanges]);
+
+  // Browser beforeunload event
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges && Object.keys(bulkAttendance).length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    if (showBulkAttendanceModal) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsavedChanges, bulkAttendance, showBulkAttendanceModal]);
+
+  // ✅ Conditional return after hooks
   if (!showBulkAttendanceModal) return null;
 
   const event = events.find(e => e.id === showBulkAttendanceModal);
@@ -612,7 +670,7 @@ const BulkAttendanceModal = ({
   const targetMembers = fetchTargetMembersForEvent(event);
   
   // FIXED: Memoize filtered members calculation
-  const filteredMembers = useMemo(() => {
+  const filteredMembers = (() => {
     if (!bulkAttendanceSearch.trim()) return targetMembers;
     
     const searchLower = bulkAttendanceSearch.toLowerCase().trim();
@@ -621,7 +679,7 @@ const BulkAttendanceModal = ({
       const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
       return searchableText.includes(searchLower);
     });
-  }, [targetMembers, bulkAttendanceSearch]); // Only recalculates when targetMembers or search changes
+  })();
 
   const stats = {
     present: Object.values(bulkAttendance).filter(status => status === 'present').length,
@@ -644,7 +702,7 @@ const BulkAttendanceModal = ({
             </p>
           </div>
           <button
-            onClick={closeBulkAttendanceModal}
+            onClick={handleClose}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors duration-200 flex-shrink-0 ml-2"
           >
             <X className="h-5 w-5 text-gray-500 dark:text-gray-400" />
@@ -704,7 +762,7 @@ const BulkAttendanceModal = ({
                 onClick={() => {
                   // Mark all as present
                   targetMembers.forEach(member => {
-                    handleBulkAttendanceChange(member.id, 'present');
+                    handleAttendanceChangeWithTracking(member.id, 'present');
                   });
                 }}
                 className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm"
@@ -715,7 +773,7 @@ const BulkAttendanceModal = ({
                 onClick={() => {
                   // Mark all as absent (this is the default)
                   targetMembers.forEach(member => {
-                    handleBulkAttendanceChange(member.id, 'absent');
+                    handleAttendanceChangeWithTracking(member.id, 'absent');
                   });
                 }}
                 className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm"
@@ -725,7 +783,7 @@ const BulkAttendanceModal = ({
               <button
                 onClick={() => {
                   // Clear all attendance
-                  Object.keys(bulkAttendance).forEach(key => handleBulkAttendanceChange(key, 'absent'));
+                  Object.keys(bulkAttendance).forEach(key => handleAttendanceChangeWithTracking(key, 'absent'));
                 }}
                 className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs sm:text-sm"
               >
@@ -735,7 +793,7 @@ const BulkAttendanceModal = ({
                 <button
                   onClick={() => {
                     filteredMembers.forEach(member => {
-                      handleBulkAttendanceChange(member.id, 'present');
+                      handleAttendanceChangeWithTracking(member.id, 'present');
                     });
                   }}
                   className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
@@ -747,7 +805,7 @@ const BulkAttendanceModal = ({
                 <button
                   onClick={() => {
                     filteredMembers.forEach(member => {
-                      handleBulkAttendanceChange(member.id, 'absent');
+                      handleAttendanceChangeWithTracking(member.id, 'absent');
                     });
                   }}
                   className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs sm:text-sm"
@@ -797,7 +855,7 @@ const BulkAttendanceModal = ({
                       {/* Right side - Buttons */}
                       <div className="flex gap-2 flex-shrink-0">
                         <button
-                          onClick={() => handleBulkAttendanceChange(member.id, 'present')}
+                          onClick={() => handleAttendanceChangeWithTracking(member.id, 'present')}
                           className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
                             bulkAttendance[member.id] === 'present'
                               ? 'bg-green-600 text-white'
@@ -807,7 +865,7 @@ const BulkAttendanceModal = ({
                           Present
                         </button>
                         <button
-                          onClick={() => handleBulkAttendanceChange(member.id, 'absent')}
+                          onClick={() => handleAttendanceChangeWithTracking(member.id, 'absent')}
                           className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
                             bulkAttendance[member.id] === 'absent'
                               ? 'bg-red-600 text-white'
@@ -847,13 +905,16 @@ const BulkAttendanceModal = ({
             </div>
             <div className="flex gap-3 w-full sm:w-auto">
               <button
-                onClick={closeBulkAttendanceModal}
+                onClick={handleClose}
                 className="flex-1 sm:flex-none px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
               >
                 Cancel
               </button>
               <button
-                onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
+                onClick={async () => {
+                  await saveBulkAttendance(showBulkAttendanceModal);
+                  setHasUnsavedChanges(false);
+                }}
                 disabled={loading || Object.keys(bulkAttendance).length === 0}
                 className="flex-1 sm:flex-none px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
               >
@@ -874,6 +935,15 @@ const BulkAttendanceModal = ({
           </div>
         </div>
       </div>
+
+      {/* Unsaved Changes Dialog */}
+      <UnsavedChangesDialog
+        isOpen={showUnsavedDialog}
+        onConfirm={handleSaveAndClose}
+        onCancel={handleDiscardChanges}
+        title="Unsaved Changes"
+        message="You are about to leave the page. Would you like to save the data captured?"
+      />
     </div>
   );
 };
@@ -938,6 +1008,7 @@ const Events = () => {
   const [bulkAttendanceSearch, setBulkAttendanceSearch] = useState('');
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
+  const [hasUnsavedAttendanceChanges, setHasUnsavedAttendanceChanges] = useState(false);
 
   // Track if we've set the Sunday service name
   const [isSundayServiceSet, setIsSundayServiceSet] = useState(false);
@@ -3619,6 +3690,8 @@ const Events = () => {
         loading={loading}
         attendanceNotesRef={attendanceNotesRef}
         getInitials={getInitials}
+        hasUnsavedChanges={hasUnsavedAttendanceChanges}
+        setHasUnsavedChanges={setHasUnsavedAttendanceChanges}
       />
       
       <AttendeeModal />
