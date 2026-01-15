@@ -576,7 +576,7 @@ const NewcomerModal = ({
   );
 };
 
-// BulkAttendanceModal Component (Fixed with useMemo and default to "all absent")
+// BulkAttendanceModal Component with Save on Exit functionality
 const BulkAttendanceModal = ({ 
   showBulkAttendanceModal, 
   closeBulkAttendanceModal,
@@ -589,9 +589,7 @@ const BulkAttendanceModal = ({
   saveBulkAttendance,
   loading,
   attendanceNotesRef,
-  getInitials,
-  hasUnsavedChanges,
-  setHasUnsavedChanges
+  getInitials
 }: {
   showBulkAttendanceModal: string | null;
   closeBulkAttendanceModal: () => void;
@@ -605,20 +603,22 @@ const BulkAttendanceModal = ({
   loading: boolean;
   attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
   getInitials: (name: string, surname: string) => string;
-  hasUnsavedChanges: boolean;
-  setHasUnsavedChanges: (value: boolean) => void;
 }) => {
+  // State for tracking unsaved changes
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
 
   // Track unsaved changes when attendance is modified
   const handleAttendanceChangeWithTracking = useCallback((memberId: string, status: 'present' | 'absent') => {
     handleBulkAttendanceChange(memberId, status);
     setHasUnsavedChanges(true);
-  }, [handleBulkAttendanceChange, setHasUnsavedChanges]);
+  }, [handleBulkAttendanceChange]);
 
   // Handle close with unsaved changes check
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges && Object.keys(bulkAttendance).length > 0) {
+      setPendingCloseAction(() => closeBulkAttendanceModal);
       setShowUnsavedDialog(true);
     } else {
       closeBulkAttendanceModal();
@@ -631,16 +631,21 @@ const BulkAttendanceModal = ({
       await saveBulkAttendance(showBulkAttendanceModal);
       setShowUnsavedDialog(false);
       setHasUnsavedChanges(false);
-      closeBulkAttendanceModal();
+      if (pendingCloseAction) {
+        pendingCloseAction();
+      }
     }
-  }, [showBulkAttendanceModal, saveBulkAttendance, closeBulkAttendanceModal, setHasUnsavedChanges]);
+  }, [showBulkAttendanceModal, saveBulkAttendance, pendingCloseAction]);
 
   // Handle discard changes
   const handleDiscardChanges = useCallback(() => {
     setShowUnsavedDialog(false);
     setHasUnsavedChanges(false);
-    closeBulkAttendanceModal();
-  }, [closeBulkAttendanceModal, setHasUnsavedChanges]);
+    if (pendingCloseAction) {
+      pendingCloseAction();
+    }
+    setPendingCloseAction(null);
+  }, [pendingCloseAction]);
 
   // Browser beforeunload event
   useEffect(() => {
@@ -661,7 +666,16 @@ const BulkAttendanceModal = ({
     };
   }, [hasUnsavedChanges, bulkAttendance, showBulkAttendanceModal]);
 
-  // ✅ Conditional return after hooks
+  // Reset unsaved changes state when modal closes
+  useEffect(() => {
+    if (!showBulkAttendanceModal) {
+      setHasUnsavedChanges(false);
+      setShowUnsavedDialog(false);
+      setPendingCloseAction(null);
+    }
+  }, [showBulkAttendanceModal]);
+
+  // ✅ Conditional return at the beginning (no hooks after this)
   if (!showBulkAttendanceModal) return null;
 
   const event = events.find(e => e.id === showBulkAttendanceModal);
@@ -670,7 +684,7 @@ const BulkAttendanceModal = ({
   const targetMembers = fetchTargetMembersForEvent(event);
   
   // FIXED: Memoize filtered members calculation
-  const filteredMembers = (() => {
+  const filteredMembers = useMemo(() => {
     if (!bulkAttendanceSearch.trim()) return targetMembers;
     
     const searchLower = bulkAttendanceSearch.toLowerCase().trim();
@@ -679,7 +693,7 @@ const BulkAttendanceModal = ({
       const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
       return searchableText.includes(searchLower);
     });
-  })();
+  }, [targetMembers, bulkAttendanceSearch]);
 
   const stats = {
     present: Object.values(bulkAttendance).filter(status => status === 'present').length,
@@ -700,6 +714,12 @@ const BulkAttendanceModal = ({
               Manage attendance for all target members - {targetMembers.length} members found
               {bulkAttendanceSearch && ` (${filteredMembers.length} filtered)`}
             </p>
+            {hasUnsavedChanges && (
+              <div className="mt-1 flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3 text-yellow-500" />
+                <span className="text-xs text-yellow-600 dark:text-yellow-400">You have unsaved changes</span>
+              </div>
+            )}
           </div>
           <button
             onClick={handleClose}
@@ -884,6 +904,7 @@ const BulkAttendanceModal = ({
                           defaultValue={attendanceNotesRef.current[member.id] || ''}
                           onChange={(e) => {
                             attendanceNotesRef.current[member.id] = e.target.value;
+                            setHasUnsavedChanges(true);
                           }}
                           placeholder="Reason for absence (optional)..."
                           className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
@@ -902,6 +923,9 @@ const BulkAttendanceModal = ({
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
               {stats.present + stats.absent} of {targetMembers.length} members marked
+              {hasUnsavedChanges && (
+                <span className="ml-2 text-yellow-600 dark:text-yellow-400 font-medium">• Unsaved changes</span>
+              )}
             </div>
             <div className="flex gap-3 w-full sm:w-auto">
               <button
@@ -911,10 +935,7 @@ const BulkAttendanceModal = ({
                 Cancel
               </button>
               <button
-                onClick={async () => {
-                  await saveBulkAttendance(showBulkAttendanceModal);
-                  setHasUnsavedChanges(false);
-                }}
+                onClick={() => saveBulkAttendance(showBulkAttendanceModal)}
                 disabled={loading || Object.keys(bulkAttendance).length === 0}
                 className="flex-1 sm:flex-none px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
               >
@@ -937,13 +958,67 @@ const BulkAttendanceModal = ({
       </div>
 
       {/* Unsaved Changes Dialog */}
-      <UnsavedChangesDialog
-        isOpen={showUnsavedDialog}
-        onConfirm={handleSaveAndClose}
-        onCancel={handleDiscardChanges}
-        title="Unsaved Changes"
-        message="You are about to leave the page. Would you like to save the data captured?"
-      />
+      {showUnsavedDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-yellow-100 dark:bg-yellow-900/30">
+                <AlertTriangle className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white text-center mb-2">
+                Unsaved Changes
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 text-center mb-6">
+                You are about to leave the page. Would you like to save the data captured?
+              </p>
+              
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 mb-6">
+                <h4 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Attendance Summary:</h4>
+                <ul className="space-y-1 text-sm text-yellow-700 dark:text-yellow-400">
+                  <li className="flex items-center justify-between">
+                    <span>Present:</span>
+                    <span className="font-bold">{stats.present}</span>
+                  </li>
+                  <li className="flex items-center justify-between">
+                    <span>Absent:</span>
+                    <span className="font-bold">{stats.absent}</span>
+                  </li>
+                  <li className="flex items-center justify-between">
+                    <span>Total Marked:</span>
+                    <span className="font-bold">{stats.present + stats.absent}</span>
+                  </li>
+                </ul>
+              </div>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDiscardChanges}
+                  className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm"
+                >
+                  Discard Changes
+                </button>
+                <button
+                  onClick={handleSaveAndClose}
+                  disabled={loading}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span>Save & Close</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1008,7 +1083,6 @@ const Events = () => {
   const [bulkAttendanceSearch, setBulkAttendanceSearch] = useState('');
   const [bulkAttendance, setBulkAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [_attendanceNotes, setAttendanceNotes] = useState<Record<string, string>>({});
-  const [hasUnsavedAttendanceChanges, setHasUnsavedAttendanceChanges] = useState(false);
 
   // Track if we've set the Sunday service name
   const [isSundayServiceSet, setIsSundayServiceSet] = useState(false);
@@ -3676,7 +3750,7 @@ const Events = () => {
 
       <PamphletModal />
       
-      {/* Use the separate BulkAttendanceModal component with useMemo optimization */}
+      {/* Use the separate BulkAttendanceModal component with Save on Exit functionality */}
       <BulkAttendanceModal
         showBulkAttendanceModal={showBulkAttendanceModal}
         closeBulkAttendanceModal={closeBulkAttendanceModal}
@@ -3690,8 +3764,6 @@ const Events = () => {
         loading={loading}
         attendanceNotesRef={attendanceNotesRef}
         getInitials={getInitials}
-        hasUnsavedChanges={hasUnsavedAttendanceChanges}
-        setHasUnsavedChanges={setHasUnsavedAttendanceChanges}
       />
       
       <AttendeeModal />
