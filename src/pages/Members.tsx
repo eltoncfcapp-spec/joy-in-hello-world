@@ -2,7 +2,6 @@ import { Search, Plus, Phone, User, X, MapPin, Edit2, Save, Trash2, Calendar, Dr
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
 
 interface Member {
   id: string;
@@ -137,7 +136,7 @@ const MemberNotes: React.FC<{
   const fetchNotes = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('member_notes')
         .select(`
           *,
@@ -150,7 +149,7 @@ const MemberNotes: React.FC<{
       
       const filteredNotes = canViewConfidential 
         ? data 
-        : data?.filter(note => !note.is_confidential);
+        : data?.filter((note: any) => !note.is_confidential);
       
       setNotes(filteredNotes || []);
     } catch (error) {
@@ -178,7 +177,7 @@ const MemberNotes: React.FC<{
         created_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
+      const { error } = await (supabase as any)
         .from('member_notes')
         .insert([newNote])
         .select();
@@ -204,7 +203,7 @@ const MemberNotes: React.FC<{
     if (!editingNote || !editNoteForm.note_content.trim()) return;
     
     try {
-      const { data, error } = await supabase
+      const { error } = await (supabase as any)
         .from('member_notes')
         .update({
           note_type: editNoteForm.note_type,
@@ -229,7 +228,7 @@ const MemberNotes: React.FC<{
     if (!confirm('Are you sure you want to delete this note?')) return;
     
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('member_notes')
         .delete()
         .eq('id', noteId);
@@ -502,13 +501,11 @@ const FoundationalTraining: React.FC<{
   memberId: string;
   currentUserId: string;
   canEditTraining: boolean;
-  editingMode?: boolean;
   onTrainingUpdated?: () => void;
 }> = ({
   memberId,
   currentUserId,
   canEditTraining,
-  editingMode = false,
   onTrainingUpdated
 }) => {
   const [topics, setTopics] = useState<FoundationalTopic[]>([]);
@@ -521,13 +518,21 @@ const FoundationalTraining: React.FC<{
     total: 0
   });
   const [expandedLevel, setExpandedLevel] = useState<number | null>(null);
+  
+  // Form state for adding training
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addFormData, setAddFormData] = useState({
+    level: 1,
+    topic_name: '',
+    completed_date: new Date().toISOString().split('T')[0]
+  });
 
   const fetchTrainingData = async () => {
     try {
       setLoading(true);
       
       // Fetch all active topics with correct column names
-      const { data: topicsData, error: topicsError } = await supabase
+      const { data: topicsData, error: topicsError } = await (supabase as any)
         .from('foundational_topics')
         .select('*')
         .eq('is_active', true)
@@ -538,7 +543,7 @@ const FoundationalTraining: React.FC<{
       setTopics(topicsData || []);
 
       // Fetch member's training progress with topic details
-      const { data: progressData, error: progressError } = await supabase
+      const { data: progressData, error: progressError } = await (supabase as any)
         .from('member_training_progress')
         .select(`
           *,
@@ -551,19 +556,19 @@ const FoundationalTraining: React.FC<{
       setTrainingProgress(progressData || []);
 
       // Calculate progress
-      const level1Topics = topicsData?.filter(t => t.level === 1) || [];
-      const level2Topics = topicsData?.filter(t => t.level === 2) || [];
-      const level3Topics = topicsData?.filter(t => t.level === 3) || [];
+      const level1Topics = topicsData?.filter((t: any) => t.level === 1) || [];
+      const level2Topics = topicsData?.filter((t: any) => t.level === 2) || [];
+      const level3Topics = topicsData?.filter((t: any) => t.level === 3) || [];
       const totalTopics = topicsData?.length || 0;
 
-      const completedLevel1 = progressData?.filter(p => 
-        level1Topics.find(t => t.id === p.topic_id)
+      const completedLevel1 = progressData?.filter((p: any) => 
+        level1Topics.find((t: any) => t.id === p.topic_id)
       ).length || 0;
-      const completedLevel2 = progressData?.filter(p => 
-        level2Topics.find(t => t.id === p.topic_id)
+      const completedLevel2 = progressData?.filter((p: any) => 
+        level2Topics.find((t: any) => t.id === p.topic_id)
       ).length || 0;
-      const completedLevel3 = progressData?.filter(p => 
-        level3Topics.find(t => t.id === p.topic_id)
+      const completedLevel3 = progressData?.filter((p: any) => 
+        level3Topics.find((t: any) => t.id === p.topic_id)
       ).length || 0;
 
       setProgress({
@@ -590,7 +595,7 @@ const FoundationalTraining: React.FC<{
     try {
       if (isCompleted) {
         // Remove completion
-        const { error } = await supabase
+        const { error } = await (supabase as any)
           .from('member_training_progress')
           .delete()
           .eq('member_id', memberId)
@@ -607,7 +612,7 @@ const FoundationalTraining: React.FC<{
           notes: `Completed foundational training topic`
         };
 
-        const { error } = await supabase
+        const { error } = await (supabase as any)
           .from('member_training_progress')
           .insert([completionData]);
 
@@ -619,6 +624,64 @@ const FoundationalTraining: React.FC<{
     } catch (error) {
       console.error('Error updating topic completion:', error);
       alert('Failed to update training progress. Please try again.');
+    }
+  };
+  
+  const handleAddTraining = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEditTraining || !addFormData.topic_name.trim()) return;
+
+    try {
+      // First, check if topic exists or create it
+      let topicId = '';
+      const existingTopic = topics.find(
+        t => t.topic_name.toLowerCase() === addFormData.topic_name.toLowerCase() && t.level === addFormData.level
+      );
+
+      if (existingTopic) {
+        topicId = existingTopic.id;
+      } else {
+        // Create new topic
+        const { data: newTopic, error: topicError } = await (supabase as any)
+          .from('foundational_topics')
+          .insert([{
+            topic_name: addFormData.topic_name.trim(),
+            level: addFormData.level,
+            topic_order: topics.filter(t => t.level === addFormData.level).length + 1,
+            is_active: true,
+            created_at: new Date().toISOString()
+          }])
+          .select()
+          .single();
+
+        if (topicError) throw topicError;
+        topicId = newTopic.id;
+      }
+
+      // Add completion record
+      const { error } = await (supabase as any)
+        .from('member_training_progress')
+        .insert([{
+          member_id: memberId,
+          topic_id: topicId,
+          completed_by: currentUserId,
+          completed_date: addFormData.completed_date,
+          notes: `Level ${addFormData.level} training completed`
+        }]);
+
+      if (error) throw error;
+
+      setAddFormData({
+        level: 1,
+        topic_name: '',
+        completed_date: new Date().toISOString().split('T')[0]
+      });
+      setShowAddForm(false);
+      fetchTrainingData();
+      if (onTrainingUpdated) onTrainingUpdated();
+    } catch (error) {
+      console.error('Error adding training:', error);
+      alert('Failed to add training. Please try again.');
     }
   };
 
@@ -678,10 +741,87 @@ const FoundationalTraining: React.FC<{
           <BookOpen className="h-5 w-5" />
           Foundational Training
         </h3>
-        <div className="text-sm text-gray-600 dark:text-gray-400">
-          {canEditTraining ? 'Click to toggle completion' : 'View only'}
-        </div>
+        {canEditTraining && (
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors duration-200"
+          >
+            <Plus className="h-4 w-4" />
+            {showAddForm ? 'Cancel' : 'Add Training'}
+          </button>
+        )}
       </div>
+
+      {/* Add Training Form */}
+      {showAddForm && canEditTraining && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+          <form onSubmit={handleAddTraining} className="space-y-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Level *
+              </label>
+              <select
+                value={addFormData.level}
+                onChange={(e) => setAddFormData({...addFormData, level: parseInt(e.target.value)})}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value={1}>Level 1: Foundations</option>
+                <option value={2}>Level 2: Growth</option>
+                <option value={3}>Level 3: Leadership</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Topic Name *
+              </label>
+              <input
+                type="text"
+                value={addFormData.topic_name}
+                onChange={(e) => setAddFormData({...addFormData, topic_name: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter topic name (e.g., Water Baptism, Discipleship 101)"
+                required
+              />
+              {topics.length > 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Existing topics: {topics.filter(t => t.level === addFormData.level).map(t => t.topic_name).join(', ') || 'None'}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Date Completed *
+              </label>
+              <input
+                type="date"
+                value={addFormData.completed_date}
+                onChange={(e) => setAddFormData({...addFormData, completed_date: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors duration-200"
+              >
+                <Save className="h-4 w-4" />
+                Save Training
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Progress Overview */}
       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700/50 rounded-xl p-4">
@@ -717,15 +857,17 @@ const FoundationalTraining: React.FC<{
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading training topics...</p>
         </div>
-      ) : topics.length === 0 ? (
+      ) : topics.length === 0 && !showAddForm ? (
         <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
           <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-3" />
           <p className="text-gray-600 dark:text-gray-400">No training topics configured.</p>
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-            Contact an administrator to set up foundational training topics.
-          </p>
+          {canEditTraining && (
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+              Click "Add Training" to add foundational training records.
+            </p>
+          )}
         </div>
-      ) : (
+      ) : topics.length > 0 && (
         <div className="space-y-6">
           {[1, 2, 3].map(level => {
             const levelTopics = getLevelTopics(level);
@@ -828,7 +970,6 @@ const FoundationalTraining: React.FC<{
 // Main Members Component
 const Members = () => {
   const { profile, loading: authLoading } = useAuth();
-  const navigate = useNavigate();
   
   const [showForm, setShowForm] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
@@ -1835,7 +1976,6 @@ const Members = () => {
           memberId={member.id}
           currentUserId={profile?.id || ''}
           canEditTraining={canEditMember(member.cell_group_id)}
-          editingMode={true}
           onTrainingUpdated={() => {
             setSuccess('Training progress updated!');
             setTimeout(() => setSuccess(null), 3000);
