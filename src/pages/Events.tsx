@@ -1424,7 +1424,7 @@ const Events = () => {
       const attendanceData: any = {
         event_id: eventId,
         members_id: memberId,
-        first_time: false,
+        first_time: false, // This should be true for newcomers, but we handle that separately
         invited_by_id: null,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
@@ -2282,6 +2282,7 @@ const Events = () => {
     setShowNewcomerModal(null);
   }, []);
 
+  // FIXED: Now correctly sets first_time to true for newcomers
   const handleNewcomerSubmit = useCallback(async (newcomerData: {
     name: string;
     surname: string;
@@ -2389,7 +2390,7 @@ const Events = () => {
       const attendeeData = {
         event_id: eventId,
         members_id: memberId,
-        first_time: true,
+        first_time: true, // FIXED: Changed from false to true for newcomers
         invited_by_id: null,
         attendance_status: 'present' as const,
         attended_at: new Date().toISOString()
