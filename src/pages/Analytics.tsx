@@ -1699,7 +1699,7 @@ const Analytics = () => {
         membersForAttendance
       );
 
-      // NEW: Generate accurate Sunday attendance reports////////////////////////////////////////////////////////////////////////////////
+      // NEW: Generate accurate Sunday attendance reports
       await generateAccurateSundayAttendanceReports(events, allAttendees, membersForAttendance);
 
     } catch (error) {
@@ -1709,105 +1709,84 @@ const Analytics = () => {
     }
   };
 
-  // NEW: Helper function to generate accurate Sunday attendance reports
-// NEW: Helper function to generate accurate Sunday attendance reports
-const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
-  try {
-    // Get only Sunday events from the filter period
-    const sundayEvents = events.filter(event => 
-      event.name?.toLowerCase().includes('sunday') || 
-      event.name?.toLowerCase().includes('service')
-    ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+  // NEW: Fetch Sunday attendance reports using direct SQL query
+  const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
+    try {
+      // Get only Sunday events from the filter period
+      const sundayEvents = events.filter(event => 
+        event.name?.toLowerCase().includes('sunday') || 
+        event.name?.toLowerCase().includes('service')
+      ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
 
-    const reports: AttendanceReport[] = [];
+      if (!sundayEvents || sundayEvents.length === 0) {
+        setAttendanceReports([]);
+        return;
+      }
 
-    for (const event of sundayEvents.slice(0, 5)) { // Get last 5 Sundays
-      // FIXED: Get attendees for THIS SPECIFIC event only
-      const eventAttendees = allAttendees.filter((attendee: any) => 
-        attendee.event_id === event.id
-      );
+      const reports: AttendanceReport[] = [];
 
-      // FIXED: Count present attendees for THIS event
-      const presentAttendees = eventAttendees.filter((a: any) => 
-        a.attendance_status === 'present'
-      );
-      const presentCount = presentAttendees.length;
-      
-      // Count absent attendees for THIS event
-      const absentAttendees = eventAttendees.filter((a: any) => 
-        a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
-      );
-      const absentCount = absentAttendees.length;
+      // For each Sunday event, get detailed attendance using RPC function
+      for (const event of sundayEvents.slice(0, 5)) { // Get last 5 Sundays
+        const { data: attendanceData, error: attendanceError } = await supabase
+          .rpc('get_sunday_attendance_report', {
+            p_event_id: event.id
+          });
 
-      // Get member counts (these remain the same for all events)
-      const totalMembers = allMembers.length;
-      const activeMembers = allMembers.filter(m => !m.is_hidden).length;
-      
-      // Calculate demographics for THIS event
-      let malePresent = 0;
-      let femalePresent = 0;
-      let newcomersPresent = 0;
-      let regularsPresent = 0;
-      let firstTimers = 0;
-
-      presentAttendees.forEach((a: any) => {
-        const member = allMembers.find(m => m.id === a.members_id);
-        if (member) {
-          if (member.gender === 'male') malePresent++;
-          if (member.gender === 'female') femalePresent++;
-          if (member.status === 'newcomer') newcomersPresent++;
-          if (member.status === 'signed_member') regularsPresent++;
-          
-          // Check if this is their first time attending (check if first_time flag is true)
-          if (a.first_time === true) {
-            firstTimers++;
-          }
+        if (attendanceError) {
+          console.error('Error fetching attendance for event:', event.id, attendanceError);
+          continue;
         }
-      });
 
-      // FIXED: Calculate attendance rates correctly
-      // Use the actual registered count (present + absent) as the denominator
-      const totalRegistered = presentCount + absentCount;
-      const attendanceRate = totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0;
-      
-      // For active attendance rate, count only active members who were registered
-      const activeRegistered = eventAttendees.filter((a: any) => {
-        const member = allMembers.find(m => m.id === a.members_id);
-        return member && !member.is_hidden;
-      }).length;
-      
-      const activePresentCount = presentAttendees.filter((a: any) => {
-        const member = allMembers.find(m => m.id === a.members_id);
-        return member && !member.is_hidden;
-      }).length;
-      
-      const activeAttendanceRate = activeRegistered > 0 ? Math.round((activePresentCount / activeRegistered) * 100) : 0;
+        if (attendanceData && attendanceData.length > 0) {
+          const data = attendanceData[0];
+          
+          // Get total and active members count from allMembers
+          const totalMembers = allMembers.length;
+          const activeMembers = allMembers.filter(m => !m.is_hidden).length;
+          
+          // Use the data from the SQL query
+          const totalRegistered = data.total_registered || 0;
+          const presentCount = data.present_count || 0;
+          const absentCount = (data.absent_count || 0) + (data.absent_with_reason_count || 0);
+          
+          // Calculate attendance rate: present / total_registered
+          const attendanceRate = totalRegistered > 0 
+            ? Math.round((presentCount / totalRegistered) * 100) 
+            : 0;
+          
+          // Calculate active attendance rate: active_present / active_registered
+          const activePresentCount = data.active_present_count || 0;
+          const activeRegistered = data.active_registered || 0;
+          const activeAttendanceRate = activeRegistered > 0 
+            ? Math.round((activePresentCount / activeRegistered) * 100) 
+            : 0;
 
-      reports.push({
-        meeting_date: event.event_date,
-        meeting_type: event.name || 'Sunday Service',
-        total_members: totalMembers,
-        active_members: activeMembers,
-        present_count: presentCount,
-        absent_count: absentCount,
-        late_count: 0, // You can add late logic if needed
-        attendance_rate: attendanceRate,
-        active_attendance_rate: activeAttendanceRate,
-        male_present: malePresent,
-        female_present: femalePresent,
-        first_timers: firstTimers,
-        newcomers: newcomersPresent,
-        regulars: regularsPresent
-      });
+          reports.push({
+            meeting_date: event.event_date,
+            meeting_type: event.name || 'Sunday Service',
+            total_members: totalMembers,
+            active_members: activeMembers,
+            present_count: presentCount,
+            absent_count: absentCount,
+            late_count: 0,
+            attendance_rate: attendanceRate,
+            active_attendance_rate: activeAttendanceRate,
+            male_present: data.male_present || 0,
+            female_present: data.female_present || 0,
+            first_timers: data.first_timers || 0,
+            newcomers: data.newcomers_present || 0,
+            regulars: data.regulars_present || 0
+          });
+        }
+      }
+
+      setAttendanceReports(reports);
+
+    } catch (error) {
+      console.error('Error generating Sunday reports:', error);
     }
+  };
 
-    setAttendanceReports(reports);
-
-  } catch (error) {
-    console.error('Error generating Sunday reports:', error);
-  }
-};
-/////////////////////////////////////////////////////////////////////////////////////////
   const fetchNonActiveMembers = async () => {
     try {
       const { data, error } = await supabase
@@ -4470,9 +4449,9 @@ const generateAccurateSundayAttendanceReports = async (events: any[], allAttende
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Date</th>
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Event</th>
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Present</th>
-                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Members</th>
-                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate (All)</th>
-                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate (Active)</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Total Registered</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Attendance Rate</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Active Rate</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -4494,17 +4473,17 @@ const generateAccurateSundayAttendanceReports = async (events: any[], allAttende
                             {report.present_count}
                           </span>
                           <span className="text-xs text-gray-500 dark:text-gray-400">
-                            / {report.total_members}
+                            / {report.present_count + report.absent_count}
                           </span>
                         </div>
                       </td>
                       <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
                         <div className="flex flex-col">
-                          <span className="text-blue-600 dark:text-blue-400 font-medium">
-                            {report.active_members} active
+                          <span className="text-blue-600 dark:text-blue-400 font-bold">
+                            {report.present_count + report.absent_count}
                           </span>
                           <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {report.total_members - report.active_members} non-active
+                            {report.present_count} present + {report.absent_count} absent
                           </span>
                         </div>
                       </td>
@@ -4523,7 +4502,7 @@ const generateAccurateSundayAttendanceReports = async (events: any[], allAttende
                           <span className="text-xs sm:text-sm font-bold">{report.attendance_rate}%</span>
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          All members
+                          All registered
                         </div>
                       </td>
                       <td className="px-2 sm:px-4 py-3">
@@ -4541,7 +4520,7 @@ const generateAccurateSundayAttendanceReports = async (events: any[], allAttende
                           <span className="text-xs sm:text-sm font-bold">{report.active_attendance_rate}%</span>
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Active only
+                          Active registered
                         </div>
                       </td>
                     </tr>
