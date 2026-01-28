@@ -1615,6 +1615,7 @@ const Analytics = () => {
     }
   }, [filters, hasAccess]);
 
+  // FIXED: Fetch analytics data with proper separation of filtered and unfiltered data
   const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
@@ -1709,14 +1710,32 @@ const Analytics = () => {
       if (eventsData.error) throw eventsData.error;
       const events = eventsData.data || [];
 
-      // Fetch event attendees
+      // FIXED: Fetch ALL event attendees (WITHOUT filters) for accurate attendance calculations
+      const { data: allEventAttendees, error: allAttendeesError } = await supabase
+        .from('event_attendees')
+        .select(`
+          *,
+          members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
+          events!event_attendees_event_id_fkey(id, name, event_date)
+        `)
+        .gte('events.event_date', filters.date_from)  // Still apply date filter for events
+        .lte('events.event_date', filters.date_to);
+
+      if (allAttendeesError) {
+        console.error('Error fetching all event attendees:', allAttendeesError);
+      }
+      const allAttendees = allEventAttendees || [];
+
+      // Also fetch filtered event attendees for other analytics (if needed)
       let attendeesQuery = supabase
         .from('event_attendees')
         .select(`
           *,
           members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
           events!event_attendees_event_id_fkey(id, name, event_date)
-        `);
+        `)
+        .gte('events.event_date', filters.date_from)
+        .lte('events.event_date', filters.date_to);
 
       if (filters.attendance_status !== 'all') {
         attendeesQuery = attendeesQuery.eq('attendance_status', filters.attendance_status);
@@ -1730,13 +1749,14 @@ const Analytics = () => {
       const nonActiveMembersData = await fetchNonActiveMembers();
       const nonActiveMembers = nonActiveMembersData || [];
 
-      // Calculate all metrics
+      // FIXED: Use ALL attendees for accurate attendance calculations
+      // Calculate all metrics with allAttendees (unfiltered) for attendance reports
       await calculateAllMetrics(
         members,
         allCellGroups,
         allDepartments,
         events,
-        eventAttendees,
+        allAttendees,  // Use ALL attendees for accurate attendance calculations
         nonActiveMembers,
         membersForAttendance
       );
