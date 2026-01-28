@@ -1658,21 +1658,31 @@ const Analytics = () => {
       if (eventsData.error) throw eventsData.error;
       const events = eventsData.data || [];
 
-      // FIXED: Fetch ALL event attendees (WITHOUT filters) for accurate attendance calculations
-      const { data: allEventAttendees, error: allAttendeesError } = await supabase
-        .from('event_attendees')
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
-          events!event_attendees_event_id_fkey(id, name, event_date, event_time, location)
-        `)
-        .gte('events.event_date', filters.date_from)
-        .lte('events.event_date', filters.date_to);
+      // FIXED: Fetch ALL event attendees for ALL events (NO date filters on event_attendees)
+      // First, get the event IDs from the filtered events
+      const eventIds = events.map(event => event.id);
+      
+      // If there are events, fetch ALL attendance records for those events
+      let allAttendees = [];
+      
+      if (eventIds.length > 0) {
+        const { data: allEventAttendees, error: allAttendeesError } = await supabase
+          .from('event_attendees')
+          .select(`
+            *,
+            members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
+            events!event_attendees_event_id_fkey(id, name, event_date, event_time, location)
+          `)
+          .in('event_id', eventIds);  // Only filter by event IDs, not by date
 
-      if (allAttendeesError) {
-        console.error('Error fetching all event attendees:', allAttendeesError);
+        if (allAttendeesError) {
+          console.error('Error fetching all event attendees:', allAttendeesError);
+        } else {
+          allAttendees = allEventAttendees || [];
+        }
       }
-      const allAttendees = allEventAttendees || [];
+
+      console.log(`Fetched ${allAttendees.length} attendance records for ${eventIds.length} events`);
 
       // Fetch non-active members
       const nonActiveMembersData = await fetchNonActiveMembers();
@@ -3430,7 +3440,7 @@ const Analytics = () => {
                   Attendance Comparison
                 </h3>
                 <p className="text-blue-700 dark:text-blue-400 text-xs sm:text-sm">
-                  Total: {growthMetrics.total_members} members ({growthMetrics.active_members} active, {growthMetrics.non_active_members} non-active)
+                  Total: ${growthMetrics.total_members} members (${growthMetrics.active_members} active, ${growthMetrics.non_active_members} non-active)
                 </p>
               </div>
             </div>
