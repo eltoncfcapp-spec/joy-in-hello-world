@@ -1699,7 +1699,7 @@ const Analytics = () => {
         membersForAttendance
       );
 
-      // NEW: Generate accurate Sunday attendance reports
+      // NEW: Generate accurate Sunday attendance reports////////////////////////////////////////////////////////////////////////////////
       await generateAccurateSundayAttendanceReports(events, allAttendees, membersForAttendance);
 
     } catch (error) {
@@ -1710,90 +1710,104 @@ const Analytics = () => {
   };
 
   // NEW: Helper function to generate accurate Sunday attendance reports
-  const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
-    try {
-      // Get only Sunday events from the filter period
-      const sundayEvents = events.filter(event => 
-        event.name?.toLowerCase().includes('sunday') || 
-        event.name?.toLowerCase().includes('service')
-      ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+// NEW: Helper function to generate accurate Sunday attendance reports
+const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
+  try {
+    // Get only Sunday events from the filter period
+    const sundayEvents = events.filter(event => 
+      event.name?.toLowerCase().includes('sunday') || 
+      event.name?.toLowerCase().includes('service')
+    ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
 
-      const reports: AttendanceReport[] = [];
+    const reports: AttendanceReport[] = [];
 
-      for (const event of sundayEvents.slice(0, 5)) { // Get last 5 Sundays
-        // Get attendees for this specific Sunday event
-        const eventAttendees = allAttendees.filter((attendee: any) => 
-          attendee.event_id === event.id
-        );
+    for (const event of sundayEvents.slice(0, 5)) { // Get last 5 Sundays
+      // FIXED: Get attendees for THIS SPECIFIC event only
+      const eventAttendees = allAttendees.filter((attendee: any) => 
+        attendee.event_id === event.id
+      );
 
-        // Count present attendees
-        const presentAttendees = eventAttendees.filter((a: any) => a.attendance_status === 'present');
-        const presentCount = presentAttendees.length;
-        
-        // Count absent attendees
-        const absentAttendees = eventAttendees.filter((a: any) => 
-          a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
-        );
-        const absentCount = absentAttendees.length;
+      // FIXED: Count present attendees for THIS event
+      const presentAttendees = eventAttendees.filter((a: any) => 
+        a.attendance_status === 'present'
+      );
+      const presentCount = presentAttendees.length;
+      
+      // Count absent attendees for THIS event
+      const absentAttendees = eventAttendees.filter((a: any) => 
+        a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
+      );
+      const absentCount = absentAttendees.length;
 
-        // Get member counts
-        const totalMembers = allMembers.length;
-        const activeMembers = allMembers.filter(m => !m.is_hidden).length;
-        
-        // Calculate demographics
-        let malePresent = 0;
-        let femalePresent = 0;
-        let newcomersPresent = 0;
-        let regularsPresent = 0;
-        let firstTimers = 0;
+      // Get member counts (these remain the same for all events)
+      const totalMembers = allMembers.length;
+      const activeMembers = allMembers.filter(m => !m.is_hidden).length;
+      
+      // Calculate demographics for THIS event
+      let malePresent = 0;
+      let femalePresent = 0;
+      let newcomersPresent = 0;
+      let regularsPresent = 0;
+      let firstTimers = 0;
 
-        presentAttendees.forEach((a: any) => {
-          const member = allMembers.find(m => m.id === a.members_id);
-          if (member) {
-            if (member.gender === 'male') malePresent++;
-            if (member.gender === 'female') femalePresent++;
-            if (member.status === 'newcomer') newcomersPresent++;
-            if (member.status === 'signed_member') regularsPresent++;
-            
-            // Check if first time attending any event (simplified logic)
-            const memberAllAttendances = allAttendees.filter((att: any) => 
-              att.members_id === member.id && att.attendance_status === 'present'
-            );
-            if (memberAllAttendances.length === 1) {
-              firstTimers++;
-            }
+      presentAttendees.forEach((a: any) => {
+        const member = allMembers.find(m => m.id === a.members_id);
+        if (member) {
+          if (member.gender === 'male') malePresent++;
+          if (member.gender === 'female') femalePresent++;
+          if (member.status === 'newcomer') newcomersPresent++;
+          if (member.status === 'signed_member') regularsPresent++;
+          
+          // Check if this is their first time attending (check if first_time flag is true)
+          if (a.first_time === true) {
+            firstTimers++;
           }
-        });
+        }
+      });
 
-        // Calculate attendance rates
-        const attendanceRate = totalMembers > 0 ? Math.round((presentCount / totalMembers) * 100) : 0;
-        const activeAttendanceRate = activeMembers > 0 ? Math.round((presentCount / activeMembers) * 100) : 0;
+      // FIXED: Calculate attendance rates correctly
+      // Use the actual registered count (present + absent) as the denominator
+      const totalRegistered = presentCount + absentCount;
+      const attendanceRate = totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0;
+      
+      // For active attendance rate, count only active members who were registered
+      const activeRegistered = eventAttendees.filter((a: any) => {
+        const member = allMembers.find(m => m.id === a.members_id);
+        return member && !member.is_hidden;
+      }).length;
+      
+      const activePresentCount = presentAttendees.filter((a: any) => {
+        const member = allMembers.find(m => m.id === a.members_id);
+        return member && !member.is_hidden;
+      }).length;
+      
+      const activeAttendanceRate = activeRegistered > 0 ? Math.round((activePresentCount / activeRegistered) * 100) : 0;
 
-        reports.push({
-          meeting_date: event.event_date,
-          meeting_type: event.name || 'Sunday Service',
-          total_members: totalMembers,
-          active_members: activeMembers,
-          present_count: presentCount,
-          absent_count: absentCount,
-          late_count: 0, // You can add late logic if needed
-          attendance_rate: attendanceRate,
-          active_attendance_rate: activeAttendanceRate,
-          male_present: malePresent,
-          female_present: femalePresent,
-          first_timers: firstTimers,
-          newcomers: newcomersPresent,
-          regulars: regularsPresent
-        });
-      }
-
-      setAttendanceReports(reports);
-
-    } catch (error) {
-      console.error('Error generating Sunday reports:', error);
+      reports.push({
+        meeting_date: event.event_date,
+        meeting_type: event.name || 'Sunday Service',
+        total_members: totalMembers,
+        active_members: activeMembers,
+        present_count: presentCount,
+        absent_count: absentCount,
+        late_count: 0, // You can add late logic if needed
+        attendance_rate: attendanceRate,
+        active_attendance_rate: activeAttendanceRate,
+        male_present: malePresent,
+        female_present: femalePresent,
+        first_timers: firstTimers,
+        newcomers: newcomersPresent,
+        regulars: regularsPresent
+      });
     }
-  };
 
+    setAttendanceReports(reports);
+
+  } catch (error) {
+    console.error('Error generating Sunday reports:', error);
+  }
+};
+/////////////////////////////////////////////////////////////////////////////////////////
   const fetchNonActiveMembers = async () => {
     try {
       const { data, error } = await supabase
