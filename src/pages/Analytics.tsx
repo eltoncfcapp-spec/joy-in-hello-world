@@ -3418,20 +3418,20 @@ const Analytics = () => {
               </div>
             </div>
 
-            {/* Active Filters Display */}
-            {hasActiveFilters() && (
-              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <div className="text-sm text-blue-700 dark:text-blue-300">
-                  Active Filters: 
-                  {filters.member_visibility !== 'active' && ` ${filters.member_visibility} members`}
-                  {filters.gender !== 'all' && `, ${filters.gender}`}
-                  {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
-                  {filters.department !== 'all' && `, ${departments.find(d => d.id === filters.department)?.name || 'Selected Department'}`}
-                  {filters.status !== 'all' && `, ${filters.status}`}
-                  {filters.meeting_type !== 'all' && `, ${filters.meeting_type} events`}
-                </div>
-              </div>
-            )}
+ {/* Active Filters Display */}
+{hasActiveFilters() && (
+  <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+    <div className="text-sm text-blue-700 dark:text-blue-300">
+      Active Filters: 
+      {filters.member_visibility !== 'active' && ` ${filters.member_visibility === 'non-active' ? 'Non-active' : 'All'} members`}
+      {filters.gender !== 'all' && `, ${filters.gender === 'male' ? 'Male' : 'Female'}`}
+      {filters.cell_group !== 'all' && `, ${cellGroups.find(g => g.id === filters.cell_group)?.name || 'Selected Group'}`}
+      {filters.department !== 'all' && `, ${departments.find(d => d.id === filters.department)?.name || 'Selected Department'}`}
+      {filters.status !== 'all' && `, ${filters.status === 'newcomer' ? 'Newcomers' : filters.status === 'signed_member' ? 'Signed Members' : 'Not Attending'}`}
+      {filters.meeting_type !== 'all' && `, ${filters.meeting_type === 'sunday' ? 'Sunday Services' : filters.meeting_type === 'cell' ? 'Cell Groups' : filters.meeting_type === 'department' ? 'Department Events' : 'Other'} events`}
+    </div>
+  </div>
+)}
           </div>
         )}
 
