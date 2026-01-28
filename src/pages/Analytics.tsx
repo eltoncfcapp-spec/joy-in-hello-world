@@ -1618,7 +1618,7 @@ const Analytics = () => {
       setCellGroups(allCellGroups);
       setDepartments(allDepartments);
 
-      // Build base members query
+      // Build base members query with filters
       let membersQuery = supabase
         .from('members')
         .select(`
@@ -1653,10 +1653,21 @@ const Analytics = () => {
         }
       }
 
-      // Fetch members
+      // Fetch filtered members for display
       const membersData = await membersQuery;
       if (membersData.error) throw membersData.error;
       const members = membersData.data || [];
+
+      // Fetch ALL active members for attendance calculations (ignoring filters)
+      const { data: allActiveMembers, error: allActiveMembersError } = await supabase
+        .from('members')
+        .select('id, name, surname, gender, status, is_hidden, created_at')
+        .eq('is_hidden', false); // Only active members
+
+      if (allActiveMembersError) {
+        console.error('Error fetching all active members:', allActiveMembersError);
+      }
+      const membersForAttendance = allActiveMembers || [];
 
       // Fetch events with date filter
       let eventsQuery = supabase
@@ -1705,12 +1716,12 @@ const Analytics = () => {
         allDepartments,
         events,
         eventAttendees,
-        nonActiveMembers
+        nonActiveMembers,
+        membersForAttendance
       );
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
-      // You might want to show an error message to the user here
     } finally {
       setLoading(false);
     }
@@ -1835,7 +1846,7 @@ const Analytics = () => {
             a.event_id === event.id && a.members_id === member.id
           );
 
-          if (!attendance || attendance.attendance_status === 'absent') {
+          if (!attendance || attendance.attendance_status === 'absent' || attendance.attendance_status === 'absent_with_reason') {
             absences++;
             absenceDates.push(event.event_date);
           } else if (attendance.attendance_status === 'present') {
@@ -1877,15 +1888,23 @@ const Analytics = () => {
     }
   };
 
-  const calculateAllMetrics = async (members: any[], cellGroups: any[], departments: any[], events: any[], eventAttendees: any[], nonActiveMembersList: any[]) => {
+  const calculateAllMetrics = async (
+    members: any[], 
+    cellGroups: any[], 
+    departments: any[], 
+    events: any[], 
+    eventAttendees: any[], 
+    nonActiveMembersList: any[],
+    membersForAttendance: any[]
+  ) => {
     // Calculate basic statistics
-    const totalMembers = members.length;
+    const totalMembers = membersForAttendance.length; // Use membersForAttendance for accurate count
     const totalCellGroups = cellGroups.length;
     const totalDepartments = departments.length;
 
-    // Calculate attendance data
+    // Calculate attendance data using ALL active members
     const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
-    const totalPossibleAttendance = events.length * totalMembers;
+    const totalPossibleAttendance = events.length * membersForAttendance.length;
     const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
 
     // Get baptism data
@@ -1915,7 +1934,7 @@ const Analytics = () => {
 
     // Calculate non-active metrics
     const totalNonActive = nonActiveMembersList.length;
-    const nonActiveRate = members.length > 0 ? Math.round((totalNonActive / (members.length + totalNonActive)) * 100) : 0;
+    const nonActiveRate = membersForAttendance.length > 0 ? Math.round((totalNonActive / (membersForAttendance.length + totalNonActive)) * 100) : 0;
     
     const nonActiveByGender = {
       male: nonActiveMembersList.filter(m => m.gender === 'male').length,
@@ -1984,7 +2003,7 @@ const Analytics = () => {
       { 
         icon: Users, 
         label: 'Active Members', 
-        value: totalMembers.toString(), 
+        value: membersForAttendance.length.toString(), 
         color: 'bg-blue-50 dark:bg-blue-900/20',
         description: `${totalSignedMembers} signed members`,
         trend: 5.2
@@ -2032,18 +2051,23 @@ const Analytics = () => {
     ]);
 
     // Calculate all detailed metrics
-    await calculateGrowthMetrics(members, totalNonActive, potentialReturnMembers);
-    await calculateGenderStats(members, eventAttendees, nonActiveMembersList);
+    await calculateGrowthMetrics(members, totalNonActive, potentialReturnMembers, membersForAttendance);
+    await calculateGenderStats(membersForAttendance, eventAttendees, nonActiveMembersList);
     await calculateInviterStats(members, nonActiveMembersList);
-    await generateAttendanceReports(events, members, eventAttendees);
-    await calculateCellGroupStats(cellGroups, events, members, eventAttendees, nonActiveMembersList);
-    await calculateDepartmentStats(departments, events, members, eventAttendees, nonActiveMembersList);
-    await findConsecutiveAbsences(members, events, eventAttendees, cellGroups);
-    await findSundayServiceAbsentees(members, events, eventAttendees, cellGroups);
-    await findThreeTimeAbsentees(members, events, eventAttendees, cellGroups);
+    await generateAttendanceReports(events, membersForAttendance, eventAttendees);
+    await calculateCellGroupStats(cellGroups, events, membersForAttendance, eventAttendees, nonActiveMembersList);
+    await calculateDepartmentStats(departments, events, membersForAttendance, eventAttendees, nonActiveMembersList);
+    await findConsecutiveAbsences(membersForAttendance, events, eventAttendees, cellGroups);
+    await findSundayServiceAbsentees(membersForAttendance, events, eventAttendees, cellGroups);
+    await findThreeTimeAbsentees(membersForAttendance, events, eventAttendees, cellGroups);
   };
 
-  const calculateGrowthMetrics = async (members: any[], totalNonActive: number, potentialReturnMembers: number) => {
+  const calculateGrowthMetrics = async (
+    members: any[], 
+    totalNonActive: number, 
+    potentialReturnMembers: number,
+    membersForAttendance: any[]
+  ) => {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
@@ -2108,7 +2132,7 @@ const Analytics = () => {
       : newMembersThisMonth > 0 ? 100 : 0;
 
     // Calculate non-active rate
-    const totalAllMembers = members.length + totalNonActive;
+    const totalAllMembers = membersForAttendance.length + totalNonActive;
     const nonActiveRate = totalAllMembers > 0 ? Math.round((totalNonActive / totalAllMembers) * 100) : 0;
 
     setGrowthMetrics(prev => ({
@@ -2118,7 +2142,7 @@ const Analytics = () => {
       growth_rate: growthRate,
       permanent_members: totalSignedMembers,
       newcomers: totalNewcomers,
-      total_members: members.length,
+      total_members: membersForAttendance.length,
       became_members_this_month: becameMembersInRange,
       baptism_this_month: baptismsThisMonth,
       baptism_last_month: baptismsLastMonth,
@@ -2138,23 +2162,23 @@ const Analytics = () => {
     }));
   };
 
-  const calculateGenderStats = async (members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
-    const maleMembers = members.filter(m => m.gender === 'male');
-    const femaleMembers = members.filter(m => m.gender === 'female');
+  const calculateGenderStats = async (membersForAttendance: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
+    const maleMembers = membersForAttendance.filter(m => m.gender === 'male');
+    const femaleMembers = membersForAttendance.filter(m => m.gender === 'female');
     
     // Calculate attendance by gender
     const malePresent = eventAttendees.filter(attendee => {
-      const member = members.find(m => m.id === attendee.members_id);
+      const member = membersForAttendance.find(m => m.id === attendee.members_id);
       return attendee.attendance_status === 'present' && member?.gender === 'male';
     }).length;
 
     const femalePresent = eventAttendees.filter(attendee => {
-      const member = members.find(m => m.id === attendee.members_id);
+      const member = membersForAttendance.find(m => m.id === attendee.members_id);
       return attendee.attendance_status === 'present' && member?.gender === 'female';
     }).length;
 
     // Calculate baptism by gender
-    const baptizedMembers = members.filter(m => m.baptism);
+    const baptizedMembers = membersForAttendance.filter(m => m.baptism);
     const maleBaptized = baptizedMembers.filter(m => m.gender === 'male').length;
     const femaleBaptized = baptizedMembers.filter(m => m.gender === 'female').length;
 
@@ -2165,7 +2189,7 @@ const Analytics = () => {
     const maleAttendanceRate = maleMembers.length > 0 ? Math.round((malePresent / maleMembers.length) * 100) : 0;
     const femaleAttendanceRate = femaleMembers.length > 0 ? Math.round((femalePresent / femaleMembers.length) * 100) : 0;
     
-    const totalAllMembers = members.length + nonActiveMembers.length;
+    const totalAllMembers = membersForAttendance.length + nonActiveMembers.length;
     const nonActiveRate = totalAllMembers > 0 ? Math.round(((maleNonActive + femaleNonActive) / totalAllMembers) * 100) : 0;
 
     setGenderStats({
@@ -2219,16 +2243,21 @@ const Analytics = () => {
     setInviterStats(inviterStatsArray);
   };
 
-  const generateAttendanceReports = (events: any[], members: any[], eventAttendees: any[]) => {
+  const generateAttendanceReports = (events: any[], membersForAttendance: any[], eventAttendees: any[]) => {
     const reports: AttendanceReport[] = events.map(event => {
+      // Get all event attendees for this event
       const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+      
+      // Calculate counts
       const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
-      const absentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'absent');
+      const absentAttendees = eventAttendeesList.filter((a: any) => 
+        a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
+      );
       
       const present = presentAttendees.length;
       const absent = absentAttendees.length;
+      const totalExpected = membersForAttendance.length; // All active members are expected to attend
       const late = 0;
-      const total = members.length;
       
       let malePresent = 0;
       let femalePresent = 0;
@@ -2237,23 +2266,31 @@ const Analytics = () => {
       let regulars = 0;
       
       presentAttendees.forEach((a: any) => {
-        const member = members.find(m => m.id === a.members_id);
+        const member = membersForAttendance.find(m => m.id === a.members_id);
         if (member) {
           if (member.gender === 'male') malePresent++;
           if (member.gender === 'female') femalePresent++;
           if (member.status === 'newcomer') newcomers++;
           if (member.status === 'signed_member') regulars++;
+          
+          // Calculate if this was their first time attending any event
+          const memberAllAttendances = eventAttendees.filter((att: any) => 
+            att.members_id === member.id && att.attendance_status === 'present'
+          );
+          if (memberAllAttendances.length === 1) {
+            firstTimers++;
+          }
         }
       });
 
       return {
         meeting_date: event.event_date,
         meeting_type: event.name || 'General Event',
-        total_members: total,
+        total_members: totalExpected,
         present_count: present,
         absent_count: absent,
         late_count: late,
-        attendance_rate: total > 0 ? Math.round((present / total) * 100) : 0,
+        attendance_rate: totalExpected > 0 ? Math.round((present / totalExpected) * 100) : 0,
         male_present: malePresent,
         female_present: femalePresent,
         first_timers: firstTimers,
@@ -2262,14 +2299,19 @@ const Analytics = () => {
       };
     });
 
-    setAttendanceReports(reports.slice(0, 10));
+    // Sort by date descending to show most recent first
+    const sortedReports = reports.sort((a, b) => 
+      new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime()
+    );
+    
+    setAttendanceReports(sortedReports.slice(0, 10));
   };
 
-  const calculateCellGroupStats = async (cellGroups: any[], events: any[], members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
+  const calculateCellGroupStats = async (cellGroups: any[], events: any[], membersForAttendance: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
     const stats: CellGroupStats[] = [];
 
     for (const group of cellGroups) {
-      const groupMembers = members.filter(member => member.cell_group_id === group.id);
+      const groupMembers = membersForAttendance.filter(member => member.cell_group_id === group.id);
       const nonActiveGroupMembers = nonActiveMembers.filter(member => member.cell_group_id === group.id);
 
       if ((!groupMembers || groupMembers.length === 0) && (!nonActiveGroupMembers || nonActiveGroupMembers.length === 0)) continue;
@@ -2320,12 +2362,12 @@ const Analytics = () => {
     setCellGroupStats(stats.filter(group => group.total_members > 0));
   };
 
-  const calculateDepartmentStats = async (departments: any[], events: any[], members: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
+  const calculateDepartmentStats = async (departments: any[], events: any[], membersForAttendance: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
     const stats: DepartmentStats[] = [];
 
     for (const department of departments) {
       // Get department members
-      const departmentMembers = members.filter(member => 
+      const departmentMembers = membersForAttendance.filter(member => 
         member.department_members?.some((dm: any) => dm.departments?.id === department.id)
       );
 
@@ -2378,7 +2420,7 @@ const Analytics = () => {
     setDepartmentStats(stats.filter(dept => dept.total_members > 0));
   };
 
-  const findConsecutiveAbsences = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
+  const findConsecutiveAbsences = async (membersForAttendance: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
     try {
       const absentMembersList: AbsentMember[] = [];
       
@@ -2386,7 +2428,7 @@ const Analytics = () => {
         .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
         .slice(-5);
 
-      for (const member of members) {
+      for (const member of membersForAttendance) {
         let consecutiveAbsences = 0;
         let lastAttendanceDate: string | null = null;
 
@@ -2395,7 +2437,7 @@ const Analytics = () => {
             a.event_id === event.id && a.members_id === member.id
           );
           
-          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent') {
+          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent' || attendanceRecord.attendance_status === 'absent_with_reason') {
             consecutiveAbsences++;
           } else {
             consecutiveAbsences = 0;
@@ -2431,23 +2473,23 @@ const Analytics = () => {
     }
   };
 
-  const findSundayServiceAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
+  const findSundayServiceAbsentees = async (membersForAttendance: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
     try {
       const sundayAbsenteesList: AbsentMember[] = [];
       
       const sundayEvents = events.filter(event => {
-        const eventDate = new Date(event.event_date);
-        return eventDate.getDay() === 0;
+        const eventName = event.name?.toLowerCase() || '';
+        return eventName.includes('sunday') || eventName.includes('service');
       }).slice(-2);
 
-      for (const member of members) {
+      for (const member of membersForAttendance) {
         let sundayAbsences = 0;
 
         for (const event of sundayEvents) {
           const attendanceRecord = eventAttendees.find((a: any) => 
             a.event_id === event.id && a.members_id === member.id
           );
-          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent') {
+          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent' || attendanceRecord.attendance_status === 'absent_with_reason') {
             sundayAbsences++;
           }
         }
@@ -2479,18 +2521,18 @@ const Analytics = () => {
     }
   };
 
-  const findThreeTimeAbsentees = async (members: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
+  const findThreeTimeAbsentees = async (membersForAttendance: any[], events: any[], eventAttendees: any[], cellGroups: any[]) => {
     try {
       const threeTimeAbsenteesList: AbsentMember[] = [];
 
-      for (const member of members) {
+      for (const member of membersForAttendance) {
         let totalAbsences = 0;
 
         for (const event of events) {
           const attendanceRecord = eventAttendees.find((a: any) => 
             a.event_id === event.id && a.members_id === member.id
           );
-          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent') {
+          if (!attendanceRecord || attendanceRecord.attendance_status === 'absent' || attendanceRecord.attendance_status === 'absent_with_reason') {
             totalAbsences++;
           }
         }
