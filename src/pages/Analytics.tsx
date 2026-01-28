@@ -1,4 +1,4 @@
-import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, FileText } from 'lucide-react';
+import { BarChart3, Users, Calendar, AlertTriangle, TrendingUp, Activity, Filter, Target, Star, TrendingDown, X, Building, Printer, Droplets, MapPin, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronRight, Search, Phone, Home, FileText, Clock, CalendarDays } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -1242,9 +1242,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
   );
 };
 
-// Add missing imports for the DetailedAbsenceModal
-import { Clock, CalendarDays } from 'lucide-react';
-
 interface StatCard {
   icon: any;
   label: string;
@@ -2287,23 +2284,26 @@ const Analytics = () => {
     setInviterStats(inviterStatsArray);
   };
 
+  // UPDATED: Generate attendance reports with both rates
   const generateAttendanceReports = (events: any[], allMembers: any[], eventAttendees: any[]) => {
     const reports: AttendanceReport[] = events.map(event => {
       // Get all event attendees for this event
       const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
       
-      // Calculate counts
+      // Calculate present count from event_attendees table
       const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
-      const absentAttendees = eventAttendeesList.filter((a: any) => 
-        a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
-      );
-      
       const present = presentAttendees.length;
-      const absent = absentAttendees.length;
-      const totalMembers = allMembers.length;
-      const activeMembers = allMembers.filter(m => !m.is_hidden).length;
+      
+      // Get member counts
+      const totalMembers = allMembers.length; // All members (active + non-active)
+      const activeMembers = allMembers.filter(m => !m.is_hidden).length; // Only active members
+      const nonActiveMembers = allMembers.filter(m => m.is_hidden).length; // Only non-active members
+      
+      // Calculate absent
+      const absent = totalMembers - present;
       const late = 0;
       
+      // Process demographics of present attendees
       let malePresent = 0;
       let femalePresent = 0;
       let firstTimers = 0;
@@ -2328,20 +2328,23 @@ const Analytics = () => {
         }
       });
 
-      // Calculate both attendance rates
+      // Calculate BOTH attendance rates
+      // Rate (All) = present / all members (including non-active members)
       const attendanceRate = totalMembers > 0 ? Math.round((present / totalMembers) * 100) : 0;
+      
+      // Rate (Active) = present / active members only (excluding non-active members)
       const activeAttendanceRate = activeMembers > 0 ? Math.round((present / activeMembers) * 100) : 0;
 
       return {
         meeting_date: event.event_date,
         meeting_type: event.name || 'General Event',
-        total_members: totalMembers,
-        active_members: activeMembers,
-        present_count: present,
-        absent_count: totalMembers - present,
+        total_members: totalMembers, // 386 in your case
+        active_members: activeMembers, // e.g., 300 active
+        present_count: present, // 132 in your case
+        absent_count: absent, // 254 in your case (386 - 132)
         late_count: late,
-        attendance_rate: attendanceRate,
-        active_attendance_rate: activeAttendanceRate,
+        attendance_rate: attendanceRate, // e.g., 34% (132/386)
+        active_attendance_rate: activeAttendanceRate, // e.g., 44% (132/300)
         male_present: malePresent,
         female_present: femalePresent,
         first_timers: firstTimers,
@@ -4422,74 +4425,98 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Recent Attendance Reports */}
+        {/* UPDATED: Recent Attendance Reports Table */}
         {attendanceReports.length > 0 && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Calendar className="h-5 w-5" />
               Recent Attendance
             </h2>
-            <div className="overflow-x-auto -mx-2 sm:mx-0">
-              <div className="min-w-full inline-block align-middle">
-                <div className="overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead>
-                      <tr className="text-left text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Date</th>
-                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Event</th>
-                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Present</th>
-                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate (All)</th>
-                        <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate (Active)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {attendanceReports.slice(0, 5).map((report, index) => (
-                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                          <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">{report.meeting_date}</td>
-                          <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate max-w-[120px] sm:max-w-none">
-                            {report.meeting_type}
-                          </td>
-                          <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
-                            <span className="text-green-600 dark:text-green-400 font-medium">
-                              {report.present_count}
-                            </span>
-                          </td>
-                          <td className="px-2 sm:px-4 py-3">
-                            <div className="flex items-center gap-1 sm:gap-2">
-                              <div className="w-10 sm:w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div 
-                                  className={`h-2 rounded-full ${
-                                    report.attendance_rate >= 80 ? 'bg-green-500' :
-                                    report.attendance_rate >= 60 ? 'bg-yellow-500' :
-                                    'bg-red-500'
-                                  }`}
-                                  style={{ width: `${report.attendance_rate}%` }}
-                                ></div>
-                              </div>
-                              <span className="text-xs sm:text-sm">{report.attendance_rate}%</span>
-                            </div>
-                          </td>
-                          <td className="px-2 sm:px-4 py-3">
-                            <div className="flex items-center gap-1 sm:gap-2">
-                              <div className="w-10 sm:w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div 
-                                  className={`h-2 rounded-full ${
-                                    report.active_attendance_rate >= 80 ? 'bg-green-500' :
-                                    report.active_attendance_rate >= 60 ? 'bg-yellow-500' :
-                                    'bg-red-500'
-                                  }`}
-                                  style={{ width: `${report.active_attendance_rate}%` }}
-                                ></div>
-                              </div>
-                              <span className="text-xs sm:text-sm">{report.active_attendance_rate}%</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead>
+                  <tr className="text-left text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Date</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Event</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Present</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Members</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate (All)</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Rate (Active)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {attendanceReports.slice(0, 5).map((report, index) => (
+                    <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
+                        {new Date(report.meeting_date).toLocaleDateString('en-US', { 
+                          month: 'short', 
+                          day: 'numeric',
+                          year: 'numeric'
+                        })}
+                      </td>
+                      <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-900 dark:text-white truncate max-w-[120px] sm:max-w-none">
+                        {report.meeting_type}
+                      </td>
+                      <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
+                        <div className="flex flex-col">
+                          <span className="text-green-600 dark:text-green-400 font-bold">
+                            {report.present_count}
+                          </span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            / {report.total_members}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
+                        <div className="flex flex-col">
+                          <span className="text-blue-600 dark:text-blue-400 font-medium">
+                            {report.active_members} active
+                          </span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {report.total_members - report.active_members} non-active
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-2 sm:px-4 py-3">
+                        <div className="flex items-center gap-1 sm:gap-2">
+                          <div className="w-10 sm:w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                            <div 
+                              className={`h-2 rounded-full ${
+                                report.attendance_rate >= 80 ? 'bg-green-500' :
+                                report.attendance_rate >= 60 ? 'bg-yellow-500' :
+                                'bg-red-500'
+                              }`}
+                              style={{ width: `${report.attendance_rate}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-xs sm:text-sm font-bold">{report.attendance_rate}%</span>
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          All members
+                        </div>
+                      </td>
+                      <td className="px-2 sm:px-4 py-3">
+                        <div className="flex items-center gap-1 sm:gap-2">
+                          <div className="w-10 sm:w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                            <div 
+                              className={`h-2 rounded-full ${
+                                report.active_attendance_rate >= 80 ? 'bg-green-500' :
+                                report.active_attendance_rate >= 60 ? 'bg-yellow-500' :
+                                'bg-red-500'
+                              }`}
+                              style={{ width: `${report.active_attendance_rate}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-xs sm:text-sm font-bold">{report.active_attendance_rate}%</span>
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          Active only
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
