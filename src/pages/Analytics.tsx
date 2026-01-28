@@ -5,7 +5,6 @@ import { useAuth } from '../contexts/AuthContext';
 
 // Import the DetailedAbsenceModal component types and interfaces
 interface MemberAbsenceDetails {
-  // Member Information
   id: string;
   name: string;
   surname: string;
@@ -17,12 +16,10 @@ interface MemberAbsenceDetails {
   member_since: string;
   is_hidden: boolean;
   
-  // Group Information
   cell_group_name: string | null;
   cell_group_location: string | null;
   department_names: string[];
   
-  // Overall Statistics
   total_events: number;
   total_absences: number;
   total_present: number;
@@ -30,7 +27,6 @@ interface MemberAbsenceDetails {
   last_attended_date: string | null;
   consecutive_absences: number;
   
-  // Detailed Absence Records
   absence_records: {
     id: string;
     event_id: string;
@@ -44,7 +40,6 @@ interface MemberAbsenceDetails {
     invited_by: string | null;
   }[];
   
-  // Department Attendance
   department_attendance: {
     department_name: string;
     total_meetings: number;
@@ -53,14 +48,12 @@ interface MemberAbsenceDetails {
     last_attended: string | null;
   }[];
   
-  // Pattern Analysis
   absence_patterns: {
     pattern: string;
     count: number;
     percentage: number;
   }[];
   
-  // Monthly Breakdown
   monthly_stats: {
     month: string;
     year: number;
@@ -92,7 +85,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
     try {
       setLoading(true);
       
-      // 1. Fetch basic member information
       const { data: memberInfo, error: memberError } = await supabase
         .from('members')
         .select(`
@@ -107,7 +99,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
 
       if (memberError) throw memberError;
 
-      // 2. Fetch all event attendance records for this member
       const { data: attendanceRecords, error: attendanceError } = await supabase
         .from('event_attendees')
         .select(`
@@ -128,7 +119,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
 
       if (attendanceError) throw attendanceError;
 
-      // 3. Fetch department attendance records
       const { data: departmentAttendance, error: deptError } = await supabase
         .from('department_attendance')
         .select(`
@@ -146,21 +136,18 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
         console.warn('Department attendance error:', deptError);
       }
       
-      // Sort attendance records by event date (descending) in JavaScript
       const sortedAttendanceRecords = (attendanceRecords || []).sort((a, b) => {
         const dateA = new Date(a.events?.event_date || 0).getTime();
         const dateB = new Date(b.events?.event_date || 0).getTime();
         return dateB - dateA;
       });
       
-      // Sort department attendance by meeting date (descending) in JavaScript
       const sortedDeptAttendance = (departmentAttendance || []).sort((a, b) => {
         const dateA = new Date(a.department_meetings?.meeting_date || 0).getTime();
         const dateB = new Date(b.department_meetings?.meeting_date || 0).getTime();
         return dateB - dateA;
       });
 
-      // 4. Process the data
       const processedData = processMemberData(
         memberInfo,
         sortedAttendanceRecords,
@@ -180,7 +167,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
     attendanceRecords: any[],
     departmentAttendance: any[]
   ): MemberAbsenceDetails => {
-    // Calculate overall statistics
     const totalEvents = attendanceRecords.length;
     const absences = attendanceRecords.filter(record => 
       record.attendance_status === 'absent' || record.attendance_status === 'absent_with_reason'
@@ -191,13 +177,11 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
     
     const absenceRate = totalEvents > 0 ? Math.round((absences / totalEvents) * 100) : 0;
     
-    // Find last attended date
     const lastAttended = attendanceRecords
       .filter(record => record.attendance_status === 'present')
       .sort((a, b) => new Date(b.events?.event_date).getTime() - new Date(a.events?.event_date).getTime())[0]
       ?.events?.event_date || null;
 
-    // Calculate consecutive absences
     let consecutiveAbsences = 0;
     let currentStreak = 0;
     
@@ -213,7 +197,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
       }
     });
 
-    // Process detailed absence records
     const detailedAbsences = attendanceRecords.map(record => {
       const eventName = record.events?.name || 'Unknown Event';
       let eventType: 'sunday' | 'cell' | 'department' | 'other' = 'other';
@@ -240,8 +223,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
       };
     });
 
-    // Process department attendance
-    const deptAttendance = departmentAttendance.reduce((acc, record) => {
+    const deptAttendance = departmentAttendance.reduce((acc: any, record) => {
       const deptName = record.department_meetings?.departments?.name || 'Unknown Department';
       
       if (!acc[deptName]) {
@@ -269,12 +251,9 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
         : 0;
       
       return acc;
-    }, {} as Record<string, any>);
+    }, {});
 
-    // Analyze absence patterns
     const processedAbsencePatterns = analyzeAbsencePatterns(detailedAbsences);
-
-    // Calculate monthly statistics
     const monthlyStats = calculateMonthlyStats(detailedAbsences);
 
     return {
@@ -314,8 +293,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
   };
 
   const analyzeAbsencePatterns = (absences: any[]) => {
-    
-    // Group by day of week
     const dayPatterns: Record<string, number> = {};
     absences.forEach(absence => {
       const date = new Date(absence.event_date);
@@ -323,13 +300,11 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
       dayPatterns[day] = (dayPatterns[day] || 0) + 1;
     });
     
-    // Group by event type
     const typePatterns: Record<string, number> = {};
     absences.forEach(absence => {
       typePatterns[absence.event_type] = (typePatterns[absence.event_type] || 0) + 1;
     });
     
-    // Group by month
     const monthPatterns: Record<string, number> = {};
     absences.forEach(absence => {
       const date = new Date(absence.event_date);
@@ -383,13 +358,9 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
       }
     });
     
-    // Convert to array and calculate rates
     const result = Object.values(monthlyData).map((data: any) => {
       const attendanceRate = Math.round((data.present / data.total_events) * 100);
-      
-      // Determine trend (simple calculation)
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
-      // This would be better with more data, but for now we'll use a simple approach
       
       return {
         ...data,
@@ -397,7 +368,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
         trend
       };
     }).sort((a: any, b: any) => {
-      // Sort by year and month
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const monthOrderA = months.indexOf(a.month);
       const monthOrderB = months.indexOf(b.month);
@@ -446,7 +416,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
     setExporting(true);
     
     try {
-      // Prepare CSV data
       const csvData = [
         [`Member Absence Report: ${memberData.name} ${memberData.surname}`, `Generated: ${new Date().toLocaleDateString()}`],
         [],
@@ -482,12 +451,10 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
         ])
       ];
 
-      // Convert to CSV string
       const csvString = csvData.map(row => 
         row.map(cell => `"${cell}"`).join(',')
       ).join('\n');
 
-      // Create download link
       const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
@@ -554,7 +521,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn overflow-y-auto">
       <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-6xl w-full max-h-[95vh] overflow-hidden shadow-2xl">
-        {/* Header */}
         <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6">
             <div className="flex-1 min-w-0">
@@ -615,7 +581,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
             </div>
           </div>
           
-          {/* Tabs */}
           <div className="px-6">
             <div className="flex border-b border-gray-200 dark:border-gray-700">
               <button
@@ -672,11 +637,9 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
           </div>
         </div>
 
-        {/* Content */}
         <div className="overflow-y-auto max-h-[calc(95vh-200px)] p-6">
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              {/* Quick Stats */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -733,7 +696,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
                 </div>
               </div>
 
-              {/* Member Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
                   <h4 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -819,7 +781,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
                 </div>
               </div>
 
-              {/* Recent Absences */}
               {memberData.absence_records.filter(a => a.attendance_status !== 'present').length > 0 && (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
                   <h4 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -1170,7 +1131,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
                     ))}
                   </div>
                   
-                  {/* Year-over-year comparison */}
                   <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
                     <h5 className="font-medium text-gray-900 dark:text-white mb-4">Yearly Comparison</h5>
                     <div className="overflow-x-auto">
@@ -1272,12 +1232,12 @@ interface AttendanceReport {
   meeting_date: string;
   meeting_type: string;
   total_members: number;
-  active_members: number; // Added
+  active_members: number;
   present_count: number;
   absent_count: number;
   late_count: number;
   attendance_rate: number;
-  active_attendance_rate: number; // Added
+  active_attendance_rate: number;
   male_present: number;
   female_present: number;
   first_timers: number;
@@ -1292,7 +1252,7 @@ interface GrowthMetrics {
   permanent_members: number;
   newcomers: number;
   total_members: number;
-  active_members: number; // Added
+  active_members: number;
   became_members_this_month: number;
   became_members_last_month: number;
   baptism_this_month: number;
@@ -1304,7 +1264,7 @@ interface GrowthMetrics {
     female: number;
   };
   average_attendance_rate: number;
-  average_active_attendance_rate: number; // Added
+  average_active_attendance_rate: number;
   average_sunday_attendance: number;
   retention_rate: number;
   conversion_rate: number;
@@ -1316,9 +1276,9 @@ interface GrowthMetrics {
 interface CellGroupStats {
   group_name: string;
   total_members: number;
-  active_members: number; // Added
+  active_members: number;
   avg_attendance: number;
-  active_avg_attendance: number; // Added
+  active_avg_attendance: number;
   meetings_this_month: number;
   leader_name: string;
   trend: 'increasing' | 'decreasing' | 'steady';
@@ -1333,9 +1293,9 @@ interface CellGroupStats {
 interface DepartmentStats {
   department_name: string;
   total_members: number;
-  active_members: number; // Added
+  active_members: number;
   avg_attendance: number;
-  active_avg_attendance: number; // Added
+  active_avg_attendance: number;
   meetings_this_month: number;
   leader_name: string;
   trend: 'increasing' | 'decreasing' | 'steady';
@@ -1358,16 +1318,16 @@ interface InviterStats {
 interface GenderStats {
   male: number;
   female: number;
-  male_active: number; // Added
-  female_active: number; // Added
+  male_active: number;
+  female_active: number;
   male_present: number;
   female_present: number;
   male_baptized: number;
   female_baptized: number;
   male_attendance_rate: number;
   female_attendance_rate: number;
-  male_active_attendance_rate: number; // Added
-  female_active_attendance_rate: number; // Added
+  male_active_attendance_rate: number;
+  female_active_attendance_rate: number;
   male_non_active: number;
   female_non_active: number;
   non_active_rate: number;
@@ -1437,21 +1397,17 @@ interface DetailedAbsenceRecord {
   last_attended_date: string | null;
   member_since: string;
   status: string;
-  is_hidden: boolean; // Added
+  is_hidden: boolean;
 }
 
-// Check if user has permission to view analytics page
 const canViewAnalyticsPage = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
-  // Only pastors and admins can view this page
   if (userRole === 'pastor' || userRole === 'admin') return true;
   
-  // Check boolean role flags from profile
   if (profile) {
     if (profile.pastor_role || profile.is_admin || profile.is_developer) return true;
     if (profile.admin_role === 'admin' || profile.admin_role === 'pastor') return true;
   }
   
-  // Check permissions array
   return hasPermission(userPermissions, 'admin_access');
 };
 
@@ -1464,18 +1420,14 @@ const canEdit = (userRole: string | null | undefined, userPermissions: string[] 
 };
 
 const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
-  // Check admin_role string
   if (userRole === 'pastor' || userRole === 'admin') return true;
   
-  // Check boolean role flags from profile
   if (profile) {
     if (profile.pastor_role || profile.is_admin || profile.is_developer) return true;
     if (profile.admin_role === 'admin' || profile.admin_role === 'pastor') return true;
-    // Group leaders and department leaders can also view member details
     if (profile.group_leader || profile.department_leader || profile.deacon_role) return true;
   }
   
-  // Check permissions array
   return hasPermission(userPermissions, 'view_members') || hasPermission(userPermissions, 'admin_access');
 };
 
@@ -1586,7 +1538,6 @@ const Analytics = () => {
     try {
       setAccessLoading(true);
       
-      // Check if user has pastor or admin role
       const userCanView = canViewAnalyticsPage(
         profile?.admin_role,
         profile?.permissions || [],
@@ -1606,16 +1557,13 @@ const Analytics = () => {
     }
   };
 
-  void canEdit(profile?.admin_role, profile?.permissions || []); // Keep function call for potential future use
-  const currentUserCanViewMemberDetails = canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile);
-
   useEffect(() => {
     if (hasAccess) {
       fetchAnalyticsData();
     }
   }, [filters, hasAccess]);
 
-  // FIXED: Fetch analytics data with proper separation of filtered and unfiltered data
+  // FIXED: Fetch analytics data with correct attendance calculation
   const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
@@ -1640,9 +1588,9 @@ const Analytics = () => {
         .from('members')
         .select(`
           *,
-          cell_groups!fk_cell_group(id, name),
+          cell_groups!fk_cell_group(name),
           department_members!left(
-            departments!inner(id, name)
+            departments!inner(name)
           )
         `);
 
@@ -1678,7 +1626,7 @@ const Analytics = () => {
       // Fetch ALL members (both active and inactive) for accurate attendance calculations
       const { data: allMembers, error: allMembersError } = await supabase
         .from('members')
-        .select('id, name, surname, gender, status, is_hidden, created_at, baptism')
+        .select('id, name, surname, gender, status, is_hidden, created_at, baptism, cell_group_id')
         .order('created_at', { ascending: false });
 
       if (allMembersError) {
@@ -1716,9 +1664,9 @@ const Analytics = () => {
         .select(`
           *,
           members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
-          events!event_attendees_event_id_fkey(id, name, event_date)
+          events!event_attendees_event_id_fkey(id, name, event_date, event_time, location)
         `)
-        .gte('events.event_date', filters.date_from)  // Still apply date filter for events
+        .gte('events.event_date', filters.date_from)
         .lte('events.event_date', filters.date_to);
 
       if (allAttendeesError) {
@@ -1726,37 +1674,17 @@ const Analytics = () => {
       }
       const allAttendees = allEventAttendees || [];
 
-      // Also fetch filtered event attendees for other analytics (if needed)
-      let attendeesQuery = supabase
-        .from('event_attendees')
-        .select(`
-          *,
-          members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
-          events!event_attendees_event_id_fkey(id, name, event_date)
-        `)
-        .gte('events.event_date', filters.date_from)
-        .lte('events.event_date', filters.date_to);
-
-      if (filters.attendance_status !== 'all') {
-        attendeesQuery = attendeesQuery.eq('attendance_status', filters.attendance_status);
-      }
-
-      const attendeesData = await attendeesQuery;
-      if (attendeesData.error) throw attendeesData.error;
-      const eventAttendees = attendeesData.data || [];
-
       // Fetch non-active members
       const nonActiveMembersData = await fetchNonActiveMembers();
       const nonActiveMembers = nonActiveMembersData || [];
 
       // FIXED: Use ALL attendees for accurate attendance calculations
-      // Calculate all metrics with allAttendees (unfiltered) for attendance reports
       await calculateAllMetrics(
         members,
         allCellGroups,
         allDepartments,
         events,
-        allAttendees,  // Use ALL attendees for accurate attendance calculations
+        allAttendees,
         nonActiveMembers,
         membersForAttendance
       );
@@ -1795,7 +1723,6 @@ const Analytics = () => {
       setQueryLoading(true);
       setDetailedAbsences([]);
 
-      // Build events query based on filters
       let eventsQuery = supabase
         .from('events')
         .select('id, event_date, name')
@@ -1820,7 +1747,6 @@ const Analytics = () => {
         return;
       }
 
-      // Build members query
       let membersQuery = supabase
         .from('members')
         .select(`
@@ -1855,7 +1781,6 @@ const Analytics = () => {
         return;
       }
 
-      // Get attendance for these events
       const eventIds = events.map(e => e.id);
       const { data: attendances, error: attendanceError } = await supabase
         .from('event_attendees')
@@ -1864,11 +1789,9 @@ const Analytics = () => {
 
       if (attendanceError) throw attendanceError;
 
-      // Process each member's absence record
       const detailedAbsencesList: DetailedAbsenceRecord[] = [];
 
       for (const member of members) {
-        // For department filtering
         if (absenceQueryFilter.group_type === 'department' && absenceQueryFilter.group_id !== 'all') {
           const memberDepartments = member.department_members || [];
           const hasDepartment = memberDepartments.some((dm: any) => 
@@ -1919,7 +1842,6 @@ const Analytics = () => {
         }
       }
 
-      // Sort by highest absences first
       detailedAbsencesList.sort((a, b) => b.absences - a.absences);
       setDetailedAbsences(detailedAbsencesList);
 
@@ -1930,6 +1852,7 @@ const Analytics = () => {
     }
   };
 
+  // FIXED: Correct attendance calculation
   const calculateAllMetrics = async (
     members: any[], 
     cellGroups: any[], 
@@ -1946,14 +1869,52 @@ const Analytics = () => {
     const totalCellGroups = cellGroups.length;
     const totalDepartments = departments.length;
 
-    // Calculate attendance data using ALL members for accurate rates
-    const totalPresent = eventAttendees.filter((attendee: any) => attendee.attendance_status === 'present').length;
-    const totalPossibleAttendance = events.length * totalMembers;
-    const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresent / totalPossibleAttendance) * 100) : 0;
+    // FIXED: Calculate attendance correctly
+    // Get only Sunday events from the filter period
+    const sundayEvents = events.filter(event => 
+      event.name?.toLowerCase().includes('sunday') || event.name?.toLowerCase().includes('service')
+    );
+
+    // Calculate total present for ALL members across ALL Sunday events
+    let totalPresentAllMembers = 0;
+    let totalPossibleAttendance = 0;
+
+    // For each Sunday event, calculate attendance
+    sundayEvents.forEach(event => {
+      // Get attendees for this event
+      const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+      
+      // Count present attendees
+      const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
+      totalPresentAllMembers += presentAttendees.length;
+      
+      // Total possible attendance for this event = total members (since it's a Sunday service for everyone)
+      totalPossibleAttendance += totalMembers;
+    });
+
+    // Calculate average attendance rate for all members
+    const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresentAllMembers / totalPossibleAttendance) * 100) : 0;
     
     // Calculate attendance based on active members only
-    const activePossibleAttendance = events.length * activeMembers;
-    const activeAvgAttendance = activePossibleAttendance > 0 ? Math.round((totalPresent / activePossibleAttendance) * 100) : 0;
+    let totalPresentActiveMembers = 0;
+    let activePossibleAttendance = 0;
+
+    sundayEvents.forEach(event => {
+      const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+      const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
+      
+      // Count only active members who were present
+      presentAttendees.forEach((a: any) => {
+        const member = allMembers.find(m => m.id === a.members_id);
+        if (member && !member.is_hidden) {
+          totalPresentActiveMembers++;
+        }
+      });
+      
+      activePossibleAttendance += activeMembers;
+    });
+
+    const activeAvgAttendance = activePossibleAttendance > 0 ? Math.round((totalPresentActiveMembers / activePossibleAttendance) * 100) : 0;
 
     // Get baptism data
     const baptizedMembers = members.filter(m => m.baptism);
@@ -2100,14 +2061,14 @@ const Analytics = () => {
 
     // Calculate all detailed metrics
     await calculateGrowthMetrics(members, totalMembers, activeMembers, totalNonActive, potentialReturnMembers, avgAttendance, activeAvgAttendance);
-    await calculateGenderStats(allMembers, eventAttendees, nonActiveMembersList);
+    await calculateGenderStats(allMembers, eventAttendees, nonActiveMembersList, sundayEvents);
     await calculateInviterStats(members, nonActiveMembersList);
-    await generateAttendanceReports(events, allMembers, eventAttendees);
-    await calculateCellGroupStats(cellGroups, events, allMembers, eventAttendees, nonActiveMembersList);
-    await calculateDepartmentStats(departments, events, allMembers, eventAttendees, nonActiveMembersList);
-    await findConsecutiveAbsences(allMembers, events, eventAttendees, cellGroups);
-    await findSundayServiceAbsentees(allMembers, events, eventAttendees, cellGroups);
-    await findThreeTimeAbsentees(allMembers, events, eventAttendees, cellGroups);
+    await generateAttendanceReports(sundayEvents, allMembers, eventAttendees);
+    await calculateCellGroupStats(cellGroups, sundayEvents, allMembers, eventAttendees, nonActiveMembersList);
+    await calculateDepartmentStats(departments, sundayEvents, allMembers, eventAttendees, nonActiveMembersList);
+    await findConsecutiveAbsences(allMembers, sundayEvents, eventAttendees, cellGroups);
+    await findSundayServiceAbsentees(allMembers, sundayEvents, eventAttendees, cellGroups);
+    await findThreeTimeAbsentees(allMembers, sundayEvents, eventAttendees, cellGroups);
   };
 
   const calculateGrowthMetrics = async (
@@ -2205,7 +2166,7 @@ const Analytics = () => {
       },
       average_attendance_rate: avgAttendance,
       average_active_attendance_rate: activeAvgAttendance,
-      average_sunday_attendance: 85,
+      average_sunday_attendance: avgAttendance, // Use the calculated average
       retention_rate: retentionRate,
       conversion_rate: conversionRate,
       non_active_members: totalNonActive,
@@ -2214,22 +2175,30 @@ const Analytics = () => {
     }));
   };
 
-  const calculateGenderStats = async (allMembers: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
+  // FIXED: Calculate gender stats with correct Sunday attendance
+  const calculateGenderStats = async (allMembers: any[], eventAttendees: any[], nonActiveMembers: any[], sundayEvents: any[]) => {
     const maleMembers = allMembers.filter(m => m.gender === 'male');
     const femaleMembers = allMembers.filter(m => m.gender === 'female');
     const maleActiveMembers = allMembers.filter(m => m.gender === 'male' && !m.is_hidden);
     const femaleActiveMembers = allMembers.filter(m => m.gender === 'female' && !m.is_hidden);
     
-    // Calculate attendance by gender (all members)
-    const malePresent = eventAttendees.filter(attendee => {
-      const member = allMembers.find(m => m.id === attendee.members_id);
-      return attendee.attendance_status === 'present' && member?.gender === 'male';
-    }).length;
+    // Calculate attendance by gender for Sunday events only
+    let malePresent = 0;
+    let femalePresent = 0;
 
-    const femalePresent = eventAttendees.filter(attendee => {
-      const member = allMembers.find(m => m.id === attendee.members_id);
-      return attendee.attendance_status === 'present' && member?.gender === 'female';
-    }).length;
+    // For each Sunday event
+    sundayEvents.forEach(event => {
+      const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
+      const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
+      
+      presentAttendees.forEach(attendee => {
+        const member = allMembers.find(m => m.id === attendee.members_id);
+        if (member) {
+          if (member.gender === 'male') malePresent++;
+          if (member.gender === 'female') femalePresent++;
+        }
+      });
+    });
 
     // Calculate baptism by gender
     const baptizedMembers = allMembers.filter(m => m.baptism);
@@ -2241,10 +2210,16 @@ const Analytics = () => {
     const femaleNonActive = nonActiveMembers.filter(m => m.gender === 'female').length;
 
     // Calculate attendance rates
-    const maleAttendanceRate = maleMembers.length > 0 ? Math.round((malePresent / maleMembers.length) * 100) : 0;
-    const femaleAttendanceRate = femaleMembers.length > 0 ? Math.round((femalePresent / femaleMembers.length) * 100) : 0;
-    const maleActiveAttendanceRate = maleActiveMembers.length > 0 ? Math.round((malePresent / maleActiveMembers.length) * 100) : 0;
-    const femaleActiveAttendanceRate = femaleActiveMembers.length > 0 ? Math.round((femalePresent / femaleActiveMembers.length) * 100) : 0;
+    // Total possible attendance = number of Sunday events * number of members of that gender
+    const totalPossibleMale = sundayEvents.length * maleMembers.length;
+    const totalPossibleFemale = sundayEvents.length * femaleMembers.length;
+    const totalPossibleMaleActive = sundayEvents.length * maleActiveMembers.length;
+    const totalPossibleFemaleActive = sundayEvents.length * femaleActiveMembers.length;
+
+    const maleAttendanceRate = totalPossibleMale > 0 ? Math.round((malePresent / totalPossibleMale) * 100) : 0;
+    const femaleAttendanceRate = totalPossibleFemale > 0 ? Math.round((femalePresent / totalPossibleFemale) * 100) : 0;
+    const maleActiveAttendanceRate = totalPossibleMaleActive > 0 ? Math.round((malePresent / totalPossibleMaleActive) * 100) : 0;
+    const femaleActiveAttendanceRate = totalPossibleFemaleActive > 0 ? Math.round((femalePresent / totalPossibleFemaleActive) * 100) : 0;
     
     const totalAllMembers = allMembers.length;
     const nonActiveRate = totalAllMembers > 0 ? Math.round(((maleNonActive + femaleNonActive) / totalAllMembers) * 100) : 0;
@@ -2304,10 +2279,10 @@ const Analytics = () => {
     setInviterStats(inviterStatsArray);
   };
 
-  // UPDATED: Generate attendance reports with both rates
-  const generateAttendanceReports = (events: any[], allMembers: any[], eventAttendees: any[]) => {
-    const reports: AttendanceReport[] = events.map(event => {
-      // Get all event attendees for this event
+  // FIXED: Generate accurate attendance reports for Sunday events
+  const generateAttendanceReports = (sundayEvents: any[], allMembers: any[], eventAttendees: any[]) => {
+    const reports: AttendanceReport[] = sundayEvents.map(event => {
+      // Get all event attendees for this Sunday event
       const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
       
       // Calculate present count from event_attendees table
@@ -2319,7 +2294,7 @@ const Analytics = () => {
       const activeMembers = allMembers.filter(m => !m.is_hidden).length; // Only active members
       const nonActiveMembers = allMembers.filter(m => m.is_hidden).length; // Only non-active members
       
-      // Calculate absent
+      // Calculate absent (total members - present)
       const absent = totalMembers - present;
       const late = 0;
       
@@ -2357,14 +2332,14 @@ const Analytics = () => {
 
       return {
         meeting_date: event.event_date,
-        meeting_type: event.name || 'General Event',
-        total_members: totalMembers, // 386 in your case
-        active_members: activeMembers, // e.g., 300 active
-        present_count: present, // 132 in your case
-        absent_count: absent, // 254 in your case (386 - 132)
+        meeting_type: event.name || 'Sunday Service',
+        total_members: totalMembers,
+        active_members: activeMembers,
+        present_count: present,
+        absent_count: absent,
         late_count: late,
-        attendance_rate: attendanceRate, // e.g., 34% (132/386)
-        active_attendance_rate: activeAttendanceRate, // e.g., 44% (132/300)
+        attendance_rate: attendanceRate,
+        active_attendance_rate: activeAttendanceRate,
         male_present: malePresent,
         female_present: femalePresent,
         first_timers: firstTimers,
@@ -2378,7 +2353,7 @@ const Analytics = () => {
       new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime()
     );
     
-    setAttendanceReports(sortedReports.slice(0, 10));
+    setAttendanceReports(sortedReports);
   };
 
   const calculateCellGroupStats = async (cellGroups: any[], events: any[], allMembers: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
@@ -2730,7 +2705,7 @@ const Analytics = () => {
   };
 
   const viewAbsenceMemberDetails = (member: DetailedAbsenceRecord) => {
-    if (!currentUserCanViewMemberDetails) {
+    if (!canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile)) {
       return;
     }
     setSelectedAbsenceMember(member);
@@ -2741,7 +2716,7 @@ const Analytics = () => {
   };
 
   const openDetailedAbsenceModal = (memberId: string) => {
-    if (!currentUserCanViewMemberDetails) {
+    if (!canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile)) {
       return;
     }
     setSelectedMemberForDetailedView(memberId);
@@ -3771,9 +3746,9 @@ const Analytics = () => {
                             <div className="flex gap-2">
                               <button
                                 onClick={() => viewAbsenceMemberDetails(member)}
-                                disabled={!currentUserCanViewMemberDetails}
+                                disabled={!canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile)}
                                 className={`px-3 py-1 rounded text-sm font-medium ${
-                                  currentUserCanViewMemberDetails 
+                                  canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile)
                                     ? 'bg-blue-600 hover:bg-blue-700 text-white' 
                                     : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
                                 }`}
@@ -3782,9 +3757,9 @@ const Analytics = () => {
                               </button>
                               <button
                                 onClick={() => openDetailedAbsenceModal(member.id)}
-                                disabled={!currentUserCanViewMemberDetails}
+                                disabled={!canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile)}
                                 className={`px-3 py-1 rounded text-sm font-medium ${
-                                  currentUserCanViewMemberDetails 
+                                  canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile)
                                     ? 'bg-purple-600 hover:bg-purple-700 text-white' 
                                     : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
                                 }`}
@@ -4334,7 +4309,7 @@ const Analytics = () => {
         </div>
 
         {/* Absence Member Details Modal */}
-        {selectedAbsenceMember && currentUserCanViewMemberDetails && (
+        {selectedAbsenceMember && canViewMemberDetails(profile?.admin_role, profile?.permissions || [], profile) && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
             <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
               <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
@@ -4450,7 +4425,7 @@ const Analytics = () => {
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Calendar className="h-5 w-5" />
-              Recent Attendance
+              Recent Sunday Attendance
             </h2>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
