@@ -1408,7 +1408,7 @@ const canViewAnalyticsPage = (userRole: string | null | undefined, userPermissio
     if (profile.admin_role === 'admin' || profile.admin_role === 'pastor') return true;
   }
   
-  return hasPermission(userPermissions, 'admin_access');
+  return false;
 };
 
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
@@ -1699,10 +1699,98 @@ const Analytics = () => {
         membersForAttendance
       );
 
+      // NEW: Generate accurate Sunday attendance reports
+      await generateAccurateSundayAttendanceReports(events, allAttendees, membersForAttendance);
+
     } catch (error) {
       console.error('Error fetching analytics data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NEW: Helper function to generate accurate Sunday attendance reports
+  const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
+    try {
+      // Get only Sunday events from the filter period
+      const sundayEvents = events.filter(event => 
+        event.name?.toLowerCase().includes('sunday') || 
+        event.name?.toLowerCase().includes('service')
+      ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+
+      const reports: AttendanceReport[] = [];
+
+      for (const event of sundayEvents.slice(0, 5)) { // Get last 5 Sundays
+        // Get attendees for this specific Sunday event
+        const eventAttendees = allAttendees.filter((attendee: any) => 
+          attendee.event_id === event.id
+        );
+
+        // Count present attendees
+        const presentAttendees = eventAttendees.filter((a: any) => a.attendance_status === 'present');
+        const presentCount = presentAttendees.length;
+        
+        // Count absent attendees
+        const absentAttendees = eventAttendees.filter((a: any) => 
+          a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
+        );
+        const absentCount = absentAttendees.length;
+
+        // Get member counts
+        const totalMembers = allMembers.length;
+        const activeMembers = allMembers.filter(m => !m.is_hidden).length;
+        
+        // Calculate demographics
+        let malePresent = 0;
+        let femalePresent = 0;
+        let newcomersPresent = 0;
+        let regularsPresent = 0;
+        let firstTimers = 0;
+
+        presentAttendees.forEach((a: any) => {
+          const member = allMembers.find(m => m.id === a.members_id);
+          if (member) {
+            if (member.gender === 'male') malePresent++;
+            if (member.gender === 'female') femalePresent++;
+            if (member.status === 'newcomer') newcomersPresent++;
+            if (member.status === 'signed_member') regularsPresent++;
+            
+            // Check if first time attending any event (simplified logic)
+            const memberAllAttendances = allAttendees.filter((att: any) => 
+              att.members_id === member.id && att.attendance_status === 'present'
+            );
+            if (memberAllAttendances.length === 1) {
+              firstTimers++;
+            }
+          }
+        });
+
+        // Calculate attendance rates
+        const attendanceRate = totalMembers > 0 ? Math.round((presentCount / totalMembers) * 100) : 0;
+        const activeAttendanceRate = activeMembers > 0 ? Math.round((presentCount / activeMembers) * 100) : 0;
+
+        reports.push({
+          meeting_date: event.event_date,
+          meeting_type: event.name || 'Sunday Service',
+          total_members: totalMembers,
+          active_members: activeMembers,
+          present_count: presentCount,
+          absent_count: absentCount,
+          late_count: 0, // You can add late logic if needed
+          attendance_rate: attendanceRate,
+          active_attendance_rate: activeAttendanceRate,
+          male_present: malePresent,
+          female_present: femalePresent,
+          first_timers: firstTimers,
+          newcomers: newcomersPresent,
+          regulars: regularsPresent
+        });
+      }
+
+      setAttendanceReports(reports);
+
+    } catch (error) {
+      console.error('Error generating Sunday reports:', error);
     }
   };
 
@@ -2073,7 +2161,8 @@ const Analytics = () => {
     await calculateGrowthMetrics(members, totalMembers, activeMembers, totalNonActive, potentialReturnMembers, avgAttendance, activeAvgAttendance);
     await calculateGenderStats(allMembers, eventAttendees, nonActiveMembersList, sundayEvents);
     await calculateInviterStats(members, nonActiveMembersList);
-    await generateAttendanceReports(sundayEvents, allMembers, eventAttendees);
+    // Attendance reports are now generated separately in generateAccurateSundayAttendanceReports
+    // Remove the old generateAttendanceReports call from here
     await calculateCellGroupStats(cellGroups, sundayEvents, allMembers, eventAttendees, nonActiveMembersList);
     await calculateDepartmentStats(departments, sundayEvents, allMembers, eventAttendees, nonActiveMembersList);
     await findConsecutiveAbsences(allMembers, sundayEvents, eventAttendees, cellGroups);
@@ -2287,83 +2376,6 @@ const Analytics = () => {
       .slice(0, 10);
 
     setInviterStats(inviterStatsArray);
-  };
-
-  // FIXED: Generate accurate attendance reports for Sunday events
-  const generateAttendanceReports = (sundayEvents: any[], allMembers: any[], eventAttendees: any[]) => {
-    const reports: AttendanceReport[] = sundayEvents.map(event => {
-      // Get all event attendees for this Sunday event
-      const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
-      
-      // Calculate present count from event_attendees table
-      const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
-      const present = presentAttendees.length;
-      
-      // Get member counts
-      const totalMembers = allMembers.length; // All members (active + non-active)
-      const activeMembers = allMembers.filter(m => !m.is_hidden).length; // Only active members
-      const nonActiveMembers = allMembers.filter(m => m.is_hidden).length; // Only non-active members
-      
-      // Calculate absent (total members - present)
-      const absent = totalMembers - present;
-      const late = 0;
-      
-      // Process demographics of present attendees
-      let malePresent = 0;
-      let femalePresent = 0;
-      let firstTimers = 0;
-      let newcomers = 0;
-      let regulars = 0;
-      
-      presentAttendees.forEach((a: any) => {
-        const member = allMembers.find(m => m.id === a.members_id);
-        if (member) {
-          if (member.gender === 'male') malePresent++;
-          if (member.gender === 'female') femalePresent++;
-          if (member.status === 'newcomer') newcomers++;
-          if (member.status === 'signed_member') regulars++;
-          
-          // Calculate if this was their first time attending any event
-          const memberAllAttendances = eventAttendees.filter((att: any) => 
-            att.members_id === member.id && att.attendance_status === 'present'
-          );
-          if (memberAllAttendances.length === 1) {
-            firstTimers++;
-          }
-        }
-      });
-
-      // Calculate BOTH attendance rates
-      // Rate (All) = present / all members (including non-active members)
-      const attendanceRate = totalMembers > 0 ? Math.round((present / totalMembers) * 100) : 0;
-      
-      // Rate (Active) = present / active members only (excluding non-active members)
-      const activeAttendanceRate = activeMembers > 0 ? Math.round((present / activeMembers) * 100) : 0;
-
-      return {
-        meeting_date: event.event_date,
-        meeting_type: event.name || 'Sunday Service',
-        total_members: totalMembers,
-        active_members: activeMembers,
-        present_count: present,
-        absent_count: absent,
-        late_count: late,
-        attendance_rate: attendanceRate,
-        active_attendance_rate: activeAttendanceRate,
-        male_present: malePresent,
-        female_present: femalePresent,
-        first_timers: firstTimers,
-        newcomers: newcomers,
-        regulars: regulars
-      };
-    });
-
-    // Sort by date descending to show most recent first
-    const sortedReports = reports.sort((a, b) => 
-      new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime()
-    );
-    
-    setAttendanceReports(sortedReports);
   };
 
   const calculateCellGroupStats = async (cellGroups: any[], events: any[], allMembers: any[], eventAttendees: any[], nonActiveMembers: any[]) => {
