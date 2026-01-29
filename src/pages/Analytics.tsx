@@ -1530,6 +1530,9 @@ const Analytics = () => {
     member_visibility: 'active'
   });
 
+  // Track newcomers count for the filter period
+  const [newcomersCount, setNewcomersCount] = useState<number>(0);
+
   useEffect(() => {
     checkAccess();
   }, [profile]);
@@ -1562,6 +1565,15 @@ const Analytics = () => {
       fetchAnalyticsData();
     }
   }, [filters, hasAccess]);
+
+  // NEW: Update absence query dates when main filter dates change
+  useEffect(() => {
+    setAbsenceQueryFilter(prev => ({
+      ...prev,
+      date_from: filters.date_from,
+      date_to: filters.date_to
+    }));
+  }, [filters.date_from, filters.date_to]);
 
   // FIXED: Fetch analytics data with correct attendance calculation
   const fetchAnalyticsData = async () => {
@@ -1634,10 +1646,14 @@ const Analytics = () => {
       }
       const membersForAttendance = allMembers || [];
 
-      // Log the counts to verify
-      console.log('Total members fetched:', membersForAttendance.length);
-      console.log('Active members:', membersForAttendance.filter(m => !m.is_hidden).length);
-      console.log('Inactive members:', membersForAttendance.filter(m => m.is_hidden).length);
+      // NEW: Calculate newcomers count for the filter period
+      const newcomersInPeriod = allMembers.filter(member => {
+        const memberDate = new Date(member.created_at);
+        const fromDate = new Date(filters.date_from);
+        const toDate = new Date(filters.date_to);
+        return memberDate >= fromDate && memberDate <= toDate;
+      }).length;
+      setNewcomersCount(newcomersInPeriod);
 
       // Fetch events with date filter
       let eventsQuery = supabase
@@ -2096,7 +2112,7 @@ const Analytics = () => {
       potential_return_rate: potentialReturnRate
     });
 
-    // Update main stats
+    // Update main stats with newcomers count
     const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
 
     setStats([
@@ -2117,6 +2133,14 @@ const Analytics = () => {
         trend: 2.1
       },
       { 
+        icon: Users, 
+        label: 'Newcomers', 
+        value: newcomersCount.toString(), 
+        color: 'bg-purple-50 dark:bg-purple-900/20',
+        description: `in selected period`,
+        trend: 2.1
+      },
+      { 
         icon: EyeOff, 
         label: 'Non-active Members', 
         value: totalNonActive.toString(), 
@@ -2128,17 +2152,9 @@ const Analytics = () => {
         icon: Users, 
         label: 'Cell Groups', 
         value: totalCellGroups.toString(), 
-        color: 'bg-purple-50 dark:bg-purple-900/20',
+        color: 'bg-indigo-50 dark:bg-indigo-900/20',
         description: `${cellGroups.filter(g => g.status === 'active').length} active`,
         trend: 2.1
-      },
-      { 
-        icon: Building, 
-        label: 'Departments', 
-        value: totalDepartments.toString(), 
-        color: 'bg-indigo-50 dark:bg-indigo-900/20',
-        description: `${departments.filter(d => d.status === 'active').length} active`,
-        trend: 1.5
       },
       { 
         icon: BarChart3, 
@@ -2151,7 +2167,7 @@ const Analytics = () => {
     ]);
 
     // Calculate all detailed metrics
-    await calculateGrowthMetrics(members, totalMembers, activeMembers, totalNonActive, potentialReturnMembers, avgAttendance, activeAvgAttendance);
+    await calculateGrowthMetrics(members, totalMembers, activeMembers, totalNonActive, potentialReturnMembers, avgAttendance, activeAvgAttendance, newcomersCount);
     await calculateGenderStats(allMembers, eventAttendees, nonActiveMembersList, sundayEvents);
     await calculateInviterStats(members, nonActiveMembersList);
     // Attendance reports are now generated separately in generateAccurateSundayAttendanceReports
@@ -2170,7 +2186,8 @@ const Analytics = () => {
     totalNonActive: number, 
     potentialReturnMembers: number,
     avgAttendance: number,
-    activeAvgAttendance: number
+    activeAvgAttendance: number,
+    newcomersInPeriod: number
   ) => {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
@@ -2179,13 +2196,8 @@ const Analytics = () => {
     const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
     const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
-    // New members in date range
-    const newMembersInRange = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return memberDate >= fromDate && memberDate <= toDate;
-    }).length;
+    // New members in date range (use the calculated newcomers count)
+    const newMembersInRange = newcomersInPeriod;
 
     // New members this month
     const newMembersThisMonth = members.filter(member => {
@@ -2940,8 +2952,8 @@ const Analytics = () => {
               </div>
             </div>
             <div class="quick-stat">
-              <div class="stat-value">${growthMetrics.new_members_this_month}</div>
-              <div class="stat-label">New Members in Period</div>
+              <div class="stat-value">${newcomersCount}</div>
+              <div class="stat-label">Newcomers in Period</div>
             </div>
             <div class="quick-stat">
               <div class="stat-value">${growthMetrics.baptism_this_month}</div>
@@ -3122,7 +3134,7 @@ const Analytics = () => {
       [],
       ['Growth & Baptism Metrics'],
       ['Metric', 'Value'],
-      ['New Members (Period)', growthMetrics.new_members_this_month],
+      ['New Members (Period)', newcomersCount],
       ['Baptisms (Period)', growthMetrics.baptism_this_month],
       ['Total Baptisms', growthMetrics.total_baptisms],
       ['Male Baptized', growthMetrics.baptism_by_gender.male],
@@ -3500,7 +3512,7 @@ const Analytics = () => {
           </div>
         )}
 
-        {/* Main Stats Grid */}
+        {/* Main Stats Grid - Updated with Newcomers Card */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 sm:gap-4 md:gap-6 mb-8">
           {stats.map((stat, index) => (
             <div key={index} className={`${stat.color} rounded-2xl p-4 sm:p-6 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50`}>
@@ -3889,9 +3901,9 @@ const Analytics = () => {
                 </div>
               </div>
               <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 sm:p-4 text-center">
-                <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 dark:text-green-400">{growthMetrics.new_members_this_month}</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">New Members</div>
-                <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 dark:text-green-400">{newcomersCount}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Newcomers</div>
+                <div className="text-xs text-gray-500 dark:text-gray-500">in selected period</div>
               </div>
               <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 sm:p-4 text-center">
                 <div className="text-lg sm:text-xl md:text-2xl font-bold text-amber-600 dark:text-amber-400">{growthMetrics.non_active_members}</div>
