@@ -2912,15 +2912,15 @@ const Analytics = () => {
 
           <div class="attendance-comparison">
             <h3>📈 Attendance Comparison</h3>
-            <p><strong>Total Members:</strong> ${growthMetrics.total_members} (${growthMetrics.active_members} active, ${growthMetrics.non_active_members} non-active)</p>
-            <p><strong>Average Attendance (All Members):</strong> ${growthMetrics.average_attendance_rate}%</p>
-            <p><strong>Average Attendance (Active Only):</strong> ${growthMetrics.average_active_attendance_rate}%</p>
+            <p><strong>Total Members:</strong> {growthMetrics.total_members} ({growthMetrics.active_members} active, {growthMetrics.non_active_members} non-active)</p>
+            <p><strong>Average Attendance (All Members):</strong> {growthMetrics.average_attendance_rate}%</p>
+            <p><strong>Average Attendance (Active Only):</strong> {growthMetrics.average_active_attendance_rate}%</p>
           </div>
 
           ${growthMetrics.non_active_members > 0 ? `
           <div class="non-active-alert">
-            <p><strong>⚠️ Non-active Members Alert:</strong> ${growthMetrics.non_active_members} members (${growthMetrics.non_active_rate}% of total) are currently non-active.</p>
-            <p><strong>Potential Return:</strong> ${growthMetrics.potential_return_members} members have been non-active for less than 90 days.</p>
+            <p><strong>⚠️ Non-active Members Alert:</strong> {growthMetrics.non_active_members} members ({growthMetrics.non_active_rate}% of total) are currently non-active.</p>
+            <p><strong>Potential Return:</strong> {growthMetrics.potential_return_members} members have been non-active for less than 90 days.</p>
           </div>
           ` : ''}
 
