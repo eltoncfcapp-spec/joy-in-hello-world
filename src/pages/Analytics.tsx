@@ -85,6 +85,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
     try {
       setLoading(true);
       
+      // Fetch member info with cell group and departments
       const { data: memberInfo, error: memberError } = await supabase
         .from('members')
         .select(`
@@ -99,6 +100,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
 
       if (memberError) throw memberError;
 
+      // Fetch attendance records
       const { data: attendanceRecords, error: attendanceError } = await supabase
         .from('event_attendees')
         .select(`
@@ -107,51 +109,26 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
             id,
             name,
             event_date,
-            event_time,
-            location,
-            is_whole_church,
-            target_groups,
-            target_departments
-          ),
-          cell_groups!event_attendees_cell_group_id_fkey(name)
+            location
+          )
         `)
         .eq('members_id', memberId);
 
       if (attendanceError) throw attendanceError;
 
-      const { data: departmentAttendance, error: deptError } = await supabase
-        .from('department_attendance')
-        .select(`
-          *,
-          department_meetings!inner(
-            id,
-            meeting_date,
-            department_id,
-            departments!inner(name)
-          )
-        `)
-        .eq('member_id', memberId);
-
-      if (deptError && !deptError.message.includes('does not exist')) {
-        console.warn('Department attendance error:', deptError);
-      }
+      // Fetch department attendance - this table doesn't exist in schema
+      // Remove this query since department_attendance table doesn't exist
       
       const sortedAttendanceRecords = (attendanceRecords || []).sort((a, b) => {
         const dateA = new Date(a.events?.event_date || 0).getTime();
         const dateB = new Date(b.events?.event_date || 0).getTime();
         return dateB - dateA;
       });
-      
-      const sortedDeptAttendance = (departmentAttendance || []).sort((a, b) => {
-        const dateA = new Date(a.department_meetings?.meeting_date || 0).getTime();
-        const dateB = new Date(b.department_meetings?.meeting_date || 0).getTime();
-        return dateB - dateA;
-      });
 
       const processedData = processMemberData(
         memberInfo,
         sortedAttendanceRecords,
-        sortedDeptAttendance
+        []
       );
 
       setMemberData(processedData);
@@ -218,40 +195,13 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
         attendance_status: record.attendance_status,
         notes: record.notes,
         event_location: record.events?.location,
-        cell_group_name: record.cell_groups?.name,
+        cell_group_name: null, // Not available in the query
         invited_by: record.invited_by
       };
     });
 
-    const deptAttendance = departmentAttendance.reduce((acc: any, record) => {
-      const deptName = record.department_meetings?.departments?.name || 'Unknown Department';
-      
-      if (!acc[deptName]) {
-        acc[deptName] = {
-          total_meetings: 0,
-          absences: 0,
-          attendance_rate: 0,
-          last_attended: null
-        };
-      }
-      
-      acc[deptName].total_meetings++;
-      
-      if (record.status === 'absent' || record.status === 'absent_with_reason') {
-        acc[deptName].absences++;
-      } else if (record.status === 'present') {
-        const meetingDate = record.department_meetings?.meeting_date;
-        if (!acc[deptName].last_attended || new Date(meetingDate) > new Date(acc[deptName].last_attended)) {
-          acc[deptName].last_attended = meetingDate;
-        }
-      }
-      
-      acc[deptName].attendance_rate = acc[deptName].total_meetings > 0 
-        ? Math.round(((acc[deptName].total_meetings - acc[deptName].absences) / acc[deptName].total_meetings) * 100)
-        : 0;
-      
-      return acc;
-    }, {});
+    // Department attendance data is empty since table doesn't exist
+    const deptAttendance: Record<string, any> = {};
 
     const processedAbsencePatterns = analyzeAbsencePatterns(detailedAbsences);
     const monthlyStats = calculateMonthlyStats(detailedAbsences);
@@ -293,6 +243,8 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
   };
 
   const analyzeAbsencePatterns = (absences: any[]) => {
+    if (absences.length === 0) return [];
+    
     const dayPatterns: Record<string, number> = {};
     absences.forEach(absence => {
       const date = new Date(absence.event_date);
@@ -828,19 +780,6 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
                 <h4 className="font-semibold text-gray-900 dark:text-white text-lg">
                   All Attendance Records ({memberData.absence_records.length})
                 </h4>
-                <div className="flex gap-2">
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
-                    <option value="all">All Status</option>
-                    <option value="present">Present Only</option>
-                    <option value="absent">Absent Only</option>
-                  </select>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
-                    <option value="all">All Event Types</option>
-                    <option value="sunday">Sunday Services</option>
-                    <option value="cell">Cell Groups</option>
-                    <option value="department">Departments</option>
-                  </select>
-                </div>
               </div>
               
               <div className="overflow-x-auto">
@@ -971,7 +910,7 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <Building className="h-16 w-16 mx-auto mb-4 text-gray-400" />
                   <p className="text-lg">No department attendance records found</p>
-                  <p className="text-sm mt-2">This member may not be assigned to any departments</p>
+                  <p className="text-sm mt-2">This member may not be assigned to any departments or department attendance data is not available</p>
                 </div>
               )}
             </div>
@@ -1115,76 +1054,9 @@ const DetailedAbsenceModal: React.FC<DetailedAbsenceModalProps> = ({ memberId, o
                               <div className="text-xs text-gray-600 dark:text-gray-400">Absences</div>
                             </div>
                           </div>
-                          
-                          <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                            <div className="text-sm text-gray-600 dark:text-gray-400">Trend</div>
-                            <div className={`font-medium ${
-                              month.trend === 'improving' ? 'text-green-600 dark:text-green-400' :
-                              month.trend === 'declining' ? 'text-red-600 dark:text-red-400' :
-                              'text-amber-600 dark:text-amber-400'
-                            }`}>
-                              {month.trend.toUpperCase()}
-                            </div>
-                          </div>
                         </div>
                       </div>
                     ))}
-                  </div>
-                  
-                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6">
-                    <h5 className="font-medium text-gray-900 dark:text-white mb-4">Yearly Comparison</h5>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full">
-                        <thead>
-                          <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                            <th className="px-3 py-2">Year</th>
-                            <th className="px-3 py-2">Months</th>
-                            <th className="px-3 py-2">Total Events</th>
-                            <th className="px-3 py-2">Avg Attendance</th>
-                            <th className="px-3 py-2">Total Absences</th>
-                            <th className="px-3 py-2">Trend</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.entries(
-                            memberData.monthly_stats.reduce((acc: any, month) => {
-                              if (!acc[month.year]) {
-                                acc[month.year] = {
-                                  months: [],
-                                  totalEvents: 0,
-                                  totalAbsences: 0,
-                                  attendanceRates: []
-                                };
-                              }
-                              acc[month.year].months.push(month.month);
-                              acc[month.year].totalEvents += month.total_events;
-                              acc[month.year].totalAbsences += month.absences;
-                              acc[month.year].attendanceRates.push(month.attendance_rate);
-                              return acc;
-                            }, {})
-                          ).map(([year, data]: [string, any]) => (
-                            <tr key={year} className="border-t border-gray-200 dark:border-gray-700">
-                              <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">{year}</td>
-                              <td className="px-3 py-3 text-gray-600 dark:text-gray-400">{data.months.join(', ')}</td>
-                              <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">{data.totalEvents}</td>
-                              <td className="px-3 py-3">
-                                <span className={`font-bold ${
-                                  Math.round(data.attendanceRates.reduce((a: number, b: number) => a + b, 0) / data.attendanceRates.length) >= 80 ? 'text-green-600 dark:text-green-400' :
-                                  Math.round(data.attendanceRates.reduce((a: number, b: number) => a + b, 0) / data.attendanceRates.length) >= 60 ? 'text-amber-600 dark:text-amber-400' :
-                                  'text-red-600 dark:text-red-400'
-                                }`}>
-                                  {Math.round(data.attendanceRates.reduce((a: number, b: number) => a + b, 0) / data.attendanceRates.length)}%
-                                </span>
-                              </td>
-                              <td className="px-3 py-3 text-red-600 dark:text-red-400 font-medium">{data.totalAbsences}</td>
-                              <td className="px-3 py-3">
-                                <span className="text-amber-600 dark:text-amber-400 font-medium">STABLE</span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                 </div>
               ) : (
@@ -1220,7 +1092,6 @@ interface AbsentMember {
   consecutive_absences: number;
   cell_group_name: string | null;
   department_name: string | null;
-  absence_reason?: string;
   member_since: string;
   gender: string;
   residence: string | null;
@@ -1231,44 +1102,25 @@ interface AbsentMember {
 interface AttendanceReport {
   meeting_date: string;
   meeting_type: string;
-  total_members: number;
-  active_members: number;
   present_count: number;
   absent_count: number;
-  late_count: number;
   attendance_rate: number;
   active_attendance_rate: number;
-  male_present: number;
-  female_present: number;
-  first_timers: number;
-  newcomers: number;
-  regulars: number;
 }
 
 interface GrowthMetrics {
-  new_members_this_month: number;
-  new_members_last_month: number;
-  growth_rate: number;
-  permanent_members: number;
-  newcomers: number;
   total_members: number;
   active_members: number;
-  became_members_this_month: number;
-  became_members_last_month: number;
-  baptism_this_month: number;
-  baptism_last_month: number;
-  baptism_growth_rate: number;
+  non_active_members: number;
+  average_attendance_rate: number;
+  average_active_attendance_rate: number;
   total_baptisms: number;
+  baptism_this_month: number;
+  baptism_growth_rate: number;
   baptism_by_gender: {
     male: number;
     female: number;
   };
-  average_attendance_rate: number;
-  average_active_attendance_rate: number;
-  average_sunday_attendance: number;
-  retention_rate: number;
-  conversion_rate: number;
-  non_active_members: number;
   non_active_rate: number;
   potential_return_members: number;
 }
@@ -1279,14 +1131,6 @@ interface CellGroupStats {
   active_members: number;
   avg_attendance: number;
   active_avg_attendance: number;
-  meetings_this_month: number;
-  leader_name: string;
-  trend: 'increasing' | 'decreasing' | 'steady';
-  previous_month_attendance: number;
-  new_members: number;
-  baptism_count: number;
-  location: string;
-  meeting_day: string;
   non_active_count: number;
 }
 
@@ -1296,13 +1140,6 @@ interface DepartmentStats {
   active_members: number;
   avg_attendance: number;
   active_avg_attendance: number;
-  meetings_this_month: number;
-  leader_name: string;
-  trend: 'increasing' | 'decreasing' | 'steady';
-  previous_month_attendance: number;
-  new_members: number;
-  baptism_count: number;
-  purpose: string;
   non_active_count: number;
 }
 
@@ -1320,14 +1157,8 @@ interface GenderStats {
   female: number;
   male_active: number;
   female_active: number;
-  male_present: number;
-  female_present: number;
   male_baptized: number;
   female_baptized: number;
-  male_attendance_rate: number;
-  female_attendance_rate: number;
-  male_active_attendance_rate: number;
-  female_active_attendance_rate: number;
   male_non_active: number;
   female_non_active: number;
   non_active_rate: number;
@@ -1362,12 +1193,10 @@ interface FilterState {
   gender: 'all' | 'male' | 'female';
   cell_group: string;
   department: string;
-  attendance_status: 'all' | 'present' | 'absent';
   meeting_type: 'all' | 'sunday' | 'cell' | 'department' | 'other';
   date_from: string;
   date_to: string;
   status: 'all' | 'newcomer' | 'signed_member' | 'not_attending';
-  baptism_status: 'all' | 'baptized' | 'not_baptized';
   member_visibility: 'all' | 'active' | 'non-active';
 }
 
@@ -1415,10 +1244,6 @@ const hasPermission = (userPermissions: string[] = [], requiredPermission: strin
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
 };
 
-const canEdit = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
-  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
-};
-
 const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
   if (userRole === 'pastor' || userRole === 'admin') return true;
   
@@ -1442,26 +1267,15 @@ const Analytics = () => {
   const [threeTimeAbsentees, setThreeTimeAbsentees] = useState<AbsentMember[]>([]);
   const [attendanceReports, setAttendanceReports] = useState<AttendanceReport[]>([]);
   const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics>({
-    new_members_this_month: 0,
-    new_members_last_month: 0,
-    growth_rate: 0,
-    permanent_members: 0,
-    newcomers: 0,
     total_members: 0,
     active_members: 0,
-    became_members_this_month: 0,
-    became_members_last_month: 0,
-    baptism_this_month: 0,
-    baptism_last_month: 0,
-    baptism_growth_rate: 0,
-    total_baptisms: 0,
-    baptism_by_gender: { male: 0, female: 0 },
+    non_active_members: 0,
     average_attendance_rate: 0,
     average_active_attendance_rate: 0,
-    average_sunday_attendance: 0,
-    retention_rate: 0,
-    conversion_rate: 0,
-    non_active_members: 0,
+    total_baptisms: 0,
+    baptism_this_month: 0,
+    baptism_growth_rate: 0,
+    baptism_by_gender: { male: 0, female: 0 },
     non_active_rate: 0,
     potential_return_members: 0
   });
@@ -1473,14 +1287,8 @@ const Analytics = () => {
     female: 0,
     male_active: 0,
     female_active: 0,
-    male_present: 0,
-    female_present: 0,
     male_baptized: 0,
     female_baptized: 0,
-    male_attendance_rate: 0,
-    female_attendance_rate: 0,
-    male_active_attendance_rate: 0,
-    female_active_attendance_rate: 0,
     male_non_active: 0,
     female_non_active: 0,
     non_active_rate: 0
@@ -1521,12 +1329,10 @@ const Analytics = () => {
     gender: 'all',
     cell_group: 'all',
     department: 'all',
-    attendance_status: 'all',
     meeting_type: 'all',
     date_from: defaultDateFrom.toISOString().split('T')[0],
     date_to: new Date().toISOString().split('T')[0],
     status: 'all',
-    baptism_status: 'all',
     member_visibility: 'active'
   });
 
@@ -1563,12 +1369,11 @@ const Analytics = () => {
     }
   }, [filters, hasAccess]);
 
-  // FIXED: Fetch analytics data with correct attendance calculation
   const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
 
-      // First, fetch cell groups and departments for filters
+      // Fetch cell groups and departments
       const [cellGroupsData, departmentsData] = await Promise.all([
         supabase.from('cell_groups').select('*'),
         supabase.from('departments').select('*')
@@ -1583,7 +1388,7 @@ const Analytics = () => {
       setCellGroups(allCellGroups);
       setDepartments(allDepartments);
 
-      // Build base members query with filters
+      // Fetch members with filters
       let membersQuery = supabase
         .from('members')
         .select(`
@@ -1594,14 +1399,13 @@ const Analytics = () => {
           )
         `);
 
-      // Apply member visibility filter
+      // Apply filters
       if (filters.member_visibility === 'active') {
         membersQuery = membersQuery.eq('is_hidden', false);
       } else if (filters.member_visibility === 'non-active') {
         membersQuery = membersQuery.eq('is_hidden', true);
       }
 
-      // Apply other filters
       if (filters.gender !== 'all') {
         membersQuery = membersQuery.eq('gender', filters.gender);
       }
@@ -1618,12 +1422,11 @@ const Analytics = () => {
         }
       }
 
-      // Fetch filtered members for display
       const membersData = await membersQuery;
       if (membersData.error) throw membersData.error;
       const members = membersData.data || [];
 
-      // Fetch ALL members (both active and inactive) for accurate attendance calculations
+      // Fetch all members for attendance calculations
       const { data: allMembers, error: allMembersError } = await supabase
         .from('members')
         .select('id, name, surname, gender, status, is_hidden, created_at, baptism, cell_group_id')
@@ -1634,12 +1437,7 @@ const Analytics = () => {
       }
       const membersForAttendance = allMembers || [];
 
-      // Log the counts to verify
-      console.log('Total members fetched:', membersForAttendance.length);
-      console.log('Active members:', membersForAttendance.filter(m => !m.is_hidden).length);
-      console.log('Inactive members:', membersForAttendance.filter(m => m.is_hidden).length);
-
-      // Fetch events with date filter
+      // Fetch events
       let eventsQuery = supabase
         .from('events')
         .select('*')
@@ -1658,22 +1456,19 @@ const Analytics = () => {
       if (eventsData.error) throw eventsData.error;
       const events = eventsData.data || [];
 
-      // FIXED: Fetch ALL event attendees for ALL events (NO date filters on event_attendees)
-      // First, get the event IDs from the filtered events
-      const eventIds = events.map(event => event.id);
-      
-      // If there are events, fetch ALL attendance records for those events
+      // Fetch event attendees for the filtered events
       let allAttendees = [];
       
-      if (eventIds.length > 0) {
+      if (events.length > 0) {
+        const eventIds = events.map(event => event.id);
         const { data: allEventAttendees, error: allAttendeesError } = await supabase
           .from('event_attendees')
           .select(`
             *,
             members!event_attendees_members_id_fkey(id, name, surname, gender, status, is_hidden),
-            events!event_attendees_event_id_fkey(id, name, event_date, event_time, location)
+            events!event_attendees_event_id_fkey(id, name, event_date, location)
           `)
-          .in('event_id', eventIds);  // Only filter by event IDs, not by date
+          .in('event_id', eventIds);
 
         if (allAttendeesError) {
           console.error('Error fetching all event attendees:', allAttendeesError);
@@ -1682,108 +1477,27 @@ const Analytics = () => {
         }
       }
 
-      console.log(`Fetched ${allAttendees.length} attendance records for ${eventIds.length} events`);
-
       // Fetch non-active members
       const nonActiveMembersData = await fetchNonActiveMembers();
-      const nonActiveMembers = nonActiveMembersData || [];
+      const nonActiveMembersList = nonActiveMembersData || [];
 
-      // FIXED: Use ALL attendees for accurate attendance calculations
       await calculateAllMetrics(
         members,
         allCellGroups,
         allDepartments,
         events,
         allAttendees,
-        nonActiveMembers,
+        nonActiveMembersList,
         membersForAttendance
       );
 
-      // NEW: Generate accurate Sunday attendance reports
-      await generateAccurateSundayAttendanceReports(events, allAttendees, membersForAttendance);
+      // Generate attendance reports
+      await generateAttendanceReports(events, allAttendees, membersForAttendance);
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // NEW: Fetch Sunday attendance reports using direct SQL query
-  const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
-    try {
-      // Get only Sunday events from the filter period
-      const sundayEvents = events.filter(event => 
-        event.name?.toLowerCase().includes('sunday') || 
-        event.name?.toLowerCase().includes('service')
-      ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
-
-      if (!sundayEvents || sundayEvents.length === 0) {
-        setAttendanceReports([]);
-        return;
-      }
-
-      const reports: AttendanceReport[] = [];
-
-      // For each Sunday event, get detailed attendance using RPC function
-      for (const event of sundayEvents.slice(0, 5)) { // Get last 5 Sundays
-        const { data: attendanceData, error: attendanceError } = await supabase
-          .rpc('get_sunday_attendance_report', {
-            p_event_id: event.id
-          });
-
-        if (attendanceError) {
-          console.error('Error fetching attendance for event:', event.id, attendanceError);
-          continue;
-        }
-
-        if (attendanceData && attendanceData.length > 0) {
-          const data = attendanceData[0];
-          
-          // Get total and active members count from allMembers
-          const totalMembers = allMembers.length;
-          const activeMembers = allMembers.filter(m => !m.is_hidden).length;
-          
-          // Use the data from the SQL query
-          const totalRegistered = data.total_registered || 0;
-          const presentCount = data.present_count || 0;
-          const absentCount = (data.absent_count || 0) + (data.absent_with_reason_count || 0);
-          
-          // Calculate attendance rate: present / total_registered
-          const attendanceRate = totalRegistered > 0 
-            ? Math.round((presentCount / totalRegistered) * 100) 
-            : 0;
-          
-          // Calculate active attendance rate: active_present / active_registered
-          const activePresentCount = data.active_present_count || 0;
-          const activeRegistered = data.active_registered || 0;
-          const activeAttendanceRate = activeRegistered > 0 
-            ? Math.round((activePresentCount / activeRegistered) * 100) 
-            : 0;
-
-          reports.push({
-            meeting_date: event.event_date,
-            meeting_type: event.name || 'Sunday Service',
-            total_members: totalMembers,
-            active_members: activeMembers,
-            present_count: presentCount,
-            absent_count: absentCount,
-            late_count: 0,
-            attendance_rate: attendanceRate,
-            active_attendance_rate: activeAttendanceRate,
-            male_present: data.male_present || 0,
-            female_present: data.female_present || 0,
-            first_timers: data.first_timers || 0,
-            newcomers: data.newcomers_present || 0,
-            regulars: data.regulars_present || 0
-          });
-        }
-      }
-
-      setAttendanceReports(reports);
-
-    } catch (error) {
-      console.error('Error generating Sunday reports:', error);
     }
   };
 
@@ -1806,6 +1520,55 @@ const Analytics = () => {
     } catch (error) {
       console.error('Error fetching non-active members:', error);
       return [];
+    }
+  };
+
+  const generateAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
+    try {
+      const sundayEvents = events.filter(event => 
+        event.name?.toLowerCase().includes('sunday') || 
+        event.name?.toLowerCase().includes('service')
+      ).sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
+
+      if (!sundayEvents || sundayEvents.length === 0) {
+        setAttendanceReports([]);
+        return;
+      }
+
+      const reports: AttendanceReport[] = [];
+
+      for (const event of sundayEvents.slice(0, 5)) {
+        const eventAttendees = allAttendees.filter((a: any) => a.event_id === event.id);
+        const presentCount = eventAttendees.filter((a: any) => a.attendance_status === 'present').length;
+        const absentCount = eventAttendees.filter((a: any) => 
+          a.attendance_status === 'absent' || a.attendance_status === 'absent_with_reason'
+        ).length;
+        
+        const totalRegistered = presentCount + absentCount;
+        const attendanceRate = totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0;
+        
+        const activeAttendees = eventAttendees.filter((a: any) => {
+          const member = allMembers.find(m => m.id === a.members_id);
+          return member && !member.is_hidden;
+        });
+        const activePresent = activeAttendees.filter((a: any) => a.attendance_status === 'present').length;
+        const activeRegistered = activeAttendees.length;
+        const activeAttendanceRate = activeRegistered > 0 ? Math.round((activePresent / activeRegistered) * 100) : 0;
+
+        reports.push({
+          meeting_date: event.event_date,
+          meeting_type: event.name || 'Sunday Service',
+          present_count: presentCount,
+          absent_count: absentCount,
+          attendance_rate: attendanceRate,
+          active_attendance_rate: activeAttendanceRate
+        });
+      }
+
+      setAttendanceReports(reports);
+
+    } catch (error) {
+      console.error('Error generating attendance reports:', error);
     }
   };
 
@@ -1943,7 +1706,6 @@ const Analytics = () => {
     }
   };
 
-  // FIXED: Correct attendance calculation
   const calculateAllMetrics = async (
     members: any[], 
     cellGroups: any[], 
@@ -1960,33 +1722,23 @@ const Analytics = () => {
     const totalCellGroups = cellGroups.length;
     const totalDepartments = departments.length;
 
-    // FIXED: Calculate attendance correctly
-    // Get only Sunday events from the filter period
+    // Calculate attendance
     const sundayEvents = events.filter(event => 
       event.name?.toLowerCase().includes('sunday') || event.name?.toLowerCase().includes('service')
     );
 
-    // Calculate total present for ALL members across ALL Sunday events
     let totalPresentAllMembers = 0;
     let totalPossibleAttendance = 0;
 
-    // For each Sunday event, calculate attendance
     sundayEvents.forEach(event => {
-      // Get attendees for this event
       const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
-      
-      // Count present attendees
       const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
       totalPresentAllMembers += presentAttendees.length;
-      
-      // Total possible attendance for this event = total members (since it's a Sunday service for everyone)
       totalPossibleAttendance += totalMembers;
     });
 
-    // Calculate average attendance rate for all members
     const avgAttendance = totalPossibleAttendance > 0 ? Math.round((totalPresentAllMembers / totalPossibleAttendance) * 100) : 0;
     
-    // Calculate attendance based on active members only
     let totalPresentActiveMembers = 0;
     let activePossibleAttendance = 0;
 
@@ -1994,7 +1746,6 @@ const Analytics = () => {
       const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
       const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
       
-      // Count only active members who were present
       presentAttendees.forEach((a: any) => {
         const member = allMembers.find(m => m.id === a.members_id);
         if (member && !member.is_hidden) {
@@ -2012,25 +1763,12 @@ const Analytics = () => {
     const totalBaptisms = baptizedMembers.length;
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
-    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
-    // Calculate members who became baptized this month
     const baptismsThisMonth = baptizedMembers.filter(member => {
       if (!member.baptism) return false;
       const baptismDate = new Date(member.baptism);
       return baptismDate.getMonth() === currentMonth && baptismDate.getFullYear() === currentYear;
     }).length;
-
-    const baptismsLastMonth = baptizedMembers.filter(member => {
-      if (!member.baptism) return false;
-      const baptismDate = new Date(member.baptism);
-      return baptismDate.getMonth() === lastMonth && baptismDate.getFullYear() === lastMonthYear;
-    }).length;
-
-    const baptismGrowthRate = baptismsLastMonth > 0 
-      ? Math.round(((baptismsThisMonth - baptismsLastMonth) / baptismsLastMonth) * 100)
-      : baptismsThisMonth > 0 ? 100 : 0;
 
     // Calculate non-active metrics
     const totalNonActive = nonActiveMembersList.length;
@@ -2097,8 +1835,6 @@ const Analytics = () => {
     });
 
     // Update main stats
-    const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
-
     setStats([
       { 
         icon: Users, 
@@ -2151,11 +1887,9 @@ const Analytics = () => {
     ]);
 
     // Calculate all detailed metrics
-    await calculateGrowthMetrics(members, totalMembers, activeMembers, totalNonActive, potentialReturnMembers, avgAttendance, activeAvgAttendance);
-    await calculateGenderStats(allMembers, eventAttendees, nonActiveMembersList, sundayEvents);
+    await calculateGrowthMetrics(members, totalMembers, activeMembers, totalNonActive, potentialReturnMembers, avgAttendance, activeAvgAttendance, totalBaptisms, baptismsThisMonth);
+    await calculateGenderStats(allMembers, nonActiveMembersList);
     await calculateInviterStats(members, nonActiveMembersList);
-    // Attendance reports are now generated separately in generateAccurateSundayAttendanceReports
-    // Remove the old generateAttendanceReports call from here
     await calculateCellGroupStats(cellGroups, sundayEvents, allMembers, eventAttendees, nonActiveMembersList);
     await calculateDepartmentStats(departments, sundayEvents, allMembers, eventAttendees, nonActiveMembersList);
     await findConsecutiveAbsences(allMembers, sundayEvents, eventAttendees, cellGroups);
@@ -2170,128 +1904,41 @@ const Analytics = () => {
     totalNonActive: number, 
     potentialReturnMembers: number,
     avgAttendance: number,
-    activeAvgAttendance: number
+    activeAvgAttendance: number,
+    totalBaptisms: number,
+    baptismsThisMonth: number
   ) => {
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth();
-    const currentYear = currentDate.getFullYear();
-    
-    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-
-    // New members in date range
-    const newMembersInRange = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return memberDate >= fromDate && memberDate <= toDate;
-    }).length;
-
-    // New members this month
-    const newMembersThisMonth = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === currentMonth && memberDate.getFullYear() === currentYear;
-    }).length;
-
-    const newMembersLastMonth = members.filter(member => {
-      const memberDate = new Date(member.created_at);
-      return memberDate.getMonth() === lastMonth && memberDate.getFullYear() === lastMonthYear;
-    }).length;
-
-    // Members who became signed members
-    const becameMembersInRange = members.filter(member => {
-      if (!member.created_at) return false;
-      const createdDate = new Date(member.created_at);
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      return createdDate >= fromDate && createdDate <= toDate && member.status === 'signed_member';
-    }).length;
-
-    // Calculate retention and conversion rates
-    const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
-    const totalNewcomers = members.filter(m => m.status === 'newcomer').length;
-    
-    const retentionRate = members.length > 0 ? Math.round((totalSignedMembers / members.length) * 100) : 0;
-    const conversionRate = totalNewcomers > 0 ? Math.round((becameMembersInRange / totalNewcomers) * 100) : 0;
-
     // Baptism calculations
     const baptizedMembers = members.filter(m => m.baptism);
-    const totalBaptisms = baptizedMembers.length;
-    const baptismsThisMonth = baptizedMembers.filter(member => {
-      const baptismDate = new Date(member.baptism);
-      return baptismDate.getMonth() === currentMonth && baptismDate.getFullYear() === currentYear;
-    }).length;
+    const baptismByGender = {
+      male: baptizedMembers.filter(m => m.gender === 'male').length,
+      female: baptizedMembers.filter(m => m.gender === 'female').length
+    };
 
-    const baptismsLastMonth = baptizedMembers.filter(member => {
-      const baptismDate = new Date(member.baptism);
-      return baptismDate.getMonth() === lastMonth && baptismDate.getFullYear() === lastMonthYear;
-    }).length;
-
-    const baptismGrowthRate = baptismsLastMonth > 0 
-      ? Math.round(((baptismsThisMonth - baptismsLastMonth) / baptismsLastMonth) * 100)
-      : baptismsThisMonth > 0 ? 100 : 0;
-
-    const growthRate = newMembersLastMonth > 0 
-      ? Math.round(((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100)
-      : newMembersThisMonth > 0 ? 100 : 0;
-
-    // Calculate non-active rate
     const nonActiveRate = totalMembers > 0 ? Math.round((totalNonActive / totalMembers) * 100) : 0;
 
     setGrowthMetrics(prev => ({
       ...prev,
-      new_members_this_month: newMembersInRange,
-      new_members_last_month: newMembersLastMonth,
-      growth_rate: growthRate,
-      permanent_members: totalSignedMembers,
-      newcomers: totalNewcomers,
       total_members: totalMembers,
       active_members: activeMembers,
-      became_members_this_month: becameMembersInRange,
-      baptism_this_month: baptismsThisMonth,
-      baptism_last_month: baptismsLastMonth,
-      baptism_growth_rate: baptismGrowthRate,
-      total_baptisms: totalBaptisms,
-      baptism_by_gender: {
-        male: baptizedMembers.filter(m => m.gender === 'male').length,
-        female: baptizedMembers.filter(m => m.gender === 'female').length
-      },
+      non_active_members: totalNonActive,
       average_attendance_rate: avgAttendance,
       average_active_attendance_rate: activeAvgAttendance,
-      average_sunday_attendance: avgAttendance, // Use the calculated average
-      retention_rate: retentionRate,
-      conversion_rate: conversionRate,
-      non_active_members: totalNonActive,
+      total_baptisms: totalBaptisms,
+      baptism_this_month: baptismsThisMonth,
+      baptism_growth_rate: 0, // Simplified - would need historical data
+      baptism_by_gender: baptismByGender,
       non_active_rate: nonActiveRate,
       potential_return_members: potentialReturnMembers
     }));
   };
 
-  // FIXED: Calculate gender stats with correct Sunday attendance
-  const calculateGenderStats = async (allMembers: any[], eventAttendees: any[], nonActiveMembers: any[], sundayEvents: any[]) => {
+  const calculateGenderStats = async (allMembers: any[], nonActiveMembers: any[]) => {
     const maleMembers = allMembers.filter(m => m.gender === 'male');
     const femaleMembers = allMembers.filter(m => m.gender === 'female');
     const maleActiveMembers = allMembers.filter(m => m.gender === 'male' && !m.is_hidden);
     const femaleActiveMembers = allMembers.filter(m => m.gender === 'female' && !m.is_hidden);
     
-    // Calculate attendance by gender for Sunday events only
-    let malePresent = 0;
-    let femalePresent = 0;
-
-    // For each Sunday event
-    sundayEvents.forEach(event => {
-      const eventAttendeesList = eventAttendees.filter((attendee: any) => attendee.event_id === event.id);
-      const presentAttendees = eventAttendeesList.filter((a: any) => a.attendance_status === 'present');
-      
-      presentAttendees.forEach(attendee => {
-        const member = allMembers.find(m => m.id === attendee.members_id);
-        if (member) {
-          if (member.gender === 'male') malePresent++;
-          if (member.gender === 'female') femalePresent++;
-        }
-      });
-    });
-
     // Calculate baptism by gender
     const baptizedMembers = allMembers.filter(m => m.baptism);
     const maleBaptized = baptizedMembers.filter(m => m.gender === 'male').length;
@@ -2301,18 +1948,6 @@ const Analytics = () => {
     const maleNonActive = nonActiveMembers.filter(m => m.gender === 'male').length;
     const femaleNonActive = nonActiveMembers.filter(m => m.gender === 'female').length;
 
-    // Calculate attendance rates
-    // Total possible attendance = number of Sunday events * number of members of that gender
-    const totalPossibleMale = sundayEvents.length * maleMembers.length;
-    const totalPossibleFemale = sundayEvents.length * femaleMembers.length;
-    const totalPossibleMaleActive = sundayEvents.length * maleActiveMembers.length;
-    const totalPossibleFemaleActive = sundayEvents.length * femaleActiveMembers.length;
-
-    const maleAttendanceRate = totalPossibleMale > 0 ? Math.round((malePresent / totalPossibleMale) * 100) : 0;
-    const femaleAttendanceRate = totalPossibleFemale > 0 ? Math.round((femalePresent / totalPossibleFemale) * 100) : 0;
-    const maleActiveAttendanceRate = totalPossibleMaleActive > 0 ? Math.round((malePresent / totalPossibleMaleActive) * 100) : 0;
-    const femaleActiveAttendanceRate = totalPossibleFemaleActive > 0 ? Math.round((femalePresent / totalPossibleFemaleActive) * 100) : 0;
-    
     const totalAllMembers = allMembers.length;
     const nonActiveRate = totalAllMembers > 0 ? Math.round(((maleNonActive + femaleNonActive) / totalAllMembers) * 100) : 0;
 
@@ -2321,14 +1956,8 @@ const Analytics = () => {
       female: femaleMembers.length,
       male_active: maleActiveMembers.length,
       female_active: femaleActiveMembers.length,
-      male_present: malePresent,
-      female_present: femalePresent,
       male_baptized: maleBaptized,
       female_baptized: femaleBaptized,
-      male_attendance_rate: maleAttendanceRate,
-      female_attendance_rate: femaleAttendanceRate,
-      male_active_attendance_rate: maleActiveAttendanceRate,
-      female_active_attendance_rate: femaleActiveAttendanceRate,
       male_non_active: maleNonActive,
       female_non_active: femaleNonActive,
       non_active_rate: nonActiveRate
@@ -2383,7 +2012,7 @@ const Analytics = () => {
 
       const groupMemberIds = groupAllMembers.map(m => m.id);
       
-      // Calculate attendance for this group (all members)
+      // Calculate attendance for this group
       let presentCount = 0;
       let totalPossible = 0;
       
@@ -2415,15 +2044,6 @@ const Analytics = () => {
       });
       
       const activeAvgAttendance = activePossible > 0 ? Math.round((activePresentCount / activePossible) * 100) : 0;
-      
-      // Calculate baptism count
-      const groupBaptisms = groupAllMembers.filter(m => m.baptism).length;
-
-      // Get leader info
-      const leaderName = group.leader_id ? 
-        `Leader ${group.leader_id}` : 'Not assigned';
-
-      const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
 
       stats.push({
         group_name: group.name,
@@ -2431,14 +2051,6 @@ const Analytics = () => {
         active_members: groupActiveMembers.length,
         avg_attendance: avgAttendance,
         active_avg_attendance: activeAvgAttendance,
-        meetings_this_month: events.length,
-        leader_name: leaderName,
-        trend: trend,
-        previous_month_attendance: Math.max(0, avgAttendance - 10),
-        new_members: groupAllMembers.filter(m => m.status === 'newcomer').length,
-        baptism_count: groupBaptisms,
-        location: group.location || 'Not specified',
-        meeting_day: group.meeting_day || 'Not specified',
         non_active_count: nonActiveGroupMembers.length
       });
     }
@@ -2450,7 +2062,6 @@ const Analytics = () => {
     const stats: DepartmentStats[] = [];
 
     for (const department of departments) {
-      // Get department members
       const departmentAllMembers = allMembers.filter(member => 
         member.department_members?.some((dm: any) => dm.departments?.id === department.id)
       );
@@ -2464,7 +2075,7 @@ const Analytics = () => {
 
       const departmentMemberIds = departmentAllMembers.map(m => m.id);
       
-      // Calculate attendance (all members)
+      // Calculate attendance
       let presentCount = 0;
       let totalPossible = 0;
       
@@ -2496,13 +2107,6 @@ const Analytics = () => {
       });
       
       const activeAvgAttendance = activePossible > 0 ? Math.round((activePresentCount / activePossible) * 100) : 0;
-      
-      const departmentBaptisms = departmentAllMembers.filter(m => m.baptism).length;
-
-      const leaderName = department.leader_id ? 
-        `Leader ${department.leader_id}` : 'Not assigned';
-
-      const trend = avgAttendance >= 70 ? 'increasing' : avgAttendance >= 50 ? 'steady' : 'decreasing';
 
       stats.push({
         department_name: department.name,
@@ -2510,13 +2114,6 @@ const Analytics = () => {
         active_members: departmentActiveMembers.length,
         avg_attendance: avgAttendance,
         active_avg_attendance: activeAvgAttendance,
-        meetings_this_month: events.length,
-        leader_name: leaderName,
-        trend: trend,
-        previous_month_attendance: Math.max(0, avgAttendance - 10),
-        new_members: departmentAllMembers.filter(m => m.status === 'newcomer').length,
-        baptism_count: departmentBaptisms,
-        purpose: department.description || 'Not specified',
         non_active_count: nonActiveDepartmentMembers.length
       });
     }
@@ -2687,12 +2284,10 @@ const Analytics = () => {
       gender: 'all',
       cell_group: 'all',
       department: 'all',
-      attendance_status: 'all',
       meeting_type: 'all',
       date_from: defaultDateFrom.toISOString().split('T')[0],
       date_to: new Date().toISOString().split('T')[0],
       status: 'all',
-      baptism_status: 'all',
       member_visibility: 'active'
     });
   };
@@ -2701,10 +2296,8 @@ const Analytics = () => {
     return filters.gender !== 'all' || 
            filters.cell_group !== 'all' || 
            filters.department !== 'all' || 
-           filters.attendance_status !== 'all' || 
            filters.meeting_type !== 'all' ||
            filters.status !== 'all' ||
-           filters.baptism_status !== 'all' ||
            filters.member_visibility !== 'active';
   };
 
@@ -2940,26 +2533,16 @@ const Analytics = () => {
               </div>
             </div>
             <div class="quick-stat">
-              <div class="stat-value">${growthMetrics.new_members_this_month}</div>
-              <div class="stat-label">New Members in Period</div>
+              <div class="stat-value">${genderStats.male_baptized}</div>
+              <div class="stat-label">Male Baptized</div>
             </div>
             <div class="quick-stat">
-              <div class="stat-value">${growthMetrics.baptism_this_month}</div>
-              <div class="stat-label">Baptisms This Month</div>
+              <div class="stat-value">${genderStats.female_baptized}</div>
+              <div class="stat-label">Female Baptized</div>
             </div>
             <div class="quick-stat">
-              <div class="stat-value">${genderStats.male_attendance_rate}%</div>
-              <div class="stat-label">Male Attendance Rate</div>
-              <div class="stat-description" style="font-size: 10px; color: #6b7280; margin-top: 3px;">
-                Active only: ${genderStats.male_active_attendance_rate}%
-              </div>
-            </div>
-            <div class="quick-stat">
-              <div class="stat-value">${genderStats.female_attendance_rate}%</div>
-              <div class="stat-label">Female Attendance Rate</div>
-              <div class="stat-description" style="font-size: 10px; color: #6b7280; margin-top: 3px;">
-                Active only: ${genderStats.female_active_attendance_rate}%
-              </div>
+              <div class="stat-value">${genderStats.non_active_rate}%</div>
+              <div class="stat-label">Non-active Rate</div>
             </div>
           </div>
 
@@ -2978,8 +2561,8 @@ const Analytics = () => {
               <div class="stat-label">Female Baptized</div>
             </div>
             <div class="quick-stat">
-              <div class="stat-value">${growthMetrics.baptism_growth_rate}%</div>
-              <div class="stat-label">Baptism Growth Rate</div>
+              <div class="stat-value">${growthMetrics.baptism_this_month}</div>
+              <div class="stat-label">Baptisms This Month</div>
             </div>
           </div>
 
@@ -2993,7 +2576,6 @@ const Analytics = () => {
                 <th>Non-active</th>
                 <th>Avg Attendance</th>
                 <th>Active Avg</th>
-                <th>Baptisms</th>
               </tr>
             </thead>
             <tbody>
@@ -3005,7 +2587,6 @@ const Analytics = () => {
                   <td>${group.non_active_count}</td>
                   <td>${group.avg_attendance}%</td>
                   <td>${group.active_avg_attendance}%</td>
-                  <td>${group.baptism_count}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3021,7 +2602,6 @@ const Analytics = () => {
                 <th>Non-active</th>
                 <th>Avg Attendance</th>
                 <th>Active Avg</th>
-                <th>Baptisms</th>
               </tr>
             </thead>
             <tbody>
@@ -3033,7 +2613,6 @@ const Analytics = () => {
                   <td>${dept.non_active_count}</td>
                   <td>${dept.avg_attendance}%</td>
                   <td>${dept.active_avg_attendance}%</td>
-                  <td>${dept.baptism_count}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3116,33 +2695,38 @@ const Analytics = () => {
       ['Category', 'Male', 'Female', 'Total'],
       ['Total Members', genderStats.male, genderStats.female, genderStats.male + genderStats.female],
       ['Active Members', genderStats.male_active, genderStats.female_active, genderStats.male_active + genderStats.female_active],
-      ['Attendance Rate (All)', `${genderStats.male_attendance_rate}%`, `${genderStats.female_attendance_rate}%`, `${Math.round(((genderStats.male_attendance_rate + genderStats.female_attendance_rate) / 2))}%`],
-      ['Attendance Rate (Active)', `${genderStats.male_active_attendance_rate}%`, `${genderStats.female_active_attendance_rate}%`, `${Math.round(((genderStats.male_active_attendance_rate + genderStats.female_active_attendance_rate) / 2))}%`],
       ['Baptized', genderStats.male_baptized, genderStats.female_baptized, genderStats.male_baptized + genderStats.female_baptized],
       [],
-      ['Growth & Baptism Metrics'],
+      ['Baptism Metrics'],
       ['Metric', 'Value'],
-      ['New Members (Period)', growthMetrics.new_members_this_month],
-      ['Baptisms (Period)', growthMetrics.baptism_this_month],
       ['Total Baptisms', growthMetrics.total_baptisms],
+      ['Baptisms This Month', growthMetrics.baptism_this_month],
       ['Male Baptized', growthMetrics.baptism_by_gender.male],
       ['Female Baptized', growthMetrics.baptism_by_gender.female],
-      ['Baptism Growth Rate', `${growthMetrics.baptism_growth_rate}%`],
       ['Non-active Members', growthMetrics.non_active_members],
       ['Non-active Rate', `${growthMetrics.non_active_rate}%`],
       ['Potential Return Members', growthMetrics.potential_return_members],
       [],
       ['Cell Group Performance'],
-      ['Group Name', 'Total Members', 'Active Members', 'Non-active Members', 'Avg Attendance', 'Active Avg', 'Baptisms', 'Trend'],
+      ['Group Name', 'Total Members', 'Active Members', 'Non-active Members', 'Avg Attendance', 'Active Avg'],
       ...cellGroupStats.map(group => [
         group.group_name,
         group.total_members,
         group.active_members,
         group.non_active_count,
         `${group.avg_attendance}%`,
-        `${group.active_avg_attendance}%`,
-        group.baptism_count,
-        group.trend
+        `${group.active_avg_attendance}%`
+      ]),
+      [],
+      ['Department Performance'],
+      ['Department Name', 'Total Members', 'Active Members', 'Non-active Members', 'Avg Attendance', 'Active Avg'],
+      ...departmentStats.map(dept => [
+        dept.department_name,
+        dept.total_members,
+        dept.active_members,
+        dept.non_active_count,
+        `${dept.avg_attendance}%`,
+        `${dept.active_avg_attendance}%`
       ])
     ];
 
@@ -3889,26 +3473,18 @@ const Analytics = () => {
                 </div>
               </div>
               <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 sm:p-4 text-center">
-                <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 dark:text-green-400">{growthMetrics.new_members_this_month}</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">New Members</div>
-                <div className="text-xs text-gray-500 dark:text-gray-500">in period</div>
-              </div>
-              <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 sm:p-4 text-center">
-                <div className="text-lg sm:text-xl md:text-2xl font-bold text-amber-600 dark:text-amber-400">{growthMetrics.non_active_members}</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Non-active</div>
-                <div className="text-xs text-amber-500 dark:text-amber-500">
-                  {growthMetrics.non_active_rate}% of total
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-green-600 dark:text-green-400">{genderStats.male_baptized}</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Male Baptized</div>
+                <div className="text-xs text-gray-500 dark:text-gray-500">
+                  {genderStats.male > 0 ? Math.round((genderStats.male_baptized / genderStats.male) * 100) : 0}% of males
                 </div>
               </div>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4">
-              <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-3">
-                <div className="text-base sm:text-lg font-bold text-orange-600 dark:text-orange-400">{growthMetrics.retention_rate}%</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Retention Rate</div>
-              </div>
-              <div className="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-3">
-                <div className="text-base sm:text-lg font-bold text-teal-600 dark:text-teal-400">{growthMetrics.conversion_rate}%</div>
-                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Conversion Rate</div>
+              <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-xl md:text-2xl font-bold text-amber-600 dark:text-amber-400">{genderStats.non_active_rate}%</div>
+                <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Non-active Rate</div>
+                <div className="text-xs text-amber-500 dark:text-amber-500">
+                  {growthMetrics.non_active_members} members
+                </div>
               </div>
             </div>
           </div>
@@ -3954,7 +3530,7 @@ const Analytics = () => {
             </div>
           </div>
 
-          {/* Gender Attendance */}
+          {/* Gender Analytics */}
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -3963,63 +3539,45 @@ const Analytics = () => {
             <div className="space-y-3 sm:space-y-4">
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm sm:text-base text-gray-700 dark:text-gray-300">Male Attendance (All)</span>
+                  <span className="text-sm sm:text-base text-gray-700 dark:text-gray-300">Male Members</span>
                   <span className="font-bold text-blue-600 dark:text-blue-400">
-                    {genderStats.male_attendance_rate}%
+                    {genderStats.male}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-blue-500 h-2 rounded-full" 
-                    style={{ width: `${genderStats.male_attendance_rate}%` }}
-                  ></div>
-                </div>
                 <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.male_present} of {genderStats.male} total • {genderStats.male_baptized} baptized
+                  {genderStats.male_active} active • {genderStats.male_non_active} non-active • {genderStats.male_baptized} baptized
                 </div>
                 <div className="text-xs text-green-500 dark:text-green-500 mt-1">
-                  Active only: {genderStats.male_active_attendance_rate}% ({genderStats.male_active} active)
-                </div>
-                <div className="text-xs text-amber-500 dark:text-amber-500 mt-1">
-                  {genderStats.male_non_active} non-active members
+                  Baptism rate: {genderStats.male > 0 ? Math.round((genderStats.male_baptized / genderStats.male) * 100) : 0}%
                 </div>
               </div>
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm sm:text-base text-gray-700 dark:text-gray-300">Female Attendance (All)</span>
+                  <span className="text-sm sm:text-base text-gray-700 dark:text-gray-300">Female Members</span>
                   <span className="font-bold text-pink-600 dark:text-pink-400">
-                    {genderStats.female_attendance_rate}%
+                    {genderStats.female}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-pink-500 h-2 rounded-full" 
-                    style={{ width: `${genderStats.female_attendance_rate}%` }}
-                  ></div>
-                </div>
                 <div className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  {genderStats.female_present} of {genderStats.female} total • {genderStats.female_baptized} baptized
+                  {genderStats.female_active} active • {genderStats.female_non_active} non-active • {genderStats.female_baptized} baptized
                 </div>
                 <div className="text-xs text-green-500 dark:text-green-500 mt-1">
-                  Active only: {genderStats.female_active_attendance_rate}% ({genderStats.female_active} active)
-                </div>
-                <div className="text-xs text-amber-500 dark:text-amber-500 mt-1">
-                  {genderStats.female_non_active} non-active members
+                  Baptism rate: {genderStats.female > 0 ? Math.round((genderStats.female_baptized / genderStats.female) * 100) : 0}%
                 </div>
               </div>
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <div className="grid grid-cols-3 gap-3 sm:gap-4">
                   <div className="text-center">
                     <div className="text-base sm:text-lg font-bold text-blue-600 dark:text-blue-400">
-                      {Math.round((genderStats.male_baptized / genderStats.male) * 100) || 0}%
+                      {genderStats.male_active}
                     </div>
-                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Male Baptism Rate</div>
+                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Active Male</div>
                   </div>
                   <div className="text-center">
                     <div className="text-base sm:text-lg font-bold text-pink-600 dark:text-pink-400">
-                      {Math.round((genderStats.female_baptized / genderStats.female) * 100) || 0}%
+                      {genderStats.female_active}
                     </div>
-                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Female Baptism Rate</div>
+                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Active Female</div>
                   </div>
                   <div className="text-center">
                     <div className="text-base sm:text-lg font-bold text-amber-600 dark:text-amber-400">
@@ -4090,7 +3648,6 @@ const Analytics = () => {
                 <div key={index} className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div className="flex justify-between items-start mb-2">
                     <div className="font-semibold text-gray-900 dark:text-white truncate text-sm sm:text-base">{group.group_name}</div>
-                    {getTrendIcon(group.trend)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">
                     {group.total_members} total • {group.active_members} active • {group.non_active_count} non-active
@@ -4126,12 +3683,6 @@ const Analytics = () => {
                         {group.active_avg_attendance}%
                       </span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-500 dark:text-gray-500">Baptisms</span>
-                      <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400">
-                        {group.baptism_count}
-                      </span>
-                    </div>
                     {group.non_active_count > 0 && (
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-amber-500 dark:text-amber-500">Non-active</span>
@@ -4140,16 +3691,6 @@ const Analytics = () => {
                         </span>
                       </div>
                     )}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500 space-y-1">
-                    <div className="flex items-center gap-1 truncate">
-                      <MapPin className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">{group.location}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">{group.meeting_day}</span>
-                    </div>
                   </div>
                 </div>
               )) : (
@@ -4164,7 +3705,6 @@ const Analytics = () => {
                 <div key={index} className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div className="flex justify-between items-start mb-2">
                     <div className="font-semibold text-gray-900 dark:text-white truncate text-sm sm:text-base">{dept.department_name}</div>
-                    {getTrendIcon(dept.trend)}
                   </div>
                   <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-2">
                     {dept.total_members} total • {dept.active_members} active • {dept.non_active_count} non-active
@@ -4200,12 +3740,6 @@ const Analytics = () => {
                         {dept.active_avg_attendance}%
                       </span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-500 dark:text-gray-500">Baptisms</span>
-                      <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400">
-                        {dept.baptism_count}
-                      </span>
-                    </div>
                     {dept.non_active_count > 0 && (
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-amber-500 dark:text-amber-500">Non-active</span>
@@ -4214,9 +3748,6 @@ const Analytics = () => {
                         </span>
                       </div>
                     )}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2">
-                    {dept.purpose}
                   </div>
                 </div>
               )) : (
@@ -4435,7 +3966,7 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* UPDATED: Recent Attendance Reports Table */}
+        {/* Recent Attendance Reports Table */}
         {attendanceReports.length > 0 && (
           <div className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 sm:p-6 mb-8">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 flex items-center gap-2">
@@ -4449,7 +3980,7 @@ const Analytics = () => {
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Date</th>
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Event</th>
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Present</th>
-                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Total Registered</th>
+                    <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Absent</th>
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Attendance Rate</th>
                     <th scope="col" className="px-2 sm:px-4 py-2 font-medium">Active Rate</th>
                   </tr>
@@ -4472,18 +4003,12 @@ const Analytics = () => {
                           <span className="text-green-600 dark:text-green-400 font-bold">
                             {report.present_count}
                           </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            / {report.present_count + report.absent_count}
-                          </span>
                         </div>
                       </td>
                       <td className="px-2 sm:px-4 py-3 text-xs sm:text-sm">
                         <div className="flex flex-col">
-                          <span className="text-blue-600 dark:text-blue-400 font-bold">
-                            {report.present_count + report.absent_count}
-                          </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {report.present_count} present + {report.absent_count} absent
+                          <span className="text-red-600 dark:text-red-400 font-bold">
+                            {report.absent_count}
                           </span>
                         </div>
                       </td>
