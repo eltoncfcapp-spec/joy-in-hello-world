@@ -1400,7 +1400,7 @@ interface DetailedAbsenceRecord {
   is_hidden: boolean;
 }
 
-const canViewAnalyticsPage = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
+const canViewAnalyticsPage = (userRole: string | null | undefined, _userPermissions: string[] = [], profile?: any): boolean => {
   if (userRole === 'pastor' || userRole === 'admin') return true;
   
   if (profile) {
@@ -1413,10 +1413,6 @@ const canViewAnalyticsPage = (userRole: string | null | undefined, userPermissio
 
 const hasPermission = (userPermissions: string[] = [], requiredPermission: string): boolean => {
   return userPermissions.includes(requiredPermission) || userPermissions.includes('admin_access');
-};
-
-const canEdit = (userRole: string | null | undefined, userPermissions: string[] = []): boolean => {
-  return userRole === 'pastor' || userRole === 'admin' || hasPermission(userPermissions, 'admin_access');
 };
 
 const canViewMemberDetails = (userRole: string | null | undefined, userPermissions: string[] = [], profile?: any): boolean => {
@@ -1647,8 +1643,8 @@ const Analytics = () => {
       const membersForAttendance = allMembers || [];
 
       // NEW: Calculate newcomers count for the filter period
-      const newcomersInPeriod = allMembers.filter(member => {
-        const memberDate = new Date(member.created_at);
+      const newcomersInPeriod = (allMembers || []).filter(member => {
+        const memberDate = new Date(member.created_at || '');
         const fromDate = new Date(filters.date_from);
         const toDate = new Date(filters.date_to);
         return memberDate >= fromDate && memberDate <= toDate;
@@ -1679,7 +1675,7 @@ const Analytics = () => {
       const eventIds = events.map(event => event.id);
       
       // If there are events, fetch ALL attendance records for those events
-      let allAttendees = [];
+      let allAttendees: any[] = [];
       
       if (eventIds.length > 0) {
         const { data: allEventAttendees, error: allAttendeesError } = await supabase
@@ -1726,7 +1722,7 @@ const Analytics = () => {
   };
 
   // NEW: Fetch Sunday attendance reports using direct SQL query
-  const generateAccurateSundayAttendanceReports = async (events: any[], allAttendees: any[], allMembers: any[]) => {
+  const generateAccurateSundayAttendanceReports = async (events: any[], _allAttendees: any[], allMembers: any[]) => {
     try {
       // Get only Sunday events from the filter period
       const sundayEvents = events.filter(event => 
@@ -1974,7 +1970,7 @@ const Analytics = () => {
     const activeMembers = allMembers.filter(m => !m.is_hidden).length;
     const inactiveMembers = allMembers.filter(m => m.is_hidden).length;
     const totalCellGroups = cellGroups.length;
-    const totalDepartments = departments.length;
+    void departments.length; // Used for logging purposes
 
     // FIXED: Calculate attendance correctly
     // Get only Sunday events from the filter period
@@ -2025,7 +2021,7 @@ const Analytics = () => {
 
     // Get baptism data
     const baptizedMembers = members.filter(m => m.baptism);
-    const totalBaptisms = baptizedMembers.length;
+    void baptizedMembers.length; // Used for potential future features
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
@@ -2044,9 +2040,10 @@ const Analytics = () => {
       return baptismDate.getMonth() === lastMonth && baptismDate.getFullYear() === lastMonthYear;
     }).length;
 
-    const baptismGrowthRate = baptismsLastMonth > 0 
+    // Calculate baptism growth rate for potential future use
+    void (baptismsLastMonth > 0 
       ? Math.round(((baptismsThisMonth - baptismsLastMonth) / baptismsLastMonth) * 100)
-      : baptismsThisMonth > 0 ? 100 : 0;
+      : baptismsThisMonth > 0 ? 100 : 0);
 
     // Calculate non-active metrics
     const totalNonActive = nonActiveMembersList.length;
@@ -2113,7 +2110,7 @@ const Analytics = () => {
     });
 
     // Update main stats with newcomers count
-    const totalSignedMembers = members.filter(m => m.status === 'signed_member').length;
+    void members.filter(m => m.status === 'signed_member').length; // For future use
 
     setStats([
       { 

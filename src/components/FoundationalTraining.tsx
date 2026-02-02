@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { CheckCircle, Circle, BookOpen, Calendar, Award, ChevronDown, ChevronUp } from 'lucide-react';
+import type { Tables } from '../integrations/supabase/types';
 
 interface FoundationalTrainingProps {
   memberId: string;
@@ -8,25 +9,13 @@ interface FoundationalTrainingProps {
   canEditTraining: boolean;
 }
 
-interface FoundationalTopic {
-  id: string;
-  topic_name: string;
+type FoundationalTopic = Tables<'foundational_topics'> & {
   description?: string;
-  level: number;
-  topic_order: number;
-  is_active: boolean;
   subject_area?: string;
   estimated_hours?: number;
-  created_at: string;
-}
+};
 
-interface MemberProgress {
-  topic_id: string;
-  completed_date: string;
-  completed_by: string;
-  verified_by?: string;
-  verified_date?: string;
-}
+type MemberProgress = Tables<'member_training_progress'>;
 
 interface LevelInfo {
   level: number;

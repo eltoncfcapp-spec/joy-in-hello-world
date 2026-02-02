@@ -54,6 +54,13 @@ export type Database = {
             foreignKeyName: "attendance_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "attendance_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -91,6 +98,13 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "audit_logs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
           {
             foreignKeyName: "audit_logs_user_id_fkey"
             columns: ["user_id"]
@@ -142,6 +156,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "group_statistics"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cell_group_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
           },
           {
             foreignKeyName: "cell_group_members_member_id_fkey"
@@ -200,6 +221,13 @@ export type Database = {
             foreignKeyName: "cell_groups_leader_id_fkey"
             columns: ["leader_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "cell_groups_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -240,6 +268,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "department_meetings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_attendance_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
           },
           {
             foreignKeyName: "department_attendance_member_id_fkey"
@@ -334,6 +369,13 @@ export type Database = {
             foreignKeyName: "department_members_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "department_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -374,6 +416,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "department_reports_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
           {
             foreignKeyName: "department_reports_created_by_fkey"
             columns: ["created_by"]
@@ -425,6 +474,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "departments_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
           {
             foreignKeyName: "departments_leader_id_fkey"
             columns: ["leader_id"]
@@ -500,8 +556,22 @@ export type Database = {
             foreignKeyName: "event_attendees_invited_by_id_fkey"
             columns: ["invited_by_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "event_attendees_invited_by_id_fkey"
+            columns: ["invited_by_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_attendees_members_id_fkey"
+            columns: ["members_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
           },
           {
             foreignKeyName: "event_attendees_members_id_fkey"
@@ -569,6 +639,39 @@ export type Database = {
           target_groups?: string[] | null
           topic?: string | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      foundational_topics: {
+        Row: {
+          created_at: string
+          duration_minutes: number | null
+          id: string
+          is_active: boolean
+          level: number
+          topic_description: string | null
+          topic_name: string
+          topic_order: number
+        }
+        Insert: {
+          created_at?: string
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean
+          level: number
+          topic_description?: string | null
+          topic_name: string
+          topic_order: number
+        }
+        Update: {
+          created_at?: string
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean
+          level?: number
+          topic_description?: string | null
+          topic_name?: string
+          topic_order?: number
         }
         Relationships: []
       }
@@ -667,6 +770,13 @@ export type Database = {
             foreignKeyName: "group_members_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "group_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -712,6 +822,13 @@ export type Database = {
             foreignKeyName: "meeting_attendance_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "meeting_attendance_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -752,6 +869,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "meeting_reports_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
           {
             foreignKeyName: "meeting_reports_created_by_fkey"
             columns: ["created_by"]
@@ -825,6 +949,68 @@ export type Database = {
           },
         ]
       }
+      member_notes: {
+        Row: {
+          author_id: string
+          created_at: string | null
+          id: string
+          is_confidential: boolean | null
+          member_id: string
+          note_content: string
+          note_type: string
+          updated_at: string | null
+        }
+        Insert: {
+          author_id: string
+          created_at?: string | null
+          id?: string
+          is_confidential?: boolean | null
+          member_id: string
+          note_content: string
+          note_type?: string
+          updated_at?: string | null
+        }
+        Update: {
+          author_id?: string
+          created_at?: string | null
+          id?: string
+          is_confidential?: boolean | null
+          member_id?: string
+          note_content?: string
+          note_type?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "member_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_notes_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "member_notes_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       member_roles: {
         Row: {
           created_at: string | null
@@ -849,7 +1035,80 @@ export type Database = {
             foreignKeyName: "member_roles_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "member_roles_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      member_training_progress: {
+        Row: {
+          completed_by: string | null
+          completed_date: string
+          created_at: string
+          id: string
+          member_id: string
+          notes: string | null
+          topic_id: string
+        }
+        Insert: {
+          completed_by?: string | null
+          completed_date?: string
+          created_at?: string
+          id?: string
+          member_id: string
+          notes?: string | null
+          topic_id: string
+        }
+        Update: {
+          completed_by?: string | null
+          completed_date?: string
+          created_at?: string
+          id?: string
+          member_id?: string
+          notes?: string | null
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_training_progress_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "member_training_progress_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_training_progress_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "member_training_progress_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_training_progress_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "foundational_topics"
             referencedColumns: ["id"]
           },
         ]
@@ -1037,6 +1296,13 @@ export type Database = {
             foreignKeyName: "ministry_group_members_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "ministry_group_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -1068,6 +1334,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "ministry_groups_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
           {
             foreignKeyName: "ministry_groups_leader_id_fkey"
             columns: ["leader_id"]
@@ -1151,6 +1424,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
           {
             foreignKeyName: "push_subscriptions_member_id_fkey"
             columns: ["member_id"]
@@ -1306,6 +1586,13 @@ export type Database = {
             foreignKeyName: "cell_groups_leader_id_fkey"
             columns: ["leader_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "cell_groups_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
@@ -1330,6 +1617,20 @@ export type Database = {
         }
         Relationships: []
       }
+      member_training_summary: {
+        Row: {
+          last_completion_date: string | null
+          level1_completed: number | null
+          level2_completed: number | null
+          level3_completed: number | null
+          member_id: string | null
+          name: string | null
+          surname: string | null
+          total_topics_available: number | null
+          total_topics_completed: number | null
+        }
+        Relationships: []
+      }
       ministry_membership: {
         Row: {
           created_at: string | null
@@ -1348,8 +1649,22 @@ export type Database = {
             foreignKeyName: "ministry_group_members_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "ministry_group_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ministry_groups_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
           },
           {
             foreignKeyName: "ministry_groups_leader_id_fkey"
@@ -1376,8 +1691,22 @@ export type Database = {
             foreignKeyName: "ministry_group_members_member_id_fkey"
             columns: ["member_id"]
             isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
+          },
+          {
+            foreignKeyName: "ministry_group_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ministry_groups_leader_id_fkey"
+            columns: ["leader_id"]
+            isOneToOne: false
+            referencedRelation: "member_training_summary"
+            referencedColumns: ["member_id"]
           },
           {
             foreignKeyName: "ministry_groups_leader_id_fkey"
@@ -1420,6 +1749,25 @@ export type Database = {
           ministry_group_id: string
           ministry_group_name: string
           role: string
+        }[]
+      }
+      get_sunday_attendance_report: {
+        Args: { p_event_id: string }
+        Returns: {
+          absent_count: number
+          absent_with_reason_count: number
+          active_present_count: number
+          active_registered: number
+          event_date: string
+          event_id: string
+          event_name: string
+          female_present: number
+          first_timers: number
+          male_present: number
+          newcomers_present: number
+          present_count: number
+          regulars_present: number
+          total_registered: number
         }[]
       }
       get_user_assigned_departments: { Args: never; Returns: string[] }
