@@ -2,7 +2,6 @@ import { Calendar as CalendarIcon, Clock, MapPin, Plus, Phone, X, User, Search, 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useAuth } from '../contexts/AuthContext';
-import UnsavedChangesDialog from '../components/UnsavedChangesDialog';
 
 interface Event {
   id: string;
@@ -584,7 +583,8 @@ const BulkAttendanceModal = ({
   saveBulkAttendance,
   loading,
   attendanceNotesRef,
-  getInitials
+  getInitials,
+  eventAttendees
 }: {
   showBulkAttendanceModal: string | null;
   closeBulkAttendanceModal: () => void;
@@ -598,6 +598,7 @@ const BulkAttendanceModal = ({
   loading: boolean;
   attendanceNotesRef: React.MutableRefObject<Record<string, string>>;
   getInitials: (name: string, surname: string) => string;
+  eventAttendees: EventAttendee[];
 }) => {
   // State for tracking unsaved changes
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -625,15 +626,23 @@ const BulkAttendanceModal = ({
     });
   }, [targetMembers, bulkAttendanceSearch]);
 
-  // Calculate stats using useMemo
+  // Calculate stats using useMemo - including first-timers from DB
+  const firstTimersCount = useMemo(() => {
+    if (!showBulkAttendanceModal) return 0;
+    return eventAttendees
+      .filter(a => a.event_id === showBulkAttendanceModal && a.first_time && a.attendance_status === 'present')
+      .length;
+  }, [eventAttendees, showBulkAttendanceModal]);
+
   const stats = useMemo(() => {
     return {
       present: Object.values(bulkAttendance).filter(status => status === 'present').length,
       absent: Object.values(bulkAttendance).filter(status => status === 'absent').length,
       total: targetMembers.length,
-      filtered: filteredMembers.length
+      filtered: filteredMembers.length,
+      firstTimers: firstTimersCount
     };
-  }, [bulkAttendance, targetMembers.length, filteredMembers.length]);
+  }, [bulkAttendance, targetMembers.length, filteredMembers.length, firstTimersCount]);
 
   // Track unsaved changes when attendance is modified
   const handleAttendanceChangeWithTracking = useCallback((memberId: string, status: 'present' | 'absent') => {
@@ -760,7 +769,7 @@ const BulkAttendanceModal = ({
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4 mb-4">
               <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3 sm:p-4 text-center">
                 <div className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</div>
                 <div className="text-xs sm:text-sm text-green-700 dark:text-green-300 font-medium">Present</div>
@@ -772,6 +781,10 @@ const BulkAttendanceModal = ({
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3 sm:p-4 text-center">
                 <div className="text-lg sm:text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</div>
                 <div className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 font-medium">Total Expected</div>
+              </div>
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-lg sm:text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.firstTimers}</div>
+                <div className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium">First Timers</div>
               </div>
               <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-xl p-3 sm:p-4 text-center">
                 <div className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.filtered}</div>
@@ -846,20 +859,20 @@ const BulkAttendanceModal = ({
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {filteredMembers.map((member) => (
-                  <div key={member.id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
-                    <div className="flex items-center justify-between gap-3">
+                  <div key={member.id} className="p-4 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
+                    <div className="flex items-center justify-between gap-4">
                       {/* Left side - Member info */}
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
                           {getInitials(member.name, member.surname)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                          <div className="font-semibold text-gray-900 dark:text-white text-base truncate">
                             {member.name} {member.surname}
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
+                          <div className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                             {member.phone && <span className="truncate">{member.phone}</span>}
                             {member.cell_group_name && (
                               <>
@@ -871,34 +884,34 @@ const BulkAttendanceModal = ({
                         </div>
                       </div>
                       
-                      {/* Right side - Buttons */}
-                      <div className="flex gap-2 flex-shrink-0">
+                      {/* Right side - Bigger Buttons */}
+                      <div className="flex gap-3 flex-shrink-0">
                         <button
                           onClick={() => handleAttendanceChangeWithTracking(member.id, 'present')}
-                          className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
+                          className={`px-5 py-3 rounded-xl transition-colors text-sm font-bold ${
                             bulkAttendance[member.id] === 'present'
-                              ? 'bg-green-600 text-white'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                              ? 'bg-green-600 text-white shadow-lg'
+                              : 'bg-gray-200 text-gray-700 hover:bg-green-100 dark:bg-gray-600 dark:text-gray-300 dark:hover:bg-green-900/30'
                           }`}
                         >
-                          Present
+                          ✓ Present
                         </button>
                         <button
                           onClick={() => handleAttendanceChangeWithTracking(member.id, 'absent')}
-                          className={`px-3 py-1.5 rounded-lg transition-colors text-xs font-medium ${
+                          className={`px-5 py-3 rounded-xl transition-colors text-sm font-bold ${
                             bulkAttendance[member.id] === 'absent'
-                              ? 'bg-red-600 text-white'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-300'
+                              ? 'bg-red-600 text-white shadow-lg'
+                              : 'bg-gray-200 text-gray-700 hover:bg-red-100 dark:bg-gray-600 dark:text-gray-300 dark:hover:bg-red-900/30'
                           }`}
                         >
-                          Absent
+                          ✗ Absent
                         </button>
                       </div>
                     </div>
                     
                     {/* Notes section - only show when absent */}
                     {bulkAttendance[member.id] === 'absent' && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
                         <textarea
                           defaultValue={attendanceNotesRef.current[member.id] || ''}
                           onChange={(e) => {
@@ -906,8 +919,8 @@ const BulkAttendanceModal = ({
                             setHasUnsavedChanges(true);
                           }}
                           placeholder="Reason for absence (optional)..."
-                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                          rows={1}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                          rows={2}
                         />
                       </div>
                     )}
@@ -1336,17 +1349,6 @@ const Events = () => {
       return isMemberInTargetGroups(member, event);
     });
   }, [members, isMemberInTargetGroups]);
-
-  const filterTargetMembersSearch = useCallback((targetMembers: Member[], searchTerm: string): Member[] => {
-    if (!searchTerm.trim()) return targetMembers;
-    
-    const searchLower = searchTerm.toLowerCase().trim();
-    
-    return targetMembers.filter(member => {
-      const searchableText = `${member.name} ${member.surname} ${member.phone || ''} ${member.login_username || ''}`.toLowerCase();
-      return searchableText.includes(searchLower);
-    });
-  }, []);
 
   const handleDeleteEvent = useCallback(async (eventId: string) => {
     if (!confirm('Are you sure you want to delete this event? This action cannot be undone.')) return;
@@ -3710,6 +3712,7 @@ const Events = () => {
         loading={loading}
         attendanceNotesRef={attendanceNotesRef}
         getInitials={getInitials}
+        eventAttendees={attendees}
       />
       
       <AttendeeModal />
