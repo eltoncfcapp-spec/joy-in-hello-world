@@ -1642,12 +1642,14 @@ const Analytics = () => {
       }
       const membersForAttendance = allMembers || [];
 
-      // NEW: Calculate newcomers count for the filter period
+      // Calculate newcomers count: members added within the selected period OR with 'newcomer' status
       const newcomersInPeriod = (allMembers || []).filter(member => {
         const memberDate = new Date(member.created_at || '');
         const fromDate = new Date(filters.date_from);
         const toDate = new Date(filters.date_to);
-        return memberDate >= fromDate && memberDate <= toDate;
+        const addedInPeriod = memberDate >= fromDate && memberDate <= toDate;
+        const isNewcomerStatus = member.status === 'newcomer';
+        return addedInPeriod || isNewcomerStatus;
       }).length;
       setNewcomersCount(newcomersInPeriod);
 
@@ -3454,7 +3456,7 @@ const Analytics = () => {
                   Attendance Comparison
                 </h3>
                 <p className="text-blue-700 dark:text-blue-400 text-xs sm:text-sm">
-                  Total: ${growthMetrics.total_members} members (${growthMetrics.active_members} active, ${growthMetrics.non_active_members} non-active)
+                  Total: {growthMetrics.total_members} members ({growthMetrics.active_members} active, {growthMetrics.non_active_members} non-active)
                 </p>
               </div>
             </div>
