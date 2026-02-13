@@ -377,7 +377,12 @@ const Dashboard = () => {
     
     const totalMembers = activeMembers.length;
     const hiddenMembersCountValue = hiddenMembers.length;
-    const newcomers = activeMembers.filter(m => m.status === 'newcomer').length;
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    const newcomers = activeMembers.filter(m => 
+      m.status === 'newcomer' || 
+      (m.created_at && new Date(m.created_at) >= twoWeeksAgo)
+    ).length;
     const upcomingEventsCount = events.length;
     const totalSermons = allSermons.length;
     
