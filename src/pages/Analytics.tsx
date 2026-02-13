@@ -1642,14 +1642,12 @@ const Analytics = () => {
       }
       const membersForAttendance = allMembers || [];
 
-      // Calculate newcomers count: members added within the selected period OR with 'newcomer' status
+      // Calculate newcomers count: members added within the selected period
       const newcomersInPeriod = (allMembers || []).filter(member => {
         const memberDate = new Date(member.created_at || '');
         const fromDate = new Date(filters.date_from);
         const toDate = new Date(filters.date_to);
-        const addedInPeriod = memberDate >= fromDate && memberDate <= toDate;
-        const isNewcomerStatus = member.status === 'newcomer';
-        return addedInPeriod || isNewcomerStatus;
+        return memberDate >= fromDate && memberDate <= toDate;
       }).length;
       setNewcomersCount(newcomersInPeriod);
 
