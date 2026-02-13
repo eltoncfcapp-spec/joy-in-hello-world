@@ -66,7 +66,7 @@ export function useNotifications(memberId?: string) {
   const autoSubscribe = async (registration: ServiceWorkerRegistration) => {
     try {
       // Check if already subscribed
-      const existingSubscription = await registration.pushManager.getSubscription();
+      const existingSubscription = await (registration as any).pushManager.getSubscription();
       
       if (existingSubscription) {
         // Verify it's in database
@@ -87,7 +87,7 @@ export function useNotifications(memberId?: string) {
 
       // Create new subscription
       const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-      const subscription = await registration.pushManager.subscribe({
+      const subscription = await (registration as any).pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: applicationServerKey.buffer as ArrayBuffer
       });
@@ -129,7 +129,7 @@ export function useNotifications(memberId?: string) {
         }
 
         const registration = await navigator.serviceWorker.ready;
-        const subscription = await registration.pushManager.getSubscription();
+        const subscription = await (registration as any).pushManager.getSubscription();
         
         if (subscription) {
           const subscriptionJSON = subscription.toJSON();
@@ -208,7 +208,7 @@ export function useNotifications(memberId?: string) {
     try {
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         const registration = await navigator.serviceWorker.ready;
-        const subscription = await registration.pushManager.getSubscription();
+        const subscription = await (registration as any).pushManager.getSubscription();
         
         if (subscription) {
           const subscriptionJSON = subscription.toJSON();
