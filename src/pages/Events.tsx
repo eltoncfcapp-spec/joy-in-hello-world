@@ -48,6 +48,7 @@ interface Member {
   phone: string | null;
   cell_group_id: string | null;
   status: 'newcomer' | 'signed_member' | 'not_attending' | null;
+  created_at?: string | null;
   cell_group_name?: string | null;
   ministry_group_names?: string[];
   department_names?: string[];
@@ -1177,7 +1178,7 @@ const Events = () => {
       ] = await Promise.all([
         supabase
           .from('members')
-          .select('id, name, surname, login_username, phone, cell_group_id, status')
+          .select('id, name, surname, login_username, phone, cell_group_id, status, created_at')
           .order('name'),
         supabase.from('cell_groups').select('id, name'),
         supabase.from('ministry_group_members').select('member_id, ministry_groups!inner(id, name)'),
@@ -1423,10 +1424,20 @@ const Events = () => {
         .eq('members_id', memberId)
         .single();
 
+      // Check if member was created on the same day as the event - mark as first timer
+      const event = events.find(e => e.id === eventId);
+      const member = members.find(m => m.id === memberId);
+      let isFirstTime = false;
+      if (event && member?.created_at) {
+        const eventDate = event.event_date; // YYYY-MM-DD
+        const memberCreatedDate = new Date(member.created_at).toISOString().split('T')[0];
+        isFirstTime = eventDate === memberCreatedDate;
+      }
+
       const attendanceData: any = {
         event_id: eventId,
         members_id: memberId,
-        first_time: false, // This should be true for newcomers, but we handle that separately
+        first_time: isFirstTime,
         invited_by_id: null,
         attendance_status: status,
         attended_at: status === 'present' ? new Date().toISOString() : null,
@@ -2040,14 +2051,24 @@ const Events = () => {
 
   const markMembersAsAbsent = useCallback(async (eventId: string, absentMemberIds: string[]) => {
     try {
-      const absentRecords = absentMemberIds.map(memberId => ({
+      const event = events.find(e => e.id === eventId);
+      const absentRecords = absentMemberIds.map(memberId => {
+        const member = members.find(m => m.id === memberId);
+        let isFirstTime = false;
+        if (event && member?.created_at) {
+          const eventDate = event.event_date;
+          const memberCreatedDate = new Date(member.created_at).toISOString().split('T')[0];
+          isFirstTime = eventDate === memberCreatedDate;
+        }
+        return {
         event_id: eventId,
         members_id: memberId,
-        first_time: false,
+        first_time: isFirstTime,
         invited_by_id: null,
         attendance_status: 'absent' as const,
         attended_at: null
-      }));
+        };
+      });
 
       for (const record of absentRecords) {
         const { data: existing } = await supabase
