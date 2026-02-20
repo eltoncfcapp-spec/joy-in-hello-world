@@ -1,0 +1,1 @@
+DELETE FROM sermons WHERE id IN ('3303504f-dba7-4606-ad25-ac61c345e9fa', '709def85-24cf-4975-b59e-966ec2fd5ea3');
