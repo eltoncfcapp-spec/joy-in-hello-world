@@ -3654,7 +3654,7 @@ const Events = () => {
                         </>
                       )}
                       <button
-                        onClick={() => openSermonModal(event.id)}
+                        onClick={() => openSermonModal(event.id, sermon || undefined)}
                         className="flex items-center justify-center gap-2 px-3 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 font-medium text-xs sm:text-sm"
                       >
                         <BookOpen className="h-3 w-3 sm:h-4 sm:w-4" />
