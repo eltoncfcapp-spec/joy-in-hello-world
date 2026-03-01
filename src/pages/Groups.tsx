@@ -2310,7 +2310,7 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
           decisions_made: data.decisions_made || '',
           action_items: data.action_items || '',
           next_meeting_date: data.next_meeting_date || '',
-          additional_notes: '',
+          additional_notes: selectedMeeting?.notes || '',
           meeting_status: 'completed'
         });
       } else {
@@ -2401,10 +2401,13 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         .eq('id', selectedMeeting.id)
         .single();
 
-      const updatedMeeting = {
+      const updatedMeeting: any = {
         status: 'completed',
         updated_at: new Date().toISOString()
       };
+      if (reportData.additional_notes) {
+        updatedMeeting.notes = reportData.additional_notes;
+      }
 
       await supabase
         .from('meetings')
@@ -2477,41 +2480,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
         </table>` 
       : '<p>No attendance records available.</p>';
     
-    // Build existing report preview section for print
-    const existingReportPreview = existingReport ? `
-      <div class="existing-report-preview">
-        <div class="preview-header">
-          <span class="preview-title">✓ Existing Report Preview</span>
-          <span class="preview-badge">Report Saved</span>
-        </div>
-        <div class="preview-grid">
-          <div class="preview-item">
-            <h5>Meeting Summary</h5>
-            <p>${reportData.report_text || 'Not provided'}</p>
-          </div>
-          <div class="preview-item">
-            <h5>Decisions Made</h5>
-            <p>${reportData.decisions_made || 'No decisions recorded'}</p>
-          </div>
-          <div class="preview-item">
-            <h5>Action Items & Follow-ups</h5>
-            <p>${reportData.action_items || 'No action items recorded'}</p>
-          </div>
-          <div class="preview-item">
-            <h5>Next Meeting Date</h5>
-            <p>${reportData.next_meeting_date 
-              ? new Date(reportData.next_meeting_date).toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })
-              : 'Not scheduled'
-            }</p>
-          </div>
-        </div>
-      </div>
-    ` : '';
     
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -2547,18 +2515,9 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
             .highlight-box { background: #eff6ff; border: 2px solid #3b82f6; padding: 12px; border-radius: 6px; margin: 8px 0; }
             .decisions-box { background: #f0fdf4; border: 2px solid #22c55e; }
             .actions-box { background: #fefce8; border: 2px solid #eab308; }
-            .existing-report-preview { background: linear-gradient(to right, #f0fdf4, #ecfdf5); border: 2px solid #86efac; border-radius: 8px; padding: 12px; margin: 12px 0; }
-            .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-            .preview-title { font-size: 13px; font-weight: 600; color: #166534; }
-            .preview-badge { background: #dcfce7; color: #166534; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 500; }
-            .preview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-            .preview-item { background: rgba(255,255,255,0.8); padding: 10px; border-radius: 6px; overflow: hidden; }
-            .preview-item h5 { margin: 0 0 6px 0; font-size: 10px; color: #374151; font-weight: 600; }
-            .preview-item p { margin: 0; font-size: 10px; color: #111827; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; }
             @media print { 
               body { padding: 15px; font-size: 10px; }
               .page-break { page-break-before: always; }
-              .existing-report-preview { break-inside: avoid; }
             }
           </style>
         </head>
@@ -2599,8 +2558,6 @@ const GroupReportStep: React.FC<GroupReportStepProps> = ({ group, meetings, sele
               <div class="stat-label">Attendance Rate</div>
             </div>
           </div>
-
-          ${existingReportPreview}
 
           <!-- Meeting Summary/Report Section -->
           <div class="report-section highlight-box">
@@ -2974,7 +2931,7 @@ ${group.name} Group
                   <div className="flex items-center justify-between mb-4">
                     <h4 className="text-lg font-semibold text-green-800 flex items-center gap-2">
                       <CheckCircle className="h-5 w-5" />
-                      Existing Report Preview
+                      Edit Meeting Report
                     </h4>
                     <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
                       ✓ Report Saved
