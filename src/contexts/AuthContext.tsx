@@ -713,6 +713,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         timestamp: Date.now()
       }));
 
+      // Log login audit event with user_id
+      try {
+        await supabase.from('audit_logs').insert([{
+          action: 'LOGIN',
+          table_name: 'members',
+          record_id: memberData.id,
+          user_id: memberData.id,
+          new_data: { name: memberData.name, surname: memberData.surname, login_username: username },
+          created_at: new Date().toISOString()
+        }]);
+      } catch (auditError) {
+        console.error('Failed to log login audit:', auditError);
+      }
+
       return true;
     } catch (error) {
       console.error('Username/PIN login error:', error);
