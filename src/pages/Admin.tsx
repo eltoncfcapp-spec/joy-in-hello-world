@@ -23,10 +23,11 @@ const logAuditEvent = async (
   tableName: string,
   recordId: string,
   oldData?: any,
-  newData?: any
+  newData?: any,
+  userId?: string
 ) => {
   try {
-    console.log('📝 Audit Log:', { action, tableName, recordId });
+    console.log('📝 Audit Log:', { action, tableName, recordId, userId });
     
     const { error } = await supabase
       .from('audit_logs')
@@ -36,6 +37,7 @@ const logAuditEvent = async (
         record_id: recordId,
         old_data: oldData || null,
         new_data: newData || null,
+        user_id: userId || null,
         created_at: new Date().toISOString()
       }]);
 
