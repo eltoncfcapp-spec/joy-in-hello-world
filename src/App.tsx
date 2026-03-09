@@ -12,7 +12,9 @@ import {
   LogOut,
   Menu,
   X,
-  Building
+  Building,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import churchLogo from '@/assets/church-logo.png';
