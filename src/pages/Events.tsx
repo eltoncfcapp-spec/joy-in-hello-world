@@ -1446,9 +1446,11 @@ const Events = () => {
 
       let error;
       if (existingRecord) {
+        // Preserve first_time flag on updates - don't overwrite if already marked as first-timer
+        const { first_time: _, ...updateData } = attendanceData;
         const { error: updateError } = await supabase
           .from('event_attendees')
-          .update(attendanceData)
+          .update(updateData)
           .eq('id', existingRecord.id);
         error = updateError;
       } else {
