@@ -192,8 +192,15 @@ const Layout = () => {
           })}
         </nav>
 
-        {/* Logout Button */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        {/* Dark Mode Toggle & Logout */}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="flex items-center gap-3 w-full px-4 py-3 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all duration-200"
+          >
+            {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            {darkMode ? 'Light Mode' : 'Night Mode'}
+          </button>
           <button
             onClick={() => {
               closeSidebar();
