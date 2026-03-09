@@ -23,10 +23,11 @@ const logAuditEvent = async (
   tableName: string,
   recordId: string,
   oldData?: any,
-  newData?: any
+  newData?: any,
+  userId?: string
 ) => {
   try {
-    console.log('📝 Audit Log:', { action, tableName, recordId });
+    console.log('📝 Audit Log:', { action, tableName, recordId, userId });
     
     const { error } = await supabase
       .from('audit_logs')
@@ -36,6 +37,7 @@ const logAuditEvent = async (
         record_id: recordId,
         old_data: oldData || null,
         new_data: newData || null,
+        user_id: userId || null,
         created_at: new Date().toISOString()
       }]);
 
@@ -3277,35 +3279,6 @@ const Admin = () => {
               </div>
             </div>
             
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-gray-700">Password Requirements</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { key: 'require_uppercase', label: 'Require uppercase letters', icon: 'A' },
-                  { key: 'require_lowercase', label: 'Require lowercase letters', icon: 'a' },
-                  { key: 'require_numbers', label: 'Require numbers', icon: '123' },
-                  { key: 'require_special_chars', label: 'Require special characters', icon: '#$@' }
-                ].map((req) => (
-                  <label key={req.key} className="flex items-center gap-3 p-3 bg-white rounded-lg border cursor-pointer hover:bg-gray-50 transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={(securitySettings?.password_policy as any)?.[req.key] || false}
-                      onChange={(e) => setSecuritySettings(prev => prev ? {
-                        ...prev,
-                        password_policy: {...prev.password_policy, [req.key]: e.target.checked}
-                      } : null)}
-                      className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500" 
-                    />
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center text-blue-700 font-bold">
-                        {req.icon}
-                      </div>
-                      <span className="text-sm text-gray-700">{req.label}</span>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
 
