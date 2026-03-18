@@ -1329,6 +1329,7 @@ const Members = () => {
     });
     setEditActiveTab('profile');
     
+    // Fetch ministry group for this member
     if (member.id) {
       try {
         const { data: ministryData, error } = await supabase
@@ -1341,6 +1342,7 @@ const Members = () => {
           console.error('Error fetching ministry group:', error);
         }
         
+        // Set the ministry group ID if found
         setEditSelectedMinistryGroup(ministryData?.ministry_group_id || '');
       } catch (error) {
         console.error('Error fetching ministry group:', error);
@@ -1417,6 +1419,7 @@ const Members = () => {
 
       await logAudit('members', memberId, 'UPDATE', oldMemberData, updateData);
 
+      // Handle ministry group update
       const { data: oldMinistryData } = await supabase
         .from('ministry_group_members')
         .select('*')
