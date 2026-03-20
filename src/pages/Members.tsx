@@ -136,7 +136,7 @@ const MemberNotes: React.FC<{
   const fetchNotes = async () => {
     try {
       setLoading(true);
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('member_notes')
         .select(`
           *,
@@ -177,7 +177,7 @@ const MemberNotes: React.FC<{
         created_at: new Date().toISOString()
       };
 
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('member_notes')
         .insert([newNote])
         .select();
@@ -203,7 +203,7 @@ const MemberNotes: React.FC<{
     if (!editingNote || !editNoteForm.note_content.trim()) return;
     
     try {
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('member_notes')
         .update({
           note_type: editNoteForm.note_type,
@@ -228,7 +228,7 @@ const MemberNotes: React.FC<{
     if (!confirm('Are you sure you want to delete this note?')) return;
     
     try {
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('member_notes')
         .delete()
         .eq('id', noteId);
@@ -532,7 +532,7 @@ const FoundationalTraining: React.FC<{
       setLoading(true);
       
       // Fetch all active topics with correct column names
-      const { data: topicsData, error: topicsError } = await (supabase as any)
+      const { data: topicsData, error: topicsError } = await supabase
         .from('foundational_topics')
         .select('*')
         .eq('is_active', true)
@@ -543,7 +543,7 @@ const FoundationalTraining: React.FC<{
       setTopics(topicsData || []);
 
       // Fetch member's training progress with topic details
-      const { data: progressData, error: progressError } = await (supabase as any)
+      const { data: progressData, error: progressError } = await supabase
         .from('member_training_progress')
         .select(`
           *,
@@ -595,7 +595,7 @@ const FoundationalTraining: React.FC<{
     try {
       if (isCompleted) {
         // Remove completion
-        const { error } = await (supabase as any)
+        const { error } = await supabase
           .from('member_training_progress')
           .delete()
           .eq('member_id', memberId)
@@ -612,7 +612,7 @@ const FoundationalTraining: React.FC<{
           notes: `Completed foundational training topic`
         };
 
-        const { error } = await (supabase as any)
+        const { error } = await supabase
           .from('member_training_progress')
           .insert([completionData]);
 
@@ -642,7 +642,7 @@ const FoundationalTraining: React.FC<{
         topicId = existingTopic.id;
       } else {
         // Create new topic
-        const { data: newTopic, error: topicError } = await (supabase as any)
+        const { data: newTopic, error: topicError } = await supabase
           .from('foundational_topics')
           .insert([{
             topic_name: addFormData.topic_name.trim(),
@@ -659,7 +659,7 @@ const FoundationalTraining: React.FC<{
       }
 
       // Add completion record
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('member_training_progress')
         .insert([{
           member_id: memberId,
@@ -989,7 +989,7 @@ const Members = () => {
   const [activeTab, setActiveTab] = useState<'profile' | 'notes' | 'training'>('profile');
   
   const [selectedMinistryGroup, setSelectedMinistryGroup] = useState('');
-  const [editSelectedMinistryGroup, setEditSelectedMinistryGroup] = useState('');
+  const [editSelectedMinistryGroups, setEditSelectedMinistryGroups] = useState<string[]>([]);
   
   const [selectedCellGroup, setSelectedCellGroup] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -1038,10 +1038,14 @@ const Members = () => {
   const [editActiveTab, setEditActiveTab] = useState<'profile' | 'notes' | 'training'>('profile');
 
   const isAdmin = () => profile?.admin_role === 'admin' || profile?.admin_role === 'administrator';
-  const isPastor = () => profile?.admin_role === 'pastor';
-  const isDeacon = () => profile?.admin_role === 'deacon';
-  const isGroupLeader = () => profile?.admin_role === 'group_leader';
-  const isMember = () => profile?.admin_role === 'member' || !profile?.admin_role;
+  const isPastor = () => profile?.pastor_role === true;
+  const isDeacon = () => profile?.deacon_role === true;
+  const isGroupLeader = () => profile?.group_leader === true;
+  const isDepartmentLeader = () => profile?.department_leader === true;
+  const isMember = () => {
+    if (!profile) return false;
+    return !isAdmin() && !isPastor() && !isDeacon() && !isGroupLeader() && !isDepartmentLeader();
+  };
 
   const canViewAllMembers = () => isAdmin() || isPastor() || isDeacon();
   const canViewHiddenMembers = () => isAdmin() || isPastor() || isDeacon();
@@ -1329,24 +1333,26 @@ const Members = () => {
     });
     setEditActiveTab('profile');
     
-    // Fetch ministry group for this member
+    // Fetch all ministry groups for this member
     if (member.id) {
       try {
         const { data: ministryData, error } = await supabase
           .from('ministry_group_members')
           .select('ministry_group_id')
-          .eq('member_id', member.id)
-          .maybeSingle();
+          .eq('member_id', member.id);
         
-        if (error && error.code !== 'PGRST116') {
-          console.error('Error fetching ministry group:', error);
+        if (error) {
+          console.error('Error fetching ministry groups:', error);
         }
         
-        // Set the ministry group ID if found
-        setEditSelectedMinistryGroup(ministryData?.ministry_group_id || '');
+        // Set all ministry group IDs
+        const ministryGroupIds = ministryData?.map(item => item.ministry_group_id) || [];
+        setEditSelectedMinistryGroups(ministryGroupIds);
+        
+        console.log('Fetched ministry groups for member:', member.id, ministryGroupIds);
       } catch (error) {
-        console.error('Error fetching ministry group:', error);
-        setEditSelectedMinistryGroup('');
+        console.error('Error fetching ministry groups:', error);
+        setEditSelectedMinistryGroups([]);
       }
     }
   };
@@ -1419,7 +1425,7 @@ const Members = () => {
 
       await logAudit('members', memberId, 'UPDATE', oldMemberData, updateData);
 
-      // Handle ministry group update
+      // Handle ministry groups update
       const { data: oldMinistryData } = await supabase
         .from('ministry_group_members')
         .select('*')
@@ -1434,22 +1440,29 @@ const Members = () => {
         await logAudit('ministry_group_members', memberId, 'DELETE', oldMinistryData, null);
       }
       
-      if (editSelectedMinistryGroup) {
-        const newMinistryData = {
+      if (editSelectedMinistryGroups.length > 0) {
+        const newMinistryData = editSelectedMinistryGroups.map(ministryGroupId => ({
           member_id: memberId,
-          ministry_group_id: editSelectedMinistryGroup,
-          role: 'member'
-        };
+          ministry_group_id: ministryGroupId,
+          role: 'member',
+          joined_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }));
 
-        await supabase
+        const { error: ministryError } = await supabase
           .from('ministry_group_members')
-          .insert([newMinistryData]);
+          .insert(newMinistryData);
 
-        await logAudit('ministry_group_members', memberId, 'INSERT', null, newMinistryData);
+        if (ministryError) {
+          console.error('Error adding to ministry groups:', ministryError);
+        } else {
+          await logAudit('ministry_group_members', memberId, 'INSERT', null, newMinistryData);
+        }
       }
 
       setEditingMember(null);
-      setEditSelectedMinistryGroup('');
+      setEditSelectedMinistryGroups([]);
       
       let message = 'Member details updated successfully!';
       if (isNotAttending) {
@@ -1484,7 +1497,7 @@ const Members = () => {
       not_attending_reason: '',
       is_hidden: false,
     });
-    setEditSelectedMinistryGroup('');
+    setEditSelectedMinistryGroups([]);
     setEditActiveTab('profile');
   };
 
@@ -1779,6 +1792,16 @@ const Members = () => {
     }
   };
 
+  const handleMinistryGroupChange = (groupId: string) => {
+    setEditSelectedMinistryGroups(prev => {
+      if (prev.includes(groupId)) {
+        return prev.filter(id => id !== groupId);
+      } else {
+        return [...prev, groupId];
+      }
+    });
+  };
+
   const renderEditTabs = (member: Member) => (
     <div className="mt-6 border-t border-gray-200 dark:border-gray-600 pt-6">
       <div className="flex border-b border-gray-200 dark:border-gray-600 mb-6">
@@ -1893,20 +1916,36 @@ const Members = () => {
                   placeholder="Invited by"
                 />
               </div>
-              <div className="flex items-center gap-3">
-                <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                <select
-                  value={editSelectedMinistryGroup}
-                  onChange={(e) => setEditSelectedMinistryGroup(e.target.value)}
-                  className="flex-1 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 px-1 text-gray-600 dark:text-gray-400"
-                >
-                  <option value="">Select ministry group</option>
-                  {ministryGroups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </select>
+              <div className="flex items-center gap-3 md:col-span-2">
+                <Users className="h-4 w-4 text-gray-400 flex-shrink-0 mt-1" />
+                <div className="flex-1 space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Ministry Groups (select multiple)
+                  </label>
+                  {ministryGroups.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No ministry groups available</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {ministryGroups.map((group) => (
+                        <label key={group.id} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded-lg transition-colors">
+                          <input
+                            type="checkbox"
+                            value={group.id}
+                            checked={editSelectedMinistryGroups.includes(group.id)}
+                            onChange={() => handleMinistryGroupChange(group.id)}
+                            className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                          <span>{group.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {editSelectedMinistryGroups.length > 0 && (
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                      Selected: {editSelectedMinistryGroups.length} ministry group(s)
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
