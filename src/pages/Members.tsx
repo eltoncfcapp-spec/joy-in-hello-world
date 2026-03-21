@@ -995,7 +995,9 @@ const Members = () => {
   const [activeTab, setActiveTab] = useState<'profile' | 'notes' | 'training'>('profile');
   
   const [selectedMinistryGroup, setSelectedMinistryGroup] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
   const [editSelectedMinistryGroups, setEditSelectedMinistryGroups] = useState<string[]>([]);
+  const [editSelectedDepartments, setEditSelectedDepartments] = useState<string[]>([]);
   
   const [selectedCellGroup, setSelectedCellGroup] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -1295,6 +1297,7 @@ const Members = () => {
 
       await logAudit('members', newMember.id, 'INSERT', null, newMemberData);
 
+      // Add to ministry group if selected
       if (selectedMinistryGroup && newMember) {
         const ministryData = {
           member_id: newMember.id,
@@ -1308,12 +1311,27 @@ const Members = () => {
 
         if (ministryError) {
           console.error('Error adding to ministry group:', ministryError);
-          await logAudit('ministry_group_members', newMember.id, 'INSERT', null, {
-            ...ministryData,
-            error: ministryError.message
-          });
         } else {
           await logAudit('ministry_group_members', newMember.id, 'INSERT', null, ministryData);
+        }
+      }
+
+      // Add to department if selected
+      if (selectedDepartment && newMember) {
+        const departmentData = {
+          member_id: newMember.id,
+          department_id: selectedDepartment,
+          role: 'member'
+        };
+
+        const { error: departmentError } = await supabase
+          .from('department_members')
+          .insert([departmentData]);
+
+        if (departmentError) {
+          console.error('Error adding to department:', departmentError);
+        } else {
+          await logAudit('department_members', newMember.id, 'INSERT', null, departmentData);
         }
       }
 
@@ -1357,23 +1375,35 @@ const Members = () => {
     // Fetch all ministry groups for this member
     if (member.id) {
       try {
-        const { data: ministryData, error } = await supabase
+        const { data: ministryData, error: ministryError } = await supabase
           .from('ministry_group_members')
           .select('ministry_group_id')
           .eq('member_id', member.id);
         
-        if (error) {
-          console.error('Error fetching ministry groups:', error);
+        if (ministryError) {
+          console.error('Error fetching ministry groups:', ministryError);
         }
         
-        // Set all ministry group IDs
         const ministryGroupIds = ministryData?.map(item => item.ministry_group_id) || [];
         setEditSelectedMinistryGroups(ministryGroupIds);
         
-        console.log('Fetched ministry groups for member:', member.id, ministryGroupIds);
+        // Fetch all departments for this member
+        const { data: departmentData, error: departmentError } = await supabase
+          .from('department_members')
+          .select('department_id')
+          .eq('member_id', member.id);
+        
+        if (departmentError) {
+          console.error('Error fetching departments:', departmentError);
+        }
+        
+        const departmentIds = departmentData?.map(item => item.department_id) || [];
+        setEditSelectedDepartments(departmentIds);
+        
       } catch (error) {
-        console.error('Error fetching ministry groups:', error);
+        console.error('Error fetching member associations:', error);
         setEditSelectedMinistryGroups([]);
+        setEditSelectedDepartments([]);
       }
     }
   };
@@ -1482,8 +1512,45 @@ const Members = () => {
         }
       }
 
+      // Handle departments update
+      const { data: oldDepartmentData } = await supabase
+        .from('department_members')
+        .select('*')
+        .eq('member_id', memberId);
+
+      if (oldDepartmentData && oldDepartmentData.length > 0) {
+        await supabase
+          .from('department_members')
+          .delete()
+          .eq('member_id', memberId);
+
+        await logAudit('department_members', memberId, 'DELETE', oldDepartmentData, null);
+      }
+      
+      if (editSelectedDepartments.length > 0) {
+        const newDepartmentData = editSelectedDepartments.map(departmentId => ({
+          member_id: memberId,
+          department_id: departmentId,
+          role: 'member',
+          joined_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }));
+
+        const { error: departmentError } = await supabase
+          .from('department_members')
+          .insert(newDepartmentData);
+
+        if (departmentError) {
+          console.error('Error adding to departments:', departmentError);
+        } else {
+          await logAudit('department_members', memberId, 'INSERT', null, newDepartmentData);
+        }
+      }
+
       setEditingMember(null);
       setEditSelectedMinistryGroups([]);
+      setEditSelectedDepartments([]);
       
       let message = 'Member details updated successfully!';
       if (isNotAttending) {
@@ -1519,6 +1586,7 @@ const Members = () => {
       is_hidden: false,
     });
     setEditSelectedMinistryGroups([]);
+    setEditSelectedDepartments([]);
     setEditActiveTab('profile');
   };
 
@@ -1607,6 +1675,22 @@ const Members = () => {
       if (ministryData && ministryData.length > 0) {
         for (const ministry of ministryData) {
           await logAudit('ministry_group_members', ministry.id, 'DELETE', ministry, null);
+        }
+      }
+
+      const { data: departmentData } = await supabase
+        .from('department_members')
+        .select('*')
+        .eq('member_id', memberId);
+
+      await supabase
+        .from('department_members')
+        .delete()
+        .eq('member_id', memberId);
+
+      if (departmentData && departmentData.length > 0) {
+        for (const department of departmentData) {
+          await logAudit('department_members', department.id, 'DELETE', department, null);
         }
       }
       
@@ -1728,6 +1812,7 @@ const Members = () => {
       baptism: '',
     });
     setSelectedMinistryGroup('');
+    setSelectedDepartment('');
     setShowForm(false);
     setError(null);
   };
@@ -1819,6 +1904,16 @@ const Members = () => {
         return prev.filter(id => id !== groupId);
       } else {
         return [...prev, groupId];
+      }
+    });
+  };
+
+  const handleDepartmentChange = (departmentId: string) => {
+    setEditSelectedDepartments(prev => {
+      if (prev.includes(departmentId)) {
+        return prev.filter(id => id !== departmentId);
+      } else {
+        return [...prev, departmentId];
       }
     });
   };
@@ -1964,6 +2059,37 @@ const Members = () => {
                   {editSelectedMinistryGroups.length > 0 && (
                     <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
                       Selected: {editSelectedMinistryGroups.length} ministry group(s)
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 md:col-span-2">
+                <Users className="h-4 w-4 text-gray-400 flex-shrink-0 mt-1" />
+                <div className="flex-1 space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Departments (select multiple)
+                  </label>
+                  {departments.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No departments available</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {departments.map((dept) => (
+                        <label key={dept.id} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded-lg transition-colors">
+                          <input
+                            type="checkbox"
+                            value={dept.id}
+                            checked={editSelectedDepartments.includes(dept.id)}
+                            onChange={() => handleDepartmentChange(dept.id)}
+                            className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                          <span>{dept.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {editSelectedDepartments.length > 0 && (
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                      Selected: {editSelectedDepartments.length} department(s)
                     </p>
                   )}
                 </div>
@@ -2668,23 +2794,23 @@ const Members = () => {
                       </option>
                     ))}
                   </select>
-                  {departments.length > 0 && (
-                    <div className="mt-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Departments
-                      </label>
-                      <select
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                      >
-                        <option value="">Select department (optional)</option>
-                        {departments.map((dept) => (
-                          <option key={dept.id} value={dept.id}>
-                            {dept.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Department
+                  </label>
+                  <select
+                    value={selectedDepartment}
+                    onChange={(e) => setSelectedDepartment(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">Select department (optional)</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
