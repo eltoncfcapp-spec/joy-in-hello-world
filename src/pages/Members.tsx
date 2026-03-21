@@ -33,6 +33,11 @@ interface MinistryGroup {
   name: string;
 }
 
+interface Department {
+  id: string;
+  name: string;
+}
+
 interface MemberNote {
   id: string;
   member_id: string;
@@ -976,6 +981,7 @@ const Members = () => {
   const [hiddenMembers, setHiddenMembers] = useState<Member[]>([]);
   const [cellGroups, setCellGroups] = useState<CellGroup[]>([]);
   const [ministryGroups, setMinistryGroups] = useState<MinistryGroup[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingMember, setEditingMember] = useState<string | null>(null);
@@ -1095,6 +1101,7 @@ const Members = () => {
       fetchMembers();
       fetchCellGroups();
       fetchMinistryGroups();
+      fetchDepartments();
     }
   }, [profile]);
 
@@ -1210,6 +1217,20 @@ const Members = () => {
       setMinistryGroups(data || []);
     } catch (error: any) {
       console.error('Error fetching ministry groups:', error);
+    }
+  };
+
+  const fetchDepartments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('departments')
+        .select('id, name')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setDepartments(data || []);
+    } catch (error: any) {
+      console.error('Error fetching departments:', error);
     }
   };
 
@@ -2647,6 +2668,23 @@ const Members = () => {
                       </option>
                     ))}
                   </select>
+                  {departments.length > 0 && (
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Departments
+                      </label>
+                      <select
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      >
+                        <option value="">Select department (optional)</option>
+                        {departments.map((dept) => (
+                          <option key={dept.id} value={dept.id}>
+                            {dept.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
