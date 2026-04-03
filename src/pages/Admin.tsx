@@ -6,7 +6,7 @@ import { supabase } from '../integrations/supabase/client';
 // UUID Validation Helper
 const cleanUUIDArray = (ids: string[]): string[] => {
   if (!Array.isArray(ids)) return [];
-  
+
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   
   return ids.filter(id => {
